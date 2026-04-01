@@ -24,7 +24,9 @@ func GetDomain() (string, uint32, error) {
 	if err != nil {
 		return "", 0, err
 	}
+
+	name := windows.UTF16PtrToString(domain)
 	syscall.NetApiBufferFree((*byte)(unsafe.Pointer(domain)))
 
-	return windows.UTF16PtrToString(domain), status, nil
+	return name, status, nil
 }

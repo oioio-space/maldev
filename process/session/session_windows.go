@@ -49,22 +49,9 @@ func CreateProcessOnActiveSessions(userToken *token.Token, executable string, ar
 		return e1
 	}
 
-	attributList, err := windows.NewProcThreadAttributeList(1)
-	if err != nil {
-		return err
+	si := &windows.StartupInfo{
+		Cb: uint32(unsafe.Sizeof(windows.StartupInfo{})),
 	}
-
-	si := &windows.StartupInfoEx{
-		StartupInfo:             windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{}))},
-		ProcThreadAttributeList: attributList.List(),
-	}
-
-	handles := []windows.Handle{0}
-	attributList.Update(
-		windows.PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-		unsafe.Pointer(&handles[0]),
-		uintptr(len(handles))*unsafe.Sizeof(handles[0]),
-	)
 
 	pi := new(windows.ProcessInformation)
 
@@ -74,15 +61,15 @@ func CreateProcessOnActiveSessions(userToken *token.Token, executable string, ar
 		args16,
 		nil,
 		nil,
-		true,
-		windows.CREATE_DEFAULT_ERROR_MODE|windows.CREATE_UNICODE_ENVIRONMENT|windows.EXTENDED_STARTUPINFO_PRESENT,
+		false,
+		windows.CREATE_DEFAULT_ERROR_MODE|windows.CREATE_UNICODE_ENVIRONMENT,
 		environmentBlock,
 		workingDirectory16,
-		&si.StartupInfo,
+		si,
 		pi,
 	)
 	windows.CloseHandle(pi.Thread)
-	attributList.Delete()
+	windows.CloseHandle(pi.Process)
 	api.Userenv.NewProc("DestroyEnvironmentBlock").Call(uintptr(unsafe.Pointer(environmentBlock)))
 
 	return err

@@ -3,6 +3,7 @@ package wipe
 
 import (
 	"crypto/rand"
+	"fmt"
 	"os"
 )
 
@@ -29,8 +30,14 @@ func File(path string, passes int) error {
 			if size-written < n {
 				n = size - written
 			}
-			rand.Read(buf[:n])
-			f.Write(buf[:n])
+			if _, err := rand.Read(buf[:n]); err != nil {
+				f.Close()
+				return fmt.Errorf("random read: %w", err)
+			}
+			if _, err := f.Write(buf[:n]); err != nil {
+				f.Close()
+				return fmt.Errorf("overwrite: %w", err)
+			}
 			written += n
 		}
 		f.Sync()

@@ -92,14 +92,13 @@ func ImpersonateThread(isInDomain bool, domain, username, password string, callb
 
 		logonType := LOGON32_LOGON_INTERACTIVE
 		if !isInDomain {
-			logonType = LOGON32_LOGON_NETWORK
+			domain = "."
 		}
 
 		t, err := LogonUserW(username, domain, password, logonType, LOGON32_PROVIDER_DEFAULT)
 		if err != nil {
 			return err
 		}
-		defer t.Close()
 
 		wt := token.NewToken(t, token.TokenImpersonation)
 		defer wt.Close()

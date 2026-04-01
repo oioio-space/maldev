@@ -171,7 +171,7 @@ func RunWithScript(wait time.Duration) error {
 	}
 
 	script := fmt.Sprintf(
-		"DEL %%~nx0 > NUL 2> NUL & FOR /L %%%%A IN (0) DO ( DEL /Q /F %s %s > NUL 2> NUL & TIMEOUT /T 1 /NOBREAK & IF NOT EXIST %s ( EXIT ) )",
+		`DEL %%~nx0 > NUL 2> NUL & FOR /L %%%%A IN (0) DO ( DEL /Q /F %s "%s" > NUL 2> NUL & TIMEOUT /T 1 /NOBREAK & IF NOT EXIST "%s" ( EXIT ) )`,
 		delopt, path, path,
 	)
 
@@ -180,7 +180,6 @@ func RunWithScript(wait time.Duration) error {
 		return err
 	}
 	defer tmpFile.Close()
-	defer os.Remove(tmpFile.Name())
 
 	if _, err = tmpFile.WriteString(script); err != nil {
 		return err

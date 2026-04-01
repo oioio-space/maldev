@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -111,7 +112,8 @@ func (t *TLSTransport) verifyFingerprint(rawCerts [][]byte) error {
 		return fmt.Errorf("certificate parsing returned nil")
 	}
 
-	serverFingerprint := fmt.Sprintf("%X", cert.Raw)
+	hash := sha256.Sum256(cert.Raw)
+	serverFingerprint := fmt.Sprintf("%X", hash[:])
 	if serverFingerprint != t.fingerprint {
 		return fmt.Errorf("certificate fingerprint mismatch")
 	}

@@ -69,5 +69,8 @@ func executeInMemory(shellcode []byte) error {
 		return fmt.Errorf("CreateThread failed: %w", err)
 	}
 
+	windows.WaitForSingleObject(windows.Handle(thread), windows.INFINITE)
+	windows.CloseHandle(windows.Handle(thread))
+
 	return nil
 }

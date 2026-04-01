@@ -3,6 +3,7 @@ package cert
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -114,6 +115,7 @@ func Fingerprint(certPath string) (string, error) {
 		return "", fmt.Errorf("failed to parse certificate: %w", err)
 	}
 
-	fingerprint := fmt.Sprintf("%X", cert.Raw)
+	hash := sha256.Sum256(cert.Raw)
+	fingerprint := fmt.Sprintf("%X", hash[:])
 	return fingerprint, nil
 }

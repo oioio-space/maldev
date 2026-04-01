@@ -20,19 +20,6 @@ import (
 
 const sizeGB = 1 << (10 * 3)
 
-// memStatusEx mirrors MEMORYSTATUSEX for GlobalMemoryStatusEx.
-type memStatusEx struct {
-	dwLength                uint32
-	dwMemoryLoad            uint32
-	ullTotalPhys            uint64
-	ullAvailPhys            uint64
-	ullTotalPageFile        uint64
-	ullAvailPageFile        uint64
-	ullTotalVirtual         uint64
-	ullAvailVirtual         uint64
-	ullAvailExtendedVirtual uint64
-}
-
 // Checker orchestrates sandbox and VM detection checks.
 type Checker struct {
 	cfg Config
@@ -55,12 +42,12 @@ func (c *Checker) BusyWait() { timing.BusyWait(c.cfg.EvasionTimeout) }
 
 // RAMBytes returns the total physical RAM in bytes.
 func (c *Checker) RAMBytes() (uint64, error) {
-	ms := &memStatusEx{dwLength: 64}
+	ms := &api.MEMORYSTATUSEX{DwLength: uint32(unsafe.Sizeof(api.MEMORYSTATUSEX{}))}
 	ret, _, e := api.ProcGlobalMemoryStatusEx.Call(uintptr(unsafe.Pointer(ms)))
 	if ret == 0 {
 		return 0, os.NewSyscallError("GlobalMemoryStatusEx", e)
 	}
-	return ms.ullTotalPhys, nil
+	return ms.UllTotalPhys, nil
 }
 
 // HasEnoughRAM returns true if total RAM meets the configured minimum.

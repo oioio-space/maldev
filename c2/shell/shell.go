@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"os/exec"
 	"runtime"
@@ -101,9 +102,12 @@ func (s *Shell) Start(ctx context.Context) error {
 	return s.reconnectLoop(ctx)
 }
 
-// reconnectLoop handles the reconnection loop.
+// reconnectLoop handles the reconnection loop with exponential backoff.
 func (s *Shell) reconnectLoop(ctx context.Context) error {
 	retries := 0
+	baseWait := s.config.ReconnectWait
+	currentWait := baseWait
+	maxWait := 5 * time.Minute
 
 	// First connection attempt is immediate.
 	if err := s.attemptSession(ctx); err != nil {
@@ -115,18 +119,20 @@ func (s *Shell) reconnectLoop(ctx context.Context) error {
 		}
 	} else {
 		retries = 0
+		currentWait = baseWait
 	}
 
-	ticker := time.NewTicker(s.config.ReconnectWait)
-	defer ticker.Stop()
-
 	for {
+		// Exponential backoff with jitter: +/-25%
+		jitter := time.Duration(rand.Int63n(int64(currentWait) / 4))
+		waitTime := currentWait + jitter - currentWait/8
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-s.stopCh:
 			return nil
-		case <-ticker.C:
+		case <-time.After(waitTime):
 			if s.shouldStop(retries) {
 				return fmt.Errorf("max retries (%d) exceeded", s.config.MaxRetries)
 			}
@@ -134,10 +140,15 @@ func (s *Shell) reconnectLoop(ctx context.Context) error {
 			if err := s.attemptSession(ctx); err != nil {
 				retries++
 				fmt.Fprintf(os.Stderr, "[!] Attempt %d failed: %v\n", retries, err)
+				currentWait = currentWait * 2
+				if currentWait > maxWait {
+					currentWait = maxWait
+				}
 				continue
 			}
 
 			retries = 0
+			currentWait = baseWait
 		}
 	}
 }

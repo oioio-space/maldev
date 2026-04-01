@@ -184,6 +184,9 @@ func CreateProcessWithLogon(domain, username, password string, wd string, path s
 		return os.NewSyscallError("CreateProcessWithLogonW", e1)
 	}
 
+	defer windows.CloseHandle(windows.Handle(ptrProcessInfo.Process))
+	defer windows.CloseHandle(windows.Handle(ptrProcessInfo.Thread))
+
 	return nil
 }
 

