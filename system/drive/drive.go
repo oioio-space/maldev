@@ -1,3 +1,5 @@
+//go:build windows
+
 // Package drive provides drive detection and monitoring.
 package drive
 
