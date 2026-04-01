@@ -4,14 +4,11 @@ package morph
 import (
 	"math/rand"
 	"strings"
-	"time"
 
 	"github.com/saferwall/pe"
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
+// Go 1.20+ auto-seeds the global rand source; no init() needed.
 
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 

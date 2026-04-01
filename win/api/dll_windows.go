@@ -72,7 +72,6 @@ var (
 var (
 	ProcLogonUserW                          = Advapi32.NewProc("LogonUserW")
 	ProcImpersonateLoggedOnUser             = Advapi32.NewProc("ImpersonateLoggedOnUser")
-	ProcRevertToSelf                        = Advapi32.NewProc("RevertToSelf")
 	ProcSetNamedSecurityInfoW               = Advapi32.NewProc("SetNamedSecurityInfoW")
 	ProcConvertStringSecurityDescriptorToSD = Advapi32.NewProc("ConvertStringSecurityDescriptorToSecurityDescriptorW")
 	ProcSetServiceObjectSecurity            = Advapi32.NewProc("SetServiceObjectSecurity")

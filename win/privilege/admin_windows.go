@@ -5,6 +5,7 @@ package privilege
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"os/user"
@@ -64,7 +65,12 @@ func IsAdmin() (admin bool, elevated bool, err error) {
 	}
 	defer windows.FreeSid(sid)
 
-	t := windows.Token(0)
+	var t windows.Token
+	proc, _ := windows.GetCurrentProcess()
+	if err = windows.OpenProcessToken(proc, windows.TOKEN_QUERY, &t); err != nil {
+		return false, false, fmt.Errorf("OpenProcessToken: %w", err)
+	}
+	defer t.Close()
 
 	admin, err = t.IsMember(sid)
 	if err != nil {

