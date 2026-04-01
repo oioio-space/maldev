@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"unsafe"
 
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
 	"golang.org/x/sys/windows"
 )
 
@@ -34,4 +35,59 @@ func PatchProc(proc *windows.LazyProc, patch []byte) error {
 		return nil // proc not available, nothing to patch
 	}
 	return PatchMemory(proc.Addr(), patch)
+}
+
+// PatchMemoryWithCaller patches memory using the specified syscall Caller.
+// If caller is nil, falls back to standard PatchMemory (WinAPI).
+func PatchMemoryWithCaller(addr uintptr, patch []byte, caller *wsyscall.Caller) error {
+	if caller == nil {
+		return PatchMemory(addr, patch)
+	}
+
+	size := uintptr(len(patch))
+	var oldProtect uint32
+
+	// Use NtProtectVirtualMemory via the caller.
+	process := uintptr(0xFFFFFFFFFFFFFFFF) // current process pseudo-handle
+	baseAddr := addr
+	regionSize := size
+
+	r, err := caller.Call("NtProtectVirtualMemory",
+		process,
+		uintptr(unsafe.Pointer(&baseAddr)),
+		uintptr(unsafe.Pointer(&regionSize)),
+		uintptr(windows.PAGE_EXECUTE_READWRITE),
+		uintptr(unsafe.Pointer(&oldProtect)),
+	)
+	if r != 0 {
+		return fmt.Errorf("NtProtectVirtualMemory: %w", err)
+	}
+
+	// Write patch bytes.
+	for i, b := range patch {
+		*(*byte)(unsafe.Pointer(addr + uintptr(i))) = b
+	}
+
+	// Restore original protection.
+	baseAddr = addr
+	regionSize = size
+	var dummy uint32
+	caller.Call("NtProtectVirtualMemory",
+		process,
+		uintptr(unsafe.Pointer(&baseAddr)),
+		uintptr(unsafe.Pointer(&regionSize)),
+		uintptr(oldProtect),
+		uintptr(unsafe.Pointer(&dummy)),
+	)
+
+	return nil
+}
+
+// PatchProcWithCaller patches a LazyProc's entry point using the specified Caller.
+// If caller is nil, falls back to standard PatchProc (WinAPI).
+func PatchProcWithCaller(proc *windows.LazyProc, patch []byte, caller *wsyscall.Caller) error {
+	if err := proc.Find(); err != nil {
+		return nil // proc not available, nothing to patch
+	}
+	return PatchMemoryWithCaller(proc.Addr(), patch, caller)
 }
