@@ -1,7 +1,5 @@
 # maldev -- Modular Malware Development Library in Go
 
-**Copyright: Marine Nationale -- Centre Support Cyberdefense**
-
 A modular, multi-module Go library providing building blocks for offensive security tooling, red team operations, and penetration testing. Each module is independently importable and designed to compile on its target platform without pulling in unrelated dependencies.
 
 ## Module Table
@@ -168,4 +166,4 @@ maldev/
 
 ## License
 
-This project is developed by the Marine Nationale -- Centre Support Cyberdefense for authorized security research, red team operations, and penetration testing purposes. Unauthorized use of these tools against systems you do not own or have explicit permission to test is prohibited.
+This project is for authorized security research, red team operations, and penetration testing purposes only. Unauthorized use of these tools against systems you do not own or have explicit permission to test is prohibited.

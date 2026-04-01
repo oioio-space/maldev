@@ -2,7 +2,6 @@
 
 ## Project
 Modular malware development library in Go (workspace).
-Copyright: Marine Nationale — Centre Support Cyberdefense.
 Repo: https://github.com/oioio-space/maldev
 
 ## Critical Rules
