@@ -1,0 +1,5 @@
+{
+  "build": {
+    "buildFlags": ["-tags=go1.21,windows,linux,amd64"]
+  }
+}
