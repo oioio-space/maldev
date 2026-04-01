@@ -1,0 +1,39 @@
+# CRITIQUE: ignore/ contient du code sensible — ne JAMAIS publier sur internet
+ignore/
+
+# Binaires et artefacts de build
+*.exe
+*.dll
+*.so
+*.dylib
+bin/
+build/
+dist/
+*.bin
+
+# Go
+vendor/
+*.test
+*.out
+coverage.txt
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.xml
+material_theme_project_new.xml
+modules.xml
+workspace.xml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / certificats
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
