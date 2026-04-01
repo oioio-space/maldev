@@ -18,9 +18,7 @@ import (
 	"github.com/oioio-space/maldev/win/api"
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
+// Go 1.20+ auto-seeds the global rand source; no init() needed.
 
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 

@@ -13,8 +13,6 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-
-	"github.com/oioio-space/maldev/win/api"
 )
 
 // ErrInvalidHandle is returned when a file handle is invalid.
@@ -48,28 +46,34 @@ func dsOpenHandle(pwPath *uint16) (windows.Handle, error) {
 }
 
 func dsRenameHandle(hHandle windows.Handle) error {
-	var fRename _FILE_RENAME_INFO
-
 	dsStreamRename, err := windows.UTF16FromString(":deadbeef")
 	if err != nil {
 		return err
 	}
 
-	lpwStream := &dsStreamRename[0]
+	// UTF-16 byte length of the stream name (excluding null terminator).
+	nameByteLen := uint32(len(dsStreamRename)-1) * 2
 
-	fRename.FileNameLength = uint32(unsafe.Sizeof(lpwStream))
+	// Allocate a buffer large enough for the struct header + full filename.
+	headerSize := unsafe.Offsetof(_FILE_RENAME_INFO{}.FileName)
+	buf := make([]byte, uintptr(headerSize)+uintptr(nameByteLen))
 
-	api.ProcRtlCopyMemory.Call(
-		uintptr(unsafe.Pointer(&fRename.FileName[0])),
-		uintptr(unsafe.Pointer(lpwStream)),
-		unsafe.Sizeof(lpwStream),
-	)
+	// Fill the header fields at the start of the buffer.
+	// ReplaceIfExists = false (first byte), RootDirectory = 0 (Handle at offset 8),
+	// FileNameLength at offset 12 (after padding).
+	*(*uint32)(unsafe.Pointer(&buf[unsafe.Offsetof(_FILE_RENAME_INFO{}.FileNameLength)])) = nameByteLen
+
+	// Copy the UTF-16 stream name into the FileName field.
+	fnOffset := headerSize
+	for i := 0; i < len(dsStreamRename)-1; i++ {
+		*(*uint16)(unsafe.Pointer(&buf[fnOffset+uintptr(i)*2])) = dsStreamRename[i]
+	}
 
 	return windows.SetFileInformationByHandle(
 		hHandle,
 		windows.FileRenameInfo,
-		(*byte)(unsafe.Pointer(&fRename)),
-		uint32(unsafe.Sizeof(fRename)+unsafe.Sizeof(lpwStream)),
+		&buf[0],
+		uint32(len(buf)),
 	)
 }
 
