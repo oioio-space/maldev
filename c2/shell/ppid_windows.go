@@ -4,9 +4,8 @@ package shell
 
 import (
 	"fmt"
-	"unsafe"
 
-	"golang.org/x/sys/windows"
+	"github.com/oioio-space/maldev/process/enum"
 )
 
 // PPIDSpoofing provides PPID spoofing capabilities.
@@ -29,9 +28,9 @@ func (p *PPIDSpoofing) FindTargetProcess() error {
 	}
 
 	for _, target := range targets {
-		pid, err := findProcessByName(target)
-		if err == nil && pid != 0 {
-			p.targetPID = pid
+		procs, err := enum.FindByName(target)
+		if err == nil && len(procs) > 0 {
+			p.targetPID = procs[0].PID
 			return nil
 		}
 	}
@@ -44,61 +43,13 @@ func (p *PPIDSpoofing) TargetPID() uint32 {
 	return p.targetPID
 }
 
-// findProcessByName finds a process by its executable name.
-func findProcessByName(name string) (uint32, error) {
-	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
-	if err != nil {
-		return 0, fmt.Errorf("CreateToolhelp32Snapshot: %w", err)
-	}
-	defer windows.CloseHandle(snapshot)
-
-	var procEntry windows.ProcessEntry32
-	procEntry.Size = uint32(unsafe.Sizeof(procEntry))
-
-	err = windows.Process32First(snapshot, &procEntry)
-	if err != nil {
-		return 0, fmt.Errorf("Process32First: %w", err)
-	}
-
-	for {
-		exeFile := windows.UTF16ToString(procEntry.ExeFile[:])
-		if exeFile == name {
-			return procEntry.ProcessID, nil
-		}
-
-		err = windows.Process32Next(snapshot, &procEntry)
-		if err != nil {
-			break
-		}
-	}
-
-	return 0, fmt.Errorf("process %s not found", name)
-}
-
 // GetParentProcessID returns the parent process ID of the given PID.
 func GetParentProcessID(pid uint32) (uint32, error) {
-	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	proc, err := enum.FindProcess(func(_ string, p, _ uint32) bool {
+		return p == pid
+	})
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("process %d not found", pid)
 	}
-	defer windows.CloseHandle(snapshot)
-
-	var procEntry windows.ProcessEntry32
-	procEntry.Size = uint32(unsafe.Sizeof(procEntry))
-
-	if err := windows.Process32First(snapshot, &procEntry); err != nil {
-		return 0, err
-	}
-
-	for {
-		if procEntry.ProcessID == pid {
-			return procEntry.ParentProcessID, nil
-		}
-
-		if err := windows.Process32Next(snapshot, &procEntry); err != nil {
-			break
-		}
-	}
-
-	return 0, fmt.Errorf("process %d not found", pid)
+	return proc.PPID, nil
 }

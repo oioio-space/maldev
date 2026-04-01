@@ -2,23 +2,11 @@
 package morph
 
 import (
-	"math/rand"
 	"strings"
 
+	"github.com/oioio-space/maldev/core/utils"
 	"github.com/saferwall/pe"
 )
-
-// Go 1.20+ auto-seeds the global rand source; no init() needed.
-
-const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-
-func randomString(n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = letterBytes[rand.Intn(len(letterBytes))]
-	}
-	return string(b)
-}
 
 // UPXMorph replaces the UPX signature in a packed PE with random bytes
 // to prevent automatic unpacking and change the file hash.
@@ -38,7 +26,8 @@ func UPXMorph(peData []byte) ([]byte, error) {
 	for _, section := range pefile.Sections {
 		if strings.Contains(section.String(), "UPX1") {
 			offset := section.Header.PointerToRawData
-			copy(peData[offset:], []byte(randomString(8)))
+			s, _ := utils.RandomString(8)
+			copy(peData[offset:], []byte(s))
 			break
 		}
 	}

