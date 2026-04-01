@@ -231,7 +231,13 @@ func CheckIfRunningAsAdmin() bool {
 	}
 	defer windows.FreeSid(sid)
 
-	token := windows.Token(0)
+	var token windows.Token
+	proc, _ := windows.GetCurrentProcess()
+	if err := windows.OpenProcessToken(proc, windows.TOKEN_QUERY, &token); err != nil {
+		return false
+	}
+	defer token.Close()
+
 	member, err := token.IsMember(sid)
 	if err != nil {
 		return false

