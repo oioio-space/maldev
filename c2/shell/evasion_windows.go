@@ -4,9 +4,7 @@ package shell
 
 import (
 	"fmt"
-	"unsafe"
 
-	"github.com/oioio-space/maldev/win/api"
 	"golang.org/x/sys/windows"
 )
 
@@ -199,15 +197,14 @@ func patchFunction(addr uintptr, patch []byte) error {
 
 	var bytesWritten uintptr
 
-	ret, _, err := api.ProcWriteProcessMemory.Call(
-		uintptr(currentProcess),
+	err = windows.WriteProcessMemory(
+		currentProcess,
 		addr,
-		uintptr(unsafe.Pointer(&patch[0])),
+		&patch[0],
 		uintptr(len(patch)),
-		uintptr(unsafe.Pointer(&bytesWritten)),
+		&bytesWritten,
 	)
-
-	if ret == 0 {
+	if err != nil {
 		return fmt.Errorf("WriteProcessMemory: %w", err)
 	}
 

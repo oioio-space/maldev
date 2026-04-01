@@ -16,23 +16,8 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/oioio-space/maldev/win/api"
+	"github.com/oioio-space/maldev/win/impersonate"
 	"github.com/oioio-space/maldev/win/token"
-)
-
-// LogonType represents the type of logon operation.
-type LogonType uint32
-
-const (
-	LOGON32_LOGON_INTERACTIVE LogonType = 2
-	LOGON32_LOGON_NETWORK     LogonType = 3
-	LOGON32_LOGON_BATCH       LogonType = 4
-)
-
-// LogonProvider specifies the logon provider.
-type LogonProvider uint32
-
-const (
-	LOGON32_PROVIDER_DEFAULT LogonProvider = 0
 )
 
 const (
@@ -89,41 +74,17 @@ func IsAdmin() (admin bool, elevated bool, err error) {
 	return admin, t.IsElevated(), nil
 }
 
-// LogonUserW wraps the advapi32 LogonUserW syscall and returns the resulting
-// Windows token.
-func LogonUserW(username, domain, password string, logonType LogonType, logonProvider LogonProvider) (windows.Token, error) {
-	u := windows.StringToUTF16Ptr(username)
-	p := windows.StringToUTF16Ptr(password)
-	d := windows.StringToUTF16Ptr(domain)
-
-	handle := uintptr(0)
-
-	ret, _, e := api.ProcLogonUserW.Call(
-		uintptr(unsafe.Pointer(u)),
-		uintptr(unsafe.Pointer(d)),
-		uintptr(unsafe.Pointer(p)),
-		uintptr(logonType),
-		uintptr(logonProvider),
-		uintptr(unsafe.Pointer(&handle)),
-	)
-	if int(ret) == 0 {
-		return windows.Token(windows.InvalidHandle), os.NewSyscallError("LogonUserW", e)
-	}
-
-	return windows.Token(handle), nil
-}
-
 // ExecAs executes a program under the credentials of another user using Go's
 // exec package with a SysProcAttr token. Equivalent to "RunAs".
 func ExecAs(ctx context.Context, isInDomain bool, domain, username, password string, path string, args ...string) error {
-	logonType := LOGON32_LOGON_NETWORK
+	logonType := impersonate.LOGON32_LOGON_NETWORK
 
 	if !isInDomain {
-		logonType = LOGON32_LOGON_INTERACTIVE
+		logonType = impersonate.LOGON32_LOGON_INTERACTIVE
 		domain = "."
 	}
 
-	t, err := LogonUserW(username, domain, password, logonType, LOGON32_PROVIDER_DEFAULT)
+	t, err := impersonate.LogonUserW(username, domain, password, logonType, impersonate.LOGON32_PROVIDER_DEFAULT)
 	if err != nil {
 		return err
 	}

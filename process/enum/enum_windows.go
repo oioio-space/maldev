@@ -8,11 +8,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-
-	"github.com/oioio-space/maldev/win/api"
 )
-
-const th32csSnapProcess = 0x00000002
 
 // List returns all running processes on the system.
 func List() ([]Process, error) {
@@ -21,39 +17,37 @@ func List() ([]Process, error) {
 
 	var procs []Process
 
-	ret, _, e1 := api.ProcCreateToolhelp32Snapshot.Call(uintptr(th32csSnapProcess), 0)
-	handle := windows.Handle(ret)
-	if handle == windows.InvalidHandle {
-		return nil, e1
+	handle, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return nil, err
 	}
 	defer windows.CloseHandle(handle)
 
-	var entry api.PROCESSENTRY32W
-	entry.DwSize = uint32(unsafe.Sizeof(entry))
+	var entry windows.ProcessEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
 
-	ret, _, e1 = api.ProcProcess32FirstW.Call(uintptr(handle), uintptr(unsafe.Pointer(&entry)))
-	if ret == 0 {
-		return nil, e1
+	if err := windows.Process32First(handle, &entry); err != nil {
+		return nil, err
 	}
 
 	procs = append(procs, Process{
-		PID:  entry.Th32ProcessID,
-		PPID: entry.Th32ParentProcessID,
-		Name: syscall.UTF16ToString(entry.SzExeFile[:]),
+		PID:  entry.ProcessID,
+		PPID: entry.ParentProcessID,
+		Name: syscall.UTF16ToString(entry.ExeFile[:]),
 	})
 
 	for {
-		ret, _, e1 = api.ProcProcess32NextW.Call(uintptr(handle), uintptr(unsafe.Pointer(&entry)))
-		if ret == 0 {
-			if errno, ok := e1.(syscall.Errno); ok && errno == 18 { // ERROR_NO_MORE_FILES
+		err := windows.Process32Next(handle, &entry)
+		if err != nil {
+			if errno, ok := err.(syscall.Errno); ok && errno == 18 { // ERROR_NO_MORE_FILES
 				break
 			}
-			return procs, e1
+			return procs, err
 		}
 		procs = append(procs, Process{
-			PID:  entry.Th32ProcessID,
-			PPID: entry.Th32ParentProcessID,
-			Name: syscall.UTF16ToString(entry.SzExeFile[:]),
+			PID:  entry.ProcessID,
+			PPID: entry.ParentProcessID,
+			Name: syscall.UTF16ToString(entry.ExeFile[:]),
 		})
 	}
 

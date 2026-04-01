@@ -15,7 +15,21 @@
       "Bash(go build:*)",
       "Bash(sed:*)",
       "Bash(go vet:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(curl -s -L \"https://www.alexedwards.net/blog/go-naming-conventions\")",
+      "Bash(curl -s -L \"https://www.alexedwards.net/blog/11-tips-for-structuring-your-go-projects\")",
+      "Bash(xargs grep:*)",
+      "Bash(grep -r \"^//go:build\" --include=\"*.go\" /c/Users/m.bachmann/GolandProjects/maldev)",
+      "Bash(go doc:*)",
+      "Bash(go list:*)",
+      "Bash(grep:*)",
+      "Bash(wc:*)",
+      "Bash(curl -sL https://google.github.io/styleguide/go/best-practices.html -o /tmp/go-best-practices.html)",
+      "Bash(curl -sL https://google.github.io/styleguide/go/guide.html -o /tmp/go-guide.html)",
+      "Bash(python3 -c \"import html.parser; print\\('python3 available'\\)\")",
+      "Bash(python -c \"import html.parser; print\\('python available'\\)\")",
+      "Bash(cygpath:*)",
+      "Bash(python3:*)"
     ]
   }
 }
