@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:d3ext.github.io)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(git init:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(where gh:*)",
+      "Bash(powershell.exe -Command 'Get-Command gh -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source')",
+      "Bash(powershell.exe -Command 'echo $env:GITHUB_TOKEN')",
+      "Bash(git remote:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(go build:*)",
+      "Bash(sed:*)",
+      "Bash(go vet:*)",
+      "Bash(ls:*)"
+    ]
+  }
+}

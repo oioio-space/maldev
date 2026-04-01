@@ -42,6 +42,17 @@ var (
 	ProcSetProcessMitigationPolicy = Kernel32.NewProc("SetProcessMitigationPolicy")
 	ProcCreateProcessW             = Kernel32.NewProc("CreateProcessW")
 	ProcSetFileInformationByHandle = Kernel32.NewProc("SetFileInformationByHandle")
+	ProcWaitForSingleObject        = Kernel32.NewProc("WaitForSingleObject")
+	ProcVirtualFree                = Kernel32.NewProc("VirtualFree")
+	ProcConvertThreadToFiber       = Kernel32.NewProc("ConvertThreadToFiber")
+	ProcCreateFiber                = Kernel32.NewProc("CreateFiber")
+	ProcSwitchToFiber              = Kernel32.NewProc("SwitchToFiber")
+	ProcQueueUserAPC               = Kernel32.NewProc("QueueUserAPC")
+	ProcResumeThread               = Kernel32.NewProc("ResumeThread")
+	ProcSuspendThread              = Kernel32.NewProc("SuspendThread")
+	ProcGetThreadContext           = Kernel32.NewProc("GetThreadContext")
+	ProcSetThreadContext           = Kernel32.NewProc("SetThreadContext")
+	ProcRtlCopyMemory              = Kernel32.NewProc("RtlCopyMemory")
 )
 
 // ntdll.dll procs
@@ -59,6 +70,7 @@ var (
 	ProcEtwEventWriteTransfer    = Ntdll.NewProc("EtwEventWriteTransfer")
 	ProcRtlCreateUserThread      = Ntdll.NewProc("RtlCreateUserThread")
 	ProcNtAllocateVirtualMemory  = Ntdll.NewProc("NtAllocateVirtualMemory")
+	ProcRtlMoveMemory            = Ntdll.NewProc("RtlMoveMemory")
 )
 
 // advapi32.dll procs

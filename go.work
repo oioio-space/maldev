@@ -1,0 +1,16 @@
+go 1.20
+
+use (
+	./core
+	./win
+	./evasion
+	./injection
+	./privilege
+	./process
+	./system
+	./pe
+	./cleanup
+	./c2
+	./cve/CVE-2024-30088
+	./tools/rshell
+)
