@@ -1,5 +1,6 @@
-# CRITIQUE: ignore/ contient du code sensible — ne JAMAIS publier sur internet
+# CRITIQUE: ne JAMAIS publier
 ignore/
+.claude/
 
 # Binaires et artefacts de build
 *.exe
