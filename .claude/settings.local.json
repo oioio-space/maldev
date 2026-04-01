@@ -29,7 +29,10 @@
       "Bash(python3 -c \"import html.parser; print\\('python3 available'\\)\")",
       "Bash(python -c \"import html.parser; print\\('python available'\\)\")",
       "Bash(cygpath:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(go mod:*)",
+      "Bash(go version:*)",
+      "Bash(go test:*)"
     ]
   }
 }
