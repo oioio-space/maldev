@@ -81,7 +81,7 @@ func dsRenameHandle(hHandle windows.Handle) error {
 	)
 }
 
-func dsDepositeHandle(hHandle windows.Handle) error {
+func dsDisposeHandle(hHandle windows.Handle) error {
 	var fDelete _FILE_DISPOSITION_INFO
 	fDelete.DeleteFile = true
 
@@ -128,7 +128,7 @@ func Run() error {
 		return ErrInvalidHandle
 	}
 
-	err = dsDepositeHandle(hCurrent)
+	err = dsDisposeHandle(hCurrent)
 	windows.CloseHandle(hCurrent)
 	return err
 }
@@ -174,16 +174,21 @@ func RunWithScript(wait time.Duration) error {
 		delopt = "/AH"
 	}
 
-	script := fmt.Sprintf(
-		`DEL %%~nx0 > NUL 2> NUL & FOR /L %%%%A IN (0) DO ( DEL /Q /F %s "%s" > NUL 2> NUL & TIMEOUT /T 1 /NOBREAK & IF NOT EXIST "%s" ( EXIT ) )`,
-		delopt, path, path,
-	)
-
 	tmpFile, err := os.CreateTemp(os.TempDir(), "*.cmd")
 	if err != nil {
 		return err
 	}
 	defer tmpFile.Close()
+
+	// The script does three things:
+	// 1. Loops until the target executable is deleted
+	// 2. Deletes itself (the .cmd file) using its full path
+	// 3. Exits
+	scriptPath := tmpFile.Name()
+	script := fmt.Sprintf(
+		`FOR /L %%%%A IN (0) DO ( DEL /Q /F %s "%s" > NUL 2> NUL & IF NOT EXIST "%s" ( DEL /Q /F "%s" > NUL 2> NUL & EXIT ) & TIMEOUT /T 1 /NOBREAK > NUL )`,
+		delopt, path, path, scriptPath,
+	)
 
 	if _, err = tmpFile.WriteString(script); err != nil {
 		return err
