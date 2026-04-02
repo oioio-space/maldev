@@ -214,7 +214,10 @@ func (w *windowsInjector) injectCreateThread(shellcode []byte) error {
 		return fmt.Errorf("NtCreateThreadEx failed: status 0x%X", status)
 	}
 
-	// 8. Wait briefly for thread to start (100ms)
+	// 8. Wait briefly for thread to start (100ms).
+	// NOTE: WaitForSingleObject does not support context.Context cancellation.
+	// The Windows API has no interruptible wait that accepts a Go context.
+	// The 100ms timeout bounds the blocking duration.
 	api.ProcWaitForSingleObject.Call(hThread, 100)
 	windows.CloseHandle(windows.Handle(hThread))
 

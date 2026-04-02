@@ -194,6 +194,9 @@ func (w *windowsSyscallInjector) injectCT(shellcode []byte) error {
 		return fmt.Errorf("NtCreateThreadEx: NTSTATUS 0x%X: %w", uint32(r), err)
 	}
 
+	// NOTE: WaitForSingleObject does not support context.Context cancellation.
+	// The Windows API has no interruptible wait that accepts a Go context.
+	// The 100ms timeout bounds the blocking duration.
 	api.ProcWaitForSingleObject.Call(hThread, 100)
 	windows.CloseHandle(windows.Handle(hThread))
 	return nil

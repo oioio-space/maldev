@@ -1,8 +1,10 @@
 // Package enum provides cross-platform process enumeration for listing
 // and searching running processes by name or PID.
 //
+// Technique: Process Discovery
+// MITRE ATT&CK: T1057 (Process Discovery)
 // Platform: Cross-platform (Windows and Linux)
-// Detection: Low -- process enumeration is common system administration behavior.
+// Detection: Low -- uses standard OS APIs (CreateToolhelp32Snapshot on Windows, /proc on Linux)
 //
 // Platform-specific implementations:
 //   - Windows: uses CreateToolhelp32Snapshot with TH32CS_SNAPPROCESS

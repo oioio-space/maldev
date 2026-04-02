@@ -15,4 +15,12 @@
 // HideService applies a DACL that denies interactive/service/admin users
 // most access while allowing minimal read access. UnHideService restores
 // the default DACL.
+//
+// Example:
+//
+//	// Hide a service using native Windows API
+//	output, err := service.HideService(service.Native, "", "MyService")
+//
+//	// Restore default DACL
+//	output, err := service.UnHideService(service.Native, "", "MyService")
 package service

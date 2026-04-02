@@ -14,4 +14,11 @@
 //   - PatchAll: applies both patches in sequence.
 //
 // Returns nil if amsi.dll is not loaded (nothing to patch).
+//
+// How it works: AMSI is a Windows interface that allows antivirus engines to
+// scan scripts and .NET assemblies at runtime before they execute. Offensive
+// tools patch AMSI to prevent detection of in-memory payloads that would
+// otherwise be flagged. The patch overwrites the first few bytes of
+// AmsiScanBuffer's entry point so the function returns immediately with a
+// benign result, causing the AV engine to never see the content being scanned.
 package amsi

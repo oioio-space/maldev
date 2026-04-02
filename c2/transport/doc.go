@@ -13,4 +13,12 @@
 //
 // The factory function New creates the appropriate transport from
 // a Config struct based on the UseTLS flag.
+//
+// How it works: A C2 transport is the network layer that carries commands and
+// responses between an implant and its operator server. The TCP transport
+// opens a raw socket connection with a configurable dial timeout, suitable for
+// internal networks or tunneled traffic. The TLS transport wraps TCP with
+// encryption and optionally pins a specific server certificate fingerprint,
+// which prevents TLS inspection proxies from intercepting the traffic even if
+// they have a trusted CA certificate.
 package transport

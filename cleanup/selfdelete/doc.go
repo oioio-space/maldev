@@ -13,4 +13,11 @@
 //   - RunForce: retry Run with configurable delay (handles file locks)
 //   - RunWithScript: spawn a batch script that loops until the process exits
 //   - MarkForDeletion: schedule deletion at next reboot via MoveFileEx
+//
+// How it works: On NTFS, every file has a default unnamed data stream (:$DATA).
+// The technique opens the running executable, renames its default data stream
+// to a throwaway name (e.g., ":x"), and then closes and reopens the file with
+// DELETE disposition. Because the renamed stream no longer occupies the default
+// data stream slot, Windows considers the file "empty" and allows deletion even
+// while the process is still running from the original mapped pages in memory.
 package selfdelete

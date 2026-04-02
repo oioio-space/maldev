@@ -22,4 +22,13 @@
 //   - ProcMem (procmem): write to /proc/self/mem
 //
 // The InjectWithFallback function tries alternate methods if the primary fails.
+//
+// How it works: Shellcode injection places raw machine code (shellcode) into a
+// target process's memory and triggers its execution. Local injection writes
+// shellcode into the current process and runs it via a new thread or fiber.
+// Remote injection targets another process by allocating memory in it (e.g.,
+// VirtualAllocEx), writing the shellcode, and triggering execution through
+// mechanisms like CreateRemoteThread or queuing an APC to an existing thread.
+// APC-based methods like EarlyBird are stealthier because they piggyback on
+// normal thread scheduling rather than creating a conspicuous new thread.
 package inject

