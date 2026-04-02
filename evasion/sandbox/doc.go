@@ -17,8 +17,8 @@
 //
 // Example:
 //
-//	checker := sandbox.NewCheckerDefault()
-//	if sandboxed, reason, _ := checker.IsSandboxed(); sandboxed {
+//	checker := sandbox.New(sandbox.DefaultConfig())
+//	if sandboxed, reason, _ := checker.IsSandboxed(context.Background()); sandboxed {
 //	    os.Exit(0) // bail out of sandbox
 //	}
 package sandbox

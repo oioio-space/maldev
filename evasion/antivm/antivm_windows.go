@@ -4,6 +4,7 @@
 package antivm
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"strings"
@@ -19,16 +20,18 @@ type RegKey struct {
 }
 
 // Vendor represents a hypervisor vendor with its characteristic indicators:
-// registry keys, files, and NIC MAC prefixes.
+// registry keys, files, NIC MAC prefixes, and process names.
 type Vendor struct {
 	Name  string
 	Keys  []RegKey
 	Files []string
 	Nic   []string
+	Proc  []string
 }
 
 // DefaultVendors is the built-in list of known hypervisor indicators covering
-// Hyper-V, Parallels, VirtualBox, VirtualPC, VMware, Xen, QEMU, and Proxmox.
+// Hyper-V, Parallels, VirtualBox, VirtualPC, VMware, Xen, QEMU, Proxmox,
+// KVM, Docker, and WSL.
 var DefaultVendors = []Vendor{
 	{
 		Name: "Hyper-V",
@@ -37,7 +40,8 @@ var DefaultVendors = []Vendor{
 			{Hive: registry.LOCAL_MACHINE, Path: `SOFTWARE\Microsoft\VirtualMachine`},
 			{Hive: registry.LOCAL_MACHINE, Path: `SOFTWARE\Microsoft\Virtual Machine\Guest\Parameters`},
 		},
-		Nic: []string{`00:15:5D`},
+		Nic:  []string{`00:15:5D`},
+		Proc: []string{"vmicheartbeat", "vmicshutdown", "vmicvss"},
 	},
 	{
 		Name: "Parallels",
@@ -53,7 +57,8 @@ var DefaultVendors = []Vendor{
 			`c:\windows\system32\drivers\prl_pv32.sys`,
 			`c:\windows\system32\drivers\prl_paravirt_32.sys`,
 		},
-		Nic: []string{`00:1C:42`},
+		Nic:  []string{`00:1C:42`},
+		Proc: []string{"prl_cc", "prl_tools"},
 	},
 	{
 		Name: "VirtualBox",
@@ -101,7 +106,8 @@ var DefaultVendors = []Vendor{
 			`c:\windows\system32\vboxtray.exe`,
 			`c:\windows\system32\VBoxControl.exe`,
 		},
-		Nic: []string{`08:00:27`, `00:21:F6`, `00:14:4F`, `00:0F:4B`},
+		Nic:  []string{`08:00:27`, `00:21:F6`, `00:14:4F`, `00:0F:4B`},
+		Proc: []string{"vboxservice", "vboxtray", "vboxclient"},
 	},
 	{
 		Name: "VirtualPC",
@@ -116,7 +122,8 @@ var DefaultVendors = []Vendor{
 			`c:\windows\system32\drivers\vmsrvc.sys`,
 			`c:\windows\system32\drivers\vpc-s3.sys`,
 		},
-		Nic: []string{`00:03:FF`},
+		Nic:  []string{`00:03:FF`},
+		Proc: []string{"vmsrvc", "vmusrvc"},
 	},
 	{
 		Name: "VMware",
@@ -144,7 +151,8 @@ var DefaultVendors = []Vendor{
 			`c:\windows\system32\drivers\vmx86.sys`,
 			`c:\windows\system32\drivers\hgfs.sys`,
 		},
-		Nic: []string{`00:0C:29`, `00:1C:14`, `00:50:56`, `00:05:69`},
+		Nic:  []string{`00:0C:29`, `00:1C:14`, `00:50:56`, `00:05:69`},
+		Proc: []string{"vmtoolsd", "vmwaretray", "vmwareuser", "vmacthlp"},
 	},
 	{
 		Name: "Xen",
@@ -158,7 +166,8 @@ var DefaultVendors = []Vendor{
 			{Hive: registry.LOCAL_MACHINE, Path: `SYSTEM\ControlSet001\Services\xensvc`},
 			{Hive: registry.LOCAL_MACHINE, Path: `SYSTEM\ControlSet001\Services\xenvdb`},
 		},
-		Nic: []string{`00:16:3E`},
+		Nic:  []string{`00:16:3E`},
+		Proc: []string{"xenservice", "xenstored"},
 	},
 	{
 		Name: "QEMU",
@@ -168,11 +177,25 @@ var DefaultVendors = []Vendor{
 			{Hive: registry.LOCAL_MACHINE, Path: `HARDWARE\Description\System\VideoBiosVersion`, ExpectedValue: "QEMU"},
 			{Hive: registry.LOCAL_MACHINE, Path: `HARDWARE\Description\System\BIOS\SystemManufacturer`, ExpectedValue: "QEMU"},
 		},
-		Nic: []string{`52:54:00`},
+		Nic:  []string{`52:54:00`},
+		Proc: []string{"qemu-ga"},
 	},
 	{
 		Name: "Proxmox",
 		Nic:  []string{`96:00:FF`},
+	},
+	{
+		Name: "KVM",
+		Nic:  []string{`52:54:00`},
+		Proc: []string{"qemu-ga"},
+	},
+	{
+		Name:  "Docker",
+		Files: []string{`C:\.dockerenv`},
+	},
+	{
+		Name:  "WSL",
+		Files: []string{`/proc/sys/fs/binfmt_misc/WSLInterop`},
 	},
 }
 
@@ -267,21 +290,105 @@ func DetectRegKey(keys []RegKey) (bool, RegKey, error) {
 	return false, RegKey{}, nil
 }
 
+// Detect checks vendors from the given Config and returns the first detected
+// vendor name and nil error. Returns empty string if no vendor is detected.
+func Detect(cfg Config) (string, error) {
+	checks := cfg.checks()
+	for _, vendor := range cfg.vendors() {
+		if checks&CheckRegistry != 0 && len(vendor.Keys) > 0 {
+			if found, _, err := DetectRegKey(vendor.Keys); err != nil {
+				return "", fmt.Errorf("registry check for %s: %w", vendor.Name, err)
+			} else if found {
+				return vendor.Name, nil
+			}
+		}
+		if checks&CheckFiles != 0 && len(vendor.Files) > 0 {
+			if found, _ := DetectFiles(vendor.Files); found {
+				return vendor.Name, nil
+			}
+		}
+		if checks&CheckNIC != 0 && len(vendor.Nic) > 0 {
+			if found, _, err := DetectNic(vendor.Nic); err != nil {
+				return "", fmt.Errorf("NIC check for %s: %w", vendor.Name, err)
+			} else if found {
+				return vendor.Name, nil
+			}
+		}
+		if checks&CheckProcess != 0 && len(vendor.Proc) > 0 {
+			if found, _, err := DetectProcess(vendor.Proc); err != nil {
+				return "", fmt.Errorf("process check for %s: %w", vendor.Name, err)
+			} else if found {
+				return vendor.Name, nil
+			}
+		}
+	}
+	if checks&CheckCPUID != 0 {
+		if found, _ := DetectCPUID(); found {
+			return "VM (CPUID)", nil
+		}
+	}
+	return "", nil
+}
+
+// DetectAll checks all vendors from the given Config and returns every
+// detected vendor name. Unlike Detect it does not short-circuit.
+func DetectAll(cfg Config) ([]string, error) {
+	checks := cfg.checks()
+	seen := make(map[string]bool)
+	var results []string
+
+	for _, vendor := range cfg.vendors() {
+		if seen[vendor.Name] {
+			continue
+		}
+		if checks&CheckRegistry != 0 && len(vendor.Keys) > 0 {
+			if found, _, err := DetectRegKey(vendor.Keys); err != nil {
+				return results, fmt.Errorf("registry check for %s: %w", vendor.Name, err)
+			} else if found {
+				seen[vendor.Name] = true
+				results = append(results, vendor.Name)
+				continue
+			}
+		}
+		if checks&CheckFiles != 0 && len(vendor.Files) > 0 {
+			if found, _ := DetectFiles(vendor.Files); found {
+				seen[vendor.Name] = true
+				results = append(results, vendor.Name)
+				continue
+			}
+		}
+		if checks&CheckNIC != 0 && len(vendor.Nic) > 0 {
+			if found, _, err := DetectNic(vendor.Nic); err != nil {
+				return results, fmt.Errorf("NIC check for %s: %w", vendor.Name, err)
+			} else if found {
+				seen[vendor.Name] = true
+				results = append(results, vendor.Name)
+				continue
+			}
+		}
+		if checks&CheckProcess != 0 && len(vendor.Proc) > 0 {
+			if found, _, err := DetectProcess(vendor.Proc); err != nil {
+				return results, fmt.Errorf("process check for %s: %w", vendor.Name, err)
+			} else if found {
+				seen[vendor.Name] = true
+				results = append(results, vendor.Name)
+				continue
+			}
+		}
+	}
+	if checks&CheckCPUID != 0 {
+		if found, _ := DetectCPUID(); found && !seen["VM (CPUID)"] {
+			results = append(results, "VM (CPUID)")
+		}
+	}
+	return results, nil
+}
+
 // DetectVM checks the DefaultVendors list and returns the first detected
 // vendor name, or empty string if none is found.
 func DetectVM() string {
-	for _, vendor := range DefaultVendors {
-		if found, _ := DetectFiles(vendor.Files); found {
-			return vendor.Name
-		}
-		if found, _, _ := DetectRegKey(vendor.Keys); found {
-			return vendor.Name
-		}
-		if found, _, _ := DetectNic(vendor.Nic); found {
-			return vendor.Name
-		}
-	}
-	return ""
+	r, _ := Detect(DefaultConfig())
+	return r
 }
 
 // IsRunningInVM returns true if any VM indicator from DefaultVendors is detected.

