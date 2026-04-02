@@ -35,7 +35,10 @@ err := amsi.PatchAll(nil) // patch AMSI + bypass session init
 | **[Evasion Techniques](docs/evasion.md)** | [AMSI](docs/evasion.md#amsi-bypass-evasionamsi) &#183; [ETW](docs/evasion.md#etw-bypass-evasionetw) &#183; [Unhook](docs/evasion.md#ntdll-unhooking-evasionunhook) &#183; [Herpaderping](docs/evasion.md#process-herpaderping-evasionherpaderping----t1055) &#183; [Phant0m](docs/evasion.md#phant0m-evasionphant0m) &#183; [Sandbox](docs/evasion.md#sandbox-detection-evasionsandbox) &#183; [AntiVM](docs/evasion.md#antivm----parameterizable-config-evasionantivm) &#183; [Presets](docs/evasion.md#composable-evasion-evasionpreset) &#183; [Hook Detection](docs/evasion.md#hook-detection-evasionunhook) |
 | **[Process Injection](docs/injection.md)** | [13 methods](docs/injection.md#injection-methods) &#183; [Remote inject](docs/injection.md#remote-injection-into-an-existing-process) &#183; [Fallback](docs/injection.md#injection-with-automatic-fallback) &#183; [Syscall bypass](docs/injection.md#injection-with-syscall-bypass-edr-evasion) |
 | **[Syscall Methods](docs/syscalls.md)** | WinAPI &#183; NativeAPI &#183; Direct &#183; Indirect syscall strategies + SSN resolvers |
-| **[Command & Control](docs/c2.md)** | TCP/TLS transport &#183; Reverse shell &#183; Meterpreter staging |
+| **[Command & Control](docs/c2.md)** | TCP/TLS transport &#183; Reverse shell &#183; Meterpreter staging &#183; Cert generation |
+| **[Crypto & Encoding](docs/crypto.md)** | AES-GCM &#183; ChaCha20 &#183; RC4 &#183; XOR &#183; Base64 &#183; ROR13 &#183; Random |
+| **[Windows Primitives](docs/win.md)** | DLL handles &#183; PatchMemory &#183; Token manipulation &#183; Privilege elevation &#183; Version detection |
+| **[Cleanup & Anti-Forensics](docs/cleanup.md)** | Self-delete &#183; Service hiding &#183; Wipe &#183; Timestomp |
 | **[MITRE ATT&CK Map](docs/mitre.md)** | 17 techniques across all packages |
 
 ## Packages
