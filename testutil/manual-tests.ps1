@@ -8,25 +8,69 @@
     This script runs all manual tests that require specific environments
     (admin rights, UAC, vulnerable OS, credentials). Each section can be
     run independently. The script handles setup, execution, verification,
-    and cleanup.
+    and cleanup for each test.
+
+    Sections:
+      phant0m     Kill Event Log service threads (silences logging)
+      service     Hide/unhide a Windows service via DACL manipulation
+      uacbypass   FODHelper, EventVwr, SilentCleanup, SLUI bypass techniques
+      cve         CVE-2024-30088 kernel LPE (BSOD risk — snapshot first!)
+      impersonate Thread token impersonation with credentials
+      unhook      Restore ntdll.dll original bytes (undo EDR hooks)
+      all         Run every section above in order
+
+.PARAMETER Section
+    Which test section to run. Default: all.
+
+.PARAMETER TestUser
+    Username for impersonation tests. Create first: net user maldevtest P@ssw0rd123! /add
+
+.PARAMETER TestPass
+    Password for impersonation tests.
+
+.PARAMETER TestDomain
+    Domain for domain-joined impersonation tests (optional).
+
+.PARAMETER Help
+    Show this help message and exit.
 
 .NOTES
-    Platform: Windows 10/11 VM
-    Requires: Administrator privileges, Go toolchain, UAC enabled
-    Location: Run from the maldev repository root
+    Platform:  Windows 10/11 VM
+    Requires:  Administrator privileges, Go toolchain, UAC enabled
+    Location:  Run from the maldev repository root
+    Safety:    ALWAYS run in a VM with a snapshot. Never on your dev machine.
 
 .EXAMPLE
-    # Run everything (from elevated PowerShell in VM)
-    .\scripts\manual-tests.ps1
+    .\testutil\manual-tests.ps1
+    # Runs all sections.
 
-    # Run a specific section
-    .\scripts\manual-tests.ps1 -Section phant0m
-    .\scripts\manual-tests.ps1 -Section service
-    .\scripts\manual-tests.ps1 -Section uacbypass
-    .\scripts\manual-tests.ps1 -Section cve
-    .\scripts\manual-tests.ps1 -Section impersonate
-    .\scripts\manual-tests.ps1 -Section unhook
-    .\scripts\manual-tests.ps1 -Section all
+.EXAMPLE
+    .\testutil\manual-tests.ps1 -Section phant0m
+    # Kills Event Log threads, verifies silence, restarts the service.
+
+.EXAMPLE
+    .\testutil\manual-tests.ps1 -Section service
+    # Creates MaldevTestSvc, hides it via DACL, verifies, unhides, deletes.
+
+.EXAMPLE
+    .\testutil\manual-tests.ps1 -Section uacbypass
+    # Runs 4 UAC bypass techniques. Must be in a NON-elevated shell for real effect.
+
+.EXAMPLE
+    .\testutil\manual-tests.ps1 -Section cve
+    # Checks vulnerability, asks confirmation, runs exploit, spawns SYSTEM calc.
+
+.EXAMPLE
+    .\testutil\manual-tests.ps1 -Section impersonate -TestUser maldevtest -TestPass "P@ssw0rd123!"
+    # Tests thread impersonation with provided credentials.
+
+.EXAMPLE
+    .\testutil\manual-tests.ps1 -Section unhook
+    # Unhooks ntdll.dll and verifies clean syscall stubs.
+
+.EXAMPLE
+    Get-Help .\testutil\manual-tests.ps1 -Full
+    # Shows this full help.
 #>
 
 param(
@@ -38,8 +82,16 @@ param(
     #   net user maldevtest P@ssw0rd123! /add
     [string]$TestUser = "",
     [string]$TestPass = "",
-    [string]$TestDomain = ""
+    [string]$TestDomain = "",
+
+    [Alias("h")]
+    [switch]$Help
 )
+
+if ($Help) {
+    Get-Help $MyInvocation.MyCommand.Path -Full
+    exit 0
+}
 
 $ErrorActionPreference = "Continue"
 $env:MALDEV_MANUAL = "1"
