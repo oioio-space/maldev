@@ -2,6 +2,8 @@ package inject
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"time"
 )
 
@@ -33,24 +35,29 @@ func (s *InjectionStats) Finish(err error) {
 	s.Error = err
 }
 
-// Print displays the statistics.
-func (s *InjectionStats) Print() {
+// Fprint writes the injection statistics to w.
+func (s *InjectionStats) Fprint(w io.Writer) {
 	if s.Success {
-		fmt.Printf("\n[SUCCESS] Injection completed in %.2fs\n", s.Duration.Seconds())
+		fmt.Fprintf(w, "\n[SUCCESS] Injection completed in %.2fs\n", s.Duration.Seconds())
 	} else {
-		fmt.Printf("\n[FAILED] Injection failed after %.2fs\n", s.Duration.Seconds())
+		fmt.Fprintf(w, "\n[FAILED] Injection failed after %.2fs\n", s.Duration.Seconds())
 		if s.Error != nil {
-			fmt.Printf("  Error: %v\n", s.Error)
+			fmt.Fprintf(w, "  Error: %v\n", s.Error)
 		}
 		return
 	}
 
-	fmt.Printf("  Method: %s\n", s.Method)
-	fmt.Printf("  Shellcode: %d bytes\n", s.ShellcodeSize)
+	fmt.Fprintf(w, "  Method: %s\n", s.Method)
+	fmt.Fprintf(w, "  Shellcode: %d bytes\n", s.ShellcodeSize)
 
 	if s.TargetPID > 0 {
-		fmt.Printf("  Target: PID %d\n", s.TargetPID)
+		fmt.Fprintf(w, "  Target: PID %d\n", s.TargetPID)
 	} else {
-		fmt.Printf("  Target: Current process\n")
+		fmt.Fprintf(w, "  Target: Current process\n")
 	}
+}
+
+// Print writes the injection statistics to stdout.
+func (s *InjectionStats) Print() {
+	s.Fprint(os.Stdout)
 }

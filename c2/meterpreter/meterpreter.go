@@ -173,9 +173,14 @@ func GetPayloadName(transport Transport) string {
 	osName := runtime.GOOS
 	arch := runtime.GOARCH
 
-	archName := "x86"
-	if arch == "amd64" {
+	var archName string
+	switch arch {
+	case "amd64":
 		archName = "x64"
+	case "arm64":
+		archName = "aarch64"
+	default:
+		archName = "x86"
 	}
 
 	var prefix string

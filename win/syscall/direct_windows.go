@@ -81,7 +81,10 @@ func (c *Caller) callDirect(name string, args ...uintptr) (uintptr, error) {
 
 	// Call the stub via syscall.SyscallN
 	r, _, _ := rawsyscall.SyscallN(stubAddr, args...)
-	return r, nil
+	if r != 0 {
+		return r, fmt.Errorf("%s: NTSTATUS 0x%08X", name, uint32(r))
+	}
+	return 0, nil
 }
 
 func (c *Caller) callIndirect(name string, args ...uintptr) (uintptr, error) {
@@ -124,7 +127,10 @@ func (c *Caller) callIndirect(name string, args ...uintptr) (uintptr, error) {
 	copy((*[32]byte)(unsafe.Pointer(stubAddr))[:len(stub)], stub)
 
 	r, _, _ := rawsyscall.SyscallN(stubAddr, args...)
-	return r, nil
+	if r != 0 {
+		return r, fmt.Errorf("%s: NTSTATUS 0x%08X", name, uint32(r))
+	}
+	return 0, nil
 }
 
 // findSyscallGadget scans ntdll's .text section for a syscall;ret (0F 05 C3) gadget.

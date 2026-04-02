@@ -10,6 +10,7 @@ import (
 
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
+// RandomString generates a cryptographically random alphanumeric string of the given length.
 func RandomString(length int) (string, error) {
 	b := make([]byte, length)
 	for i := range b {
@@ -22,12 +23,14 @@ func RandomString(length int) (string, error) {
 	return string(b), nil
 }
 
+// RandomBytes returns n cryptographically random bytes.
 func RandomBytes(n int) ([]byte, error) {
 	b := make([]byte, n)
 	_, err := rand.Read(b)
 	return b, err
 }
 
+// RandomInt returns a cryptographically random integer in [min, max).
 func RandomInt(min, max int) (int, error) {
 	if max <= min {
 		return 0, fmt.Errorf("max (%d) must be greater than min (%d)", max, min)
@@ -39,11 +42,13 @@ func RandomInt(min, max int) (int, error) {
 	return int(n.Int64()) + min, nil
 }
 
+// RandomDuration returns a cryptographically random duration in [min, max).
 func RandomDuration(min, max time.Duration) (time.Duration, error) {
 	n, err := RandomInt(int(min), int(max))
 	return time.Duration(n), err
 }
 
+// IsFileExist reports whether the file at path exists and is accessible.
 func IsFileExist(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil

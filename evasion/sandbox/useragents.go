@@ -1,9 +1,10 @@
 package sandbox
 
 import (
+	"crypto/rand"
 	_ "embed"
 	"encoding/json"
-	"math/rand"
+	"math/big"
 )
 
 //go:embed useragents.json
@@ -36,7 +37,8 @@ func (uas *UserAgents) GetRandom() *UserAgent {
 	if len(*uas) == 0 {
 		return nil
 	}
-	return (*uas)[rand.Intn(len(*uas))]
+	n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(*uas))))
+	return (*uas)[n.Int64()]
 }
 
 // Filter returns a new UserAgents containing only entries for which fn returns true.

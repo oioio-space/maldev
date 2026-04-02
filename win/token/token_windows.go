@@ -22,11 +22,11 @@ var (
 )
 
 var (
-	ErrNoActiveSession                      error = fmt.Errorf("no active session found")
-	ErrInvalidDuplicatedToken               error = fmt.Errorf("invalid duplicated token")
-	ErrOnlyPrimaryImpersonationTokenAllowed error = fmt.Errorf("only primary or impersonation token types allowed")
-	ErrNoPrivilegesSpecified                error = fmt.Errorf("no privileges specified")
-	ErrTokenClosed                          error = fmt.Errorf("token has been closed")
+	ErrNoActiveSession                      = errors.New("no active session found")
+	ErrInvalidDuplicatedToken               = errors.New("invalid duplicated token")
+	ErrOnlyPrimaryImpersonationTokenAllowed = errors.New("only primary or impersonation token types allowed")
+	ErrNoPrivilegesSpecified                = errors.New("no privileges specified")
+	ErrTokenClosed                          = errors.New("token has been closed")
 )
 
 type (

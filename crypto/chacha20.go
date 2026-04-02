@@ -8,6 +8,8 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
+// EncryptChaCha20 encrypts plaintext using XChaCha20-Poly1305 with a random nonce.
+// The nonce is prepended to the returned ciphertext.
 func EncryptChaCha20(key, plaintext []byte) ([]byte, error) {
 	if len(key) != chacha20poly1305.KeySize {
 		return nil, fmt.Errorf("key must be %d bytes", chacha20poly1305.KeySize)
@@ -23,6 +25,7 @@ func EncryptChaCha20(key, plaintext []byte) ([]byte, error) {
 	return aead.Seal(nonce, nonce, plaintext, nil), nil
 }
 
+// DecryptChaCha20 decrypts XChaCha20-Poly1305 ciphertext produced by EncryptChaCha20.
 func DecryptChaCha20(key, ciphertext []byte) ([]byte, error) {
 	if len(key) != chacha20poly1305.KeySize {
 		return nil, fmt.Errorf("key must be %d bytes", chacha20poly1305.KeySize)
@@ -42,6 +45,7 @@ func DecryptChaCha20(key, ciphertext []byte) ([]byte, error) {
 	return pt, nil
 }
 
+// NewChaCha20Key generates a cryptographically random key for XChaCha20-Poly1305.
 func NewChaCha20Key() ([]byte, error) {
 	key := make([]byte, chacha20poly1305.KeySize)
 	_, err := io.ReadFull(rand.Reader, key)

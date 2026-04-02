@@ -15,8 +15,6 @@ import (
 
 // Windows injection constants
 const (
-	threadAllAccess = 0x1FFFFF // THREAD_ALL_ACCESS
-
 	threadWaitTimeout          = 2000
 	cpuDelayMaxIterations      = 5000000
 	cpuDelayFallbackIterations = 3000000
@@ -205,7 +203,7 @@ func (w *windowsInjector) injectCreateThread(shellcode []byte) error {
 
 	status, _, _ := api.ProcNtCreateThreadEx.Call(
 		uintptr(unsafe.Pointer(&hThread)),
-		threadAllAccess,
+		api.ThreadAllAccess,
 		0,
 		currentProcess,
 		addr,

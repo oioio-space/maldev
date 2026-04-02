@@ -2,10 +2,13 @@
 
 package api
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // ErrNotSupported is returned when a feature is unavailable on the target Windows version.
-var ErrNotSupported = fmt.Errorf("not supported on this Windows version")
+var ErrNotSupported = errors.New("not supported on this Windows version")
 
 // NTSTATUSError wraps an NTSTATUS code as a Go error.
 type NTSTATUSError uint32

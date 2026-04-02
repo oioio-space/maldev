@@ -1,4 +1,4 @@
-// Package injection provides unified shellcode injection techniques
+// Package inject provides unified shellcode injection techniques
 // for Windows and Linux platforms with automatic fallback support.
 //
 // Technique: Process injection via multiple methods per platform.

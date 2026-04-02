@@ -108,7 +108,7 @@ func (w *windowsSyscallInjector) injectCRT(shellcode []byte) error {
 	var hThread uintptr
 	r, err := w.caller.Call("NtCreateThreadEx",
 		uintptr(unsafe.Pointer(&hThread)),
-		uintptr(threadAllAccess),
+		uintptr(api.ThreadAllAccess),
 		0,
 		uintptr(hProcess),
 		addr,
@@ -183,7 +183,7 @@ func (w *windowsSyscallInjector) injectCT(shellcode []byte) error {
 	var hThread uintptr
 	r, err = w.caller.Call("NtCreateThreadEx",
 		uintptr(unsafe.Pointer(&hThread)),
-		uintptr(threadAllAccess),
+		uintptr(api.ThreadAllAccess),
 		0,
 		currentProcess,
 		baseAddr,
@@ -401,7 +401,7 @@ func (w *windowsSyscallInjector) injectRtl(shellcode []byte) error {
 	var hThread uintptr
 	r, err := w.caller.Call("NtCreateThreadEx",
 		uintptr(unsafe.Pointer(&hThread)),
-		uintptr(threadAllAccess),
+		uintptr(api.ThreadAllAccess),
 		0,
 		uintptr(hProcess),
 		addr,
