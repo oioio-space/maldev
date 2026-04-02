@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// InjectionStats contains statistics for an injection attempt.
-type InjectionStats struct {
+// Stats contains statistics for an injection attempt.
+type Stats struct {
 	Method        Method
 	ShellcodeSize int
 	TargetPID     int
@@ -18,9 +18,9 @@ type InjectionStats struct {
 	Error         error
 }
 
-// NewInjectionStats creates a new stats instance.
-func NewInjectionStats(method Method, shellcodeSize int, targetPID int) *InjectionStats {
-	return &InjectionStats{
+// NewStats creates a new stats instance.
+func NewStats(method Method, shellcodeSize int, targetPID int) *Stats {
+	return &Stats{
 		Method:        method,
 		ShellcodeSize: shellcodeSize,
 		TargetPID:     targetPID,
@@ -29,14 +29,14 @@ func NewInjectionStats(method Method, shellcodeSize int, targetPID int) *Injecti
 }
 
 // Finish marks the injection as completed.
-func (s *InjectionStats) Finish(err error) {
+func (s *Stats) Finish(err error) {
 	s.Duration = time.Since(s.StartTime)
 	s.Success = err == nil
 	s.Error = err
 }
 
 // Fprint writes the injection statistics to w.
-func (s *InjectionStats) Fprint(w io.Writer) {
+func (s *Stats) Fprint(w io.Writer) {
 	if s.Success {
 		fmt.Fprintf(w, "\n[SUCCESS] Injection completed in %.2fs\n", s.Duration.Seconds())
 	} else {
@@ -58,6 +58,6 @@ func (s *InjectionStats) Fprint(w io.Writer) {
 }
 
 // Print writes the injection statistics to stdout.
-func (s *InjectionStats) Print() {
+func (s *Stats) Print() {
 	s.Fprint(os.Stdout)
 }

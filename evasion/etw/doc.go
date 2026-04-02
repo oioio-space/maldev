@@ -6,7 +6,7 @@
 // Platform: Windows
 // Detection: Medium -- patches ntdll.dll in-memory, detectable by integrity checks.
 //
-// PatchETW overwrites all 5 ETW event writing functions (EtwEventWrite,
+// Patch overwrites all 5 ETW event writing functions (EtwEventWrite,
 // EtwEventWriteEx, EtwEventWriteFull, EtwEventWriteString, EtwEventWriteTransfer)
 // with "xor rax, rax; ret" (48 33 C0 C3), making them return STATUS_SUCCESS
 // without logging.

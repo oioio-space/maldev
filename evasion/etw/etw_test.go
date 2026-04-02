@@ -13,14 +13,14 @@ import (
 	"github.com/oioio-space/maldev/win/api"
 )
 
-func TestPatchETW(t *testing.T) {
+func TestPatch(t *testing.T) {
 	testutil.RequireIntrusive(t)
 	proc := api.Ntdll.NewProc("EtwEventWrite")
 	if err := proc.Find(); err != nil {
 		t.Fatal("EtwEventWrite not found")
 	}
 	addr := proc.Addr()
-	err := PatchETW(nil)
+	err := Patch(nil)
 	require.NoError(t, err)
 	patched := (*[4]byte)(unsafe.Pointer(addr))
 	assert.Equal(t, byte(0x48), patched[0])

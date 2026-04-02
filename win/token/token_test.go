@@ -15,7 +15,7 @@ func openCurrentProcessToken(t *testing.T) *Token {
 	var rawToken windows.Token
 	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &rawToken)
 	require.NoError(t, err, "OpenProcessToken failed")
-	return NewToken(rawToken, TokenPrimary)
+	return New(rawToken, Primary)
 }
 
 func TestOpenCurrentProcessToken(t *testing.T) {
@@ -28,7 +28,7 @@ func TestTokenPrivileges(t *testing.T) {
 	tok := openCurrentProcessToken(t)
 	defer tok.Close()
 
-	privs, err := tok.GetPrivileges()
+	privs, err := tok.Privileges()
 	require.NoError(t, err)
 	assert.NotEmpty(t, privs, "expected at least one privilege on the current process token")
 }
@@ -46,7 +46,7 @@ func TestTokenIntegrityLevel(t *testing.T) {
 	tok := openCurrentProcessToken(t)
 	defer tok.Close()
 
-	level, err := tok.GetIntegrityLevel()
+	level, err := tok.IntegrityLevel()
 	require.NoError(t, err)
 	assert.NotEmpty(t, level, "expected non-empty integrity level string")
 }

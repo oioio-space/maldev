@@ -9,7 +9,7 @@
 // Detection: Medium -- DACL changes on services are logged if auditing is enabled.
 //
 // Two application modes:
-//   - NATIF: uses SetNamedSecurityInfo Windows API directly
+//   - Native: uses SetNamedSecurityInfo Windows API directly
 //   - SC_SDSET: uses sc.exe SDSET command (works remotely with hostname)
 //
 // HideService applies a DACL that denies interactive/service/admin users

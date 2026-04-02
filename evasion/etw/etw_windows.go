@@ -23,7 +23,7 @@ import (
 // patch is the x64 stub: XOR RAX,RAX; RET — makes function return STATUS_SUCCESS.
 var patch = []byte{0x48, 0x33, 0xC0, 0xC3}
 
-// PatchETW patches all 5 ETW event writing functions in ntdll.dll:
+// Patch patches all 5 ETW event writing functions in ntdll.dll:
 //   - EtwEventWrite
 //   - EtwEventWriteEx
 //   - EtwEventWriteFull
@@ -34,7 +34,7 @@ var patch = []byte{0x48, 0x33, 0xC0, 0xC3}
 // STATUS_SUCCESS without writing any event.
 // Procs that are not present on the current OS version are silently skipped.
 // If caller is non-nil, memory protection changes use the specified syscall method.
-func PatchETW(caller *wsyscall.Caller) error {
+func Patch(caller *wsyscall.Caller) error {
 	procs := []*windows.LazyProc{
 		api.ProcEtwEventWrite,
 		api.ProcEtwEventWriteEx,
@@ -65,11 +65,11 @@ func PatchNtTraceEvent(caller *wsyscall.Caller) error {
 	return api.PatchMemoryWithCaller(proc.Addr(), patch, caller)
 }
 
-// PatchAll applies both PatchETW and PatchNtTraceEvent.
+// PatchAll applies both Patch and PatchNtTraceEvent.
 // Returns the first error encountered, or nil if both succeed.
 func PatchAll(caller *wsyscall.Caller) error {
-	if err := PatchETW(caller); err != nil {
-		return fmt.Errorf("PatchETW: %w", err)
+	if err := Patch(caller); err != nil {
+		return fmt.Errorf("Patch: %w", err)
 	}
 	if err := PatchNtTraceEvent(caller); err != nil {
 		return fmt.Errorf("PatchNtTraceEvent: %w", err)

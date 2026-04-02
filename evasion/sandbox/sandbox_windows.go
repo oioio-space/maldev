@@ -143,7 +143,7 @@ func (c *Checker) FakeDomainReachable() (bool, int, error) {
 	if err != nil {
 		return false, 0, err
 	}
-	ua := uas.GetRandom()
+	ua := uas.Random()
 	if ua != nil {
 		req.Header.Set("User-Agent", ua.String())
 	}

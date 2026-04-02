@@ -32,8 +32,8 @@ func LoadUserAgents() (*UserAgents, error) {
 	return uas, nil
 }
 
-// GetRandom returns a random UserAgent from the list, or nil if the list is empty.
-func (uas *UserAgents) GetRandom() *UserAgent {
+// Random returns a random UserAgent from the list, or nil if the list is empty.
+func (uas *UserAgents) Random() *UserAgent {
 	if len(*uas) == 0 {
 		return nil
 	}

@@ -216,8 +216,8 @@ if ($Section -eq "all" -or $Section -eq "service") {
     Write-Step "Original DACL:"
     sc.exe sdshow $testSvcName 2>&1 | Write-Host
 
-    # ── Execute: Hide (NATIF mode) ──
-    Write-Step "Running HideService (NATIF mode)..."
+    # ── Execute: Hide (Native mode) ──
+    Write-Step "Running HideService (Native mode)..."
     go test ./cleanup/service/ -run TestHideService -v -timeout 30s 2>&1 | Write-Host
 
     # ── Verify ──

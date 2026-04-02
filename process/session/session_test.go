@@ -20,7 +20,7 @@ func openCurrentProcessToken(t *testing.T) *token.Token {
 	var rawToken windows.Token
 	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY|windows.TOKEN_DUPLICATE, &rawToken)
 	require.NoError(t, err, "OpenProcessToken failed")
-	return token.NewToken(rawToken, token.TokenPrimary)
+	return token.New(rawToken, token.Primary)
 }
 
 // TestImpersonateThreadOnActiveSession runs the callback under the current

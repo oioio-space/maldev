@@ -14,8 +14,8 @@ type TCPTransport struct {
 	conn    net.Conn
 }
 
-// NewTCPTransport creates a new TCP transport.
-func NewTCPTransport(address string, timeout time.Duration) *TCPTransport {
+// NewTCP creates a new TCP transport.
+func NewTCP(address string, timeout time.Duration) *TCPTransport {
 	return &TCPTransport{
 		address: address,
 		timeout: timeout,

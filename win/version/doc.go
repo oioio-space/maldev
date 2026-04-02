@@ -14,7 +14,7 @@
 //
 // Example:
 //
-//	v := version.GetVersion()
+//	v := version.Current()
 //	if v.IsLower(version.WINDOWS_10_1809) {
 //	    fmt.Println("Unsupported Windows version")
 //	}

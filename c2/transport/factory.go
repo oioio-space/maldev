@@ -15,8 +15,8 @@ type Config struct {
 	TLSFingerprint string
 }
 
-// NewTransport creates the appropriate transport based on configuration.
-func NewTransport(cfg *Config) (Transport, error) {
+// New creates the appropriate transport based on configuration.
+func New(cfg *Config) (Transport, error) {
 	if cfg.UseTLS {
 		var opts []TLSOption
 		if cfg.TLSInsecure {
@@ -26,7 +26,7 @@ func NewTransport(cfg *Config) (Transport, error) {
 			opts = append(opts, WithFingerprint(cfg.TLSFingerprint))
 		}
 
-		return NewTLSTransport(
+		return NewTLS(
 			cfg.Address,
 			cfg.Timeout,
 			cfg.TLSCertPath,
@@ -35,5 +35,5 @@ func NewTransport(cfg *Config) (Transport, error) {
 		), nil
 	}
 
-	return NewTCPTransport(cfg.Address, cfg.Timeout), nil
+	return NewTCP(cfg.Address, cfg.Timeout), nil
 }

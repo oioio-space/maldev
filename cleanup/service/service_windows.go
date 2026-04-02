@@ -17,8 +17,8 @@ import (
 type Mode int
 
 const (
-	// NATIF uses Windows DLLs directly.
-	NATIF Mode = iota
+	// Native uses Windows DLLs directly.
+	Native Mode = iota
 	// SC_SDSET uses the sc.exe SDSET command.
 	SC_SDSET
 )
@@ -89,7 +89,7 @@ func SetServiceSecurityDescriptor(hostname string, svc any, secDescStr string) e
 func HideService(mode Mode, hostname string, svc any) (string, error) {
 	secDescStr := "D:(D;;DCWPDTSD;;;IU)(D;;DCWPDTSD;;;SU)(D;;DCWPDTSD;;;BA)(A;;CCSWLOCRRC;;;IU)(A;;CCSWLOCRRC;;;SU)(A;;CCSWRPWPDTLOCRRC;;;SY)(A;;CCDCSWRPWPDTLOCRSDRCWDWO;;;BA)"
 	switch mode {
-	case NATIF:
+	case Native:
 		return "", SetServiceSecurityDescriptor(hostname, svc, secDescStr)
 	case SC_SDSET:
 		return ScSdset(hostname, svc, secDescStr)
@@ -102,7 +102,7 @@ func HideService(mode Mode, hostname string, svc any) (string, error) {
 func UnHideService(mode Mode, hostname string, svc any) (string, error) {
 	secDescStr := "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)S:(AU;FA;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;WD)"
 	switch mode {
-	case NATIF:
+	case Native:
 		return "", SetServiceSecurityDescriptor(hostname, svc, secDescStr)
 	case SC_SDSET:
 		return ScSdset(hostname, svc, secDescStr)

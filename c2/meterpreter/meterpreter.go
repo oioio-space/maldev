@@ -167,9 +167,9 @@ func (s *Stager) fetchStageHTTP() ([]byte, error) {
 	return stage, nil
 }
 
-// GetPayloadName returns the appropriate Metasploit payload name for the
+// PayloadName returns the appropriate Metasploit payload name for the
 // current platform and architecture.
-func GetPayloadName(transport Transport) string {
+func PayloadName(transport Transport) string {
 	osName := runtime.GOOS
 	arch := runtime.GOARCH
 

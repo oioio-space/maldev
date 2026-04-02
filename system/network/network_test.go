@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-func TestGetIfacesIP(t *testing.T) {
-	ips, err := GetIfacesIP()
+func TestInterfaceIPs(t *testing.T) {
+	ips, err := InterfaceIPs()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -87,8 +87,8 @@ func (wv *Version) IsEqual(v *Version) bool {
 		wv.BuildNumber == v.BuildNumber
 }
 
-// GetVersion returns the current Windows version via RtlGetVersion.
-func GetVersion() *Version {
+// Current returns the current Windows version via RtlGetVersion.
+func Current() *Version {
 	wv := Version(*windows.RtlGetVersion())
 	return &wv
 }
@@ -134,9 +134,9 @@ func readUBR() (uint32, error) {
 	return binary.LittleEndian.Uint32(buf[:]), nil
 }
 
-// GetWindowVersion returns the current Windows version including the UBR
+// Windows returns the current Windows version including the UBR
 // (Update Build Revision) read from the registry.
-func GetWindowVersion() (*WindowsVersion, error) {
+func Windows() (*WindowsVersion, error) {
 	info := windows.RtlGetVersion()
 	ubr, err := readUBR()
 	if err != nil {
@@ -150,10 +150,10 @@ func GetWindowVersion() (*WindowsVersion, error) {
 	}, nil
 }
 
-// CheckCVE202430088Vulnerability checks if the system is vulnerable to CVE-2024-30088.
+// CVE202430088 checks if the system is vulnerable to CVE-2024-30088.
 // Returns true for Windows 10/11 and Server builds before June 2024 patch.
-func CheckCVE202430088Vulnerability() (*WindowsVersion, error) {
-	v, err := GetWindowVersion()
+func CVE202430088() (*WindowsVersion, error) {
+	v, err := Windows()
 	if err != nil {
 		return nil, err
 	}

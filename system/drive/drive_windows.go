@@ -8,8 +8,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// GetLogicalDrivesLetter returns the drive letters present on the machine.
-func GetLogicalDrivesLetter() (d []string, err error) {
+// LogicalDriveLetters returns the drive letters present on the machine.
+func LogicalDriveLetters() (d []string, err error) {
 	bitMap, err := windows.GetLogicalDrives()
 	if err != nil {
 		return nil, err
@@ -23,17 +23,17 @@ func GetLogicalDrivesLetter() (d []string, err error) {
 	return d, nil
 }
 
-// GetLogicalDriveType returns the DRIVETYPE for a given drive letter.
-func GetLogicalDriveType(drive string) (DRIVETYPE, error) {
+// Type returns the DriveType for a given drive letter.
+func Type(drive string) (DriveType, error) {
 	d, err := syscall.UTF16PtrFromString(drive)
 	if err != nil {
 		return 0, err
 	}
-	return DRIVETYPE(windows.GetDriveType(d)), nil
+	return DriveType(windows.GetDriveType(d)), nil
 }
 
-// GetVolumeInformation returns volume metadata for a given drive letter.
-func GetVolumeInformation(drive string) (*VolumeInformations, error) {
+// Volume returns volume metadata for a given drive letter.
+func Volume(drive string) (*VolumeInfo, error) {
 	volumeNameBuffer := make([]uint16, syscall.MAX_PATH+1)
 	nVolumeNameSize := uint32(len(volumeNameBuffer))
 	var volumeSerialNumber uint32
@@ -61,7 +61,7 @@ func GetVolumeInformation(drive string) (*VolumeInformations, error) {
 		return nil, err
 	}
 
-	return NewVolumeInformations(
+	return NewVolumeInfo(
 		syscall.UTF16ToString(volumeNameBuffer),
 		int(volumeSerialNumber),
 		syscall.UTF16ToString(fileSystemNameBuffer),

@@ -39,8 +39,8 @@ func WithFingerprint(fp string) TLSOption {
 	}
 }
 
-// NewTLSTransport creates a new TLS transport.
-func NewTLSTransport(address string, timeout time.Duration, certPath, keyPath string, opts ...TLSOption) *TLSTransport {
+// NewTLS creates a new TLS transport.
+func NewTLS(address string, timeout time.Duration, certPath, keyPath string, opts ...TLSOption) *TLSTransport {
 	t := &TLSTransport{
 		address:  address,
 		timeout:  timeout,

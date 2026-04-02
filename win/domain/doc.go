@@ -8,7 +8,7 @@
 //
 // Example:
 //
-//	name, status, err := domain.GetDomain()
+//	name, status, err := domain.Name()
 //	if status == syscall.NetSetupDomainName {
 //	    fmt.Printf("Joined to domain: %s\n", name)
 //	}

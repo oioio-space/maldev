@@ -209,7 +209,7 @@ Tests that run anywhere with `go test`. No system dependencies.
 | `TestRandomBytesLength` | Output length matches requested |
 | `TestRandomIntRange` | Result within [min, max) |
 | `TestRandomIntInvalidRange` | `max <= min` returns error |
-| `TestIsFileExist` | Existing file → true, non-existing → false |
+| `TestFileExists` | Existing file → true, non-existing → false |
 
 ### 4.5 `pe/parse/` (NEW)
 
@@ -231,7 +231,7 @@ Tests that run anywhere with `go test`. No system dependencies.
 | `TestValidateMethodInvalid` | Unknown string returns error |
 | `TestAvailableMethods` | Returns non-empty list |
 | `TestFallbackChainOrder` | Fallback tries methods in declared order |
-| `TestReadShellcode` | Read from temp file matches written content |
+| `TestRead` | Read from temp file matches written content |
 | `TestValidateShellcodeEmpty` | Empty bytes rejected |
 | `TestValidateShellcodeValid` | Valid shellcode bytes accepted |
 
@@ -473,15 +473,15 @@ func TestErrProcNotFound(t *testing.T) {
 ```go
 //go:build windows
 
-func TestGetVersion(t *testing.T) {
-    v, err := version.GetVersion()
+func TestCurrent(t *testing.T) {
+    v, err := version.Current()
     require.NoError(t, err)
     assert.True(t, v.MajorVersion >= 10)
     assert.True(t, v.BuildNumber > 0)
 }
 
-func TestGetWindowVersion(t *testing.T) {
-    wv, err := version.GetWindowVersion()
+func TestWindows(t *testing.T) {
+    wv, err := version.Windows()
     require.NoError(t, err)
     assert.NotEmpty(t, wv.String())
     // Server 2019/2022 disambiguation
@@ -507,7 +507,7 @@ func TestTokenPrivileges(t *testing.T) {
     tok, err := token.OpenCurrentProcessToken()
     require.NoError(t, err)
     defer tok.Close()
-    privs, err := tok.GetPrivileges()
+    privs, err := tok.Privileges()
     require.NoError(t, err)
     assert.NotEmpty(t, privs)
 }

@@ -15,7 +15,7 @@
 //
 // Example:
 //
-//	trans := transport.NewTCPTransport("10.0.0.1:4444", 10*time.Second)
+//	trans := transport.NewTCP("10.0.0.1:4444", 10*time.Second)
 //	sh := shell.New(trans, nil)
 //	sh.Start(context.Background())
 package shell

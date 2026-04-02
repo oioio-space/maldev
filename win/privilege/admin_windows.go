@@ -95,7 +95,7 @@ func ExecAs(ctx context.Context, isInDomain bool, domain, username, password str
 		return err
 	}
 
-	wt := token.NewToken(t, token.TokenPrimary)
+	wt := token.New(t, token.Primary)
 	defer wt.Close()
 
 	if err = wt.EnableAllPrivileges(); err != nil {

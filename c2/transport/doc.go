@@ -11,6 +11,6 @@
 //   - TLSTransport: TLS connections with optional client certificates,
 //     InsecureSkipVerify, and SHA256 certificate fingerprint pinning
 //
-// The factory function NewTransport creates the appropriate transport from
+// The factory function New creates the appropriate transport from
 // a Config struct based on the UseTLS flag.
 package transport

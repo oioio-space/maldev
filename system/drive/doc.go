@@ -13,7 +13,7 @@
 // Example:
 //
 //	drives := drive.NewDrives(ctx)
-//	all, _ := drives.GetAll(func(d *drive.Drive) bool {
-//	    return d.Type == drive.REMOVABLE
+//	all, _ := drives.All(func(d *drive.Drive) bool {
+//	    return d.Type == drive.Removable
 //	})
 package drive

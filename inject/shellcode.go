@@ -13,16 +13,16 @@ const (
 	asciiPrintableThresh = 90               // % ASCII printable threshold
 )
 
-// ShellcodeValidationResult contains the results of shellcode validation.
-type ShellcodeValidationResult struct {
+// ValidationResult contains the results of shellcode validation.
+type ValidationResult struct {
 	Valid    bool
 	Size     int
 	Warnings []string
 	Errors   []string
 }
 
-// ReadShellcode reads a shellcode file from disk.
-func ReadShellcode(path string) ([]byte, error) {
+// Read reads a shellcode file from disk.
+func Read(path string) ([]byte, error) {
 	shellcode, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read shellcode: %w", err)
@@ -33,9 +33,9 @@ func ReadShellcode(path string) ([]byte, error) {
 	return shellcode, nil
 }
 
-// ValidateShellcode validates a shellcode file before injection.
-func ValidateShellcode(path string) (*ShellcodeValidationResult, error) {
-	result := &ShellcodeValidationResult{
+// Validate validates a shellcode file before injection.
+func Validate(path string) (*ValidationResult, error) {
+	result := &ValidationResult{
 		Valid:    true,
 		Warnings: []string{},
 		Errors:   []string{},

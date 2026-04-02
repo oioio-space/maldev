@@ -81,12 +81,12 @@ func TestRandomDuration(t *testing.T) {
 	}
 }
 
-func TestIsFileExist(t *testing.T) {
+func TestFileExists(t *testing.T) {
 	// This test file itself should exist
-	if !IsFileExist("utils_test.go") {
+	if !FileExists("utils_test.go") {
 		t.Fatal("utils_test.go should exist")
 	}
-	if IsFileExist("nonexistent_file_12345.xyz") {
+	if FileExists("nonexistent_file_12345.xyz") {
 		t.Fatal("nonexistent file should not exist")
 	}
 }

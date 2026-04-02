@@ -48,8 +48,8 @@ func RandomDuration(min, max time.Duration) (time.Duration, error) {
 	return time.Duration(n), err
 }
 
-// IsFileExist reports whether the file at path exists and is accessible.
-func IsFileExist(path string) bool {
+// FileExists reports whether the file at path exists and is accessible.
+func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }

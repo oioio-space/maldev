@@ -19,7 +19,7 @@ func applyEvasion(cfg *EvasionConfig) error {
 		return nil
 	}
 
-	version := winver.GetVersion()
+	version := winver.Current()
 	var errors []error
 
 	if cfg.PatchAMSI && version.BuildNumber >= 14393 {
@@ -77,7 +77,7 @@ func patchAMSI() error {
 
 // patchETW delegates to the canonical evasion/etw package.
 func patchETW() error {
-	return etw.PatchETW(nil)
+	return etw.Patch(nil)
 }
 
 // patchWLDP patches WldpIsClassInApprovedList to always return true.
@@ -133,8 +133,8 @@ func bypassCLM() error {
 	return nil
 }
 
-// CheckIfRunningAsAdmin checks if the current process has admin privileges.
-func CheckIfRunningAsAdmin() bool {
+// IsAdmin checks if the current process has admin privileges.
+func IsAdmin() bool {
 	var sid *windows.SID
 	err := windows.AllocateAndInitializeSid(
 		&windows.SECURITY_NT_AUTHORITY,

@@ -134,7 +134,7 @@ func (c *Checker) FakeDomainReachable() (bool, int, error) {
 	if err != nil {
 		return false, 0, err
 	}
-	req.Header.Set("User-Agent", uas.GetRandom().String())
+	req.Header.Set("User-Agent", uas.Random().String())
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return false, 0, nil

@@ -10,13 +10,13 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// GetDomain returns the domain name of the machine and the join status.
+// Name returns the domain name of the machine and the join status.
 // Possible status values:
 //   - syscall.NetSetupDomainName
 //   - syscall.NetSetupUnknownStatus
 //   - syscall.NetSetupWorkgroupName
 //   - syscall.NetSetupUnjoined
-func GetDomain() (string, uint32, error) {
+func Name() (string, uint32, error) {
 	var domain *uint16
 	var status uint32
 

@@ -63,8 +63,8 @@ func TestFetchStageTCPMock(t *testing.T) {
 	}
 }
 
-func TestGetPayloadName(t *testing.T) {
-	name := GetPayloadName(TransportTCP)
+func TestPayloadName(t *testing.T) {
+	name := PayloadName(TransportTCP)
 
 	assert.Contains(t, name, "meterpreter", "payload name must contain 'meterpreter'")
 	assert.Contains(t, name, "reverse_tcp", "payload name must contain 'reverse_tcp'")

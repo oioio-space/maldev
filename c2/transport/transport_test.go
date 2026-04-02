@@ -36,7 +36,7 @@ func startTCPEcho(t *testing.T) string {
 func TestTCPRoundTrip(t *testing.T) {
 	addr := startTCPEcho(t)
 
-	tr := NewTCPTransport(addr, 2*time.Second)
+	tr := NewTCP(addr, 2*time.Second)
 	require.NoError(t, tr.Connect(context.Background()))
 	defer tr.Close()
 
@@ -54,7 +54,7 @@ func TestTCPRoundTrip(t *testing.T) {
 func TestTCPReconnect(t *testing.T) {
 	addr := startTCPEcho(t)
 
-	tr := NewTCPTransport(addr, 2*time.Second)
+	tr := NewTCP(addr, 2*time.Second)
 
 	// First connection: write and echo back.
 	require.NoError(t, tr.Connect(context.Background()))
@@ -94,7 +94,7 @@ func TestTCPContextCancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	tr := NewTCPTransport(addr, 5*time.Second)
+	tr := NewTCP(addr, 5*time.Second)
 	err = tr.Connect(ctx)
 	// The echo server accepts immediately at the TCP level; use a non-routable
 	// address to guarantee a timeout instead.
@@ -112,7 +112,7 @@ func TestTCPContextCancelNonRoutable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 
-	tr := NewTCPTransport(addr, 5*time.Second)
+	tr := NewTCP(addr, 5*time.Second)
 	err := tr.Connect(ctx)
 	assert.Error(t, err, "expected dial to fail for non-routable address")
 }
@@ -120,7 +120,7 @@ func TestTCPContextCancelNonRoutable(t *testing.T) {
 func TestTCPRemoteAddr(t *testing.T) {
 	addr := startTCPEcho(t)
 
-	tr := NewTCPTransport(addr, 2*time.Second)
+	tr := NewTCP(addr, 2*time.Second)
 	require.NoError(t, tr.Connect(context.Background()))
 	defer tr.Close()
 

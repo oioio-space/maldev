@@ -48,8 +48,8 @@ func TestHideService(t *testing.T) {
 
 	const svcName = "MaldevTestSvc"
 
-	// Use NATIF mode (direct Windows API) to apply the restrictive DACL.
-	output, err := HideService(NATIF, "", svcName)
+	// Use Native mode (direct Windows API) to apply the restrictive DACL.
+	output, err := HideService(Native, "", svcName)
 	require.NoError(t, err)
 	t.Logf("HideService output: %q", output)
 
@@ -81,7 +81,7 @@ func TestUnHideService(t *testing.T) {
 
 	const svcName = "MaldevTestSvc"
 
-	output, err := UnHideService(NATIF, "", svcName)
+	output, err := UnHideService(Native, "", svcName)
 	require.NoError(t, err)
 	t.Logf("UnHideService output: %q", output)
 

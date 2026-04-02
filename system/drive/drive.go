@@ -10,25 +10,25 @@ import (
 	"time"
 )
 
-// DRIVETYPE represents a Windows drive type.
-type DRIVETYPE uint32
+// DriveType represents a Windows drive type.
+type DriveType uint32
 
 // String returns a human-readable representation of the drive type.
-func (wdt DRIVETYPE) String() string {
+func (wdt DriveType) String() string {
 	switch wdt {
-	case UNKNOWN:
+	case Unknown:
 		return "unknown"
-	case NOROOTDIR:
+	case NoRootDir:
 		return "noRootDir"
-	case REMOVABLE:
+	case Removable:
 		return "removable"
-	case FIXED:
+	case Fixed:
 		return "fixed"
-	case REMOTE:
+	case Remote:
 		return "remote"
 	case CDROM:
 		return "cdrom"
-	case RAMDISK:
+	case RAMDisk:
 		return "ramdisk"
 	default:
 		return ""
@@ -36,25 +36,25 @@ func (wdt DRIVETYPE) String() string {
 }
 
 const (
-	UNKNOWN   DRIVETYPE = 0
-	NOROOTDIR DRIVETYPE = 1
-	REMOVABLE DRIVETYPE = 2
-	FIXED     DRIVETYPE = 3
-	REMOTE    DRIVETYPE = 4
-	CDROM     DRIVETYPE = 5
-	RAMDISK   DRIVETYPE = 6
+	Unknown   DriveType = 0
+	NoRootDir DriveType = 1
+	Removable DriveType = 2
+	Fixed     DriveType = 3
+	Remote    DriveType = 4
+	CDROM     DriveType = 5
+	RAMDisk   DriveType = 6
 )
 
-// VolumeInformations contains volume metadata.
-type VolumeInformations struct {
+// VolumeInfo contains volume metadata.
+type VolumeInfo struct {
 	Name           string
 	SerialNumber   int
 	FileSystemName string
 }
 
-// NewVolumeInformations creates a new VolumeInformations.
-func NewVolumeInformations(name string, serialNumber int, fsName string) *VolumeInformations {
-	return &VolumeInformations{
+// NewVolumeInfo creates a new VolumeInfo.
+func NewVolumeInfo(name string, serialNumber int, fsName string) *VolumeInfo {
+	return &VolumeInfo{
 		Name:           name,
 		SerialNumber:   serialNumber,
 		FileSystemName: fsName,
@@ -64,8 +64,8 @@ func NewVolumeInformations(name string, serialNumber int, fsName string) *Volume
 // Drive represents a disk drive.
 type Drive struct {
 	Letter string
-	Type   DRIVETYPE
-	Infos  *VolumeInformations
+	Type   DriveType
+	Infos  *VolumeInfo
 	UID    [16]byte
 }
 
@@ -76,12 +76,12 @@ func NewDrive(letter string) (*Drive, error) {
 	}
 
 	var err error
-	d.Infos, err = GetVolumeInformation(letter)
+	d.Infos, err = Volume(letter)
 	if err != nil {
 		return nil, err
 	}
 
-	d.Type, err = GetLogicalDriveType(letter)
+	d.Type, err = Type(letter)
 	if err != nil {
 		return nil, err
 	}
@@ -117,9 +117,9 @@ func (d *Drives) mapToArray() []*Drive {
 	return drives
 }
 
-// GetAll returns all drives matching the filter.
-func (d *Drives) GetAll(ff FilterFunc) ([]*Drive, error) {
-	ldl, err := GetLogicalDrivesLetter()
+// All returns all drives matching the filter.
+func (d *Drives) All(ff FilterFunc) ([]*Drive, error) {
+	ldl, err := LogicalDriveLetters()
 	if err != nil {
 		return nil, err
 	}
@@ -136,11 +136,11 @@ func (d *Drives) GetAll(ff FilterFunc) ([]*Drive, error) {
 	return d.mapToArray(), nil
 }
 
-// GetNew returns newly connected drives since last check.
-func (d *Drives) GetNew(ff FilterFunc, appendNew bool) ([]*Drive, error) {
+// Added returns newly connected drives since last check.
+func (d *Drives) Added(ff FilterFunc, appendNew bool) ([]*Drive, error) {
 	nDrives := make([]*Drive, 0)
 
-	ldl, err := GetLogicalDrivesLetter()
+	ldl, err := LogicalDriveLetters()
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +165,7 @@ func (d *Drives) GetNew(ff FilterFunc, appendNew bool) ([]*Drive, error) {
 
 // WatchNew starts a goroutine that monitors for new drives matching the filter.
 func (d *Drives) WatchNew(ff FilterFunc, once bool) (<-chan any, error) {
-	_, err := d.GetAll(ff)
+	_, err := d.All(ff)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +189,7 @@ func (d *Drives) watchNewWorker(ff FilterFunc, once bool) {
 		case <-d.ctx.Done():
 			return
 		case <-ticker.C:
-			drives, err := d.GetNew(ff, once)
+			drives, err := d.Added(ff, once)
 			if err != nil {
 				d.chanDrive <- err
 				continue

@@ -8,23 +8,23 @@ import (
 	"github.com/oioio-space/maldev/process/enum"
 )
 
-// PPIDSpoofing provides PPID spoofing capabilities.
+// PPIDSpoofer provides PPID spoofing capabilities.
 //
 // TODO: Wire targetPID to cmd.SysProcAttr.ParentProcess via
 // UpdateProcThreadAttribute(PROC_THREAD_ATTRIBUTE_PARENT_PROCESS).
 // Currently FindTargetProcess discovers the PID but shell spawning
 // does not apply it.
-type PPIDSpoofing struct {
+type PPIDSpoofer struct {
 	targetPID uint32
 }
 
-// NewPPIDSpoofing creates a new PPIDSpoofing instance.
-func NewPPIDSpoofing() *PPIDSpoofing {
-	return &PPIDSpoofing{}
+// NewPPIDSpoofer creates a new PPIDSpoofer instance.
+func NewPPIDSpoofer() *PPIDSpoofer {
+	return &PPIDSpoofer{}
 }
 
 // FindTargetProcess finds a suitable legitimate parent process.
-func (p *PPIDSpoofing) FindTargetProcess() error {
+func (p *PPIDSpoofer) FindTargetProcess() error {
 	targets := []string{
 		"explorer.exe",
 		"svchost.exe",
@@ -44,12 +44,12 @@ func (p *PPIDSpoofing) FindTargetProcess() error {
 }
 
 // TargetPID returns the selected target process ID.
-func (p *PPIDSpoofing) TargetPID() uint32 {
+func (p *PPIDSpoofer) TargetPID() uint32 {
 	return p.targetPID
 }
 
-// GetParentProcessID returns the parent process ID of the given PID.
-func GetParentProcessID(pid uint32) (uint32, error) {
+// ParentPID returns the parent process ID of the given PID.
+func ParentPID(pid uint32) (uint32, error) {
 	proc, err := enum.FindProcess(func(_ string, p, _ uint32) bool {
 		return p == pid
 	})

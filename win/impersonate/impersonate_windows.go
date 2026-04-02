@@ -100,7 +100,7 @@ func ImpersonateThread(isInDomain bool, domain, username, password string, callb
 			return err
 		}
 
-		wt := token.NewToken(t, token.TokenImpersonation)
+		wt := token.New(t, token.Impersonation)
 		defer wt.Close()
 
 		if err = wt.EnableAllPrivileges(); err != nil {

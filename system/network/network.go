@@ -6,8 +6,8 @@ import (
 	"net"
 )
 
-// GetIfacesIP returns all IP addresses of the machine (including loopback).
-func GetIfacesIP() ([]net.IP, error) {
+// InterfaceIPs returns all IP addresses of the machine (including loopback).
+func InterfaceIPs() ([]net.IP, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil, err
@@ -58,7 +58,7 @@ func IsLocal(IPorDN any) (bool, error) {
 		return false, ErrNotIPorDN
 	}
 
-	ips, err := GetIfacesIP()
+	ips, err := InterfaceIPs()
 	if err != nil {
 		return false, err
 	}

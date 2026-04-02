@@ -30,7 +30,7 @@ var (
 )
 
 type (
-	tokenType   int
+	Type   int
 	privModType int
 )
 
@@ -42,7 +42,7 @@ const (
 
 // Token wraps a windows.Token with its type and exposes manipulation methods.
 type Token struct {
-	typ   tokenType
+	typ   Type
 	token windows.Token
 }
 
@@ -81,19 +81,19 @@ func (p Privilege) String() string {
 }
 
 const (
-	tokenUnknown tokenType = iota
-	TokenPrimary
-	TokenImpersonation
-	TokenLinked
+	tokenUnknown Type = iota
+	Primary
+	Impersonation
+	Linked
 )
 
 const (
 	WTS_CURRENT_SERVER_HANDLE windows.Handle = 0
 )
 
-// NewToken wraps an existing windows.Token so callers can use the package's
+// New wraps an existing windows.Token so callers can use the package's
 // manipulation methods.
-func NewToken(t windows.Token, typ tokenType) *Token {
+func New(t windows.Token, typ Type) *Token {
 	return &Token{token: t, typ: typ}
 }
 
@@ -176,8 +176,8 @@ func (t *Token) UserDetails() (TokenUserDetail, error) {
 	}, nil
 }
 
-// GetPrivileges lists all privileges held by the token.
-func (t *Token) GetPrivileges() ([]Privilege, error) {
+// Privileges lists all privileges held by the token.
+func (t *Token) Privileges() ([]Privilege, error) {
 	if err := t.errIfTokenClosed(); err != nil {
 		return nil, err
 	}
@@ -237,7 +237,7 @@ func (t *Token) EnableAllPrivileges() error {
 		return err
 	}
 
-	privs, err := t.GetPrivileges()
+	privs, err := t.Privileges()
 	if err != nil {
 		return err
 	}
@@ -257,7 +257,7 @@ func (t *Token) DisableAllPrivileges() error {
 		return err
 	}
 
-	privs, err := t.GetPrivileges()
+	privs, err := t.Privileges()
 	if err != nil {
 		return err
 	}
@@ -277,7 +277,7 @@ func (t *Token) RemoveAllPrivileges() error {
 		return err
 	}
 
-	privs, err := t.GetPrivileges()
+	privs, err := t.Privileges()
 	if err != nil {
 		return err
 	}
@@ -291,33 +291,33 @@ func (t *Token) RemoveAllPrivileges() error {
 	return t.modifyTokenPrivileges(toBeRemoved, PrivRemove)
 }
 
-// EnableTokenPrivileges enables the named privileges.
-func (t *Token) EnableTokenPrivileges(privs []string) error {
+// EnablePrivileges enables the named privileges.
+func (t *Token) EnablePrivileges(privs []string) error {
 	return t.modifyTokenPrivileges(privs, PrivEnable)
 }
 
-// DisableTokenPrivileges disables the named privileges.
-func (t *Token) DisableTokenPrivileges(privs []string) error {
+// DisablePrivileges disables the named privileges.
+func (t *Token) DisablePrivileges(privs []string) error {
 	return t.modifyTokenPrivileges(privs, PrivDisable)
 }
 
-// RemoveTokenPrivileges removes the named privileges.
-func (t *Token) RemoveTokenPrivileges(privs []string) error {
+// RemovePrivileges removes the named privileges.
+func (t *Token) RemovePrivileges(privs []string) error {
 	return t.modifyTokenPrivileges(privs, PrivRemove)
 }
 
-// EnableTokenPrivilege enables a single named privilege.
-func (t *Token) EnableTokenPrivilege(priv string) error {
+// EnablePrivilege enables a single named privilege.
+func (t *Token) EnablePrivilege(priv string) error {
 	return t.modifyTokenPrivilege(priv, PrivEnable)
 }
 
-// DisableTokenPrivilege disables a single named privilege.
-func (t *Token) DisableTokenPrivilege(priv string) error {
+// DisablePrivilege disables a single named privilege.
+func (t *Token) DisablePrivilege(priv string) error {
 	return t.modifyTokenPrivilege(priv, PrivDisable)
 }
 
-// RemoveTokenPrivilege removes a single named privilege.
-func (t *Token) RemoveTokenPrivilege(priv string) error {
+// RemovePrivilege removes a single named privilege.
+func (t *Token) RemovePrivilege(priv string) error {
 	return t.modifyTokenPrivilege(priv, PrivRemove)
 }
 
@@ -385,8 +385,8 @@ func (t *Token) modifyTokenPrivilege(priv string, mode privModType) error {
 	return nil
 }
 
-// GetIntegrityLevel returns the integrity level string of the token.
-func (t *Token) GetIntegrityLevel() (string, error) {
+// IntegrityLevel returns the integrity level string of the token.
+func (t *Token) IntegrityLevel() (string, error) {
 	if err := t.errIfTokenClosed(); err != nil {
 		return "", err
 	}
@@ -415,18 +415,18 @@ func (t *Token) GetIntegrityLevel() (string, error) {
 	}
 }
 
-// GetLinkedToken returns the linked token if the token has one.
-func (t *Token) GetLinkedToken() (*Token, error) {
+// LinkedToken returns the linked token if the token has one.
+func (t *Token) LinkedToken() (*Token, error) {
 	lt, err := t.token.GetLinkedToken()
 	if err != nil {
 		return nil, err
 	}
-	return &Token{typ: TokenLinked, token: lt}, nil
+	return &Token{typ: Linked, token: lt}, nil
 }
 
 // OpenProcessToken opens the token for a process identified by pid.
 // Pass pid=0 to open the current process token.
-func OpenProcessToken(pid int, typ tokenType) (*Token, error) {
+func OpenProcessToken(pid int, typ Type) (*Token, error) {
 	var (
 		t               windows.Token
 		duplicatedToken windows.Token
@@ -449,15 +449,15 @@ func OpenProcessToken(pid int, typ tokenType) (*Token, error) {
 	defer windows.CloseHandle(windows.Handle(t))
 
 	switch typ {
-	case TokenPrimary:
+	case Primary:
 		if err = windows.DuplicateTokenEx(t, windows.MAXIMUM_ALLOWED, nil, windows.SecurityDelegation, windows.TokenPrimary, &duplicatedToken); err != nil {
 			return nil, fmt.Errorf("error while DuplicateTokenEx: %w", err)
 		}
-	case TokenImpersonation:
+	case Impersonation:
 		if err = windows.DuplicateTokenEx(t, windows.MAXIMUM_ALLOWED, nil, windows.SecurityImpersonation, windows.TokenImpersonation, &duplicatedToken); err != nil {
 			return nil, fmt.Errorf("error while DuplicateTokenEx: %w", err)
 		}
-	case TokenLinked:
+	case Linked:
 		if err = windows.DuplicateTokenEx(t, windows.MAXIMUM_ALLOWED, nil, windows.SecurityDelegation, windows.TokenPrimary, &duplicatedToken); err != nil {
 			return nil, fmt.Errorf("error while DuplicateTokenEx: %w", err)
 		}
@@ -472,11 +472,11 @@ func OpenProcessToken(pid int, typ tokenType) (*Token, error) {
 	return &Token{token: duplicatedToken, typ: typ}, nil
 }
 
-// GetInteractiveToken returns the interactive token for the currently logged-in
+// Interactive returns the interactive token for the currently logged-in
 // user via WTSEnumerateSessions and WTSQueryUserToken.
-func GetInteractiveToken(typ tokenType) (*Token, error) {
+func Interactive(typ Type) (*Token, error) {
 	switch typ {
-	case TokenPrimary, TokenImpersonation, TokenLinked:
+	case Primary, Impersonation, Linked:
 	default:
 		return nil, ErrOnlyPrimaryImpersonationTokenAllowed
 	}
@@ -519,15 +519,15 @@ func GetInteractiveToken(typ tokenType) (*Token, error) {
 	defer windows.CloseHandle(windows.Handle(interactiveToken))
 
 	switch typ {
-	case TokenPrimary:
+	case Primary:
 		if err = windows.DuplicateTokenEx(interactiveToken, windows.MAXIMUM_ALLOWED, nil, windows.SecurityDelegation, windows.TokenPrimary, &duplicatedToken); err != nil {
 			return nil, fmt.Errorf("error while DuplicateTokenEx: %w", err)
 		}
-	case TokenImpersonation:
+	case Impersonation:
 		if err = windows.DuplicateTokenEx(interactiveToken, windows.MAXIMUM_ALLOWED, nil, windows.SecurityImpersonation, windows.TokenImpersonation, &duplicatedToken); err != nil {
 			return nil, fmt.Errorf("error while DuplicateTokenEx: %w", err)
 		}
-	case TokenLinked:
+	case Linked:
 		if err = windows.DuplicateTokenEx(interactiveToken, windows.MAXIMUM_ALLOWED, nil, windows.SecurityDelegation, windows.TokenPrimary, &duplicatedToken); err != nil {
 			return nil, fmt.Errorf("error while DuplicateTokenEx: %w", err)
 		}

