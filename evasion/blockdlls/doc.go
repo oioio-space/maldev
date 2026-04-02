@@ -1,5 +1,3 @@
-//go:build windows
-
 // Package blockdlls provides DLL blocking via process mitigation policies
 // to prevent non-Microsoft DLLs from being loaded into the process.
 //

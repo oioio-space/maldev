@@ -18,12 +18,16 @@ func File(path string, passes int) error {
 		return err
 	}
 	size := info.Size()
-	for i := 0; i < passes; i++ {
-		f, err := os.OpenFile(path, os.O_WRONLY, 0)
-		if err != nil {
-			return err
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	buf := make([]byte, 4096)
+	for pass := 0; pass < passes; pass++ {
+		if _, err := f.Seek(0, 0); err != nil {
+			f.Close()
+			return fmt.Errorf("seek pass %d: %w", pass+1, err)
 		}
-		buf := make([]byte, 4096)
 		written := int64(0)
 		for written < size {
 			n := int64(len(buf))
@@ -32,16 +36,21 @@ func File(path string, passes int) error {
 			}
 			if _, err := rand.Read(buf[:n]); err != nil {
 				f.Close()
-				return fmt.Errorf("random read: %w", err)
+				return fmt.Errorf("random read pass %d: %w", pass+1, err)
 			}
-			if _, err := f.Write(buf[:n]); err != nil {
+			nw, werr := f.Write(buf[:n])
+			if werr != nil {
 				f.Close()
-				return fmt.Errorf("overwrite: %w", err)
+				return fmt.Errorf("write pass %d: %w", pass+1, werr)
 			}
-			written += n
+			written += int64(nw)
 		}
-		f.Sync()
-		f.Close()
+		if err := f.Sync(); err != nil {
+			f.Close()
+			return fmt.Errorf("sync pass %d: %w", pass+1, err)
+		}
 	}
+	// Close before Remove — Windows requires the handle to be released.
+	f.Close()
 	return os.Remove(path)
 }

@@ -42,6 +42,12 @@ func (wv *Version) String() string {
 	} else {
 		switch {
 		case wv.MajorVersion == 10 && wv.MinorVersion == 0:
+			if wv.BuildNumber >= 20348 {
+				return "windows server 2022"
+			}
+			if wv.BuildNumber >= 17763 {
+				return "windows server 2019"
+			}
 			return "windows server 2016"
 		case wv.MajorVersion == 6 && wv.MinorVersion == 3:
 			return "windows server 2012 r2"

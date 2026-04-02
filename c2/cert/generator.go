@@ -84,7 +84,7 @@ func Generate(cfg *Config, certPath, keyPath string) error {
 		return fmt.Errorf("failed to encode certificate: %w", err)
 	}
 
-	keyFile, err := os.Create(keyPath)
+	keyFile, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create key file: %w", err)
 	}

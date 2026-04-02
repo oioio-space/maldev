@@ -17,8 +17,10 @@ var (
 	Userenv  = windows.NewLazySystemDLL("userenv.dll")
 	Netapi32 = windows.NewLazySystemDLL("netapi32.dll")
 	Amsi     = windows.NewLazySystemDLL("amsi.dll")
-	Wldp     = windows.NewLazySystemDLL("wldp.dll")
 )
+
+// Thread access rights.
+const ThreadAllAccess = 0x1FFFFF
 
 // kernel32.dll procs
 //
@@ -51,6 +53,7 @@ var (
 	ProcSetThreadContext           = Kernel32.NewProc("SetThreadContext")
 	ProcRtlCopyMemory              = Kernel32.NewProc("RtlCopyMemory")
 	ProcSetThreadPriority          = Kernel32.NewProc("SetThreadPriority")
+	ProcTerminateThread            = Kernel32.NewProc("TerminateThread")
 )
 
 // ntdll.dll procs
@@ -91,6 +94,12 @@ var (
 var (
 	ProcSHGetSpecialFolderPathW = Shell32.NewProc("SHGetSpecialFolderPathW")
 	ProcShellExecuteW           = Shell32.NewProc("ShellExecuteW")
+)
+
+// userenv.dll procs
+var (
+	ProcCreateEnvironmentBlock  = Userenv.NewProc("CreateEnvironmentBlock")
+	ProcDestroyEnvironmentBlock = Userenv.NewProc("DestroyEnvironmentBlock")
 )
 
 // amsi.dll procs

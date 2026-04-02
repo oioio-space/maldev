@@ -9,6 +9,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// ntdll is a package-local handle to avoid an import cycle with win/api.
+var ntdll = windows.NewLazySystemDLL("ntdll.dll")
+
 // SSNResolver resolves the Syscall Service Number (SSN) for an NT function.
 type SSNResolver interface {
 	Resolve(ntFuncName string) (uint16, error)
@@ -21,7 +24,7 @@ type HellsGateResolver struct{}
 func NewHellsGate() *HellsGateResolver { return &HellsGateResolver{} }
 
 func (r *HellsGateResolver) Resolve(name string) (uint16, error) {
-	proc := windows.NewLazySystemDLL("ntdll.dll").NewProc(name)
+	proc := ntdll.NewProc(name)
 	if err := proc.Find(); err != nil {
 		return 0, fmt.Errorf("find %s: %w", name, err)
 	}
@@ -55,7 +58,7 @@ func (r *HalosGateResolver) Resolve(name string) (uint16, error) {
 		return ssn, nil
 	}
 
-	proc := windows.NewLazySystemDLL("ntdll.dll").NewProc(name)
+	proc := ntdll.NewProc(name)
 	if err := proc.Find(); err != nil {
 		return 0, fmt.Errorf("find %s: %w", name, err)
 	}
@@ -77,6 +80,9 @@ func (r *HalosGateResolver) Resolve(name string) (uint16, error) {
 		b = (*[8]byte)(unsafe.Pointer(downAddr))
 		if b[0] == 0x4C && b[1] == 0x8B && b[2] == 0xD1 && b[3] == 0xB8 {
 			neighborSSN := uint16(b[4]) | uint16(b[5])<<8
+			if uint16(offset) > neighborSSN {
+				continue
+			}
 			return neighborSSN - uint16(offset), nil
 		}
 	}
@@ -86,12 +92,16 @@ func (r *HalosGateResolver) Resolve(name string) (uint16, error) {
 
 // TartarusGateResolver extends Halo's Gate by also recognizing hooked
 // functions (JMP hooks) and computing SSN from the hook displacement.
+//
+// TODO: Implement JMP-hook displacement analysis to distinguish Tartarus from
+// Halo's Gate. Currently this is a plain alias for HalosGateResolver; the
+// hook-aware logic (detecting E9/EB JMP patches and extracting the original
+// SSN from the displacement) has not been implemented yet.
 type TartarusGateResolver struct{}
 
 func NewTartarus() *TartarusGateResolver { return &TartarusGateResolver{} }
 
 func (r *TartarusGateResolver) Resolve(name string) (uint16, error) {
-	// Try Halo's Gate (which tries Hell's Gate first)
 	hg := NewHalosGate()
 	return hg.Resolve(name)
 }

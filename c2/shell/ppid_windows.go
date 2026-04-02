@@ -9,6 +9,11 @@ import (
 )
 
 // PPIDSpoofing provides PPID spoofing capabilities.
+//
+// TODO: Wire targetPID to cmd.SysProcAttr.ParentProcess via
+// UpdateProcThreadAttribute(PROC_THREAD_ATTRIBUTE_PARENT_PROCESS).
+// Currently FindTargetProcess discovers the PID but shell spawning
+// does not apply it.
 type PPIDSpoofing struct {
 	targetPID uint32
 }

@@ -3,12 +3,18 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"unsafe"
 
 	wsyscall "github.com/oioio-space/maldev/win/syscall"
 	"golang.org/x/sys/windows"
 )
+
+// ErrProcNotFound is returned when a LazyProc cannot be resolved (e.g., DLL
+// not loaded or export missing). Callers should use errors.Is to handle this
+// as a non-fatal condition.
+var ErrProcNotFound = errors.New("proc not available, nothing to patch")
 
 // PatchMemory overwrites bytes at addr with patch, temporarily setting
 // PAGE_EXECUTE_READWRITE and restoring the original protection afterward.
@@ -29,10 +35,10 @@ func PatchMemory(addr uintptr, patch []byte) error {
 }
 
 // PatchProc patches a LazyProc's entry point with the given bytes.
-// Returns nil if the proc cannot be found (e.g., DLL not loaded).
+// Returns ErrProcNotFound if the proc cannot be resolved.
 func PatchProc(proc *windows.LazyProc, patch []byte) error {
 	if err := proc.Find(); err != nil {
-		return nil // proc not available, nothing to patch
+		return ErrProcNotFound
 	}
 	return PatchMemory(proc.Addr(), patch)
 }
@@ -84,10 +90,11 @@ func PatchMemoryWithCaller(addr uintptr, patch []byte, caller *wsyscall.Caller) 
 }
 
 // PatchProcWithCaller patches a LazyProc's entry point using the specified Caller.
+// Returns ErrProcNotFound if the proc cannot be resolved.
 // If caller is nil, falls back to standard PatchProc (WinAPI).
 func PatchProcWithCaller(proc *windows.LazyProc, patch []byte, caller *wsyscall.Caller) error {
 	if err := proc.Find(); err != nil {
-		return nil // proc not available, nothing to patch
+		return ErrProcNotFound
 	}
 	return PatchMemoryWithCaller(proc.Addr(), patch, caller)
 }

@@ -10,6 +10,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+const errNoMoreFiles = syscall.Errno(18) // ERROR_NO_MORE_FILES
+
 // List returns all running processes on the system.
 func List() ([]Process, error) {
 	runtime.LockOSThread()
@@ -39,7 +41,7 @@ func List() ([]Process, error) {
 	for {
 		err := windows.Process32Next(handle, &entry)
 		if err != nil {
-			if errno, ok := err.(syscall.Errno); ok && errno == 18 { // ERROR_NO_MORE_FILES
+			if errno, ok := err.(syscall.Errno); ok && errno == errNoMoreFiles {
 				break
 			}
 			return procs, err

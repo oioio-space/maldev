@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"github.com/oioio-space/maldev/win/api"
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
 // processMitigationBinarySignaturePolicy is the policy ID (8).
@@ -22,7 +23,10 @@ type binarySignaturePolicy struct {
 //
 // WARNING: This may break legitimate third-party DLLs loaded by the process.
 // Requires Windows 10 1709+.
-func Enable() error {
+//
+// TODO: Use caller for NtSetInformationProcess when non-nil.
+func Enable(caller *wsyscall.Caller) error {
+	_ = caller // reserved for future syscall method support
 	policy := binarySignaturePolicy{Flags: 1} // MicrosoftSignedOnly = 1
 	r, _, err := api.ProcSetProcessMitigationPolicy.Call(
 		uintptr(processMitigationBinarySignaturePolicy),

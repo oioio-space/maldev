@@ -1,5 +1,3 @@
-//go:build windows
-
 // Package unhook provides techniques to remove EDR/AV hooks from ntdll.dll
 // by restoring original function bytes from a clean copy.
 //

@@ -23,7 +23,13 @@ func NewTCPTransport(address string, timeout time.Duration) *TCPTransport {
 }
 
 // Connect establishes a TCP connection with timeout and context support.
+// Any existing connection is closed before dialing.
 func (t *TCPTransport) Connect(ctx context.Context) error {
+	if t.conn != nil {
+		t.conn.Close()
+		t.conn = nil
+	}
+
 	dialer := &net.Dialer{
 		Timeout: t.timeout,
 	}

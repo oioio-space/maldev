@@ -1,5 +1,3 @@
-//go:build windows
-
 // Package acg provides Arbitrary Code Guard (ACG) process mitigation policy
 // management for preventing dynamic code generation.
 //

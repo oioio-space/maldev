@@ -18,12 +18,16 @@ import (
 // ErrInvalidHandle is returned when a file handle is invalid.
 var ErrInvalidHandle = errors.New("invalid handle")
 
-// _FILE_RENAME_INFO is used for file rename operations.
+// _FILE_RENAME_INFO matches the Windows FILE_RENAME_INFO layout on x64:
+//
+//	offset 0:  Flags (uint32, union of ReplaceIfExists/Flags)
+//	offset 4:  [4 bytes padding for Handle alignment]
+//	offset 8:  RootDirectory (Handle, 8 bytes on x64)
+//	offset 16: FileNameLength (uint32)
+//	offset 20: FileName (variable-length uint16 array)
 type _FILE_RENAME_INFO struct {
-	Union struct {
-		ReplaceIfExists bool
-		Flags           uint32
-	}
+	Flags          uint32
+	_              uint32         // padding for Handle alignment
 	RootDirectory  windows.Handle
 	FileNameLength uint32
 	FileName       [1]uint16
@@ -59,8 +63,8 @@ func dsRenameHandle(hHandle windows.Handle) error {
 	buf := make([]byte, uintptr(headerSize)+uintptr(nameByteLen))
 
 	// Fill the header fields at the start of the buffer.
-	// ReplaceIfExists = false (first byte), RootDirectory = 0 (Handle at offset 8),
-	// FileNameLength at offset 12 (after padding).
+	// Flags = 0 (offset 0), RootDirectory = 0 (offset 8),
+	// FileNameLength at offset 16.
 	*(*uint32)(unsafe.Pointer(&buf[unsafe.Offsetof(_FILE_RENAME_INFO{}.FileNameLength)])) = nameByteLen
 
 	// Copy the UTF-16 stream name into the FileName field.

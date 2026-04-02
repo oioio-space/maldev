@@ -56,8 +56,13 @@ func NewTLSTransport(address string, timeout time.Duration, certPath, keyPath st
 }
 
 // Connect establishes a TLS connection with optional client certificates
-// and certificate pinning.
+// and certificate pinning. Any existing connection is closed before dialing.
 func (t *TLSTransport) Connect(ctx context.Context) error {
+	if t.conn != nil {
+		t.conn.Close()
+		t.conn = nil
+	}
+
 	var certificates []tls.Certificate
 	if t.certPath != "" && t.keyPath != "" {
 		cert, err := tls.LoadX509KeyPair(t.certPath, t.keyPath)
@@ -72,7 +77,8 @@ func (t *TLSTransport) Connect(ctx context.Context) error {
 		InsecureSkipVerify: t.insecure,
 	}
 
-	if t.fingerprint != "" && !t.insecure {
+	if t.fingerprint != "" {
+		// Always verify fingerprint, even in insecure mode.
 		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 			return t.verifyFingerprint(rawCerts)
 		}

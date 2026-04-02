@@ -38,6 +38,9 @@ func NtAllocateVirtualMemory(process windows.Handle, baseAddr, size uintptr, all
 
 // NtWriteVirtualMemory writes data to a process's memory.
 func NtWriteVirtualMemory(process windows.Handle, baseAddr uintptr, buffer []byte) (uintptr, error) {
+	if len(buffer) == 0 {
+		return 0, nil
+	}
 	var written uintptr
 	r, _, _ := api.ProcNtWriteVirtualMemory.Call(
 		uintptr(process),
@@ -75,7 +78,7 @@ func NtCreateThreadEx(process windows.Handle, startAddr, parameter uintptr) (win
 	var hThread windows.Handle
 	r, _, _ := api.ProcNtCreateThreadEx.Call(
 		uintptr(unsafe.Pointer(&hThread)),
-		0x1FFFFF, // THREAD_ALL_ACCESS
+		api.ThreadAllAccess,
 		0,
 		uintptr(process),
 		startAddr,

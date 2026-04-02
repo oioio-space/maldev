@@ -19,13 +19,12 @@ type RegKey struct {
 }
 
 // Vendor represents a hypervisor vendor with its characteristic indicators:
-// registry keys, files, NIC MAC prefixes, and process name substrings.
+// registry keys, files, and NIC MAC prefixes.
 type Vendor struct {
 	Name  string
 	Keys  []RegKey
 	Files []string
 	Nic   []string
-	Proc  []string
 }
 
 // DefaultVendors is the built-in list of known hypervisor indicators covering
@@ -54,8 +53,7 @@ var DefaultVendors = []Vendor{
 			`c:\windows\system32\drivers\prl_pv32.sys`,
 			`c:\windows\system32\drivers\prl_paravirt_32.sys`,
 		},
-		Nic:  []string{`00:1C:42`},
-		Proc: []string{`prl_cc`, `prl_tools`},
+		Nic: []string{`00:1C:42`},
 	},
 	{
 		Name: "VirtualBox",
@@ -103,8 +101,7 @@ var DefaultVendors = []Vendor{
 			`c:\windows\system32\vboxtray.exe`,
 			`c:\windows\system32\VBoxControl.exe`,
 		},
-		Nic:  []string{`08:00:27`, `00:21:F6`, `00:14:4F`, `00:0F:4B`},
-		Proc: []string{`vbox`},
+		Nic: []string{`08:00:27`, `00:21:F6`, `00:14:4F`, `00:0F:4B`},
 	},
 	{
 		Name: "VirtualPC",
@@ -119,8 +116,7 @@ var DefaultVendors = []Vendor{
 			`c:\windows\system32\drivers\vmsrvc.sys`,
 			`c:\windows\system32\drivers\vpc-s3.sys`,
 		},
-		Nic:  []string{`00:03:FF`},
-		Proc: []string{`vmsrvc`, `vmusrvc`},
+		Nic: []string{`00:03:FF`},
 	},
 	{
 		Name: "VMware",
@@ -148,8 +144,7 @@ var DefaultVendors = []Vendor{
 			`c:\windows\system32\drivers\vmx86.sys`,
 			`c:\windows\system32\drivers\hgfs.sys`,
 		},
-		Nic:  []string{`00:0C:29`, `00:1C:14`, `00:50:56`, `00:05:69`},
-		Proc: []string{`vmware`, `vmtools`},
+		Nic: []string{`00:0C:29`, `00:1C:14`, `00:50:56`, `00:05:69`},
 	},
 	{
 		Name: "Xen",
@@ -163,8 +158,7 @@ var DefaultVendors = []Vendor{
 			{Hive: registry.LOCAL_MACHINE, Path: `SYSTEM\ControlSet001\Services\xensvc`},
 			{Hive: registry.LOCAL_MACHINE, Path: `SYSTEM\ControlSet001\Services\xenvdb`},
 		},
-		Nic:  []string{`00:16:3E`},
-		Proc: []string{`xenservice`},
+		Nic: []string{`00:16:3E`},
 	},
 	{
 		Name: "QEMU",
@@ -192,7 +186,7 @@ func DetectNic(macPrefixes []string) (bool, string, error) {
 	for _, iface := range ifaces {
 		mac := iface.HardwareAddr.String()
 		for _, prefix := range macPrefixes {
-			if strings.Contains(strings.ToLower(mac), strings.ToLower(prefix)) {
+			if strings.HasPrefix(strings.ToLower(mac), strings.ToLower(prefix)) {
 				return true, mac, nil
 			}
 		}

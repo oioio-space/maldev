@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/oioio-space/maldev/core/utils"
+	"github.com/oioio-space/maldev/random"
 	"github.com/saferwall/pe"
 )
 
@@ -45,7 +45,10 @@ func UPXMorph(peData []byte) ([]byte, error) {
 		name := section.String()
 		if strings.Contains(name, "UPX") {
 			offset := sectionHeaderOffset(peData, i)
-			s, _ := utils.RandomString(8)
+			s, err := random.RandomString(8)
+			if err != nil {
+				return peData, fmt.Errorf("generate random name: %w", err)
+			}
 			copy(peData[offset:offset+8], []byte(s))
 		}
 	}

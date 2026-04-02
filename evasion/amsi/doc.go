@@ -1,5 +1,3 @@
-//go:build windows
-
 // Package amsi provides AMSI (Antimalware Scan Interface) bypass techniques
 // through runtime memory patching of amsi.dll functions.
 //

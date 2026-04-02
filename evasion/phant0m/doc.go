@@ -1,5 +1,3 @@
-//go:build windows
-
 // Package phant0m provides Event Log service thread termination (Phant0m technique)
 // to suppress Windows Event Log recording.
 //

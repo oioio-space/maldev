@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"runtime"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/oioio-space/maldev/win/api"
@@ -98,9 +99,13 @@ func (c *Checker) BadUsername() (bool, string, error) {
 	if err != nil {
 		return false, "", err
 	}
+	name := u.Username
+	if i := strings.LastIndex(name, `\`); i >= 0 {
+		name = name[i+1:]
+	}
 	for _, bad := range c.cfg.BadUsernames {
-		if strings.EqualFold(u.Username, bad) {
-			return true, u.Username, nil
+		if strings.EqualFold(name, bad) {
+			return true, name, nil
 		}
 	}
 	return false, "", nil
@@ -138,8 +143,12 @@ func (c *Checker) FakeDomainReachable() (bool, int, error) {
 	if err != nil {
 		return false, 0, err
 	}
-	req.Header.Set("User-Agent", uas.GetRandom().String())
-	resp, err := http.DefaultClient.Do(req)
+	ua := uas.GetRandom()
+	if ua != nil {
+		req.Header.Set("User-Agent", ua.String())
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return false, 0, nil // unreachable — expected for a fake domain
 	}

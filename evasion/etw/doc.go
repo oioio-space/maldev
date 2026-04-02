@@ -1,5 +1,3 @@
-//go:build windows
-
 // Package etw provides ETW (Event Tracing for Windows) bypass techniques
 // through runtime patching of ntdll event writing functions.
 //

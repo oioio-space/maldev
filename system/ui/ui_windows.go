@@ -22,7 +22,7 @@ const (
 	MB_YESNOCANCEL        ValidationButton = 0x00000003
 	MB_YESNO              ValidationButton = 0x00000004
 	MB_RETRYCANCEL        ValidationButton = 0x00000005
-	MB_CANCELTRYCONTINNUE ValidationButton = 0x00000006
+	MB_CANCELTRYCONTINUE ValidationButton = 0x00000006
 	MB_HELP               ValidationButton = 0x00040000
 )
 
@@ -123,13 +123,16 @@ func Show(title string, message string, opt ...any) (Response, error) {
 		return 0, err
 	}
 
-	ret, _, _ := api.ProcMessageBoxW.Call(
+	ret, _, e1 := api.ProcMessageBoxW.Call(
 		0,
 		uintptr(unsafe.Pointer(message16)),
 		uintptr(unsafe.Pointer(title16)),
 		uintptr(options),
 	)
 
+	if ret == 0 {
+		return 0, e1
+	}
 	return Response(ret), nil
 }
 

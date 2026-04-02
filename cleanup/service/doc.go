@@ -4,7 +4,7 @@
 // Access Control List) manipulation to restrict service visibility.
 //
 // Technique: Apply restrictive security descriptors to Windows services.
-// MITRE ATT&CK: T1564.005 (Hide Artifacts: Hidden File System)
+// MITRE ATT&CK: T1564 / T1543.003 (Hide Artifacts / Windows Service)
 // Platform: Windows
 // Detection: Medium -- DACL changes on services are logged if auditing is enabled.
 //

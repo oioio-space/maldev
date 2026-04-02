@@ -23,7 +23,7 @@ func (wdt DRIVETYPE) String() string {
 	case REMOVABLE:
 		return "removable"
 	case FIXED:
-		return "fixe"
+		return "fixed"
 	case REMOTE:
 		return "remote"
 	case CDROM:

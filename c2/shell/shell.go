@@ -68,6 +68,7 @@ type Shell struct {
 	stopCh    chan struct{}
 	doneCh    chan struct{}
 	doneOnce  sync.Once
+	stopOnce  sync.Once
 }
 
 // New creates a new Shell with the given transport and config.
@@ -227,7 +228,9 @@ func (s *Shell) Stop() error {
 		return fmt.Errorf("shell not running")
 	}
 
-	close(s.stopCh)
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+	})
 	return nil
 }
 

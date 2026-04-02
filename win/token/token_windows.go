@@ -7,6 +7,7 @@ package token
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"unsafe"
 
@@ -350,7 +351,7 @@ func (t *Token) modifyTokenPrivileges(privs []string, mode privModType) error {
 	}
 
 	if len(errMsg) != 0 {
-		return fmt.Errorf("%s", errMsg)
+		return errors.New(errMsg)
 	}
 	return nil
 }
@@ -486,6 +487,7 @@ func GetInteractiveToken(typ tokenType) (*Token, error) {
 		interactiveToken windows.Token
 		duplicatedToken  windows.Token
 		sessionID        uint32
+		found            bool
 	)
 
 	err := windows.WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, 0, 1, (**windows.WTS_SESSION_INFO)(unsafe.Pointer(&sessionPointer)), &sessionCount)
@@ -503,10 +505,11 @@ func GetInteractiveToken(typ tokenType) (*Token, error) {
 	for i := range sessions {
 		if sessions[i].State == windows.WTSActive {
 			sessionID = sessions[i].SessionID
+			found = true
 			break
 		}
 	}
-	if sessionID == 0 {
+	if !found {
 		return nil, ErrNoActiveSession
 	}
 
