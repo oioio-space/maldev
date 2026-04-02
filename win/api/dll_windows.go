@@ -69,9 +69,14 @@ var (
 	ProcEtwEventWriteFull        = Ntdll.NewProc("EtwEventWriteFull")
 	ProcEtwEventWriteString      = Ntdll.NewProc("EtwEventWriteString")
 	ProcEtwEventWriteTransfer    = Ntdll.NewProc("EtwEventWriteTransfer")
-	ProcRtlCreateUserThread      = Ntdll.NewProc("RtlCreateUserThread")
-	ProcNtAllocateVirtualMemory  = Ntdll.NewProc("NtAllocateVirtualMemory")
-	ProcRtlMoveMemory            = Ntdll.NewProc("RtlMoveMemory")
+	ProcRtlCreateUserThread              = Ntdll.NewProc("RtlCreateUserThread")
+	ProcNtAllocateVirtualMemory          = Ntdll.NewProc("NtAllocateVirtualMemory")
+	ProcRtlMoveMemory                    = Ntdll.NewProc("RtlMoveMemory")
+	ProcNtCreateSection                  = Ntdll.NewProc("NtCreateSection")
+	ProcNtCreateProcessEx                = Ntdll.NewProc("NtCreateProcessEx")
+	ProcNtQueryInformationProcess        = Ntdll.NewProc("NtQueryInformationProcess")
+	ProcRtlCreateProcessParametersEx    = Ntdll.NewProc("RtlCreateProcessParametersEx")
+	ProcRtlInitUnicodeString             = Ntdll.NewProc("RtlInitUnicodeString")
 )
 
 // advapi32.dll procs
