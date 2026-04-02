@@ -1,40 +1,37 @@
-# CRITIQUE: ne JAMAIS publier
-ignore/
-.claude/
 
 # Binaires et artefacts de build
-*.exe
-*.dll
-*.so
-*.dylib
-bin/
-build/
-dist/
-*.bin
-
+# CRITIQUE: ne JAMAIS publier
 # Go
-vendor/
-*.test
-*.out
-coverage.txt
-go.work.sum
-
 # IDE
+# OS
+# Secrets / certificats
+*.bin
+*.crt
+*.dll
+*.dylib
+*.exe
+*.iml
+*.key
+*.out
+*.p12
+*.pem
+*.pfx
+*.so
+*.test
+*.xml
+.DS_Store
+.claude/
 .idea/
 .vscode/
-*.iml
-*.xml
+Thumbs.db
+bin/
+build/
+coverage.txt
+dist/
+go.work.sum
+ignore/
 material_theme_project_new.xml
 modules.xml
+testutil/results/
+vendor/
 workspace.xml
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Secrets / certificats
-*.pem
-*.key
-*.crt
-*.pfx
-*.p12
