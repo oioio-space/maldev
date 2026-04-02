@@ -46,7 +46,7 @@ func TestKillEventLogThreads(t *testing.T) {
 
 	// Kill returns an error if no threads were killed or if the operation failed.
 	// On success it returns nil, indicating threads were terminated.
-	err := Kill()
+	err := Kill(nil)
 	require.NoError(t, err)
 	// If Kill returned nil, at least one thread was terminated (see Kill source).
 	assert.NoError(t, err, "Kill should terminate at least one Event Log thread without error")

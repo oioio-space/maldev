@@ -52,6 +52,11 @@ type Config struct {
 
 	// TLSInsecure allows self-signed certificates for HTTPS.
 	TLSInsecure bool
+
+	// Caller routes NT syscalls through a specific method (Windows only).
+	// Accepts *wsyscall.Caller from github.com/oioio-space/maldev/win/syscall.
+	// When nil, standard WinAPI calls are used.
+	Caller any
 }
 
 // Stager manages the Meterpreter staging process.

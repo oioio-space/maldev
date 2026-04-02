@@ -31,7 +31,7 @@ func assertCleanSyscallStub(t *testing.T) {
 func TestClassicUnhook(t *testing.T) {
 	testutil.RequireIntrusive(t)
 
-	err := ClassicUnhook("NtClose")
+	err := ClassicUnhook("NtClose", nil)
 	if err != nil {
 		// Some errors are expected in restricted environments (e.g. ACG already set,
 		// ntdll not accessible from test runner). Log and skip rather than hard-fail.
@@ -44,7 +44,7 @@ func TestClassicUnhook(t *testing.T) {
 func TestFullUnhook(t *testing.T) {
 	testutil.RequireIntrusive(t)
 
-	err := FullUnhook()
+	err := FullUnhook(nil)
 	if err != nil {
 		// Same reasoning as TestClassicUnhook — log unexpected environments.
 		t.Logf("FullUnhook returned error (may be expected in this environment): %v", err)
