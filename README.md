@@ -38,6 +38,10 @@ err := amsi.PatchAll(nil) // patch AMSI + bypass session init
 | **[Command & Control](docs/c2.md)** | TCP/TLS transport &#183; Reverse shell &#183; Meterpreter staging &#183; Cert generation |
 | **[Crypto & Encoding](docs/crypto.md)** | AES-GCM &#183; ChaCha20 &#183; RC4 &#183; XOR &#183; Base64 &#183; ROR13 &#183; Random |
 | **[Windows Primitives](docs/win.md)** | DLL handles &#183; PatchMemory &#183; Token manipulation &#183; Privilege elevation &#183; Version detection |
+| **[PE Operations](docs/pe.md)** | Parse &#183; Morph &#183; sRDI |
+| **[Privilege Escalation](docs/privilege.md)** | UAC bypass &#183; CVE-2024-30088 kernel exploit |
+| **[System Information](docs/system.md)** | Drive &#183; Folder &#183; Network &#183; UI |
+| **[Process Management](docs/process.md)** | Enumeration &#183; Session management |
 | **[Cleanup & Anti-Forensics](docs/cleanup.md)** | Self-delete &#183; Service hiding &#183; Wipe &#183; Timestomp |
 | **[MITRE ATT&CK Map](docs/mitre.md)** | 17 techniques across all packages |
 
