@@ -32,49 +32,60 @@ err := amsi.PatchAll(nil) // patch AMSI + bypass session init
 
 | Guide | Content |
 |-------|---------|
-| [Evasion Techniques](docs/evasion.md) | AMSI, ETW, unhook, herpaderping, ACG, sandbox detection, presets |
-| [Process Injection](docs/injection.md) | 13 injection methods, fallback chains, syscall bypass |
-| [Syscall Methods](docs/syscalls.md) | WinAPI, NativeAPI, Direct, Indirect syscall strategies |
-| [Command & Control](docs/c2.md) | TCP/TLS transport, reverse shell, meterpreter staging |
-| [MITRE ATT&CK Map](docs/mitre.md) | Complete technique coverage table |
+| **[Evasion Techniques](docs/evasion.md)** | [AMSI](docs/evasion.md#amsi-bypass-evasionamsi) &#183; [ETW](docs/evasion.md#etw-bypass-evasionetw) &#183; [Unhook](docs/evasion.md#ntdll-unhooking-evasionunhook) &#183; [Herpaderping](docs/evasion.md#process-herpaderping-evasionherpaderping----t1055) &#183; [Phant0m](docs/evasion.md#phant0m-evasionphant0m) &#183; [Sandbox](docs/evasion.md#sandbox-detection-evasionsandbox) &#183; [AntiVM](docs/evasion.md#antivm----parameterizable-config-evasionantivm) &#183; [Presets](docs/evasion.md#composable-evasion-evasionpreset) &#183; [Hook Detection](docs/evasion.md#hook-detection-evasionunhook) |
+| **[Process Injection](docs/injection.md)** | [13 methods](docs/injection.md#injection-methods) &#183; [Remote inject](docs/injection.md#remote-injection-into-an-existing-process) &#183; [Fallback](docs/injection.md#injection-with-automatic-fallback) &#183; [Syscall bypass](docs/injection.md#injection-with-syscall-bypass-edr-evasion) |
+| **[Syscall Methods](docs/syscalls.md)** | WinAPI &#183; NativeAPI &#183; Direct &#183; Indirect syscall strategies + SSN resolvers |
+| **[Command & Control](docs/c2.md)** | TCP/TLS transport &#183; Reverse shell &#183; Meterpreter staging |
+| **[MITRE ATT&CK Map](docs/mitre.md)** | 17 techniques across all packages |
 
 ## Packages
 
-| Layer | Package | Description | Platform |
-|-------|---------|-------------|----------|
-| Crypto | `crypto` | AES-256-GCM, ChaCha20-Poly1305, RC4, XOR | Cross-platform |
-| Crypto | `encode` | Base64, Base64URL, UTF-16LE, ROT13, PowerShell encoding | Cross-platform |
-| Crypto | `hash` | MD5, SHA-1, SHA-256, SHA-512, ROR13 (API hashing) | Cross-platform |
-| Crypto | `random` | Cryptographic random strings, bytes, integers, durations | Cross-platform |
-| Win | `win/api` | DLL handles, procedure refs, memory patching | Windows |
-| Win | `win/syscall` | Pluggable syscall strategies (WinAPI/Direct/Indirect) | Windows |
-| Win | `win/ntapi` | Type-safe NT function wrappers | Windows |
-| Win | `win/token` | Token manipulation, privilege management | Windows |
-| Win | `win/privilege` | Admin detection, RunAs, elevation helpers | Windows |
-| Win | `win/impersonate` | Thread impersonation with automatic revert | Windows |
-| Win | `win/domain` | Domain membership queries | Windows |
-| Win | `win/version` | OS version detection, CVE vulnerability checks | Windows |
-| Evasion | `evasion/*` | 12 techniques -- see [evasion docs](docs/evasion.md) | Mixed |
-| Injection | `inject` | 8 Windows + 5 Linux methods -- see [injection docs](docs/injection.md) | Mixed |
-| Process | `process/enum` | Cross-platform process enumeration | Cross-platform |
-| Process | `process/session` | Cross-session execution and impersonation | Windows |
-| PE | `pe/parse` | PE file parsing (sections, exports, imports) | Cross-platform |
-| PE | `pe/morph` | UPX header mutation to break unpackers | Cross-platform |
-| PE | `pe/srdi` | DLL-to-shellcode conversion (sRDI) | Cross-platform |
-| Cleanup | `cleanup/selfdelete` | Self-deletion (NTFS ADS, script, reboot) | Windows |
-| Cleanup | `cleanup/service` | Service hiding via DACL manipulation | Windows |
-| Cleanup | `cleanup/wipe` | Multi-pass random overwrite before deletion | Cross-platform |
-| Cleanup | `cleanup/timestomp` | File timestamp manipulation | Cross-platform |
-| C2 | `c2/transport` | TCP/TLS transport with cert pinning | Cross-platform |
-| C2 | `c2/shell` | Reverse shell with reconnection, PTY, evasion | Cross-platform |
-| C2 | `c2/meterpreter` | Meterpreter stager (TCP/HTTP/HTTPS) | Cross-platform |
-| C2 | `c2/cert` | Self-signed X.509 certificate generation | Cross-platform |
-| Privilege | `uacbypass` | FODHelper, SLUI, SilentCleanup, EventVwr | Windows |
-| Exploit | `exploit/cve202430088` | Kernel TOCTOU race for LPE to SYSTEM | Windows |
-| System | `system/drive` | Drive enumeration, monitoring, volume info | Windows |
-| System | `system/network` | IP address retrieval, local address detection | Cross-platform |
-| System | `system/folder` | Windows special folder paths (CSIDL) | Windows |
-| System | `system/ui` | Message boxes and system sounds | Windows |
+| Layer | Package | Description | MITRE | Platform |
+|-------|---------|-------------|-------|----------|
+| Crypto | `crypto` | AES-256-GCM, ChaCha20-Poly1305, RC4, XOR | -- | Cross-platform |
+| Crypto | `encode` | Base64, Base64URL, UTF-16LE, ROT13, PowerShell | -- | Cross-platform |
+| Crypto | `hash` | MD5, SHA-256, SHA-512, ROR13 (API hashing) | -- | Cross-platform |
+| Crypto | `random` | Cryptographic random strings, bytes, integers | -- | Cross-platform |
+| Win | `win/api` | DLL handles, procedure refs, memory patching | -- | Windows |
+| Win | `win/syscall` | Pluggable syscall (WinAPI/Direct/Indirect) | -- | Windows |
+| Win | `win/ntapi` | Type-safe NT function wrappers | -- | Windows |
+| Win | `win/token` | Token manipulation, privilege management | -- | Windows |
+| Win | `win/privilege` | Admin detection, RunAs, elevation helpers | -- | Windows |
+| Win | `win/impersonate` | Thread impersonation with automatic revert | -- | Windows |
+| Win | `win/domain` | Domain membership queries | -- | Windows |
+| Win | `win/version` | OS version detection, CVE checks | -- | Windows |
+| Evasion | [`evasion/amsi`](docs/evasion.md#amsi-bypass-evasionamsi) | AMSI memory patching | T1562.001 | Windows |
+| Evasion | [`evasion/etw`](docs/evasion.md#etw-bypass-evasionetw) | ETW event write patching | T1562.001 | Windows |
+| Evasion | [`evasion/unhook`](docs/evasion.md#ntdll-unhooking-evasionunhook) | ntdll.dll restoration | T1562.001 | Windows |
+| Evasion | [`evasion/acg`](docs/evasion.md) | Arbitrary Code Guard policy | T1562.001 | Windows 10+ |
+| Evasion | [`evasion/blockdlls`](docs/evasion.md) | Block non-Microsoft DLLs | T1562.001 | Windows 10+ |
+| Evasion | [`evasion/phant0m`](docs/evasion.md#phant0m-evasionphant0m) | Event Log thread termination | T1562.002 | Windows |
+| Evasion | [`evasion/herpaderping`](docs/evasion.md#process-herpaderping-evasionherpaderping----t1055) | Process image tampering | T1055 | Windows 10+ |
+| Evasion | [`evasion/antidebug`](docs/evasion.md) | Debugger detection | T1622 | Cross-platform |
+| Evasion | [`evasion/antivm`](docs/evasion.md#antivm----parameterizable-config-evasionantivm) | VM/hypervisor detection | T1497.001 | Cross-platform |
+| Evasion | [`evasion/sandbox`](docs/evasion.md#sandbox-detection-evasionsandbox) | Multi-factor sandbox detection | T1497 | Cross-platform |
+| Evasion | [`evasion/timing`](docs/evasion.md) | CPU-burning delays | T1497.003 | Cross-platform |
+| Evasion | [`evasion/preset`](docs/evasion.md#composable-evasion-evasionpreset) | Composable presets (Minimal/Stealth/Aggressive) | -- | Windows |
+| Injection | [`inject`](docs/injection.md) | 8 Windows + 5 Linux methods | T1055 | Mixed |
+| Process | `process/enum` | Cross-platform process enumeration | T1057 | Cross-platform |
+| Process | `process/session` | Cross-session execution | T1134.002 | Windows |
+| PE | `pe/parse` | PE file parsing (sections, exports, imports) | -- | Cross-platform |
+| PE | `pe/morph` | UPX header mutation | T1027.002 | Cross-platform |
+| PE | `pe/srdi` | DLL-to-shellcode conversion (sRDI) | T1055.001 | Cross-platform |
+| Cleanup | `cleanup/selfdelete` | Self-deletion (NTFS ADS, script, reboot) | T1070.004 | Windows |
+| Cleanup | `cleanup/service` | Service hiding via DACL manipulation | T1564 | Windows |
+| Cleanup | `cleanup/wipe` | Multi-pass random overwrite + deletion | T1070.004 | Cross-platform |
+| Cleanup | `cleanup/timestomp` | File timestamp manipulation | T1070.006 | Cross-platform |
+| C2 | [`c2/transport`](docs/c2.md) | TCP/TLS transport with cert pinning | -- | Cross-platform |
+| C2 | [`c2/shell`](docs/c2.md) | Reverse shell with reconnection + evasion | T1059 | Cross-platform |
+| C2 | [`c2/meterpreter`](docs/c2.md) | Meterpreter stager (TCP/HTTP/HTTPS) | T1059 | Cross-platform |
+| C2 | `c2/cert` | Self-signed X.509 certificate generation | -- | Cross-platform |
+| Privilege | `uacbypass` | FODHelper, SLUI, SilentCleanup, EventVwr | T1548.002 | Windows |
+| Exploit | `exploit/cve202430088` | Kernel TOCTOU race for LPE to SYSTEM | CVE-2024-30088 | Windows |
+| System | `system/drive` | Drive enumeration, monitoring, volume info | -- | Windows |
+| System | `system/network` | IP address retrieval, local address detection | -- | Cross-platform |
+| System | `system/folder` | Windows special folder paths (CSIDL) | -- | Windows |
+| System | `system/ui` | Message boxes and system sounds | -- | Windows |
 
 ## Build
 
