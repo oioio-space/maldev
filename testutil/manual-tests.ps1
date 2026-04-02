@@ -11,13 +11,14 @@
     and cleanup for each test.
 
     Sections:
-      phant0m     Kill Event Log service threads (silences logging)
-      service     Hide/unhide a Windows service via DACL manipulation
-      uacbypass   FODHelper, EventVwr, SilentCleanup, SLUI bypass techniques
-      cve         CVE-2024-30088 kernel LPE (BSOD risk — snapshot first!)
-      impersonate Thread token impersonation with credentials
-      unhook      Restore ntdll.dll original bytes (undo EDR hooks)
-      all         Run every section above in order
+      phant0m       Kill Event Log service threads (silences logging)
+      service       Hide/unhide a Windows service via DACL manipulation
+      uacbypass     FODHelper, EventVwr, SilentCleanup, SLUI bypass techniques
+      cve           CVE-2024-30088 kernel LPE (BSOD risk — snapshot first!)
+      impersonate   Thread token impersonation with credentials
+      unhook        Restore ntdll.dll original bytes (undo EDR hooks)
+      herpaderping  Process image tampering (cmd.exe payload, svchost.exe decoy)
+      all           Run every section above in order
 
 .PARAMETER Section
     Which test section to run. Default: all.
@@ -74,7 +75,7 @@
 #>
 
 param(
-    [ValidateSet("all", "phant0m", "service", "uacbypass", "cve", "impersonate", "unhook")]
+    [ValidateSet("all", "phant0m", "service", "uacbypass", "cve", "impersonate", "unhook", "herpaderping")]
     [string]$Section = "all",
 
     # ── Credentials for impersonation tests ──
@@ -399,6 +400,19 @@ if ($Section -eq "all" -or $Section -eq "unhook") {
     # ── Verify ──
     Write-Step "Verification is built into the tests (prologue byte check)"
     Write-Cleanup "No cleanup needed — unhooking restores original bytes"
+}
+
+# ══════════════════════════════════════════════════════════════════════
+# SECTION 7: Herpaderping — Process Image Tampering
+# ══════════════════════════════════════════════════════════════════════
+
+if ($Section -eq "all" -or $Section -eq "herpaderping") {
+    Write-Section "Herpaderping — Process Image Tampering"
+
+    Write-Step "Running herpaderping test (uses cmd.exe as payload, svchost.exe as decoy)..."
+    go test ./evasion/herpaderping/ -run TestRunWithDecoy -v -timeout 30s 2>&1 | Write-Host
+
+    Write-Cleanup "Target file cleaned up by test temp directory"
 }
 
 # ══════════════════════════════════════════════════════════════════════

