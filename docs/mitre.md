@@ -4,6 +4,7 @@
 
 | Technique ID | Technique Name | Package(s) |
 |-------------|---------------|------------|
+| T1027 | Obfuscated Files or Information | `evasion/sleepmask`, `pe/strip` |
 | T1027.002 | Obfuscated Files: Software Packing | `pe/morph` |
 | T1055 | Process Injection | `inject`, `evasion/herpaderping` |
 | T1055.001 | Process Injection: DLL Injection | `pe/srdi` |
@@ -26,4 +27,4 @@
 | T1562.001 | Impair Defenses: Disable or Modify Tools | `evasion/amsi`, `evasion/etw`, `evasion/unhook`, `evasion/acg`, `evasion/blockdlls` |
 | T1562.002 | Impair Defenses: Disable Windows Event Logging | `evasion/phant0m` |
 | T1564 | Hide Artifacts | `cleanup/service` |
-| T1622 | Debugger Evasion | `evasion/antidebug` |
+| T1622 | Debugger Evasion | `evasion/antidebug`, `evasion/hwbp` |
