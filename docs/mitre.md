@@ -6,12 +6,14 @@
 |-------------|---------------|------------|
 | T1027 | Obfuscated Files or Information | `evasion/sleepmask`, `pe/strip` |
 | T1027.002 | Obfuscated Files: Software Packing | `pe/morph` |
-| T1055 | Process Injection | `inject`, `evasion/herpaderping` |
+| T1055 | Process Injection | `inject` (CRT, APC, EarlyBird, ThreadHijack, Fiber, EtwThread, NtQueueApcThreadEx, ModuleStomp, SectionMap, Callback, ThreadPool, KernelCallbackTable, PhantomDLL), `evasion/herpaderping` |
 | T1055.001 | Process Injection: DLL Injection | `pe/srdi` |
+| T1055.012 | Process Injection: Process Hollowing | `inject` (SpawnWithSpoofedArgs) |
 | T1057 | Process Discovery | `process/enum` |
-| T1059 | Command and Scripting Interpreter | `c2/shell`, `c2/meterpreter` |
+| T1059 | Command and Scripting Interpreter | `c2/shell`, `c2/meterpreter`, `pe/bof` |
 | T1082 | System Information Discovery | `win/domain`, `win/version` |
 | T1083 | File and Directory Discovery | `system/folder` |
+| T1070 | Indicator Removal on Host | `cleanup/memory` |
 | T1070.004 | Indicator Removal: File Deletion | `cleanup/selfdelete`, `cleanup/wipe` |
 | T1106 | Native API | `win/api` (PEB walk, API hashing), `win/syscall` (direct/indirect syscalls, HashGate), `win/ntapi` |
 | T1070.006 | Indicator Removal: Timestomp | `cleanup/timestomp` |

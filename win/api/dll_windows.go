@@ -17,6 +17,7 @@ var (
 	Userenv  = windows.NewLazySystemDLL("userenv.dll")
 	Netapi32 = windows.NewLazySystemDLL("netapi32.dll")
 	Amsi     = windows.NewLazySystemDLL("amsi.dll")
+	Crypt32  = windows.NewLazySystemDLL("crypt32.dll")
 )
 
 // Thread access rights.
@@ -51,6 +52,8 @@ var (
 	ProcRtlCopyMemory              = Kernel32.NewProc("RtlCopyMemory")
 	ProcSetThreadPriority          = Kernel32.NewProc("SetThreadPriority")
 	ProcTerminateThread            = Kernel32.NewProc("TerminateThread")
+	ProcCreateTimerQueueTimer      = Kernel32.NewProc("CreateTimerQueueTimer")
+	ProcDeleteTimerQueue           = Kernel32.NewProc("DeleteTimerQueue")
 )
 
 // ntdll.dll procs
@@ -76,6 +79,11 @@ var (
 	ProcRtlInitUnicodeString             = Ntdll.NewProc("RtlInitUnicodeString")
 	ProcEtwpCreateEtwThread              = Ntdll.NewProc("EtwpCreateEtwThread")
 	ProcNtQueueApcThreadEx               = Ntdll.NewProc("NtQueueApcThreadEx")
+	ProcNtMapViewOfSection               = Ntdll.NewProc("NtMapViewOfSection")
+	ProcNtUnmapViewOfSection             = Ntdll.NewProc("NtUnmapViewOfSection")
+	ProcTpAllocWork                      = Ntdll.NewProc("TpAllocWork")
+	ProcTpPostWork                       = Ntdll.NewProc("TpPostWork")
+	ProcTpReleaseWork                    = Ntdll.NewProc("TpReleaseWork")
 )
 
 // advapi32.dll procs
@@ -91,8 +99,16 @@ var (
 
 // user32.dll procs
 var (
-	ProcMessageBoxW = User32.NewProc("MessageBoxW")
-	ProcMessageBeep = User32.NewProc("MessageBeep")
+	ProcMessageBoxW  = User32.NewProc("MessageBoxW")
+	ProcMessageBeep  = User32.NewProc("MessageBeep")
+	ProcEnumWindows  = User32.NewProc("EnumWindows")
+	ProcSendMessageW = User32.NewProc("SendMessageW")
+	ProcFindWindowW  = User32.NewProc("FindWindowW")
+)
+
+// crypt32.dll procs
+var (
+	ProcCertEnumSystemStore = Crypt32.NewProc("CertEnumSystemStore")
 )
 
 // shell32.dll procs

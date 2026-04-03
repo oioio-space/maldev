@@ -17,6 +17,15 @@
 //   - CreateFiber (fiber): fiber-based shellcode execution
 //   - EtwpCreateEtwThread (etwthr): abuse internal ETW thread creation in ntdll
 //   - NtQueueApcThreadEx (apcex): special user APC injection (Win10 1903+, no alertable wait needed)
+//   - ThreadPool (threadpool): abuse TpAllocWork/TpPostWork to run shellcode in existing thread pool
+//   - KernelCallbackTable (kcallback): hijack PEB KernelCallbackTable __fnCOPYDATA entry
+//   - PhantomDLL (phantomdll): map clean System32 DLL section, overwrite .text with shellcode
+//   - SpoofArgs (spoofargs): create process with fake command line, overwrite PEB with real args
+//   - Callback (callback): execute shellcode via Windows callback mechanisms (EnumWindows, CreateTimerQueueTimer, CertEnumSystemStore)
+//   - SectionMap (sectionmap): cross-process injection via shared section mapping (no WriteProcessMemory)
+//
+// Utilities:
+//   - FindAllThreadsNt: enumerate threads via NtQuerySystemInformation (less monitored than Toolhelp32)
 //
 // Linux methods:
 //   - Ptrace (ptrace): inject via ptrace attach
