@@ -2,6 +2,30 @@
 
 Modular malware development library in Go for offensive security research.
 
+## Install
+
+```bash
+go get github.com/oioio-space/maldev@latest
+```
+
+Or pin a specific version:
+
+```bash
+go get github.com/oioio-space/maldev@v0.1.0
+```
+
+Then import the packages you need:
+
+```go
+import (
+    "github.com/oioio-space/maldev/evasion/amsi"
+    "github.com/oioio-space/maldev/inject"
+    "github.com/oioio-space/maldev/crypto"
+)
+```
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/oioio-space/maldev.svg)](https://pkg.go.dev/github.com/oioio-space/maldev)
+
 ## Architecture
 
 ```
