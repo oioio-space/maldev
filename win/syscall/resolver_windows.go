@@ -163,3 +163,49 @@ func (c *ChainResolver) Resolve(name string) (uint16, error) {
 	}
 	return 0, fmt.Errorf("all resolvers failed for %s: %w", name, lastErr)
 }
+
+// HashGateResolver resolves SSNs by finding ntdll functions via API hashing
+// (PEB walk + export table hash comparison) instead of using LazyProc.Find().
+// This avoids any string-based function resolution — the binary contains only
+// uint32 hashes, not function names like "NtAllocateVirtualMemory".
+//
+// The SSN is extracted from the function prologue using the same Hell's Gate
+// technique (4C 8B D1 B8 XX XX pattern). The difference is how the function
+// address is located: PEB walk by hash vs. ntdll.NewProc(name).
+//
+// Falls back gracefully when the function name cannot be hashed or found.
+// Composable via Chain() with other resolvers.
+type HashGateResolver struct {
+	ntdllBase uintptr // cached ntdll base address (0 = not yet resolved)
+}
+
+// NewHashGate creates a HashGateResolver. The ntdll base address is
+// resolved lazily on first Resolve() call and cached.
+func NewHashGate() *HashGateResolver { return &HashGateResolver{} }
+
+func (r *HashGateResolver) Resolve(name string) (uint16, error) {
+	// Lazy-init ntdll base address via PEB walk.
+	if r.ntdllBase == 0 {
+		base, err := pebModuleByHash(hashNtdll)
+		if err != nil {
+			return 0, fmt.Errorf("HashGate: ntdll not found via PEB walk: %w", err)
+		}
+		r.ntdllBase = base
+	}
+
+	// Hash the function name (ROR13, no null terminator) and resolve via PE exports.
+	funcHash := ror13str(name)
+	addr, err := pebExportByHash(r.ntdllBase, funcHash)
+	if err != nil {
+		return 0, fmt.Errorf("HashGate: export %s (0x%08X) not found: %w", name, funcHash, err)
+	}
+
+	// Extract SSN from prologue (same as Hell's Gate).
+	b := (*[32]byte)(unsafe.Pointer(addr))
+	if b[0] == 0x4C && b[1] == 0x8B && b[2] == 0xD1 && b[3] == 0xB8 {
+		ssn := uint16(b[4]) | uint16(b[5])<<8
+		return ssn, nil
+	}
+
+	return 0, fmt.Errorf("HashGate: %s prologue hooked (first bytes: %02X %02X %02X %02X)", name, b[0], b[1], b[2], b[3])
+}

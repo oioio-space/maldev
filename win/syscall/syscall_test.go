@@ -58,3 +58,33 @@ func TestMethodString(t *testing.T) {
 	assert.Equal(t, "Direct", MethodDirect.String())
 	assert.Equal(t, "Indirect", MethodIndirect.String())
 }
+
+func TestHashGateResolver(t *testing.T) {
+	r := NewHashGate()
+
+	// NtClose is a simple, always-present NT function.
+	ssn, err := r.Resolve("NtClose")
+	require.NoError(t, err, "HashGate should resolve NtClose")
+	assert.Greater(t, ssn, uint16(0), "NtClose SSN must be > 0")
+	t.Logf("HashGate NtClose SSN: %d (0x%04X)", ssn, ssn)
+
+	// Verify HashGate agrees with HellsGate.
+	hg := NewHellsGate()
+	hellSSN, err := hg.Resolve("NtClose")
+	require.NoError(t, err)
+	assert.Equal(t, hellSSN, ssn, "HashGate and HellsGate should return the same SSN")
+}
+
+func TestHashGateResolver_NotFound(t *testing.T) {
+	r := NewHashGate()
+	_, err := r.Resolve("NtNonExistentFunction12345")
+	assert.Error(t, err, "non-existent function should fail")
+}
+
+func TestHashGateChain(t *testing.T) {
+	// Verify HashGate composes with Chain.
+	c := Chain(NewHashGate(), NewHellsGate())
+	ssn, err := c.Resolve("NtClose")
+	require.NoError(t, err)
+	assert.Greater(t, ssn, uint16(0))
+}
