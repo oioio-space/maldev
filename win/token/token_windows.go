@@ -112,7 +112,7 @@ func New(t windows.Token, typ Type) *Token {
 func Steal(pid int) (*Token, error) {
 	hProcess, err := windows.OpenProcess(windows.PROCESS_QUERY_INFORMATION, false, uint32(pid))
 	if err != nil {
-		return nil, fmt.Errorf("OpenProcess %d: %w", pid, err)
+		return nil, fmt.Errorf("open process: %w", err)
 	}
 	defer windows.CloseHandle(hProcess)
 
@@ -179,7 +179,7 @@ func StealViaDuplicateHandle(hProcess windows.Handle, remoteTokenHandle uintptr)
 func StealByName(processName string) (*Token, error) {
 	procs, err := enum.FindByName(processName)
 	if err != nil || len(procs) == 0 {
-		return nil, fmt.Errorf("process %q not found", processName)
+		return nil, errors.New("target process not found")
 	}
 	return Steal(int(procs[0].PID))
 }

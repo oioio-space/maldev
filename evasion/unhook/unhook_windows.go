@@ -193,7 +193,7 @@ func PerunUnhookTarget(target string, caller *wsyscall.Caller) error {
 		nil, nil, &si, &pi,
 	)
 	if err != nil {
-		return fmt.Errorf("CreateProcess %s: %w", target, err)
+		return fmt.Errorf("spawn helper process: %w", err)
 	}
 	defer windows.CloseHandle(pi.Process)
 	defer windows.CloseHandle(pi.Thread)

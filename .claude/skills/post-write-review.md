@@ -42,6 +42,10 @@ STRUCTURE:
   [ ] Build tag present on platform-specific files
   [ ] Handles closed with defer
   [ ] Errors wrapped with %w, context in message
+  [ ] No OPSEC-sensitive data in error strings (paths, PIDs, addresses, DLL names)
+  [ ] Errors crossing package boundaries use sentinel/domain errors, not raw wraps
+  [ ] No fmt.Errorf with %v on structs (leaks all fields incl. passwords/tokens)
+  [ ] Structured logging only (internal/log), never fmt.Printf/Fprintf for errors
 
 DOCUMENTATION:
   [ ] Exported functions have doc comments

@@ -26,7 +26,7 @@ func NewHellsGate() *HellsGateResolver { return &HellsGateResolver{} }
 func (r *HellsGateResolver) Resolve(name string) (uint16, error) {
 	proc := ntdll.NewProc(name)
 	if err := proc.Find(); err != nil {
-		return 0, fmt.Errorf("find %s: %w", name, err)
+		return 0, fmt.Errorf("resolve: %w", err)
 	}
 	addr := proc.Addr()
 
@@ -40,7 +40,7 @@ func (r *HellsGateResolver) Resolve(name string) (uint16, error) {
 		return ssn, nil
 	}
 
-	return 0, fmt.Errorf("%s: prologue hooked or unrecognized (first bytes: %02X %02X %02X %02X)", name, b[0], b[1], b[2], b[3])
+	return 0, fmt.Errorf("prologue hooked or unrecognized")
 }
 
 // HalosGateResolver extends Hell's Gate by scanning neighboring functions
@@ -60,7 +60,7 @@ func (r *HalosGateResolver) Resolve(name string) (uint16, error) {
 
 	proc := ntdll.NewProc(name)
 	if err := proc.Find(); err != nil {
-		return 0, fmt.Errorf("find %s: %w", name, err)
+		return 0, fmt.Errorf("resolve: %w", err)
 	}
 	addr := proc.Addr()
 
@@ -87,7 +87,7 @@ func (r *HalosGateResolver) Resolve(name string) (uint16, error) {
 		}
 	}
 
-	return 0, fmt.Errorf("%s: no unhooked neighbor found within 500 stubs", name)
+	return 0, fmt.Errorf("no unhooked neighbor found within 500 stubs")
 }
 
 // TartarusGateResolver extends Halo's Gate by recognizing JMP-hooked
@@ -102,7 +102,7 @@ func NewTartarus() *TartarusGateResolver { return &TartarusGateResolver{} }
 func (r *TartarusGateResolver) Resolve(name string) (uint16, error) {
 	proc := ntdll.NewProc(name)
 	if err := proc.Find(); err != nil {
-		return 0, fmt.Errorf("find %s: %w", name, err)
+		return 0, fmt.Errorf("resolve: %w", err)
 	}
 	addr := proc.Addr()
 	b := (*[32]byte)(unsafe.Pointer(addr))
@@ -161,7 +161,7 @@ func (c *ChainResolver) Resolve(name string) (uint16, error) {
 		}
 		lastErr = err
 	}
-	return 0, fmt.Errorf("all resolvers failed for %s: %w", name, lastErr)
+	return 0, fmt.Errorf("all resolvers failed: %w", lastErr)
 }
 
 // HashGateResolver resolves SSNs by finding ntdll functions via API hashing
@@ -197,7 +197,7 @@ func (r *HashGateResolver) Resolve(name string) (uint16, error) {
 	funcHash := ror13str(name)
 	addr, err := pebExportByHash(r.ntdllBase, funcHash)
 	if err != nil {
-		return 0, fmt.Errorf("HashGate: export %s (0x%08X) not found: %w", name, funcHash, err)
+		return 0, fmt.Errorf("HashGate: export 0x%08X not found: %w", funcHash, err)
 	}
 
 	// Extract SSN from prologue (same as Hell's Gate).
@@ -207,5 +207,5 @@ func (r *HashGateResolver) Resolve(name string) (uint16, error) {
 		return ssn, nil
 	}
 
-	return 0, fmt.Errorf("HashGate: %s prologue hooked (first bytes: %02X %02X %02X %02X)", name, b[0], b[1], b[2], b[3])
+	return 0, fmt.Errorf("HashGate: prologue hooked")
 }

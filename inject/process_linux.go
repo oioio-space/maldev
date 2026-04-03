@@ -3,10 +3,16 @@
 package inject
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+)
+
+var (
+	errProcessNotFound = errors.New("process not found")
+	errNoMatchingProcess = errors.New("no matching process found")
 )
 
 // ResolveTarget resolves a target (PID or process name) to a PID.
@@ -17,14 +23,14 @@ func ResolveTarget(target string) (int, error) {
 
 	if pid, err := strconv.Atoi(target); err == nil {
 		if !ProcessExists(pid) {
-			return 0, fmt.Errorf("PID %d does not exist", pid)
+			return 0, errProcessNotFound
 		}
 		return pid, nil
 	}
 
 	pid, err := FindProcessByName(target)
 	if err != nil {
-		return 0, fmt.Errorf("failed to find process '%s': %w", target, err)
+		return 0, fmt.Errorf("find process: %w", err)
 	}
 
 	return pid, nil
@@ -34,7 +40,7 @@ func ResolveTarget(target string) (int, error) {
 func FindProcessByName(name string) (int, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return 0, fmt.Errorf("failed to read /proc: %w", err)
+		return 0, fmt.Errorf("enumerate processes: %w", err)
 	}
 
 	for _, entry := range entries {
@@ -60,7 +66,7 @@ func FindProcessByName(name string) (int, error) {
 		}
 	}
 
-	return 0, fmt.Errorf("process '%s' not found", name)
+	return 0, errProcessNotFound
 }
 
 // ProcessExists checks whether a process with the given PID exists.
@@ -73,7 +79,7 @@ func ProcessExists(pid int) bool {
 func ListProcessesByName(name string) ([]int, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read /proc: %w", err)
+		return nil, fmt.Errorf("enumerate processes: %w", err)
 	}
 
 	var pids []int
@@ -100,7 +106,7 @@ func ListProcessesByName(name string) ([]int, error) {
 	}
 
 	if len(pids) == 0 {
-		return nil, fmt.Errorf("no process found with name '%s'", name)
+		return nil, errNoMatchingProcess
 	}
 
 	return pids, nil

@@ -18,8 +18,7 @@ func ValidateMethod(method Method) error {
 		}
 	}
 
-	return fmt.Errorf("injection method '%s' not available on %s/%s, available methods: %v",
-		method, runtime.GOOS, runtime.GOARCH, available)
+	return fmt.Errorf("injection method %q not available on this platform", method)
 }
 
 // Validate checks the validity of an injection configuration.

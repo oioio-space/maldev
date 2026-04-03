@@ -110,6 +110,36 @@ Only use `LazyProc` for APIs **not wrapped** by x/sys/windows (NT*, ETW*, Fiber*
 - Close handles with `defer` immediately after successful open
 - Add max buffer size limits on growing allocations
 
+### Secure Error Handling (OPSEC-critical)
+Based on JetBrains Go secure error handling best practices.
+
+**Error messages are OPSEC artifacts** — every `fmt.Errorf("failed to allocate memory at %p", addr)`
+puts a format string and potentially sensitive data in the binary.
+
+Rules:
+- **Never expose internal details in errors that cross trust boundaries**
+  `fmt.Errorf("db error: %w", err)` → BAD (leaks db driver info)
+  `domain.ErrNotFound` → GOOD (opaque sentinel)
+- **Sanitize at subsystem boundaries** — convert low-level errors to domain errors
+  when crossing package boundaries. Database errors, OS errors, and network errors
+  should not propagate to callers as-is.
+- **Use `%w` for internal wrapping, sentinel errors for public APIs**
+  Internal: `fmt.Errorf("NtAllocateVirtualMemory: NTSTATUS 0x%X: %w", r, err)` (OK within package)
+  Public: return `ErrAllocationFailed` (opaque to consumers)
+- **Never log structs directly** — `fmt.Errorf("request %v", req)` leaks all fields
+  including passwords, tokens, keys. Always select fields explicitly.
+- **Error strings are in the binary** — in release builds (garble -literals helps),
+  but prefer generic messages: `"operation failed"` over `"NtCreateThreadEx in PID 1234 failed"`
+- **Structured logging only** — use `internal/log` (slog-based), never `fmt.Printf` or
+  `fmt.Fprintf(os.Stderr)` for error reporting
+- **Redact sensitive data** — if an error must include context, use explicit allowlists:
+  ```go
+  // BAD
+  return fmt.Errorf("inject into %s failed: %w", processPath, err)
+  // GOOD
+  return fmt.Errorf("inject failed: %w", err)  // processPath is OPSEC-sensitive
+  ```
+
 ### unsafe.Pointer
 - Never convert `uintptr` to `unsafe.Pointer` except via `unsafe.Add(nil, int(addr))`
 - Add compile-time size assertions: `var _ [N]byte = [unsafe.Sizeof(T{})]byte{}`

@@ -33,7 +33,7 @@ func applyEvasion(techniques []evasion.Technique, caller evasion.Caller) error {
 func PatchDefenses() error {
 	errs := evasion.ApplyAll(preset.Stealth(), nil)
 	if len(errs) > 0 {
-		return fmt.Errorf("evasion: %v", errs)
+		return fmt.Errorf("evasion: %d technique(s) failed", len(errs))
 	}
 	return nil
 }
