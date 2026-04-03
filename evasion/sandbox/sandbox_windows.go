@@ -14,6 +14,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/oioio-space/maldev/useragent"
+
 	"github.com/oioio-space/maldev/evasion/antidebug"
 	"github.com/oioio-space/maldev/evasion/antivm"
 	"github.com/oioio-space/maldev/evasion/timing"
@@ -160,7 +162,7 @@ func (c *Checker) FakeDomainReachable(ctx context.Context) (bool, int, error) {
 	if err != nil {
 		return false, 0, err
 	}
-	uas, err := LoadUserAgents()
+	uaDB, err := useragent.Load()
 	if err != nil {
 		return false, 0, err
 	}
@@ -168,10 +170,7 @@ func (c *Checker) FakeDomainReachable(ctx context.Context) (bool, int, error) {
 	if err != nil {
 		return false, 0, err
 	}
-	ua := uas.Random()
-	if ua != nil {
-		req.Header.Set("User-Agent", ua.String())
-	}
+	req.Header.Set("User-Agent", uaDB.RandomString("Mozilla/5.0"))
 	timeout := c.cfg.RequestTimeout
 	if timeout == 0 {
 		timeout = 5 * time.Second
