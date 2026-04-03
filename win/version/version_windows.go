@@ -102,6 +102,7 @@ type WindowsVersion struct {
 	Build      uint32
 	Revision   uint32 // UBR from HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion
 	Vulnerable bool
+	Edition    string // Human-readable edition (e.g., "Windows 10 22H2"), set by CVE checkers.
 }
 
 const _registryKeyPath = `SOFTWARE\Microsoft\Windows NT\CurrentVersion`
@@ -150,29 +151,43 @@ func Windows() (*WindowsVersion, error) {
 	}, nil
 }
 
+// cveEntry holds the vulnerability threshold and edition name for a build.
+type cveEntry struct {
+	maxRevision uint32 // UBR values strictly below this are vulnerable
+	edition     string
+}
+
+// cve202430088Table maps Windows build numbers to their CVE-2024-30088
+// vulnerability thresholds and human-readable edition names.
+var cve202430088Table = map[uint32]cveEntry{
+	10240: {maxRevision: 20680, edition: "Windows 10 1507"},
+	14393: {maxRevision: 7070, edition: "Windows 10 1607 / Server 2016"},
+	17763: {maxRevision: 5936, edition: "Windows 10 1809 / Server 2019"},
+	19041: {maxRevision: 4529, edition: "Windows 10 21H2"},
+	19042: {maxRevision: 4529, edition: "Windows 10 21H2"},
+	19043: {maxRevision: 4529, edition: "Windows 10 21H2"},
+	19044: {maxRevision: 4529, edition: "Windows 10 21H2"},
+	19045: {maxRevision: 4529, edition: "Windows 10 22H2"},
+	22000: {maxRevision: 3019, edition: "Windows 11 21H2"},
+	22621: {maxRevision: 3737, edition: "Windows 11 22H2"},
+	22631: {maxRevision: 3737, edition: "Windows 11 23H2"},
+	20348: {maxRevision: 2522, edition: "Windows Server 2022"},
+	25398: {maxRevision: 950, edition: "Windows Server 2022 23H2"},
+}
+
 // CVE202430088 checks if the system is vulnerable to CVE-2024-30088.
 // Returns true for Windows 10/11 and Server builds before June 2024 patch.
+// The Edition field is populated with the human-readable Windows edition.
 func CVE202430088() (*WindowsVersion, error) {
 	v, err := Windows()
 	if err != nil {
 		return nil, err
 	}
-	// Vulnerability table from CVE-2024-30088 analysis
-	type entry struct{ build, maxUBR uint32 }
-	table := map[uint32]uint32{
-		19041: 4529, // Win10 21H2
-		19042: 4529, // Win10 21H2 (alt)
-		19043: 4529,
-		19044: 4529, // Win10 21H2/22H2
-		19045: 4529, // Win10 22H2
-		22000: 3019, // Win11 21H2
-		22621: 3737, // Win11 22H2
-		22631: 3737, // Win11 23H2
-		20348: 2522, // Server 2022
-		25398: 950,  // Server 2022 23H2
-	}
-	if maxUBR, ok := table[v.Build]; ok {
-		v.Vulnerable = v.Revision < maxUBR
+	if entry, ok := cve202430088Table[v.Build]; ok {
+		v.Vulnerable = v.Revision < entry.maxRevision
+		v.Edition = entry.edition
+	} else {
+		v.Edition = fmt.Sprintf("Unknown (build %d)", v.Build)
 	}
 	return v, nil
 }

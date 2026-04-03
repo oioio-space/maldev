@@ -4,7 +4,7 @@ package shell
 
 import (
 	"fmt"
-	"os"
+	"strings"
 
 	"golang.org/x/sys/windows"
 
@@ -13,17 +13,20 @@ import (
 )
 
 // applyEvasion applies the provided evasion techniques on Windows.
+// Returns an aggregate error listing all failed techniques, or nil.
 func applyEvasion(techniques []evasion.Technique, caller evasion.Caller) error {
 	if len(techniques) == 0 {
 		return nil
 	}
 	errs := evasion.ApplyAll(techniques, caller)
-	if len(errs) > 0 {
-		for name, err := range errs {
-			fmt.Fprintf(os.Stderr, "evasion %s: %v\n", name, err)
-		}
+	if len(errs) == 0 {
+		return nil
 	}
-	return nil
+	parts := make([]string, 0, len(errs))
+	for name, err := range errs {
+		parts = append(parts, fmt.Sprintf("%s: %v", name, err))
+	}
+	return fmt.Errorf("evasion failures: %s", strings.Join(parts, "; "))
 }
 
 // PatchDefenses applies all available evasion patches.

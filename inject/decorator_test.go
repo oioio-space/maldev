@@ -80,10 +80,10 @@ func TestWithXOR_RandomKey(t *testing.T) {
 	err := wrapped.Inject(sc)
 	require.NoError(t, err)
 	assert.True(t, mock.called)
-	// The inner injector should receive XOR-encoded bytes, which differ
-	// from the original (except in the astronomically unlikely case the
-	// random key is 0x00).
-	assert.NotEqual(t, sc, mock.shellcode, "shellcode should be XOR-encoded before reaching inner injector")
+	// The inner injector receives XOR-encoded bytes (same length).
+	// With a random key there's a 1/256 chance key==0 (no change), so
+	// we only assert length equality — the fixed-key test below covers
+	// correctness.
 	assert.Equal(t, len(sc), len(mock.shellcode))
 }
 

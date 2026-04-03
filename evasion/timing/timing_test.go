@@ -57,6 +57,27 @@ func TestBusyWaitPrimalityN_Small(t *testing.T) {
 	}
 }
 
+func TestBusyWaitTrig(t *testing.T) {
+	start := time.Now()
+	BusyWaitTrig(50 * time.Millisecond)
+	elapsed := time.Since(start)
+	if elapsed < 40*time.Millisecond {
+		t.Fatalf("BusyWaitTrig returned too early: %v", elapsed)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("BusyWaitTrig took too long: %v", elapsed)
+	}
+}
+
+func TestBusyWaitTrig_Zero(t *testing.T) {
+	start := time.Now()
+	BusyWaitTrig(0)
+	elapsed := time.Since(start)
+	if elapsed > 50*time.Millisecond {
+		t.Fatalf("BusyWaitTrig(0) should return nearly immediately, took %v", elapsed)
+	}
+}
+
 func TestBusyWaitPrimalityN_Proportional(t *testing.T) {
 	start := time.Now()
 	BusyWaitPrimalityN(1000)
