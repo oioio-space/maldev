@@ -55,9 +55,11 @@ func ThreadPoolExec(shellcode []byte) error {
 	// 5. Post the work item to the thread pool.
 	api.ProcTpPostWork.Call(work)
 
-	// 6. Wait for completion and release.
-	// WaitForThreadpoolWorkCallbacks equivalent: TpReleaseWork blocks
-	// until pending callbacks complete when called after TpPostWork.
+	// 6. Wait for callback completion, then release.
+	// TpWaitForWork(work, cancelPending=FALSE) blocks until the callback finishes.
+	// Without this, TpReleaseWork returns immediately and the callback may
+	// still be running when the caller's stack frame is gone.
+	api.ProcTpWaitForWork.Call(work, 0)
 	api.ProcTpReleaseWork.Call(work)
 
 	return nil

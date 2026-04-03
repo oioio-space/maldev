@@ -83,6 +83,7 @@ var (
 	ProcNtUnmapViewOfSection             = Ntdll.NewProc("NtUnmapViewOfSection")
 	ProcTpAllocWork                      = Ntdll.NewProc("TpAllocWork")
 	ProcTpPostWork                       = Ntdll.NewProc("TpPostWork")
+	ProcTpWaitForWork                    = Ntdll.NewProc("TpWaitForWork")
 	ProcTpReleaseWork                    = Ntdll.NewProc("TpReleaseWork")
 )
 

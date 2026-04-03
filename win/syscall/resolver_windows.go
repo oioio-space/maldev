@@ -4,6 +4,7 @@ package syscall
 
 import (
 	"fmt"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -176,21 +177,22 @@ func (c *ChainResolver) Resolve(name string) (uint16, error) {
 // Falls back gracefully when the function name cannot be hashed or found.
 // Composable via Chain() with other resolvers.
 type HashGateResolver struct {
-	ntdllBase uintptr // cached ntdll base address (0 = not yet resolved)
+	once      sync.Once
+	ntdllBase uintptr // cached ntdll base address
+	initErr   error
 }
 
 // NewHashGate creates a HashGateResolver. The ntdll base address is
-// resolved lazily on first Resolve() call and cached.
+// resolved lazily on first Resolve() call and cached (thread-safe via sync.Once).
 func NewHashGate() *HashGateResolver { return &HashGateResolver{} }
 
 func (r *HashGateResolver) Resolve(name string) (uint16, error) {
-	// Lazy-init ntdll base address via PEB walk.
-	if r.ntdllBase == 0 {
-		base, err := pebModuleByHash(hashNtdll)
-		if err != nil {
-			return 0, fmt.Errorf("HashGate: ntdll not found via PEB walk: %w", err)
-		}
-		r.ntdllBase = base
+	// Thread-safe lazy init of ntdll base address via PEB walk.
+	r.once.Do(func() {
+		r.ntdllBase, r.initErr = pebModuleByHash(hashNtdll)
+	})
+	if r.initErr != nil {
+		return 0, fmt.Errorf("HashGate: ntdll not found via PEB walk: %w", r.initErr)
 	}
 
 	// Hash the function name (ROR13, no null terminator) and resolve via PE exports.

