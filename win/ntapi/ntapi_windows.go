@@ -1,13 +1,5 @@
 //go:build windows
 
-// Package ntapi provides typed wrappers for Native API functions (ntdll.dll).
-// These bypass kernel32.dll hooks but are still hookable at the ntdll level.
-//
-// For full hook bypass, use win/syscall/direct or win/syscall/indirect.
-//
-// Usage:
-//
-//	addr, err := ntapi.NtAllocateVirtualMemory(handle, 0, size, MEM_COMMIT, PAGE_RW)
 package ntapi
 
 import (

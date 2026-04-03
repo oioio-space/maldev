@@ -15,9 +15,16 @@ func BusyWait(d time.Duration) {
 
 // BusyWaitPrimality burns CPU using primality testing (harder to detect than simple loop).
 // Tests ~500,000 numbers for primality — takes approximately 200ms on modern hardware.
+// For custom iteration counts, use BusyWaitPrimalityN.
 func BusyWaitPrimality() {
+	BusyWaitPrimalityN(500_000)
+}
+
+// BusyWaitPrimalityN is like BusyWaitPrimality but with a configurable
+// iteration count. Higher values burn more CPU time.
+func BusyWaitPrimalityN(iterations int) {
 	count := 0
-	for n := 2; count < 500000; n++ {
+	for n := 2; count < iterations; n++ {
 		isPrime := true
 		for i := 2; i*i <= n; i++ {
 			if n%i == 0 {

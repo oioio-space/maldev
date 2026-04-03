@@ -38,3 +38,35 @@ func TestBusyWaitPrimality(t *testing.T) {
 		t.Fatalf("BusyWaitPrimality took too long: %v", elapsed)
 	}
 }
+
+func TestBusyWaitPrimalityN_Zero(t *testing.T) {
+	start := time.Now()
+	BusyWaitPrimalityN(0)
+	elapsed := time.Since(start)
+	if elapsed > 10*time.Millisecond {
+		t.Fatalf("BusyWaitPrimalityN(0) should return immediately, took %v", elapsed)
+	}
+}
+
+func TestBusyWaitPrimalityN_Small(t *testing.T) {
+	start := time.Now()
+	BusyWaitPrimalityN(100)
+	elapsed := time.Since(start)
+	if elapsed > 5*time.Second {
+		t.Fatalf("BusyWaitPrimalityN(100) took too long: %v", elapsed)
+	}
+}
+
+func TestBusyWaitPrimalityN_Proportional(t *testing.T) {
+	start := time.Now()
+	BusyWaitPrimalityN(1000)
+	small := time.Since(start)
+
+	start = time.Now()
+	BusyWaitPrimalityN(50000)
+	large := time.Since(start)
+
+	if large <= small {
+		t.Fatalf("expected BusyWaitPrimalityN(50000) > BusyWaitPrimalityN(1000), got %v <= %v", large, small)
+	}
+}

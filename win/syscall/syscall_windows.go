@@ -1,22 +1,5 @@
 //go:build windows
 
-// Package syscall provides multiple strategies for invoking Windows syscalls,
-// from standard WinAPI calls to stealthy direct/indirect syscall techniques.
-//
-// # Choosing a method
-//
-//	Environment without EDR:       MethodWinAPI (standard, via kernel32/advapi32)
-//	EDR hooks kernel32:            MethodNativeAPI (via ntdll NtXxx)
-//	EDR hooks ntdll:               MethodDirect + resolver.NewHellsGate()
-//	EDR with call-stack analysis:  MethodIndirect + resolver.Chain(HellsGate, Tartarus)
-//
-// # Detection comparison
-//
-//	Method       Hook kernel32  Hook ntdll  Memory scan  Stack analysis
-//	WinAPI           X              X            -              -
-//	NativeAPI        OK             X            -              -
-//	Direct           OK             OK           !              -
-//	Indirect         OK             OK           OK             OK
 package syscall
 
 import (

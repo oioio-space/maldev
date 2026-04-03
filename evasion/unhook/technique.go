@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/oioio-space/maldev/evasion"
-	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
 // Classic returns a Technique that restores the first 5 bytes of a single
@@ -124,8 +123,7 @@ func (t classicTechnique) Name() string { return fmt.Sprintf("unhook:Classic(%s)
 // Apply routes through the Caller for NtProtectVirtualMemory when non-nil,
 // falling back to standard WinAPI when nil.
 func (t classicTechnique) Apply(caller evasion.Caller) error {
-	c, _ := caller.(*wsyscall.Caller)
-	return ClassicUnhook(t.funcName, c)
+	return ClassicUnhook(t.funcName, evasion.AsCaller(caller))
 }
 
 // fullTechnique implements evasion.Technique for FullUnhook.
@@ -136,8 +134,7 @@ func (fullTechnique) Name() string { return "unhook:Full" }
 // Apply routes through the Caller for NtProtectVirtualMemory/NtWriteVirtualMemory
 // when non-nil, falling back to standard WinAPI when nil.
 func (fullTechnique) Apply(caller evasion.Caller) error {
-	c, _ := caller.(*wsyscall.Caller)
-	return FullUnhook(c)
+	return FullUnhook(evasion.AsCaller(caller))
 }
 
 // perunTechnique implements evasion.Technique for PerunUnhook.
@@ -151,9 +148,6 @@ func (t perunTechnique) Name() string { return fmt.Sprintf("unhook:Perun(%s)", t
 // Apply routes through the Caller for NtProtectVirtualMemory/NtWriteVirtualMemory
 // when non-nil, falling back to standard WinAPI when nil.
 //
-// Note: PerunUnhook hardcodes notepad.exe internally. The target field on this
-// struct documents intent but does not yet influence which process is spawned.
 func (t perunTechnique) Apply(caller evasion.Caller) error {
-	c, _ := caller.(*wsyscall.Caller)
-	return PerunUnhook(c)
+	return PerunUnhookTarget(t.target, evasion.AsCaller(caller))
 }

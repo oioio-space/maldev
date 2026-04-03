@@ -20,9 +20,13 @@ const (
 	// MethodProcessHollowing is deprecated: use MethodThreadHijack.
 	// This is actually Thread Execution Hijacking (T1055.003), not PE hollowing.
 	MethodProcessHollowing = MethodThreadHijack
-	MethodRtlCreateUserThread    Method = "rtl"
-	MethodDirectSyscall          Method = "syscall"
-	MethodCreateFiber            Method = "fiber"
+	MethodRtlCreateUserThread Method = "rtl"
+
+	// Deprecated: MethodDirectSyscall is a legacy path. Use NewWindowsInjector
+	// with SyscallMethod: wsyscall.MethodDirect instead.
+	MethodDirectSyscall Method = "syscall"
+
+	MethodCreateFiber Method = "fiber"
 	MethodEtwpCreateEtwThread    Method = "etwthr"
 	MethodNtQueueApcThreadEx     Method = "apcex"
 )

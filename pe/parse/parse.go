@@ -1,10 +1,3 @@
-// Package parse provides PE file parsing and modification utilities.
-//
-// This wraps the standard library debug/pe package with additional
-// helpers for maldev operations like section enumeration, export
-// resolution, and header manipulation.
-//
-// Platform: Cross-platform (parses Windows PE files on any OS).
 package parse
 
 import (

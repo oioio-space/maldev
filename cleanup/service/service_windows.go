@@ -85,9 +85,17 @@ func SetServiceSecurityDescriptor(hostname string, svc any, secDescStr string) e
 	)
 }
 
+// DefaultHideDACL is the restrictive DACL applied by HideService.
+// It denies most access to interactive, service, and admin users.
+const DefaultHideDACL = "D:(D;;DCWPDTSD;;;IU)(D;;DCWPDTSD;;;SU)(D;;DCWPDTSD;;;BA)(A;;CCSWLOCRRC;;;IU)(A;;CCSWLOCRRC;;;SU)(A;;CCSWRPWPDTLOCRRC;;;SY)(A;;CCDCSWRPWPDTLOCRSDRCWDWO;;;BA)"
+
+// DefaultUnhideDACL is the standard DACL restored by UnHideService.
+const DefaultUnhideDACL = "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)S:(AU;FA;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;WD)"
+
 // HideService hides a Windows service by applying a restrictive DACL.
+// Uses DefaultHideDACL. For a custom DACL, call SetServiceSecurityDescriptor directly.
 func HideService(mode Mode, hostname string, svc any) (string, error) {
-	secDescStr := "D:(D;;DCWPDTSD;;;IU)(D;;DCWPDTSD;;;SU)(D;;DCWPDTSD;;;BA)(A;;CCSWLOCRRC;;;IU)(A;;CCSWLOCRRC;;;SU)(A;;CCSWRPWPDTLOCRRC;;;SY)(A;;CCDCSWRPWPDTLOCRSDRCWDWO;;;BA)"
+	secDescStr := DefaultHideDACL
 	switch mode {
 	case Native:
 		return "", SetServiceSecurityDescriptor(hostname, svc, secDescStr)
@@ -99,8 +107,9 @@ func HideService(mode Mode, hostname string, svc any) (string, error) {
 }
 
 // UnHideService restores the default DACL on a Windows service.
+// Uses DefaultUnhideDACL. For a custom DACL, call SetServiceSecurityDescriptor directly.
 func UnHideService(mode Mode, hostname string, svc any) (string, error) {
-	secDescStr := "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)S:(AU;FA;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;WD)"
+	secDescStr := DefaultUnhideDACL
 	switch mode {
 	case Native:
 		return "", SetServiceSecurityDescriptor(hostname, svc, secDescStr)

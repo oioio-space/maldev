@@ -13,11 +13,11 @@ import (
 )
 
 // applyEvasion applies the provided evasion techniques on Windows.
-func applyEvasion(techniques []evasion.Technique) error {
+func applyEvasion(techniques []evasion.Technique, caller evasion.Caller) error {
 	if len(techniques) == 0 {
 		return nil
 	}
-	errs := evasion.ApplyAll(techniques, nil)
+	errs := evasion.ApplyAll(techniques, caller)
 	if len(errs) > 0 {
 		for name, err := range errs {
 			fmt.Fprintf(os.Stderr, "evasion %s: %v\n", name, err)

