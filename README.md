@@ -49,18 +49,18 @@ err := amsi.PatchAll(nil) // patch AMSI + bypass session init
 
 | Layer | Package | Description | MITRE | Platform |
 |-------|---------|-------------|-------|----------|
-| Crypto | `crypto` | AES-256-GCM, ChaCha20-Poly1305, RC4, XOR | -- | Cross-platform |
-| Crypto | `encode` | Base64, Base64URL, UTF-16LE, ROT13, PowerShell | -- | Cross-platform |
-| Crypto | `hash` | MD5, SHA-256, SHA-512, ROR13 (API hashing) | -- | Cross-platform |
-| Crypto | `random` | Cryptographic random strings, bytes, integers | -- | Cross-platform |
-| Win | `win/api` | DLL handles, procedure refs, memory patching | -- | Windows |
-| Win | `win/syscall` | Pluggable syscall (WinAPI/Direct/Indirect) | -- | Windows |
-| Win | `win/ntapi` | Type-safe NT function wrappers | -- | Windows |
-| Win | `win/token` | Token manipulation, privilege management | -- | Windows |
-| Win | `win/privilege` | Admin detection, RunAs, elevation helpers | -- | Windows |
-| Win | `win/impersonate` | Thread impersonation with automatic revert | -- | Windows |
-| Win | `win/domain` | Domain membership queries | -- | Windows |
-| Win | `win/version` | OS version detection, CVE checks | -- | Windows |
+| Crypto | [`crypto`](docs/crypto.md) | AES-256-GCM, ChaCha20-Poly1305, RC4, XOR | -- | Cross-platform |
+| Crypto | [`encode`](docs/crypto.md) | Base64, Base64URL, UTF-16LE, ROT13, PowerShell | -- | Cross-platform |
+| Crypto | [`hash`](docs/crypto.md) | MD5, SHA-256, SHA-512, ROR13 (API hashing) | -- | Cross-platform |
+| Crypto | [`random`](docs/crypto.md) | Cryptographic random strings, bytes, integers | -- | Cross-platform |
+| Win | [`win/api`](docs/win.md) | DLL handles, procedure refs, memory patching | -- | Windows |
+| Win | [`win/syscall`](docs/syscalls.md) | Pluggable syscall (WinAPI/Direct/Indirect) | -- | Windows |
+| Win | [`win/ntapi`](docs/win.md) | Type-safe NT function wrappers | -- | Windows |
+| Win | [`win/token`](docs/win.md) | Token manipulation, privilege management | -- | Windows |
+| Win | [`win/privilege`](docs/win.md) | Admin detection, RunAs, elevation helpers | -- | Windows |
+| Win | [`win/impersonate`](docs/win.md) | Thread impersonation with automatic revert | -- | Windows |
+| Win | [`win/domain`](docs/win.md) | Domain membership queries | -- | Windows |
+| Win | [`win/version`](docs/win.md) | OS version detection, CVE checks | -- | Windows |
 | Evasion | [`evasion/amsi`](docs/evasion.md#amsi-bypass-evasionamsi) | AMSI memory patching | T1562.001 | Windows |
 | Evasion | [`evasion/etw`](docs/evasion.md#etw-bypass-evasionetw) | ETW event write patching | T1562.001 | Windows |
 | Evasion | [`evasion/unhook`](docs/evasion.md#ntdll-unhooking-evasionunhook) | ntdll.dll restoration | T1562.001 | Windows |
@@ -74,25 +74,25 @@ err := amsi.PatchAll(nil) // patch AMSI + bypass session init
 | Evasion | [`evasion/timing`](docs/evasion.md) | CPU-burning delays | T1497.003 | Cross-platform |
 | Evasion | [`evasion/preset`](docs/evasion.md#composable-evasion-evasionpreset) | Composable presets (Minimal/Stealth/Aggressive) | -- | Windows |
 | Injection | [`inject`](docs/injection.md) | 8 Windows + 5 Linux methods | T1055 | Mixed |
-| Process | `process/enum` | Cross-platform process enumeration | T1057 | Cross-platform |
-| Process | `process/session` | Cross-session execution | T1134.002 | Windows |
-| PE | `pe/parse` | PE file parsing (sections, exports, imports) | -- | Cross-platform |
-| PE | `pe/morph` | UPX header mutation | T1027.002 | Cross-platform |
-| PE | `pe/srdi` | DLL-to-shellcode conversion (sRDI) | T1055.001 | Cross-platform |
-| Cleanup | `cleanup/selfdelete` | Self-deletion (NTFS ADS, script, reboot) | T1070.004 | Windows |
-| Cleanup | `cleanup/service` | Service hiding via DACL manipulation | T1564 | Windows |
-| Cleanup | `cleanup/wipe` | Multi-pass random overwrite + deletion | T1070.004 | Cross-platform |
-| Cleanup | `cleanup/timestomp` | File timestamp manipulation | T1070.006 | Cross-platform |
+| Process | [`process/enum`](docs/process.md) | Cross-platform process enumeration | T1057 | Cross-platform |
+| Process | [`process/session`](docs/process.md) | Cross-session execution | T1134.002 | Windows |
+| PE | [`pe/parse`](docs/pe.md) | PE file parsing (sections, exports, imports) | -- | Cross-platform |
+| PE | [`pe/morph`](docs/pe.md) | UPX header mutation | T1027.002 | Cross-platform |
+| PE | [`pe/srdi`](docs/pe.md) | DLL-to-shellcode conversion (sRDI) | T1055.001 | Cross-platform |
+| Cleanup | [`cleanup/selfdelete`](docs/cleanup.md) | Self-deletion (NTFS ADS, script, reboot) | T1070.004 | Windows |
+| Cleanup | [`cleanup/service`](docs/cleanup.md) | Service hiding via DACL manipulation | T1564 | Windows |
+| Cleanup | [`cleanup/wipe`](docs/cleanup.md) | Multi-pass random overwrite + deletion | T1070.004 | Cross-platform |
+| Cleanup | [`cleanup/timestomp`](docs/cleanup.md) | File timestamp manipulation | T1070.006 | Cross-platform |
 | C2 | [`c2/transport`](docs/c2.md) | TCP/TLS transport with cert pinning | -- | Cross-platform |
 | C2 | [`c2/shell`](docs/c2.md) | Reverse shell with reconnection + evasion | T1059 | Cross-platform |
 | C2 | [`c2/meterpreter`](docs/c2.md) | Meterpreter stager (TCP/HTTP/HTTPS) | T1059 | Cross-platform |
-| C2 | `c2/cert` | Self-signed X.509 certificate generation | -- | Cross-platform |
-| Privilege | `uacbypass` | FODHelper, SLUI, SilentCleanup, EventVwr | T1548.002 | Windows |
-| Exploit | `exploit/cve202430088` | Kernel TOCTOU race for LPE to SYSTEM | CVE-2024-30088 | Windows |
-| System | `system/drive` | Drive enumeration, monitoring, volume info | -- | Windows |
-| System | `system/network` | IP address retrieval, local address detection | -- | Cross-platform |
-| System | `system/folder` | Windows special folder paths (CSIDL) | -- | Windows |
-| System | `system/ui` | Message boxes and system sounds | -- | Windows |
+| C2 | [`c2/cert`](docs/c2.md) | Self-signed X.509 certificate generation | -- | Cross-platform |
+| Privilege | [`uacbypass`](docs/privilege.md) | FODHelper, SLUI, SilentCleanup, EventVwr | T1548.002 | Windows |
+| Exploit | [`exploit/cve202430088`](docs/privilege.md) | Kernel TOCTOU race for LPE to SYSTEM | CVE-2024-30088 | Windows |
+| System | [`system/drive`](docs/system.md) | Drive enumeration, monitoring, volume info | -- | Windows |
+| System | [`system/network`](docs/system.md) | IP address retrieval, local address detection | -- | Cross-platform |
+| System | [`system/folder`](docs/system.md) | Windows special folder paths (CSIDL) | -- | Windows |
+| System | [`system/ui`](docs/system.md) | Message boxes and system sounds | -- | Windows |
 
 ## Build
 
