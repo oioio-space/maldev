@@ -172,10 +172,14 @@ Use `github.com/stretchr/testify` consistently:
 Before marking any task as done, verify:
 
 ```
-[ ] Every new exported symbol has at least one test
+[ ] LIST every new/modified exported symbol explicitly (function, type, method, const)
+[ ] For EACH symbol on that list, name the test that covers it
+[ ] If no test exists for a symbol, write one NOW — do not defer
 [ ] Every new unexported helper used by exported code is tested indirectly
 [ ] go test ./affected/package... passes
 [ ] GOOS=linux go build ./affected/package... compiles (if cross-platform)
 ```
+
+**The test gap that always slips through**: you write a new method (e.g., `Detach()`, `FindHandleByType()`), it compiles, existing tests pass, so you move on. But NO test actually calls the new method. The fix: explicitly enumerate every new symbol and match it to a test name. If you can't name the test, it doesn't exist.
 
 If any check fails, write the missing tests before reporting completion.

@@ -68,3 +68,35 @@ func TestNtWriteVirtualMemoryEmpty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uintptr(0), written)
 }
+
+func TestEnumSystemHandles(t *testing.T) {
+	buf, count, err := EnumSystemHandles(0)
+	require.NoError(t, err)
+	defer FreeHandleBuffer(buf)
+
+	assert.Greater(t, count, uintptr(0), "system must have at least one open handle")
+}
+
+func TestGetKernelPointerByHandle(t *testing.T) {
+	var tok windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &tok)
+	require.NoError(t, err)
+	defer tok.Close()
+
+	// The function must locate the handle without error. The kernel pointer
+	// itself may be zero when the OS restricts kernel address exposure.
+	_, err = GetKernelPointerByHandle(windows.Handle(tok))
+	require.NoError(t, err)
+}
+
+func TestFindHandleByType(t *testing.T) {
+	var tok windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &tok)
+	require.NoError(t, err)
+	defer tok.Close()
+
+	currentPID := windows.GetCurrentProcessId()
+	handleVal, err := FindHandleByType(currentPID, windows.Handle(tok))
+	require.NoError(t, err)
+	assert.NotZero(t, handleVal, "FindHandleByType must return a non-zero handle value")
+}

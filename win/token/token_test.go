@@ -50,3 +50,18 @@ func TestTokenIntegrityLevel(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, level, "expected non-empty integrity level string")
 }
+
+func TestDetach(t *testing.T) {
+	var rawToken windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &rawToken)
+	require.NoError(t, err, "OpenProcessToken failed")
+
+	tok := New(rawToken, Primary)
+
+	detached := tok.Detach()
+	assert.NotZero(t, detached, "Detach must return a non-zero handle")
+	assert.Zero(t, tok.Token(), "Token() must return 0 after Detach")
+
+	// Close the detached handle manually to avoid leaking.
+	windows.CloseHandle(windows.Handle(detached))
+}
