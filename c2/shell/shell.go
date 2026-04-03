@@ -181,13 +181,14 @@ func (s *Shell) reconnectLoop(ctx context.Context) error {
 		case <-s.sm.stopCh:
 			return nil
 		case <-time.After(waitTime):
-			if s.shouldStop(retries) {
-				return fmt.Errorf("max retries (%d) exceeded", s.config.MaxRetries)
-			}
-
 			if err := s.attemptSession(ctx); err != nil {
 				retries++
 				s.log.Warn("connection attempt failed", "attempt", retries, "error", err)
+
+				if s.shouldStop(retries) {
+					return fmt.Errorf("max retries (%d) exceeded", s.config.MaxRetries)
+				}
+
 				currentWait = currentWait * 2
 				if currentWait > maxWait {
 					currentWait = maxWait

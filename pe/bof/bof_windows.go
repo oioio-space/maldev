@@ -163,10 +163,15 @@ func (b *BOF) Execute(args []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	// 6. Call entry function.
+	// 6. Call entry function with BOF convention: go(char *data, int len).
 	entryAddr := execMem + uintptr(entryOffset)
+	var argPtr, argLen uintptr
+	if len(args) > 0 {
+		argPtr = uintptr(unsafe.Pointer(&args[0]))
+		argLen = uintptr(len(args))
+	}
 	fn := func() {
-		syscallN(entryAddr, 0, 0)
+		syscallN(entryAddr, argPtr, argLen)
 	}
 	fn()
 

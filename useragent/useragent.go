@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"math/big"
 	"strings"
+	"sync"
 )
 
 //go:embed useragents.json
@@ -24,13 +25,19 @@ func (e *Entry) String() string { return e.Text }
 // DB is a collection of User-Agent entries.
 type DB []*Entry
 
-// Load parses the embedded useragents.json and returns a DB.
+var (
+	cachedDB   DB
+	cachedErr  error
+	loadOnce   sync.Once
+)
+
+// Load parses the embedded useragents.json and returns a cached DB.
+// The JSON is parsed only once; subsequent calls return the same DB.
 func Load() (DB, error) {
-	var db DB
-	if err := json.Unmarshal(embeddedJSON, &db); err != nil {
-		return nil, err
-	}
-	return db, nil
+	loadOnce.Do(func() {
+		cachedErr = json.Unmarshal(embeddedJSON, &cachedDB)
+	})
+	return cachedDB, cachedErr
 }
 
 // Random returns a random Entry from the database.

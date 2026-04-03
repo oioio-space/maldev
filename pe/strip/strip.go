@@ -7,10 +7,16 @@ import (
 )
 
 // SetTimestamp overwrites IMAGE_FILE_HEADER.TimeDateStamp (at PE offset + 8)
-// with the Unix epoch representation of t.
+// with the Unix epoch representation of t. Returns peData unmodified if too short.
 func SetTimestamp(peData []byte, t time.Time) []byte {
+	if len(peData) < 0x40 {
+		return peData
+	}
 	peOffset := binary.LittleEndian.Uint32(peData[0x3C:])
-	tsOffset := peOffset + 4 + 4 // PE sig(4) + Machine(2) + NumberOfSections(2) = +8, but TimeDateStamp is at COFF+4
+	tsOffset := peOffset + 4 + 4
+	if int(tsOffset)+4 > len(peData) {
+		return peData
+	}
 	binary.LittleEndian.PutUint32(peData[tsOffset:], uint32(t.Unix()))
 	return peData
 }
@@ -49,11 +55,14 @@ func WipePclntab(peData []byte) []byte {
 // Section names in PE headers are 8-byte null-padded ASCII fields.
 // Example: map[string]string{".gopclntab": ".rdata2", ".text": ".code"}
 func RenameSections(peData []byte, renames map[string]string) []byte {
-	if len(renames) == 0 {
+	if len(renames) == 0 || len(peData) < 0x40 {
 		return peData
 	}
 
 	peOffset := binary.LittleEndian.Uint32(peData[0x3C:])
+	if int(peOffset)+24 > len(peData) {
+		return peData
+	}
 	coffStart := peOffset + 4
 	numSections := binary.LittleEndian.Uint16(peData[coffStart+2:])
 	sizeOfOptHdr := binary.LittleEndian.Uint16(peData[coffStart+16:])

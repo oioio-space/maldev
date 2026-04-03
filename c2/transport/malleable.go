@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 )
@@ -227,10 +228,14 @@ func (m *MalleableTransport) Close() error {
 	return nil
 }
 
-// RemoteAddr returns the remote address. For HTTP-based transport this
-// returns the parsed server address.
+// RemoteAddr returns the remote address. Handles both full URLs
+// (https://host:port) and bare host:port addresses.
 func (m *MalleableTransport) RemoteAddr() net.Addr {
-	addr, err := net.ResolveTCPAddr("tcp", m.address)
+	host := m.address
+	if u, err := url.Parse(m.address); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	addr, err := net.ResolveTCPAddr("tcp", host)
 	if err != nil {
 		return nil
 	}
