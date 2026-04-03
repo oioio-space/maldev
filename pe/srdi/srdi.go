@@ -40,8 +40,11 @@ func DefaultConfig() *Config {
 }
 
 // ConvertDLL converts a DLL file into position-independent shellcode.
-// The resulting shellcode can be injected into any process and will
-// reflectively load the DLL from memory.
+//
+// WARNING: The reflective loader is not yet implemented. The generated
+// shellcode contains a placeholder infinite loop (jmp $) and will hang
+// the target thread. Do not use in production. This API exists to
+// reserve the package structure for future implementation.
 func ConvertDLL(dllPath string, cfg *Config) ([]byte, error) {
 	if cfg == nil {
 		cfg = DefaultConfig()

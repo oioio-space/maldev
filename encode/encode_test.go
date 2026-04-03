@@ -31,6 +31,18 @@ func TestBase64URLEncode(t *testing.T) {
 	}
 }
 
+func TestBase64URLRoundtrip(t *testing.T) {
+	data := []byte{0xfb, 0xff, 0xfe, 0x00, 0x01, 0x80}
+	encoded := Base64URLEncode(data)
+	decoded, err := Base64URLDecode(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(decoded) != string(data) {
+		t.Fatalf("Base64URL round-trip failed: got %v, want %v", decoded, data)
+	}
+}
+
 func TestToUTF16LE(t *testing.T) {
 	b := ToUTF16LE("AB")
 	// A=0x41, B=0x42 in UTF-16LE: 41 00 42 00

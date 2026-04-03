@@ -296,11 +296,11 @@ func Detect(cfg Config) (string, error) {
 	checks := cfg.checks()
 	for _, vendor := range cfg.vendors() {
 		if checks&CheckRegistry != 0 && len(vendor.Keys) > 0 {
-			if found, _, err := DetectRegKey(vendor.Keys); err != nil {
-				return "", fmt.Errorf("registry check for %s: %w", vendor.Name, err)
-			} else if found {
+			if found, _, err := DetectRegKey(vendor.Keys); err == nil && found {
 				return vendor.Name, nil
 			}
+			// Registry errors (permission denied, locked hive) are silently skipped
+			// to avoid aborting the entire scan on a single inaccessible key.
 		}
 		if checks&CheckFiles != 0 && len(vendor.Files) > 0 {
 			if found, _ := DetectFiles(vendor.Files); found {
@@ -308,16 +308,12 @@ func Detect(cfg Config) (string, error) {
 			}
 		}
 		if checks&CheckNIC != 0 && len(vendor.Nic) > 0 {
-			if found, _, err := DetectNic(vendor.Nic); err != nil {
-				return "", fmt.Errorf("NIC check for %s: %w", vendor.Name, err)
-			} else if found {
+			if found, _, err := DetectNic(vendor.Nic); err == nil && found {
 				return vendor.Name, nil
 			}
 		}
 		if checks&CheckProcess != 0 && len(vendor.Proc) > 0 {
-			if found, _, err := DetectProcess(vendor.Proc); err != nil {
-				return "", fmt.Errorf("process check for %s: %w", vendor.Name, err)
-			} else if found {
+			if found, _, err := DetectProcess(vendor.Proc); err == nil && found {
 				return vendor.Name, nil
 			}
 		}
@@ -342,9 +338,7 @@ func DetectAll(cfg Config) ([]string, error) {
 			continue
 		}
 		if checks&CheckRegistry != 0 && len(vendor.Keys) > 0 {
-			if found, _, err := DetectRegKey(vendor.Keys); err != nil {
-				return results, fmt.Errorf("registry check for %s: %w", vendor.Name, err)
-			} else if found {
+			if found, _, err := DetectRegKey(vendor.Keys); err == nil && found {
 				seen[vendor.Name] = true
 				results = append(results, vendor.Name)
 				continue

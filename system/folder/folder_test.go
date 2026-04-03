@@ -31,8 +31,19 @@ func TestGetFolderProgramFiles(t *testing.T) {
 	assert.NotEmpty(t, path, "CSIDL_PROGRAM_FILES should return a non-empty path")
 }
 
+func TestGetFolderAppData(t *testing.T) {
+	path := Get(CSIDL_APPDATA, false)
+	assert.NotEmpty(t, path, "CSIDL_APPDATA should return a non-empty path")
+	assert.True(t, strings.Contains(strings.ToLower(path), "appdata"),
+		"expected path to contain 'appdata', got: %s", path)
+}
+
+func TestGetFolderStartup(t *testing.T) {
+	path := Get(CSIDL_STARTUP, false)
+	assert.NotEmpty(t, path, "CSIDL_STARTUP should return a non-empty path")
+}
+
 func TestGetFolderInvalidCSIDL(t *testing.T) {
-	// An invalid CSIDL value should return an empty string, not panic.
 	path := Get(CSIDL(0xFF), false)
 	assert.Empty(t, path)
 }

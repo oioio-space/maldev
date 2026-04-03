@@ -12,7 +12,10 @@ import (
 // CopyFromFull copies all three timestamps (creation, access, modification)
 // from src to dst using Windows-native SetFileTime.
 func CopyFromFull(src, dst string) error {
-	srcPath, _ := windows.UTF16PtrFromString(src)
+	srcPath, err := windows.UTF16PtrFromString(src)
+	if err != nil {
+		return fmt.Errorf("encode src path: %w", err)
+	}
 	hSrc, err := windows.CreateFile(srcPath, windows.GENERIC_READ, windows.FILE_SHARE_READ, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
 		return fmt.Errorf("open source: %w", err)
@@ -24,7 +27,10 @@ func CopyFromFull(src, dst string) error {
 		return fmt.Errorf("get file time: %w", err)
 	}
 
-	dstPath, _ := windows.UTF16PtrFromString(dst)
+	dstPath, err := windows.UTF16PtrFromString(dst)
+	if err != nil {
+		return fmt.Errorf("encode dst path: %w", err)
+	}
 	hDst, err := windows.CreateFile(dstPath, windows.FILE_WRITE_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
 		return fmt.Errorf("open destination: %w", err)
@@ -39,7 +45,10 @@ func CopyFromFull(src, dst string) error {
 
 // SetFull sets creation, access, and modification times on a file.
 func SetFull(path string, ctime, atime, mtime time.Time) error {
-	p, _ := windows.UTF16PtrFromString(path)
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return fmt.Errorf("encode path: %w", err)
+	}
 	h, err := windows.CreateFile(p, windows.FILE_WRITE_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)

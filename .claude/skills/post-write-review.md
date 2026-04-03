@@ -51,6 +51,31 @@ PARAMETRIZATION:
   [ ] No hardcoded timeouts that users might want to change
   [ ] No hardcoded paths/strings that vary per operation
   [ ] Config structs have sensible zero-value defaults
+
+CALLER SYSCALL:
+  [ ] Any NT function call (NtXxx, ZwXxx) should accept optional *wsyscall.Caller
+  [ ] If Caller is nil, fall back to standard api.Proc*.Call() or windows.Xxx()
+  [ ] Pattern: if caller != nil { caller.Call("NtXxx", ...) } else { api.ProcNtXxx.Call(...) }
+  [ ] Kernel32-only APIs (GetLogicalDrives, SetProcessMitigationPolicy, Fiber*) CANNOT use Caller — skip
+  [ ] Functions called in tight loops (race conditions, polling) benefit most from Caller
+  [ ] Security-sensitive calls (OpenProcess, CreateThread, VirtualAlloc) should route through Caller
+
+REUSABILITY:
+  [ ] Any function useful beyond this package belongs in a shared package
+  [ ] Handle enumeration → win/ntapi, token ops → win/token, injection → inject/
+  [ ] Check: could another package need this? If yes, extract now — not later
+  [ ] No duplicated logic across packages (DRY across the module)
+  [ ] Dead code in win/api or other shared packages? Remove it
+
+PACKAGE DESIGN:
+  [ ] Main type does not repeat package name (drive.Info not drive.Drive)
+  [ ] Manager/collection types named by purpose (Watcher not Drives)
+  [ ] String() on Windows enums returns MSDN names (DRIVE_FIXED not "fixed")
+  [ ] No chan any — use typed Event structs
+  [ ] OS-native IDs as keys (Volume GUID not MD5 hash)
+  [ ] Watchers detect both additions AND removals
+  [ ] Poll-based watchers use fast-path check before expensive enumeration
+  [ ] Internal state is private (not exported maps)
 ```
 
 ### Report Format

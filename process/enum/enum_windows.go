@@ -32,11 +32,7 @@ func List() ([]Process, error) {
 		return nil, err
 	}
 
-	procs = append(procs, Process{
-		PID:  entry.ProcessID,
-		PPID: entry.ParentProcessID,
-		Name: syscall.UTF16ToString(entry.ExeFile[:]),
-	})
+	procs = append(procs, processFromEntry(&entry))
 
 	for {
 		err := windows.Process32Next(handle, &entry)
@@ -46,12 +42,20 @@ func List() ([]Process, error) {
 			}
 			return procs, err
 		}
-		procs = append(procs, Process{
-			PID:  entry.ProcessID,
-			PPID: entry.ParentProcessID,
-			Name: syscall.UTF16ToString(entry.ExeFile[:]),
-		})
+		procs = append(procs, processFromEntry(&entry))
 	}
 
 	return procs, nil
+}
+
+// processFromEntry converts a ProcessEntry32 to a Process, populating
+// SessionID via ProcessIdToSessionId (silently 0 on failure).
+func processFromEntry(e *windows.ProcessEntry32) Process {
+	p := Process{
+		PID:  e.ProcessID,
+		PPID: e.ParentProcessID,
+		Name: syscall.UTF16ToString(e.ExeFile[:]),
+	}
+	windows.ProcessIdToSessionId(e.ProcessID, &p.SessionID)
+	return p
 }

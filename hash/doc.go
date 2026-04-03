@@ -1,10 +1,25 @@
 // Package hash provides hashing utilities for integrity verification and
-// API hashing including MD5, SHA-256, and ROR13 hash functions.
+// API hashing.
 //
-// Platform: Cross-platform
-// Detection: N/A -- pure hashing utilities with no system interaction.
+// Technique: API hashing (ROR13) for runtime function resolution without
+// exposing plaintext import names to static analysis.
+// MITRE ATT&CK: N/A (utility — no direct system interaction).
+// Detection: N/A — pure hashing operations.
+// Platform: Cross-platform.
 //
-// API hashing (ROR13) can be used to resolve Windows API functions
-// at runtime without embedding plaintext function names, defeating static
-// analysis of import tables.
+// How it works: Standard hash functions (MD5, SHA-1, SHA-256, SHA-512) return
+// lowercase hex strings for easy comparison. ROR13 implements the classic
+// shellcode API hashing algorithm (rotate-right-13 + add) used to resolve
+// Windows API functions at runtime by comparing hashes instead of strings.
+// ROR13Module appends a null terminator before hashing, matching the convention
+// used in shellcode that resolves module names from the PEB.
+//
+// Limitations:
+//   - ROR13 is case-sensitive — callers must match the case used in shellcode.
+//   - MD5 and SHA-1 are cryptographically broken; use SHA-256+ for integrity.
+//
+// Example:
+//
+//	hex := hash.SHA256(payload)
+//	apiHash := hash.ROR13("LoadLibraryA")  // 0xEC0E4E8E
 package hash

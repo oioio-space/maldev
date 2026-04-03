@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/oioio-space/maldev/evasion/antidebug"
 	"github.com/oioio-space/maldev/evasion/antivm"
@@ -160,7 +161,7 @@ func (c *Checker) FakeDomainReachable(ctx context.Context) (bool, int, error) {
 	}
 	timeout := c.cfg.RequestTimeout
 	if timeout == 0 {
-		timeout = 5 * 1e9 // 5s fallback
+		timeout = 5 * time.Second
 	}
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)

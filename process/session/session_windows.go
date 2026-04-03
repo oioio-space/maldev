@@ -40,7 +40,7 @@ func CreateProcessOnActiveSessions(userToken *token.Token, executable string, ar
 	}
 
 	var environmentBlock *uint16
-	ret, _, e1 := api.Userenv.NewProc("CreateEnvironmentBlock").Call(
+	ret, _, e1 := api.ProcCreateEnvironmentBlock.Call(
 		uintptr(unsafe.Pointer(&environmentBlock)),
 		uintptr(userToken.Token()),
 		0,
@@ -70,7 +70,7 @@ func CreateProcessOnActiveSessions(userToken *token.Token, executable string, ar
 	)
 	windows.CloseHandle(pi.Thread)
 	windows.CloseHandle(pi.Process)
-	api.Userenv.NewProc("DestroyEnvironmentBlock").Call(uintptr(unsafe.Pointer(environmentBlock)))
+	api.ProcDestroyEnvironmentBlock.Call(uintptr(unsafe.Pointer(environmentBlock)))
 
 	return err
 }

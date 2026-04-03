@@ -1,212 +1,240 @@
 //go:build windows
 
-// Package drive provides drive detection and monitoring.
 package drive
 
 import (
 	"context"
-	"crypto/md5"
 	"fmt"
 	"time"
 )
 
-// DriveType represents a Windows drive type.
-type DriveType uint32
+// Type represents a Windows drive type (DRIVE_* constants from MSDN).
+type Type uint32
 
-// String returns a human-readable representation of the drive type.
-func (wdt DriveType) String() string {
-	switch wdt {
-	case Unknown:
-		return "unknown"
-	case NoRootDir:
-		return "noRootDir"
-	case Removable:
-		return "removable"
-	case Fixed:
-		return "fixed"
-	case Remote:
-		return "remote"
-	case CDROM:
-		return "cdrom"
-	case RAMDisk:
-		return "ramdisk"
+const (
+	TypeUnknown   Type = 0 // DRIVE_UNKNOWN
+	TypeNoRootDir Type = 1 // DRIVE_NO_ROOT_DIR
+	TypeRemovable Type = 2 // DRIVE_REMOVABLE
+	TypeFixed     Type = 3 // DRIVE_FIXED
+	TypeRemote    Type = 4 // DRIVE_REMOTE
+	TypeCDROM     Type = 5 // DRIVE_CDROM
+	TypeRAMDisk   Type = 6 // DRIVE_RAMDISK
+)
+
+// String returns the MSDN constant name for the drive type.
+func (t Type) String() string {
+	switch t {
+	case TypeUnknown:
+		return "DRIVE_UNKNOWN"
+	case TypeNoRootDir:
+		return "DRIVE_NO_ROOT_DIR"
+	case TypeRemovable:
+		return "DRIVE_REMOVABLE"
+	case TypeFixed:
+		return "DRIVE_FIXED"
+	case TypeRemote:
+		return "DRIVE_REMOTE"
+	case TypeCDROM:
+		return "DRIVE_CDROM"
+	case TypeRAMDisk:
+		return "DRIVE_RAMDISK"
 	default:
-		return ""
+		return fmt.Sprintf("DRIVE_TYPE(%d)", t)
 	}
 }
 
-const (
-	Unknown   DriveType = 0
-	NoRootDir DriveType = 1
-	Removable DriveType = 2
-	Fixed     DriveType = 3
-	Remote    DriveType = 4
-	CDROM     DriveType = 5
-	RAMDisk   DriveType = 6
-)
-
-// VolumeInfo contains volume metadata.
+// VolumeInfo contains volume metadata from GetVolumeInformationW.
 type VolumeInfo struct {
 	Name           string
-	SerialNumber   int
+	SerialNumber   uint32
 	FileSystemName string
 }
 
-// NewVolumeInfo creates a new VolumeInfo.
-func NewVolumeInfo(name string, serialNumber int, fsName string) *VolumeInfo {
-	return &VolumeInfo{
-		Name:           name,
-		SerialNumber:   serialNumber,
-		FileSystemName: fsName,
+// Info represents a detected disk drive. The GUID field is the canonical
+// unique identifier (stable across reboots and letter reassignments).
+type Info struct {
+	Letter     string     // "C:\\"
+	Type       Type       // DRIVE_FIXED, DRIVE_REMOVABLE, etc.
+	Volume     *VolumeInfo
+	GUID       string     // \\?\Volume{...}\ — stable unique ID
+	DevicePath string     // \Device\HarddiskVolumeN
+}
+
+// New creates an Info from a drive letter (e.g., "C:\\").
+func New(letter string) (*Info, error) {
+	vol, err := VolumeOf(letter)
+	if err != nil {
+		return nil, err
+	}
+	return &Info{
+		Letter:     letter,
+		Type:       TypeOf(letter),
+		Volume:     vol,
+		GUID:       volumeGUID(letter),
+		DevicePath: devicePath(letter),
+	}, nil
+}
+
+// FilterFunc is a predicate for filtering drives.
+type FilterFunc func(d *Info) bool
+
+// EventKind identifies what happened to a drive.
+type EventKind int
+
+const (
+	EventAdded   EventKind = iota // Drive was connected
+	EventRemoved                  // Drive was disconnected
+)
+
+func (k EventKind) String() string {
+	switch k {
+	case EventAdded:
+		return "added"
+	case EventRemoved:
+		return "removed"
+	default:
+		return fmt.Sprintf("EventKind(%d)", k)
 	}
 }
 
-// Drive represents a disk drive.
-type Drive struct {
-	Letter string
-	Type   DriveType
-	Infos  *VolumeInfo
-	UID    [16]byte
+// Event is emitted by Watcher when a drive change is detected.
+type Event struct {
+	Kind  EventKind
+	Drive *Info  // non-nil for Added/Removed events
+	Err   error  // non-nil when enumeration failed
 }
 
-// NewDrive creates a new Drive from a drive letter.
-func NewDrive(letter string) (*Drive, error) {
-	d := &Drive{
-		Letter: letter,
-	}
+// Watcher monitors drive changes using the Observer pattern.
+// It polls GetLogicalDrives for bitmask changes, then enumerates
+// only the affected letters. Events are delivered on a typed channel.
+type Watcher struct {
+	known  map[string]*Info // keyed by GUID (stable ID)
+	ctx    context.Context
+	filter FilterFunc
+}
 
-	var err error
-	d.Infos, err = Volume(letter)
+// NewWatcher creates a Watcher that monitors drives matching the filter.
+// The context controls the watcher goroutine's lifetime.
+func NewWatcher(ctx context.Context, filter FilterFunc) *Watcher {
+	return &Watcher{
+		known:  make(map[string]*Info),
+		ctx:    ctx,
+		filter: filter,
+	}
+}
+
+// Snapshot returns all current drives matching the filter.
+// Does not start monitoring — use Watch for that.
+func (w *Watcher) Snapshot() ([]*Info, error) {
+	letters, err := LogicalDriveLetters()
 	if err != nil {
 		return nil, err
 	}
 
-	d.Type, err = Type(letter)
-	if err != nil {
-		return nil, err
-	}
-
-	d.UID = md5.Sum([]byte(fmt.Sprintf("%s-%d-%s", d.Type, d.Infos.SerialNumber, d.Infos.FileSystemName)))
-
-	return d, nil
-}
-
-// FilterFunc is a callback to filter drives.
-type FilterFunc func(drive *Drive) bool
-
-// Drives manages a collection of detected drives.
-type Drives struct {
-	List      map[[16]byte]*Drive
-	chanDrive chan any
-	ctx       context.Context
-}
-
-// NewDrives creates a new Drives manager.
-func NewDrives(ctx context.Context) *Drives {
-	return &Drives{
-		List: make(map[[16]byte]*Drive),
-		ctx:  ctx,
-	}
-}
-
-func (d *Drives) mapToArray() []*Drive {
-	drives := make([]*Drive, 0)
-	for _, v := range d.List {
-		drives = append(drives, v)
-	}
-	return drives
-}
-
-// All returns all drives matching the filter.
-func (d *Drives) All(ff FilterFunc) ([]*Drive, error) {
-	ldl, err := LogicalDriveLetters()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, l := range ldl {
-		drive, err := NewDrive(l)
+	var result []*Info
+	for _, l := range letters {
+		info, err := New(l)
 		if err != nil {
 			continue
 		}
-		if ff(drive) {
-			d.List[drive.UID] = drive
-		}
-	}
-	return d.mapToArray(), nil
-}
-
-// Added returns newly connected drives since last check.
-func (d *Drives) Added(ff FilterFunc, appendNew bool) ([]*Drive, error) {
-	nDrives := make([]*Drive, 0)
-
-	ldl, err := LogicalDriveLetters()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, l := range ldl {
-		drive, err := NewDrive(l)
-		if err != nil {
+		if w.filter != nil && !w.filter(info) {
 			continue
 		}
-		if ff(drive) {
-			if _, ok := d.List[drive.UID]; ok {
-				continue
-			}
-			if appendNew {
-				d.List[drive.UID] = drive
-			}
-			nDrives = append(nDrives, drive)
-		}
+		w.known[info.key()] = info
+		result = append(result, info)
 	}
-	return nDrives, nil
+	return result, nil
 }
 
-// WatchNew starts a goroutine that monitors for new drives matching the filter.
-func (d *Drives) WatchNew(ff FilterFunc, once bool) (<-chan any, error) {
-	_, err := d.All(ff)
-	if err != nil {
+// Watch takes a baseline snapshot, then polls for changes.
+// Returns a channel that receives Added and Removed events.
+// The channel is closed when the context is cancelled.
+//
+// pollInterval controls how often changes are checked (default 500ms if 0).
+func (w *Watcher) Watch(pollInterval time.Duration) (<-chan Event, error) {
+	// Take initial snapshot to establish the baseline.
+	if _, err := w.Snapshot(); err != nil {
 		return nil, err
 	}
 
-	d.chanDrive = make(chan any)
-	go d.watchNewWorker(ff, once)
+	if pollInterval <= 0 {
+		pollInterval = 500 * time.Millisecond
+	}
 
-	return d.chanDrive, nil
+	ch := make(chan Event)
+	go w.pollLoop(ch, pollInterval)
+	return ch, nil
 }
 
-func (d *Drives) watchNewWorker(ff FilterFunc, once bool) {
-	ticker := time.NewTicker(200 * time.Millisecond)
+func (w *Watcher) pollLoop(ch chan<- Event, interval time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	defer close(d.chanDrive)
+	defer close(ch)
 
-	bkpDrives := make(map[[16]byte]*Drive)
-	tmpDrives := make(map[[16]byte]*Drive)
+	prevMask, _ := logicalDrivesMask()
 
 	for {
 		select {
-		case <-d.ctx.Done():
+		case <-w.ctx.Done():
 			return
 		case <-ticker.C:
-			drives, err := d.Added(ff, once)
+			mask, err := logicalDrivesMask()
 			if err != nil {
-				d.chanDrive <- err
+				ch <- Event{Err: err}
 				continue
 			}
-
-			tmpDrives = make(map[[16]byte]*Drive)
-			for _, drive := range drives {
-				tmpDrives[drive.UID] = drive
+			if mask == prevMask {
+				continue
 			}
+			prevMask = mask
 
-			for _, drive := range tmpDrives {
-				if _, okBkp := bkpDrives[drive.UID]; !okBkp {
-					d.chanDrive <- drive
-				}
-			}
-
-			bkpDrives = tmpDrives
+			w.detectChanges(ch)
 		}
 	}
+}
+
+func (w *Watcher) detectChanges(ch chan<- Event) {
+	// Enumerate current drives.
+	letters, err := LogicalDriveLetters()
+	if err != nil {
+		ch <- Event{Err: err}
+		return
+	}
+
+	current := make(map[string]*Info)
+	for _, l := range letters {
+		info, err := New(l)
+		if err != nil {
+			continue
+		}
+		if w.filter != nil && !w.filter(info) {
+			continue
+		}
+		current[info.key()] = info
+	}
+
+	// Detect additions.
+	for key, info := range current {
+		if _, exists := w.known[key]; !exists {
+			ch <- Event{Kind: EventAdded, Drive: info}
+		}
+	}
+
+	// Detect removals.
+	for key, info := range w.known {
+		if _, exists := current[key]; !exists {
+			ch <- Event{Kind: EventRemoved, Drive: info}
+		}
+	}
+
+	w.known = current
+}
+
+// key returns a stable identifier for deduplication.
+// Prefers GUID; falls back to letter if GUID is unavailable.
+func (d *Info) key() string {
+	if d.GUID != "" {
+		return d.GUID
+	}
+	return d.Letter
 }

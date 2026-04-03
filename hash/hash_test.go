@@ -43,6 +43,23 @@ func TestSHA512(t *testing.T) {
 	}
 }
 
+func TestROR13KnownValues(t *testing.T) {
+	// Canonical shellcode ROR13 reference values (unsigned 32-bit).
+	tests := []struct {
+		name string
+		want uint32
+	}{
+		{"LoadLibraryA", 0xEC0E4E8E},
+		{"GetProcAddress", 0x7C0DFCAA},
+	}
+	for _, tt := range tests {
+		got := ROR13(tt.name)
+		if got != tt.want {
+			t.Fatalf("ROR13(%q) = 0x%08X, want 0x%08X", tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestROR13Consistency(t *testing.T) {
 	// Same input should always give same output
 	a := ROR13("LoadLibraryA")

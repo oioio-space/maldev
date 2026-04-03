@@ -111,8 +111,9 @@ func isEventLogThread(pid, tid uint32) bool {
 		return false
 	}
 
-	// Buffer points to a wide string with the service name.
+	// Buffer points to a wide string allocated by I_QueryTagInformation.
 	svcName := windows.UTF16PtrToString((*uint16)(q.Buffer))
+	windows.LocalFree(windows.Handle(uintptr(q.Buffer)))
 	return strings.EqualFold(svcName, "EventLog")
 }
 

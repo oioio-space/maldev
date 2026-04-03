@@ -1,10 +1,8 @@
 //go:build windows
 
-// Package folder provides access to Windows special folder paths.
 package folder
 
 import (
-	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -14,8 +12,6 @@ import (
 
 // CSIDL represents a Windows special folder identifier.
 type CSIDL uint32
-
-type hwnd uintptr
 
 const (
 	CSIDL_ADMINTOOLS              CSIDL = 0x30
@@ -82,24 +78,22 @@ const (
 	CSIDL_WINDOWS                 CSIDL = 0x24
 )
 
-func boolToBOOL(value bool) int32 {
-	if value {
-		return 1
-	}
-	return 0
-}
-
 // Get returns (and optionally creates) a Windows special folder path.
+// Uses SHGetSpecialFolderPathW (Shell32). Returns empty string on failure.
 func Get(csidl CSIDL, createIfNotExist bool) string {
 	buf := make([]uint16, windows.MAX_PATH)
 
-	ret, _, _ := syscall.SyscallN(api.ProcSHGetSpecialFolderPathW.Addr(),
+	var create uintptr
+	if createIfNotExist {
+		create = 1
+	}
+
+	ret, _, _ := api.ProcSHGetSpecialFolderPathW.Call(
 		0,
 		uintptr(unsafe.Pointer(&buf[0])),
 		uintptr(csidl),
-		uintptr(boolToBOOL(createIfNotExist)),
+		create,
 	)
-
 	if ret == 0 {
 		return ""
 	}

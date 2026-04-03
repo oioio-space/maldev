@@ -43,12 +43,31 @@ Apply these rules to ALL Go code written or modified in this project. Check comp
 - `inject.Stats` not `inject.InjectionStats`
 - Exception: type sharing package name is acceptable: `time.Time`, `context.Context`
 - Methods: `token.Privileges()` not `token.GetTokenPrivileges()`
+- **Types**: the main type of a package should NOT repeat the package name.
+  `drive.Info` not `drive.Drive`, `process.Entry` not `process.Process`,
+  `token.Token` is acceptable (same as `time.Time` exception)
+- **Collections/managers**: name by purpose, not by content.
+  `drive.Watcher` not `drive.Drives`, `inject.Pipeline` not `inject.Injections`
 
 ### Windows SDK Constants
 - Windows SDK mirror constants (MB_OK, LOGON32_LOGON_INTERACTIVE, PROCESS_ALL_ACCESS, etc.)
   keep their original ALL_CAPS naming — developers search by SDK name
 - Project-invented constants use MixedCaps: `Native` not `NATIF`, `DriveType` not `DRIVETYPE`
 - Rule of thumb: if the constant exists in MSDN docs, keep its name; if you invented it, use Go style
+- **String() on Windows enum types**: return the MSDN constant name (`DRIVE_FIXED`, `DRIVE_REMOVABLE`)
+  not lowered Go names (`fixed`, `removable`). Developers search by MSDN name.
+  For out-of-range values: `fmt.Sprintf("TYPE_NAME(%d)", val)` not empty string
+
+### Channels
+- Never use `chan any` for typed data — define a typed event struct:
+  `type Event struct { Kind EventKind; Data *Info; Err error }`
+- Channel direction: always specify `<-chan` (receive) or `chan<-` (send) in function signatures
+- Close channels via `defer close(ch)` in the producing goroutine
+
+### Identifiers (OS-Native vs Custom)
+- Prefer OS-native identifiers over custom hashes for uniqueness:
+  Volume GUID (`\\?\Volume{...}\`) over MD5(serial+fs), Process PID over custom hash
+- Use stable identifiers as map keys: GUID > drive letter, PID > process name
 
 ### Method Receivers
 - Short: 1-3 chars, abbreviation of type: `c` for `Customer`, `hs` for `HighScore`
@@ -139,9 +158,13 @@ Current technique mapping:
 [ ] No stuttering (package name not repeated in symbol name)
 [ ] No Get-prefix on getters
 [ ] No catch-all package names (utils, helpers, common)
-[ ] No chatter (package name repeated in exported identifiers)
+[ ] No chatter (package name repeated in exported identifiers OR types)
+[ ] Main type of package does not repeat package name (drive.Info not drive.Drive)
 [ ] Receivers are short and consistent
 [ ] x/sys/windows used where available instead of LazyProc
+[ ] String() on Windows enums returns MSDN names
+[ ] No chan any — use typed event structs
+[ ] OS-native IDs preferred over custom hashes (GUID > MD5)
 [ ] All handles closed with defer
 [ ] All unsafe.Pointer arithmetic bounds-checked
 [ ] Build tags present on all platform-specific files

@@ -1,9 +1,23 @@
-// Package crypto provides cryptographic primitives for payload encryption and
-// decryption including AES, RC4, and XOR ciphers.
+// Package crypto provides cryptographic primitives for payload encryption
+// and decryption.
 //
-// Platform: Cross-platform
-// Detection: N/A -- pure cryptographic utilities with no system interaction.
+// Technique: Payload encryption/decryption for obfuscation at rest and in transit.
+// MITRE ATT&CK: N/A (utility — no direct system interaction).
+// Detection: N/A — pure cryptographic operations.
+// Platform: Cross-platform.
 //
-// These functions are intended for encrypting/decrypting shellcode and other
-// payloads at rest or in transit. They do not touch disk or make syscalls.
+// How it works: Wraps Go standard library ciphers (AES-256-GCM, XChaCha20-Poly1305,
+// RC4) with nonce management and key generation. AEAD ciphers (AES-GCM, ChaCha20)
+// prepend a random nonce to the ciphertext so that each encryption produces unique
+// output. XOR uses a repeating key for lightweight obfuscation.
+//
+// Limitations:
+//   - RC4 is deprecated and provided only for legacy compatibility.
+//   - XOR is not encryption — it is trivially reversible obfuscation.
+//
+// Example:
+//
+//	key, _ := crypto.NewAESKey()
+//	ciphertext, _ := crypto.EncryptAESGCM(key, shellcode)
+//	plaintext, _ := crypto.DecryptAESGCM(key, ciphertext)
 package crypto

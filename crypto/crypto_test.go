@@ -96,6 +96,19 @@ func TestAESGCMRoundTrip(t *testing.T) {
 	assert.Equal(t, plaintext, decrypted)
 }
 
+func TestAESGCMTamperedCiphertext(t *testing.T) {
+	key, err := NewAESKey()
+	require.NoError(t, err)
+
+	ciphertext, err := EncryptAESGCM(key, []byte("tamper test"))
+	require.NoError(t, err)
+
+	// Flip a byte in the ciphertext — AEAD should reject.
+	ciphertext[len(ciphertext)-1] ^= 0xFF
+	_, err = DecryptAESGCM(key, ciphertext)
+	assert.Error(t, err, "decrypting tampered AES-GCM ciphertext should fail")
+}
+
 func TestAESGCMInvalidKeySize(t *testing.T) {
 	shortKey := []byte("short")
 	_, err := EncryptAESGCM(shortKey, []byte("data"))

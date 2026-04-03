@@ -233,6 +233,38 @@ ptr.Flink = corruptValue
 ```
 **Do not flag**: Intentional data race patterns in exploit code.
 
+## Check 7: Caller Syscall Routing
+
+Every function that calls an NT syscall (NtXxx/ZwXxx via ntdll) should evaluate whether it benefits from accepting an optional `*wsyscall.Caller` parameter for EDR bypass.
+
+**Should route through Caller (monitored by EDR):**
+- `NtAllocateVirtualMemory`, `NtProtectVirtualMemory`, `NtWriteVirtualMemory`
+- `NtCreateThreadEx`, `NtCreateSection`, `NtCreateProcessEx`
+- `NtOpenProcess`, `NtQueryInformationToken`, `NtQuerySystemInformation`
+- Any NT function called in a tight loop or security-sensitive context
+
+**Cannot use Caller (kernel32-only, no NT equivalent):**
+- `GetLogicalDrives`, `GetDriveType`, `GetVolumeInformation`
+- `SetProcessMitigationPolicy`, `ConvertThreadToFiber`, `CreateFiber`
+- `IsDebuggerPresent`, `GetDiskFreeSpaceEx`, `GlobalMemoryStatusEx`
+
+**Pattern:**
+```go
+func DoWork(caller *wsyscall.Caller) error {
+    if caller != nil {
+        r, err := caller.Call("NtXxx", args...)
+        if r != 0 { return fmt.Errorf("NtXxx: NTSTATUS 0x%X: %w", uint32(r), err) }
+        return nil
+    }
+    // WinAPI fallback
+    r, _, err := api.ProcNtXxx.Call(args...)
+    if r != 0 { return fmt.Errorf("NtXxx: NTSTATUS 0x%X", uint32(r)) }
+    return nil
+}
+```
+
+**Red flag**: An exported function calls `api.ProcNtXxx.Call()` directly without accepting a Caller parameter — it should be refactored to accept one.
+
 ## Verification Process
 
 When using the microsoft-docs MCP tools, verify:

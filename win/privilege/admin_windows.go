@@ -80,10 +80,17 @@ func IsAdmin() (admin bool, elevated bool, err error) {
 	return admin, t.IsElevated(), nil
 }
 
-// ExecAs executes a program under the credentials of another user using Go's
+// ExecAs starts a program under the credentials of another user using Go's
 // exec package with a SysProcAttr token. Equivalent to "RunAs".
-func ExecAs(ctx context.Context, isInDomain bool, domain, username, password string, path string, args ...string) error {
-	logonType := impersonate.LOGON32_LOGON_NETWORK
+//
+// For domain accounts, uses LOGON32_LOGON_NEW_CREDENTIALS (type 9) which
+// works without DC reachability and is suitable for process creation.
+// For local accounts, uses LOGON32_LOGON_INTERACTIVE (type 2).
+//
+// Returns the started Cmd so the caller can call cmd.Wait() to avoid
+// leaking the child process handle. The token is kept alive by the Cmd.
+func ExecAs(ctx context.Context, isInDomain bool, domain, username, password string, path string, args ...string) (*exec.Cmd, error) {
+	logonType := impersonate.LOGON32_LOGON_NEW_CREDENTIALS
 
 	if !isInDomain {
 		logonType = impersonate.LOGON32_LOGON_INTERACTIVE
@@ -92,14 +99,14 @@ func ExecAs(ctx context.Context, isInDomain bool, domain, username, password str
 
 	t, err := impersonate.LogonUserW(username, domain, password, logonType, impersonate.LOGON32_PROVIDER_DEFAULT)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	wt := token.New(t, token.Primary)
-	defer wt.Close()
 
 	if err = wt.EnableAllPrivileges(); err != nil {
-		return err
+		wt.Close()
+		return nil, err
 	}
 
 	cmd := exec.CommandContext(ctx, path, args...)
@@ -108,7 +115,15 @@ func ExecAs(ctx context.Context, isInDomain bool, domain, username, password str
 		Token:      syscall.Token(wt.Token()),
 	}
 
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		wt.Close()
+		return nil, err
+	}
+
+	// Token must stay alive while the child process runs.
+	// Caller is responsible for cmd.Wait(); the token is closed
+	// by GC when the Cmd is garbage collected.
+	return cmd, nil
 }
 
 // CreateProcessWithLogon executes a program under alternate credentials using
@@ -175,7 +190,7 @@ func CreateProcessWithLogon(domain, username, password string, wd string, path s
 	runtime.KeepAlive(ptrPassword)
 	runtime.KeepAlive(ptrPath)
 	runtime.KeepAlive(ptrCmdLine)
-	runtime.KeepAlive(ptrEnv)
+	runtime.KeepAlive(ptrStartupInfo)
 	runtime.KeepAlive(ptrCD)
 	runtime.KeepAlive(ptrStartupInfo)
 	runtime.KeepAlive(ptrProcessInfo)

@@ -19,9 +19,11 @@ import (
 type LogonType uint32
 
 const (
-	LOGON32_LOGON_INTERACTIVE LogonType = 2
-	LOGON32_LOGON_NETWORK     LogonType = 3
-	LOGON32_LOGON_BATCH       LogonType = 4
+	LOGON32_LOGON_INTERACTIVE    LogonType = 2
+	LOGON32_LOGON_NETWORK        LogonType = 3
+	LOGON32_LOGON_BATCH          LogonType = 4
+	LOGON32_LOGON_SERVICE        LogonType = 5
+	LOGON32_LOGON_NEW_CREDENTIALS LogonType = 9
 )
 
 // LogonProvider specifies the logon provider.
@@ -31,15 +33,14 @@ const (
 	LOGON32_PROVIDER_DEFAULT LogonProvider = 0
 )
 
-// LogonUserW wraps the advapi32 LogonUserW syscall and returns the resulting
+// LogonUserW wraps the advapi32 LogonUserW function and returns the resulting
 // Windows token.
 func LogonUserW(username, domain, password string, logonType LogonType, logonProvider LogonProvider) (windows.Token, error) {
-	u := windows.StringToUTF16Ptr(username)
-	p := windows.StringToUTF16Ptr(password)
-	d := windows.StringToUTF16Ptr(domain)
+	u, _ := windows.UTF16PtrFromString(username)
+	d, _ := windows.UTF16PtrFromString(domain)
+	p, _ := windows.UTF16PtrFromString(password)
 
-	handle := uintptr(0)
-
+	var handle uintptr
 	ret, _, e := api.ProcLogonUserW.Call(
 		uintptr(unsafe.Pointer(u)),
 		uintptr(unsafe.Pointer(d)),
@@ -51,11 +52,10 @@ func LogonUserW(username, domain, password string, logonType LogonType, logonPro
 	if int(ret) == 0 {
 		return windows.Token(windows.InvalidHandle), os.NewSyscallError("LogonUserW", e)
 	}
-
 	return windows.Token(handle), nil
 }
 
-// ImpersonateLoggedOnUser wraps the advapi32 ImpersonateLoggedOnUser syscall.
+// ImpersonateLoggedOnUser wraps the advapi32 ImpersonateLoggedOnUser function.
 func ImpersonateLoggedOnUser(t windows.Token) error {
 	ret, _, e := api.ProcImpersonateLoggedOnUser.Call(uintptr(t))
 	if int(ret) == 0 {

@@ -3,41 +3,137 @@
 package drive
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestType(t *testing.T) {
-	dt, err := Type("C:\\")
-	require.NoError(t, err)
-	assert.Equal(t, Fixed, dt)
+func TestTypeOf(t *testing.T) {
+	dt := TypeOf("C:\\")
+	assert.Equal(t, TypeFixed, dt)
 }
 
-func TestDriveTypeString(t *testing.T) {
-	assert.Equal(t, "fixed", Fixed.String())
-	assert.Equal(t, "unknown", Unknown.String())
-	assert.Equal(t, "removable", Removable.String())
-	assert.Equal(t, "cdrom", CDROM.String())
-	assert.Equal(t, "remote", Remote.String())
-	assert.Equal(t, "ramdisk", RAMDisk.String())
-	assert.Equal(t, "noRootDir", NoRootDir.String())
+func TestTypeOf_Invalid(t *testing.T) {
+	dt := TypeOf("Z:\\nonexistent\\")
+	assert.True(t, dt == TypeUnknown || dt == TypeNoRootDir,
+		"expected TypeUnknown or TypeNoRootDir, got %s", dt)
 }
 
-func TestVolume(t *testing.T) {
-	info, err := Volume("C:\\")
+func TestTypeString(t *testing.T) {
+	tests := []struct {
+		t    Type
+		want string
+	}{
+		{TypeUnknown, "DRIVE_UNKNOWN"},
+		{TypeNoRootDir, "DRIVE_NO_ROOT_DIR"},
+		{TypeRemovable, "DRIVE_REMOVABLE"},
+		{TypeFixed, "DRIVE_FIXED"},
+		{TypeRemote, "DRIVE_REMOTE"},
+		{TypeCDROM, "DRIVE_CDROM"},
+		{TypeRAMDisk, "DRIVE_RAMDISK"},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, tt.t.String())
+	}
+}
+
+func TestTypeString_OutOfRange(t *testing.T) {
+	s := Type(99).String()
+	assert.Contains(t, s, "99")
+}
+
+func TestVolumeOf(t *testing.T) {
+	info, err := VolumeOf("C:\\")
 	require.NoError(t, err)
 	require.NotNil(t, info)
-	// NTFS is the dominant Windows filesystem; confirm it is populated.
 	assert.NotEmpty(t, info.FileSystemName)
+	assert.Greater(t, info.SerialNumber, uint32(0))
 }
 
-func TestNewDrive(t *testing.T) {
-	d, err := NewDrive("C:\\")
+func TestVolumeOf_InvalidDrive(t *testing.T) {
+	_, err := VolumeOf("Z:\\nonexistent\\")
+	assert.Error(t, err)
+}
+
+func TestNew(t *testing.T) {
+	d, err := New("C:\\")
 	require.NoError(t, err)
 	require.NotNil(t, d)
 	assert.Equal(t, "C:\\", d.Letter)
-	assert.Equal(t, Fixed, d.Type)
-	assert.NotNil(t, d.Infos)
+	assert.Equal(t, TypeFixed, d.Type)
+	assert.NotNil(t, d.Volume)
+	assert.NotEmpty(t, d.Volume.FileSystemName)
+
+	assert.NotEmpty(t, d.GUID, "should have a volume GUID")
+	assert.Contains(t, d.GUID, "\\\\?\\Volume{")
+
+	assert.NotEmpty(t, d.DevicePath, "should have a device path")
+	assert.Contains(t, d.DevicePath, "\\Device\\")
+}
+
+func TestInfoKey(t *testing.T) {
+	d, err := New("C:\\")
+	require.NoError(t, err)
+	// key should prefer GUID
+	assert.Equal(t, d.GUID, d.key())
+
+	// With empty GUID, falls back to letter
+	d2 := &Info{Letter: "X:\\"}
+	assert.Equal(t, "X:\\", d2.key())
+}
+
+func TestLogicalDriveLetters(t *testing.T) {
+	letters, err := LogicalDriveLetters()
+	require.NoError(t, err)
+	assert.NotEmpty(t, letters)
+
+	found := false
+	for _, l := range letters {
+		if l == "C:\\" {
+			found = true
+		}
+		assert.Len(t, l, 3)
+		assert.Equal(t, ":\\", l[1:])
+	}
+	assert.True(t, found, "C:\\ should be in the drive list")
+}
+
+func TestEventKindString(t *testing.T) {
+	assert.Equal(t, "added", EventAdded.String())
+	assert.Equal(t, "removed", EventRemoved.String())
+}
+
+func TestWatcher_Snapshot(t *testing.T) {
+	ctx := context.Background()
+	w := NewWatcher(ctx, func(d *Info) bool { return d.Type == TypeFixed })
+
+	drives, err := w.Snapshot()
+	require.NoError(t, err)
+	assert.NotEmpty(t, drives, "should find at least one fixed drive")
+
+	for _, d := range drives {
+		assert.Equal(t, TypeFixed, d.Type)
+	}
+}
+
+func TestWatcher_Watch(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	w := NewWatcher(ctx, func(*Info) bool { return true })
+	ch, err := w.Watch(100 * time.Millisecond)
+	require.NoError(t, err)
+
+	// No new drives expected — channel should close when context cancels.
+	for ev := range ch {
+		if ev.Err != nil {
+			t.Logf("watcher error: %v", ev.Err)
+		}
+		if ev.Drive != nil {
+			t.Logf("watcher %s: %s", ev.Kind, ev.Drive.Letter)
+		}
+	}
 }

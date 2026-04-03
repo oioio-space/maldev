@@ -146,10 +146,14 @@ func Run(cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("create target file: %w", err)
 	}
+	autoTemp := cfg.TargetPath == ""
+	succeeded := false
 	defer func() {
 		windows.CloseHandle(hFile)
-		// Best-effort cleanup if we fail partway through
-		os.Remove(targetPath)
+		// Only delete on failure — on success the decoy file should remain on disk.
+		if !succeeded && autoTemp {
+			os.Remove(targetPath)
+		}
 	}()
 
 	var written uint32
@@ -241,6 +245,7 @@ func Run(cfg Config) error {
 	}
 	windows.CloseHandle(hThread)
 
+	succeeded = true
 	return nil
 }
 

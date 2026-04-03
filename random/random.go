@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
-	"os"
 	"time"
 )
 
@@ -46,10 +45,4 @@ func RandomInt(min, max int) (int, error) {
 func RandomDuration(min, max time.Duration) (time.Duration, error) {
 	n, err := RandomInt(int(min), int(max))
 	return time.Duration(n), err
-}
-
-// FileExists reports whether the file at path exists and is accessible.
-func FileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
