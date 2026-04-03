@@ -2,7 +2,6 @@ package transport
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -105,26 +104,7 @@ func (t *TLSTransport) Connect(ctx context.Context) error {
 
 // verifyFingerprint checks the server certificate against the pinned fingerprint.
 func (t *TLSTransport) verifyFingerprint(rawCerts [][]byte) error {
-	if len(rawCerts) == 0 {
-		return fmt.Errorf("no certificates received")
-	}
-
-	cert, err := x509.ParseCertificate(rawCerts[0])
-	if err != nil {
-		return fmt.Errorf("failed to parse certificate: %w", err)
-	}
-
-	if cert == nil {
-		return fmt.Errorf("certificate parsing returned nil")
-	}
-
-	hash := sha256.Sum256(cert.Raw)
-	serverFingerprint := fmt.Sprintf("%X", hash[:])
-	if serverFingerprint != t.fingerprint {
-		return fmt.Errorf("certificate fingerprint mismatch")
-	}
-
-	return nil
+	return verifyFP(rawCerts, t.fingerprint)
 }
 
 // Read reads from the TLS connection.

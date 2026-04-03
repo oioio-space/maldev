@@ -43,14 +43,15 @@ func (m Method) String() string {
 }
 
 // Caller executes NT syscalls using the configured method and resolver.
-// For MethodDirect and MethodIndirect, a single RWX page is pre-allocated
-// per stub type and reused across calls, eliminating per-call VirtualAlloc
-// overhead. Call Close when the Caller is no longer needed to free the stubs.
+// For MethodDirect and MethodIndirect, stub pages are pre-allocated as RW
+// and cycled to RX before each execution. This avoids permanent RWX memory
+// which is flagged by all modern EDR products.
+// Call Close when the Caller is no longer needed to free the stubs.
 type Caller struct {
 	method   Method
 	resolver SSNResolver
 
-	// Pre-allocated executable stub memory (allocated once, reused).
+	// Pre-allocated stub memory (allocated once as RW, cycled to RX per call).
 	directStub   uintptr
 	indirectStub uintptr
 	mu           sync.Mutex // protects stub rewrites during concurrent calls
@@ -63,12 +64,13 @@ type Caller struct {
 func New(method Method, r SSNResolver) *Caller {
 	c := &Caller{method: method, resolver: r}
 	if method == MethodDirect || method == MethodIndirect {
-		// Pre-allocate RWX pages for the syscall stubs. 64 bytes each is
+		// Pre-allocate RW pages for the syscall stubs. 64 bytes each is
 		// more than enough for both the direct (11 bytes) and indirect (21 bytes) stubs.
+		// Pages start as RW and are cycled to RX before execution, avoiding permanent RWX.
 		c.directStub, _ = windows.VirtualAlloc(0, 64,
-			windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_EXECUTE_READWRITE)
+			windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_READWRITE)
 		c.indirectStub, _ = windows.VirtualAlloc(0, 64,
-			windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_EXECUTE_READWRITE)
+			windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_READWRITE)
 	}
 	return c
 }

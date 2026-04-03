@@ -6,6 +6,8 @@ import (
 	"fmt"
 	rawsyscall "syscall"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // Call executes a syscall using the configured method.
@@ -22,6 +24,107 @@ func (c *Caller) Call(ntFuncName string, args ...uintptr) (uintptr, error) {
 	default:
 		return 0, fmt.Errorf("unknown method: %d", c.method)
 	}
+}
+
+// CallByHash executes a syscall using a pre-computed ROR13 hash instead of
+// a function name string. This eliminates plaintext NT function names from
+// the binary — the only artifact is a uint32 constant.
+//
+// For MethodWinAPI/MethodNativeAPI, the function is resolved via PEB walk.
+// For MethodDirect/MethodIndirect, the SSN is extracted from the prologue
+// found via PEB walk + export hash matching.
+//
+// Example:
+//
+//	caller.CallByHash(api.HashNtAllocateVirtualMemory, args...)
+func (c *Caller) CallByHash(funcHash uint32, args ...uintptr) (uintptr, error) {
+	// Resolve function address via PEB walk — no strings involved.
+	ntdllBase, err := pebModuleByHash(hashNtdll)
+	if err != nil {
+		return 0, fmt.Errorf("PEB walk ntdll: %w", err)
+	}
+	addr, err := pebExportByHash(ntdllBase, funcHash)
+	if err != nil {
+		return 0, fmt.Errorf("export hash 0x%08X: %w", funcHash, err)
+	}
+
+	switch c.method {
+	case MethodWinAPI, MethodNativeAPI:
+		// Call the resolved address directly via SyscallN.
+		r, _, _ := rawsyscall.SyscallN(addr, args...)
+		if r != 0 {
+			return r, fmt.Errorf("NTSTATUS 0x%08X", uint32(r))
+		}
+		return 0, nil
+
+	case MethodDirect:
+		return c.callDirectAddr(addr, funcHash, args...)
+	case MethodIndirect:
+		return c.callIndirectAddr(addr, funcHash, args...)
+	default:
+		return 0, fmt.Errorf("unknown method: %d", c.method)
+	}
+}
+
+// callDirectAddr builds a direct syscall stub from a pre-resolved function address.
+func (c *Caller) callDirectAddr(addr uintptr, funcHash uint32, args ...uintptr) (uintptr, error) {
+	b := (*[32]byte)(unsafe.Pointer(addr))
+	if b[0] != 0x4C || b[1] != 0x8B || b[2] != 0xD1 || b[3] != 0xB8 {
+		return 0, fmt.Errorf("hash 0x%08X: prologue hooked (%02X %02X %02X %02X)", funcHash, b[0], b[1], b[2], b[3])
+	}
+	ssn := uint16(b[4]) | uint16(b[5])<<8
+
+	stub := []byte{
+		0x4C, 0x8B, 0xD1,
+		0xB8, byte(ssn), byte(ssn >> 8), 0, 0,
+		0x0F, 0x05, 0xC3,
+	}
+	c.mu.Lock()
+	var oldProtect uint32
+	copy((*[32]byte)(unsafe.Pointer(c.directStub))[:len(stub)], stub)
+	windows.VirtualProtect(c.directStub, 64, windows.PAGE_EXECUTE_READ, &oldProtect)
+	r, _, _ := rawsyscall.SyscallN(c.directStub, args...)
+	windows.VirtualProtect(c.directStub, 64, windows.PAGE_READWRITE, &oldProtect)
+	c.mu.Unlock()
+	if r != 0 {
+		return r, fmt.Errorf("NTSTATUS 0x%08X", uint32(r))
+	}
+	return 0, nil
+}
+
+// callIndirectAddr builds an indirect syscall stub from a pre-resolved function address.
+func (c *Caller) callIndirectAddr(addr uintptr, funcHash uint32, args ...uintptr) (uintptr, error) {
+	b := (*[32]byte)(unsafe.Pointer(addr))
+	if b[0] != 0x4C || b[1] != 0x8B || b[2] != 0xD1 || b[3] != 0xB8 {
+		return 0, fmt.Errorf("hash 0x%08X: prologue hooked (%02X %02X %02X %02X)", funcHash, b[0], b[1], b[2], b[3])
+	}
+	ssn := uint16(b[4]) | uint16(b[5])<<8
+
+	gadgetAddr, err := findSyscallGadget()
+	if err != nil {
+		return 0, fmt.Errorf("find syscall gadget: %w", err)
+	}
+
+	stub := make([]byte, 0, 24)
+	stub = append(stub, 0x4C, 0x8B, 0xD1)
+	stub = append(stub, 0xB8, byte(ssn), byte(ssn>>8), 0, 0)
+	stub = append(stub, 0x49, 0xBB)
+	for i := 0; i < 8; i++ {
+		stub = append(stub, byte(gadgetAddr>>(i*8)))
+	}
+	stub = append(stub, 0x41, 0xFF, 0xE3)
+
+	c.mu.Lock()
+	var oldProtect uint32
+	copy((*[32]byte)(unsafe.Pointer(c.indirectStub))[:len(stub)], stub)
+	windows.VirtualProtect(c.indirectStub, 64, windows.PAGE_EXECUTE_READ, &oldProtect)
+	r, _, _ := rawsyscall.SyscallN(c.indirectStub, args...)
+	windows.VirtualProtect(c.indirectStub, 64, windows.PAGE_READWRITE, &oldProtect)
+	c.mu.Unlock()
+	if r != 0 {
+		return r, fmt.Errorf("NTSTATUS 0x%08X", uint32(r))
+	}
+	return 0, nil
 }
 
 func (c *Caller) callWinAPI(name string, args ...uintptr) (uintptr, error) {
@@ -69,10 +172,13 @@ func (c *Caller) callDirect(name string, args ...uintptr) (uintptr, error) {
 		0xC3, // ret
 	}
 
-	// Rewrite the SSN into the pre-allocated stub under lock.
+	// Cycle permissions: RW (write stub) → RX (execute) → RW (ready for next call).
 	c.mu.Lock()
+	var oldProtect uint32
 	copy((*[32]byte)(unsafe.Pointer(c.directStub))[:len(stub)], stub)
+	windows.VirtualProtect(c.directStub, 64, windows.PAGE_EXECUTE_READ, &oldProtect)
 	r, _, _ := rawsyscall.SyscallN(c.directStub, args...)
+	windows.VirtualProtect(c.directStub, 64, windows.PAGE_READWRITE, &oldProtect)
 	c.mu.Unlock()
 
 	if r != 0 {
@@ -114,10 +220,13 @@ func (c *Caller) callIndirect(name string, args ...uintptr) (uintptr, error) {
 	}
 	stub = append(stub, 0x41, 0xFF, 0xE3) // jmp r11
 
-	// Rewrite the stub into the pre-allocated page under lock.
+	// Cycle permissions: RW (write stub) → RX (execute) → RW (ready for next call).
 	c.mu.Lock()
+	var oldProtect uint32
 	copy((*[32]byte)(unsafe.Pointer(c.indirectStub))[:len(stub)], stub)
+	windows.VirtualProtect(c.indirectStub, 64, windows.PAGE_EXECUTE_READ, &oldProtect)
 	r, _, _ := rawsyscall.SyscallN(c.indirectStub, args...)
+	windows.VirtualProtect(c.indirectStub, 64, windows.PAGE_READWRITE, &oldProtect)
 	c.mu.Unlock()
 
 	if r != 0 {

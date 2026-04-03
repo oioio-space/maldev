@@ -88,3 +88,25 @@ func TestHashGateChain(t *testing.T) {
 	require.NoError(t, err)
 	assert.Greater(t, ssn, uint16(0))
 }
+
+func TestCallByHash(t *testing.T) {
+	// Use NtQuerySystemInformation(SystemBasicInformation = 0) via hash.
+	// This is safe to call and returns basic system info.
+	caller := New(MethodWinAPI, nil)
+
+	// hash.ROR13("NtClose") — NtClose takes a single HANDLE argument.
+	// Passing an invalid handle (0xDEAD) should return STATUS_INVALID_HANDLE.
+	hashNtClose := ror13str("NtClose")
+	r, err := caller.CallByHash(hashNtClose, 0xDEAD)
+	// We expect a non-zero NTSTATUS (invalid handle) — the point is it didn't panic.
+	assert.Error(t, err, "NtClose with invalid handle should return error")
+	assert.NotZero(t, r, "NTSTATUS should be non-zero for invalid handle")
+}
+
+func TestCallByHash_IndirectSyscall(t *testing.T) {
+	caller := New(MethodIndirect, Chain(NewHashGate(), NewHellsGate()))
+	hashNtClose := ror13str("NtClose")
+	r, err := caller.CallByHash(hashNtClose, 0xDEAD)
+	assert.Error(t, err)
+	assert.NotZero(t, r)
+}
