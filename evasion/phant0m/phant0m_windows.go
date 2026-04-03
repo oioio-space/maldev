@@ -25,18 +25,10 @@ type threadEntry32 struct {
 	Flags          uint32
 }
 
-// scServiceTagQuery is the input/output structure for I_QueryTagInformation.
-// Type 1 (ServiceNameFromTagInformation) maps a (PID, tag) pair to a service name.
-type scServiceTagQuery struct {
-	ProcessID  uint32
-	ServiceTag uint32
-	_          uint32 // reserved/type — must be 1 for ServiceNameFromTagInformation
-	Buffer     unsafe.Pointer
-}
-
-// threadSubProcessTag is the TEB SubProcessTag offset value returned by
-// NtQueryInformationThread with ThreadQuerySetWin32StartAddress class (class 26).
-// On x64, the SubProcessTag is a ULONG stored in the TEB.
+// threadQuerySetWin32StartAddress is the THREAD_INFORMATION_CLASS value
+// for NtQueryInformationThread that retrieves the thread's Win32 start
+// address. For svchost-hosted service threads, this also exposes the
+// SubProcessTag used for service tag resolution.
 const threadQuerySetWin32StartAddress = 9
 
 var (

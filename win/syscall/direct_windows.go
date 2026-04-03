@@ -6,8 +6,6 @@ import (
 	"fmt"
 	rawsyscall "syscall"
 	"unsafe"
-
-	"golang.org/x/sys/windows"
 )
 
 // Call executes a syscall using the configured method.

@@ -65,3 +65,27 @@ func TestConfigValidateInvalidMethod(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bad")
 }
+
+func TestEtwpCreateEtwThreadInAvailableMethods(t *testing.T) {
+	methods := AvailableMethods()
+	assert.Contains(t, methods, MethodEtwpCreateEtwThread,
+		"AvailableMethods should include MethodEtwpCreateEtwThread")
+}
+
+func TestNtQueueApcThreadExInAvailableMethods(t *testing.T) {
+	methods := AvailableMethods()
+	assert.Contains(t, methods, MethodNtQueueApcThreadEx,
+		"AvailableMethods should include MethodNtQueueApcThreadEx")
+}
+
+func TestEtwpCreateEtwThreadFallbackChain(t *testing.T) {
+	chain := FallbackChain(MethodEtwpCreateEtwThread)
+	require.NotEmpty(t, chain)
+	assert.Equal(t, MethodEtwpCreateEtwThread, chain[0])
+}
+
+func TestNtQueueApcThreadExFallbackChain(t *testing.T) {
+	chain := FallbackChain(MethodNtQueueApcThreadEx)
+	require.NotEmpty(t, chain)
+	assert.Equal(t, MethodNtQueueApcThreadEx, chain[0])
+}

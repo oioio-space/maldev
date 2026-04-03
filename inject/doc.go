@@ -15,6 +15,8 @@
 //   - RtlCreateUserThread (rtl): undocumented ntdll thread creation
 //   - DirectSyscall (syscall): bypass EDR hooks with raw syscall stubs
 //   - CreateFiber (fiber): fiber-based shellcode execution
+//   - EtwpCreateEtwThread (etwthr): abuse internal ETW thread creation in ntdll
+//   - NtQueueApcThreadEx (apcex): special user APC injection (Win10 1903+, no alertable wait needed)
 //
 // Linux methods:
 //   - Ptrace (ptrace): inject via ptrace attach
