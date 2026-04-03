@@ -20,9 +20,11 @@ const (
 	// MethodProcessHollowing is deprecated: use MethodThreadHijack.
 	// This is actually Thread Execution Hijacking (T1055.003), not PE hollowing.
 	MethodProcessHollowing = MethodThreadHijack
-	MethodRtlCreateUserThread Method = "rtl"
-	MethodDirectSyscall       Method = "syscall"
-	MethodCreateFiber         Method = "fiber"
+	MethodRtlCreateUserThread    Method = "rtl"
+	MethodDirectSyscall          Method = "syscall"
+	MethodCreateFiber            Method = "fiber"
+	MethodEtwpCreateEtwThread    Method = "etwthr"
+	MethodNtQueueApcThreadEx     Method = "apcex"
 )
 
 // Linux methods

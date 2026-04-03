@@ -171,6 +171,38 @@ func (c *Checker) FakeDomainReachable(ctx context.Context) (bool, int, error) {
 	return true, resp.StatusCode, nil
 }
 
+// CheckProcessCount returns true if the number of running processes is
+// suspiciously low, indicating a fresh analysis VM.
+func (c *Checker) CheckProcessCount(ctx context.Context) (bool, string, error) {
+	procs, err := enum.List()
+	if err != nil {
+		return false, "", err
+	}
+	if len(procs) < c.cfg.MinProcesses {
+		return true, fmt.Sprintf("only %d processes running (minimum %d)", len(procs), c.cfg.MinProcesses), nil
+	}
+	return false, "", nil
+}
+
+// CheckConnectivity returns true if the internet is NOT reachable,
+// which may indicate a sandboxed/isolated environment.
+func (c *Checker) CheckConnectivity(ctx context.Context) (bool, string, error) {
+	if c.cfg.ConnectivityURL == "" {
+		return false, "", nil
+	}
+	client := &http.Client{Timeout: c.cfg.RequestTimeout}
+	req, err := http.NewRequestWithContext(ctx, "HEAD", c.cfg.ConnectivityURL, nil)
+	if err != nil {
+		return false, "", err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return true, "no internet connectivity", nil
+	}
+	resp.Body.Close()
+	return false, "", nil
+}
+
 // CheckAll runs every detection check and returns a Result for each.
 func (c *Checker) CheckAll(ctx context.Context) []Result {
 	var results []Result
@@ -246,6 +278,22 @@ func (c *Checker) CheckAll(ctx context.Context) []Result {
 		Err:      procErr,
 	})
 
+	lowProcs, lowProcsDetail, lowProcsErr := c.CheckProcessCount(ctx)
+	results = append(results, Result{
+		Name:     "process_count",
+		Detected: lowProcsErr == nil && lowProcs,
+		Detail:   lowProcsDetail,
+		Err:      lowProcsErr,
+	})
+
+	noInternet, noInternetDetail, noInternetErr := c.CheckConnectivity(ctx)
+	results = append(results, Result{
+		Name:     "connectivity",
+		Detected: noInternetErr == nil && noInternet,
+		Detail:   noInternetDetail,
+		Err:      noInternetErr,
+	})
+
 	return results
 }
 
@@ -297,6 +345,12 @@ func (c *Checker) isSandboxedStopOnFirst(ctx context.Context) (bool, string, err
 	}
 	if found, name, err := c.CheckProcesses(ctx); err == nil && found {
 		return true, "analysis tool detected: " + name, nil
+	}
+	if found, detail, err := c.CheckProcessCount(ctx); err == nil && found {
+		return true, detail, nil
+	}
+	if found, detail, err := c.CheckConnectivity(ctx); err == nil && found {
+		return true, detail, nil
 	}
 	return false, "", nil
 }

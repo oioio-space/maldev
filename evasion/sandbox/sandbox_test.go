@@ -22,6 +22,8 @@ func TestDefaultConfig(t *testing.T) {
 	assert.NotEmpty(t, cfg.DiskPath, "DiskPath must not be empty")
 	assert.NotZero(t, cfg.RequestTimeout, "RequestTimeout must be set")
 	assert.True(t, cfg.StopOnFirst, "StopOnFirst should default to true")
+	assert.Equal(t, 15, cfg.MinProcesses)
+	assert.NotEmpty(t, cfg.ConnectivityURL)
 }
 
 func TestNew(t *testing.T) {

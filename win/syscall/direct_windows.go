@@ -50,13 +50,16 @@ func (c *Caller) callDirect(name string, args ...uintptr) (uintptr, error) {
 	if c.resolver == nil {
 		return 0, fmt.Errorf("direct syscall requires an SSN resolver")
 	}
+	if c.directStub == 0 {
+		return 0, fmt.Errorf("direct stub not allocated (Caller may be closed)")
+	}
 
 	ssn, err := c.resolver.Resolve(name)
 	if err != nil {
 		return 0, fmt.Errorf("resolve SSN for %s: %w", name, err)
 	}
 
-	// Build the direct syscall stub in executable memory:
+	// Direct syscall stub layout (11 bytes, pre-allocated):
 	// 4C 8B D1           mov r10, rcx
 	// B8 XX XX 00 00     mov eax, <SSN>
 	// 0F 05              syscall
@@ -68,19 +71,12 @@ func (c *Caller) callDirect(name string, args ...uintptr) (uintptr, error) {
 		0xC3, // ret
 	}
 
-	// Allocate executable memory for the stub
-	stubAddr, err := windows.VirtualAlloc(0, uintptr(len(stub)),
-		windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_EXECUTE_READWRITE)
-	if err != nil {
-		return 0, fmt.Errorf("VirtualAlloc stub: %w", err)
-	}
-	defer windows.VirtualFree(stubAddr, 0, windows.MEM_RELEASE)
+	// Rewrite the SSN into the pre-allocated stub under lock.
+	c.mu.Lock()
+	copy((*[32]byte)(unsafe.Pointer(c.directStub))[:len(stub)], stub)
+	r, _, _ := rawsyscall.SyscallN(c.directStub, args...)
+	c.mu.Unlock()
 
-	// Copy stub into executable memory
-	copy((*[32]byte)(unsafe.Pointer(stubAddr))[:len(stub)], stub)
-
-	// Call the stub via syscall.SyscallN
-	r, _, _ := rawsyscall.SyscallN(stubAddr, args...)
 	if r != 0 {
 		return r, fmt.Errorf("%s: NTSTATUS 0x%08X", name, uint32(r))
 	}
@@ -90,6 +86,9 @@ func (c *Caller) callDirect(name string, args ...uintptr) (uintptr, error) {
 func (c *Caller) callIndirect(name string, args ...uintptr) (uintptr, error) {
 	if c.resolver == nil {
 		return 0, fmt.Errorf("indirect syscall requires an SSN resolver")
+	}
+	if c.indirectStub == 0 {
+		return 0, fmt.Errorf("indirect stub not allocated (Caller may be closed)")
 	}
 
 	ssn, err := c.resolver.Resolve(name)
@@ -103,7 +102,7 @@ func (c *Caller) callIndirect(name string, args ...uintptr) (uintptr, error) {
 		return 0, fmt.Errorf("find syscall gadget: %w", err)
 	}
 
-	// Build the indirect syscall stub:
+	// Indirect syscall stub layout (21 bytes, pre-allocated):
 	// 4C 8B D1              mov r10, rcx
 	// B8 XX XX 00 00        mov eax, <SSN>
 	// 49 BB <gadget 8B>     mov r11, <gadget address>
@@ -117,16 +116,12 @@ func (c *Caller) callIndirect(name string, args ...uintptr) (uintptr, error) {
 	}
 	stub = append(stub, 0x41, 0xFF, 0xE3) // jmp r11
 
-	stubAddr, err := windows.VirtualAlloc(0, uintptr(len(stub)),
-		windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_EXECUTE_READWRITE)
-	if err != nil {
-		return 0, fmt.Errorf("VirtualAlloc stub: %w", err)
-	}
-	defer windows.VirtualFree(stubAddr, 0, windows.MEM_RELEASE)
+	// Rewrite the stub into the pre-allocated page under lock.
+	c.mu.Lock()
+	copy((*[32]byte)(unsafe.Pointer(c.indirectStub))[:len(stub)], stub)
+	r, _, _ := rawsyscall.SyscallN(c.indirectStub, args...)
+	c.mu.Unlock()
 
-	copy((*[32]byte)(unsafe.Pointer(stubAddr))[:len(stub)], stub)
-
-	r, _, _ := rawsyscall.SyscallN(stubAddr, args...)
 	if r != 0 {
 		return r, fmt.Errorf("%s: NTSTATUS 0x%08X", name, uint32(r))
 	}

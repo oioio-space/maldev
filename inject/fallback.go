@@ -31,6 +31,10 @@ func windowsFallbackChain(preferred Method) []Method {
 		return []Method{MethodDirectSyscall, MethodCreateThread, MethodCreateFiber}
 	case MethodCreateFiber:
 		return []Method{MethodCreateFiber, MethodCreateThread, MethodDirectSyscall}
+	case MethodEtwpCreateEtwThread:
+		return []Method{MethodEtwpCreateEtwThread, MethodCreateThread, MethodCreateFiber}
+	case MethodNtQueueApcThreadEx:
+		return []Method{MethodNtQueueApcThreadEx, MethodQueueUserAPC, MethodCreateRemoteThread}
 	default:
 		return []Method{preferred}
 	}

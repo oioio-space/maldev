@@ -14,9 +14,11 @@ type Config struct {
 	BadUsernames   []string      // analyst usernames to detect
 	BadHostnames   []string      // sandbox hostnames to detect
 	BadProcesses   []string      // analysis tool process names to detect
-	FakeDomain     string        // domain that should NOT respond (sandbox check)
-	DiskPath       string        // disk path to check (default: "C:\" on Windows, "/" on Linux)
-	RequestTimeout time.Duration // timeout for HTTP requests
+	FakeDomain      string        // domain that should NOT respond (sandbox check)
+	DiskPath        string        // disk path to check (default: "C:\" on Windows, "/" on Linux)
+	MinProcesses    int           // minimum expected process count (default: 15)
+	ConnectivityURL string        // URL to test real internet (default: "https://www.google.com")
+	RequestTimeout  time.Duration // timeout for HTTP requests
 	EvasionTimeout time.Duration // max time for evasion checks
 	StopOnFirst    bool          // if true, IsSandboxed stops at first detection
 }
@@ -53,8 +55,10 @@ func DefaultConfig() Config {
 			"fiddler", "httpdebugger", "burpsuite", "processhacker",
 			"tcpview", "autoruns", "pestudio", "dnspy", "ghidra",
 		},
-		DiskPath:       diskPath,
-		RequestTimeout: 5 * time.Second,
-		StopOnFirst:    true,
+		DiskPath:        diskPath,
+		MinProcesses:    15,
+		ConnectivityURL: "https://www.google.com",
+		RequestTimeout:  5 * time.Second,
+		StopOnFirst:     true,
 	}
 }

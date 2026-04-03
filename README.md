@@ -191,6 +191,10 @@ maldev/
 +-- testutil/              Test harness and helpers
 ```
 
+## Acknowledgments
+
+This project was inspired by and compared against [D3Ext/maldev](https://github.com/D3Ext/maldev) by [@D3Ext](https://github.com/D3Ext), a comprehensive Go library for malware development. Several improvements (Phant0m service tag precision, process count sandbox check, internet connectivity detection) were informed by their implementation patterns.
+
 ## License
 
 This project is for authorized security research, red team operations, and penetration testing only. Unauthorized use against systems you do not own or have explicit permission to test is prohibited.
