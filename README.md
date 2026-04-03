@@ -2,223 +2,126 @@
 
 Modular malware development library in Go for offensive security research.
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/oioio-space/maldev.svg)](https://pkg.go.dev/github.com/oioio-space/maldev)
+
 ## Install
 
 ```bash
 go get github.com/oioio-space/maldev@latest
 ```
 
-Or pin a specific version:
-
-```bash
-go get github.com/oioio-space/maldev@v0.1.0
-```
-
-Then import the packages you need:
-
-```go
-import (
-    "github.com/oioio-space/maldev/evasion/amsi"
-    "github.com/oioio-space/maldev/inject"
-    "github.com/oioio-space/maldev/crypto"
-)
-```
-
-[![Go Reference](https://pkg.go.dev/badge/github.com/oioio-space/maldev.svg)](https://pkg.go.dev/github.com/oioio-space/maldev)
-
-## Architecture
-
-```
-Layer 0 (pure)     crypto/  encode/  hash/  random/
-                        |
-Layer 1 (OS)       win/api  win/syscall  win/ntapi  win/token  win/privilege  win/version
-                        |
-Layer 2 (tech)     evasion/*  inject/  process/  pe/  cleanup/  system/  uacbypass/
-                        |
-Layer 3 (orch)     c2/transport  c2/shell  c2/meterpreter  c2/cert
-                        |
-Exploits           exploit/cve202430088
-Executables        cmd/rshell
-Internal           internal/compat (slog/cmp/slices polyfills for Go 1.21)
-```
-
-Dependencies flow strictly bottom-up. Layer 0 packages are pure Go with no OS interaction. Layer 1 wraps Windows APIs behind a single `win/api` package that serves as the source of truth for all DLL handles. Layer 2 implements offensive techniques. Layer 3 orchestrates transport, shells, and staging. The `win/syscall` package provides a pluggable `Caller` that any technique can accept to route NT calls through WinAPI, NativeAPI, direct syscalls, or indirect syscalls.
-
 ## Quick Start
 
 ```go
-import "github.com/oioio-space/maldev/evasion/amsi"
+import (
+    "github.com/oioio-space/maldev/evasion"
+    "github.com/oioio-space/maldev/evasion/amsi"
+    "github.com/oioio-space/maldev/evasion/etw"
+    "github.com/oioio-space/maldev/inject"
+    wsyscall "github.com/oioio-space/maldev/win/syscall"
+)
 
-err := amsi.PatchAll(nil) // patch AMSI + bypass session init
+// 1. Create a Caller for stealthy syscalls
+caller := wsyscall.New(wsyscall.MethodIndirect,
+    wsyscall.Chain(wsyscall.NewHashGate(), wsyscall.NewHellsGate()))
+
+// 2. Disable defenses
+evasion.ApplyAll([]evasion.Technique{
+    amsi.ScanBufferPatch(),
+    etw.All(),
+}, caller)
+
+// 3. Inject shellcode
+injector, _ := inject.NewWindowsInjector(&inject.WindowsConfig{
+    Config:        inject.Config{Method: inject.MethodCreateThread},
+    SyscallMethod: wsyscall.MethodIndirect,
+})
+injector.Inject(shellcode)
 ```
 
 ## Documentation
 
-| Guide | Content |
-|-------|---------|
-| **[Evasion Techniques](docs/evasion.md)** | [AMSI](docs/evasion.md#amsi-bypass-evasionamsi) &#183; [ETW](docs/evasion.md#etw-bypass-evasionetw) &#183; [Unhook](docs/evasion.md#ntdll-unhooking-evasionunhook) &#183; [Herpaderping](docs/evasion.md#process-herpaderping-evasionherpaderping----t1055) &#183; [Phant0m](docs/evasion.md#phant0m-evasionphant0m) &#183; [Sandbox](docs/evasion.md#sandbox-detection-evasionsandbox) &#183; [AntiVM](docs/evasion.md#antivm----parameterizable-config-evasionantivm) &#183; [Presets](docs/evasion.md#composable-evasion-evasionpreset) &#183; [Hook Detection](docs/evasion.md#hook-detection-evasionunhook) |
-| **[Process Injection](docs/injection.md)** | [13 methods](docs/injection.md#injection-methods) &#183; [Remote inject](docs/injection.md#remote-injection-into-an-existing-process) &#183; [Fallback](docs/injection.md#injection-with-automatic-fallback) &#183; [Syscall bypass](docs/injection.md#injection-with-syscall-bypass-edr-evasion) |
-| **[Syscall Methods](docs/syscalls.md)** | WinAPI &#183; NativeAPI &#183; Direct &#183; Indirect syscall strategies + SSN resolvers |
-| **[Command & Control](docs/c2.md)** | TCP/TLS transport &#183; Reverse shell &#183; Meterpreter staging &#183; Cert generation |
-| **[Crypto & Encoding](docs/crypto.md)** | AES-GCM &#183; ChaCha20 &#183; RC4 &#183; XOR &#183; Base64 &#183; ROR13 &#183; Random |
-| **[Windows Primitives](docs/win.md)** | DLL handles &#183; PatchMemory &#183; Token manipulation &#183; Privilege elevation &#183; Version detection |
-| **[PE Operations](docs/pe.md)** | Parse &#183; Morph &#183; sRDI |
-| **[Privilege Escalation](docs/privilege.md)** | UAC bypass &#183; CVE-2024-30088 kernel exploit |
-| **[System Information](docs/system.md)** | Drive &#183; Folder &#183; Network &#183; UI |
-| **[Process Management](docs/process.md)** | Enumeration &#183; Session management |
-| **[Cleanup & Anti-Forensics](docs/cleanup.md)** | Self-delete &#183; Service hiding &#183; Wipe &#183; Timestomp |
-| **[MITRE ATT&CK Map](docs/mitre.md)** | 17 techniques across all packages |
+### 📖 Guides
 
-## Packages
+| Guide | Description |
+|-------|-------------|
+| **[Getting Started](docs/getting-started.md)** | First steps — concepts, terminology, your first implant |
+| **[Architecture](docs/architecture.md)** | Layered design, dependency flow, Mermaid diagrams |
+| **[OPSEC Build Pipeline](docs/opsec-build.md)** | garble, pe/strip, CallByHash — building for operations |
+| **[MITRE ATT&CK + D3FEND](docs/mitre.md)** | Full technique mapping with defensive countermeasures |
 
-| Layer | Package | Description | MITRE | Platform |
-|-------|---------|-------------|-------|----------|
-| Crypto | [`crypto`](docs/crypto.md) | AES-256-GCM, ChaCha20-Poly1305, RC4, XOR | -- | Cross-platform |
-| Crypto | [`encode`](docs/crypto.md) | Base64, Base64URL, UTF-16LE, ROT13, PowerShell | -- | Cross-platform |
-| Crypto | [`hash`](docs/crypto.md) | MD5, SHA-256, SHA-512, ROR13 (API hashing) | -- | Cross-platform |
-| Crypto | [`random`](docs/crypto.md) | Cryptographic random strings, bytes, integers | -- | Cross-platform |
-| Win | [`win/api`](docs/win.md) | DLL handles, procedure refs, memory patching, PEB walk API hashing | T1106 | Windows |
-| Win | [`win/syscall`](docs/syscalls.md) | Pluggable syscall (WinAPI/Direct/Indirect), HashGate resolver | T1106 | Windows |
-| Win | [`win/ntapi`](docs/win.md) | Type-safe NT function wrappers | -- | Windows |
-| Win | [`win/token`](docs/win.md) | Token manipulation, privilege management | -- | Windows |
-| Win | [`win/privilege`](docs/win.md) | Admin detection, RunAs, elevation helpers | -- | Windows |
-| Win | [`win/impersonate`](docs/win.md) | Thread impersonation with automatic revert | -- | Windows |
-| Win | [`win/domain`](docs/win.md) | Domain membership queries | -- | Windows |
-| Win | [`win/version`](docs/win.md) | OS version detection, CVE checks | -- | Windows |
-| Evasion | [`evasion/amsi`](docs/evasion.md#amsi-bypass-evasionamsi) | AMSI memory patching | T1562.001 | Windows |
-| Evasion | [`evasion/etw`](docs/evasion.md#etw-bypass-evasionetw) | ETW event write patching | T1562.001 | Windows |
-| Evasion | [`evasion/unhook`](docs/evasion.md#ntdll-unhooking-evasionunhook) | ntdll.dll restoration | T1562.001 | Windows |
-| Evasion | [`evasion/acg`](docs/evasion.md) | Arbitrary Code Guard policy | T1562.001 | Windows 10+ |
-| Evasion | [`evasion/blockdlls`](docs/evasion.md) | Block non-Microsoft DLLs | T1562.001 | Windows 10+ |
-| Evasion | [`evasion/phant0m`](docs/evasion.md#phant0m-evasionphant0m) | Event Log thread termination | T1562.002 | Windows |
-| Evasion | [`evasion/herpaderping`](docs/evasion.md#process-herpaderping-evasionherpaderping----t1055) | Process image tampering | T1055 | Windows 10+ |
-| Evasion | [`evasion/antidebug`](docs/evasion.md) | Debugger detection | T1622 | Cross-platform |
-| Evasion | [`evasion/antivm`](docs/evasion.md#antivm----parameterizable-config-evasionantivm) | VM/hypervisor detection | T1497.001 | Cross-platform |
-| Evasion | [`evasion/sandbox`](docs/evasion.md#sandbox-detection-evasionsandbox) | Multi-factor sandbox detection | T1497 | Cross-platform |
-| Evasion | [`evasion/timing`](docs/evasion.md) | CPU-burning delays | T1497.003 | Cross-platform |
-| Evasion | [`evasion/preset`](docs/evasion.md#composable-evasion-evasionpreset) | Composable presets (Minimal/Stealth/Aggressive) | -- | Windows |
-| Injection | [`inject`](docs/injection.md) | 8 Windows + 5 Linux methods | T1055 | Mixed |
-| Process | [`process/enum`](docs/process.md) | Cross-platform process enumeration | T1057 | Cross-platform |
-| Process | [`process/session`](docs/process.md) | Cross-session execution | T1134.002 | Windows |
-| PE | [`pe/parse`](docs/pe.md) | PE file parsing (sections, exports, imports) | -- | Cross-platform |
-| PE | [`pe/morph`](docs/pe.md) | UPX header mutation | T1027.002 | Cross-platform |
-| PE | [`pe/srdi`](docs/pe.md) | DLL-to-shellcode conversion (sRDI) | T1055.001 | Cross-platform |
-| Cleanup | [`cleanup/selfdelete`](docs/cleanup.md) | Self-deletion (NTFS ADS, script, reboot) | T1070.004 | Windows |
-| Cleanup | [`cleanup/service`](docs/cleanup.md) | Service hiding via DACL manipulation | T1564 | Windows |
-| Cleanup | [`cleanup/wipe`](docs/cleanup.md) | Multi-pass random overwrite + deletion | T1070.004 | Cross-platform |
-| Cleanup | [`cleanup/timestomp`](docs/cleanup.md) | File timestamp manipulation | T1070.006 | Cross-platform |
-| C2 | [`c2/transport`](docs/c2.md) | TCP/TLS transport with cert pinning | -- | Cross-platform |
-| C2 | [`c2/shell`](docs/c2.md) | Reverse shell with reconnection + evasion | T1059 | Cross-platform |
-| C2 | [`c2/meterpreter`](docs/c2.md) | Meterpreter stager (TCP/HTTP/HTTPS) | T1059 | Cross-platform |
-| C2 | [`c2/cert`](docs/c2.md) | Self-signed X.509 certificate generation | -- | Cross-platform |
-| Privilege | [`uacbypass`](docs/privilege.md) | FODHelper, SLUI, SilentCleanup, EventVwr | T1548.002 | Windows |
-| Exploit | [`exploit/cve202430088`](docs/privilege.md) | Kernel TOCTOU race for LPE to SYSTEM | CVE-2024-30088 | Windows |
-| System | [`system/drive`](docs/system.md) | Drive enumeration, monitoring, volume info | -- | Windows |
-| System | [`system/network`](docs/system.md) | IP address retrieval, local address detection | -- | Cross-platform |
-| System | [`system/folder`](docs/system.md) | Windows special folder paths (CSIDL) | -- | Windows |
-| System | [`system/ui`](docs/system.md) | Message boxes and system sounds | -- | Windows |
+### 🔧 Technique Reference
+
+Each technique has a dedicated page with beginner explanation, technical details, diagrams, usage examples, and comparison with other tools.
+
+| Category | Techniques |
+|----------|-----------|
+| **[Injection](docs/techniques/injection/README.md)** | [CreateRemoteThread](docs/techniques/injection/create-remote-thread.md) · [Early Bird APC](docs/techniques/injection/early-bird-apc.md) · [Thread Hijack](docs/techniques/injection/thread-hijack.md) · [Module Stomping](docs/techniques/injection/module-stomping.md) · [Section Mapping](docs/techniques/injection/section-mapping.md) · [Callback Execution](docs/techniques/injection/callback-execution.md) · [Thread Pool](docs/techniques/injection/thread-pool.md) · [KernelCallbackTable](docs/techniques/injection/kernel-callback-table.md) · [Phantom DLL](docs/techniques/injection/phantom-dll.md) · [Arg Spoofing](docs/techniques/injection/process-arg-spoofing.md) |
+| **[Evasion](docs/techniques/evasion/README.md)** | [AMSI Bypass](docs/techniques/evasion/amsi-bypass.md) · [ETW Patching](docs/techniques/evasion/etw-patching.md) · [ntdll Unhooking](docs/techniques/evasion/ntdll-unhooking.md) · [Sleep Mask](docs/techniques/evasion/sleep-mask.md) · [HW Breakpoints](docs/techniques/evasion/hw-breakpoints.md) · [ACG + BlockDLLs](docs/techniques/evasion/acg-blockdlls.md) · [Anti-Analysis](docs/techniques/evasion/anti-analysis.md) |
+| **[Syscalls](docs/techniques/syscalls/README.md)** | [Direct & Indirect](docs/techniques/syscalls/direct-indirect.md) · [API Hashing](docs/techniques/syscalls/api-hashing.md) · [SSN Resolvers](docs/techniques/syscalls/ssn-resolvers.md) |
+| **[C2 & Transport](docs/techniques/c2/README.md)** | [Reverse Shell](docs/techniques/c2/reverse-shell.md) · [Meterpreter](docs/techniques/c2/meterpreter.md) · [Transport](docs/techniques/c2/transport.md) · [Malleable HTTP](docs/techniques/c2/malleable-profiles.md) |
+| **[PE Operations](docs/techniques/pe/README.md)** | [Strip & Sanitize](docs/techniques/pe/strip-sanitize.md) · [BOF Loader](docs/techniques/pe/bof-loader.md) · [Morph](docs/techniques/pe/morph.md) |
+| **[Cleanup](docs/techniques/cleanup/README.md)** | [Self-Delete](docs/techniques/cleanup/self-delete.md) · [Timestomp](docs/techniques/cleanup/timestomp.md) · [Memory Wipe](docs/techniques/cleanup/memory-wipe.md) |
+| **[Tokens & Privileges](docs/techniques/tokens/README.md)** | [Token Theft](docs/techniques/tokens/token-theft.md) · [Impersonation](docs/techniques/tokens/impersonation.md) · [Privilege Escalation](docs/techniques/tokens/privilege-escalation.md) |
+| **[Crypto & Encoding](docs/techniques/crypto/README.md)** | [Payload Encryption](docs/techniques/crypto/payload-encryption.md) |
+
+### 🧪 Composed Examples
+
+| Example | What it demonstrates |
+|---------|---------------------|
+| **[Basic Implant](docs/examples/basic-implant.md)** | Evasion → decrypt → inject → sleep mask |
+| **[Evasive Injection](docs/examples/evasive-injection.md)** | HW breakpoints → section mapping vs module stomping vs callback |
+| **[Full Attack Chain](docs/examples/full-chain.md)** | Recon → evasion → inject → C2 → post-ex → cleanup |
+
+### 📚 API Reference
+
+Detailed API documentation for each package (function signatures, parameters, return values):
+
+| Domain | Docs |
+|--------|------|
+| Evasion APIs | [docs/evasion.md](docs/evasion.md) |
+| Injection APIs | [docs/injection.md](docs/injection.md) |
+| Syscall APIs | [docs/syscalls.md](docs/syscalls.md) |
+| C2 APIs | [docs/c2.md](docs/c2.md) |
+| Windows Primitives | [docs/win.md](docs/win.md) |
+| PE Operations | [docs/pe.md](docs/pe.md) |
+| Crypto & Encoding | [docs/crypto.md](docs/crypto.md) |
+| Cleanup APIs | [docs/cleanup.md](docs/cleanup.md) |
+| System Info | [docs/system.md](docs/system.md) |
+| Privilege & Exploits | [docs/privilege.md](docs/privilege.md) |
+| Process Management | [docs/process.md](docs/process.md) |
 
 ## Build
 
 ```bash
-# Build all packages (excludes ignore/)
-go build $(go list ./...)
-
-# Cross-compile for Linux
-GOOS=linux GOARCH=amd64 go build $(go list ./...)
-
-# Build with size optimization
-go build -ldflags="-s -w" $(go list ./...)
-
-# Run all tests
-go test $(go list ./...)
+make build          # standard development build
+make release        # OPSEC build (garble + strip + trimpath)
+make debug          # debug build (with logging)
+make test           # run all tests
+make verify         # build + test + cross-compile
 ```
 
-**Requirements:**
-- Go 1.21+
-- Windows SDK headers are NOT required -- all syscalls use `golang.org/x/sys/windows`
-- CGO is optional -- the `inject` package supports pure Go execution on Linux via `purego`
-
-## Testing
-
-```bash
-# Run safe (non-intrusive) tests
-./testutil/run-tests.sh
-
-# Run intrusive tests (requires admin, modifies system state)
-./testutil/run-tests.sh --intrusive
-
-# Run Linux tests via Podman
-./testutil/run-tests.sh --linux
-```
+**Requirements:** Go 1.21+ · Windows SDK headers NOT required · CGO optional
 
 ## Project Structure
 
 ```
 maldev/
-+-- crypto/                AES-GCM, ChaCha20, RC4, XOR
-+-- encode/                Base64, UTF-16LE, ROT13, PowerShell encoding
-+-- hash/                  MD5, SHA-256, SHA-512, ROR13 (API hashing)
-+-- random/                Cryptographic random generation
-+-- win/
-|   +-- api/               DLL handles, procedure refs, memory patching
-|   +-- syscall/           Pluggable syscall strategies (WinAPI/Direct/Indirect)
-|   +-- ntapi/             Type-safe NT function wrappers
-|   +-- token/             Token manipulation and privilege management
-|   +-- privilege/         Admin detection, RunAs, elevation helpers
-|   +-- impersonate/       Thread impersonation
-|   +-- domain/            Domain membership queries
-|   +-- version/           OS version detection, CVE checks
-+-- evasion/
-|   +-- amsi/              AMSI memory patching
-|   +-- etw/               ETW event write patching
-|   +-- unhook/            ntdll restoration (Classic, Full, Perun)
-|   +-- acg/               Arbitrary Code Guard policy
-|   +-- blockdlls/         Non-Microsoft DLL blocking
-|   +-- phant0m/           Event Log thread termination
-|   +-- herpaderping/      Process image tampering (kernel section cache)
-|   +-- antidebug/         Debugger detection
-|   +-- antivm/            VM/hypervisor detection
-|   +-- timing/            CPU-burning time delays
-|   +-- sandbox/           Multi-factor sandbox detection
-|   +-- preset/            Composable technique presets
-+-- inject/                Shellcode injection (8 Win + 5 Linux methods)
-+-- process/
-|   +-- enum/              Cross-platform process enumeration
-|   +-- session/           Cross-session execution
-+-- pe/
-|   +-- parse/             PE file parsing (sections, exports, imports)
-|   +-- morph/             UPX header mutation
-|   +-- srdi/              DLL-to-shellcode conversion (sRDI)
-+-- cleanup/
-|   +-- selfdelete/        Self-deletion (NTFS ADS, script, reboot)
-|   +-- service/           Service hiding (DACL)
-|   +-- wipe/              Secure file wiping
-|   +-- timestomp/         Timestamp manipulation
-+-- c2/
-|   +-- cert/              X.509 certificate generation
-|   +-- transport/         TCP/TLS transport with cert pinning
-|   +-- shell/             Reverse shell with reconnection
-|   +-- meterpreter/       Meterpreter staging (TCP/HTTP/HTTPS)
-+-- uacbypass/             UAC bypass (FODHelper, SLUI, SilentCleanup, EventVwr)
-+-- exploit/
-|   +-- cve202430088/      CVE-2024-30088 kernel LPE
-+-- system/
-|   +-- drive/             Drive detection and monitoring
-|   +-- network/           IP and local address detection
-|   +-- folder/            Windows special folder paths
-|   +-- ui/                Message boxes, system sounds
-+-- cmd/
-|   +-- rshell/            Standalone reverse shell binary
-+-- internal/
-|   +-- compat/            Go version compatibility shims
-+-- testutil/              Test harness and helpers
+├── crypto/          encode/          hash/          random/         useragent/
+├── win/api/         win/syscall/     win/ntapi/     win/token/      win/privilege/
+├── evasion/amsi/    evasion/etw/     evasion/unhook/ evasion/sleepmask/ evasion/hwbp/
+├── inject/          process/enum/    pe/strip/      pe/bof/         pe/morph/
+├── c2/shell/        c2/transport/    c2/meterpreter/ c2/cert/
+├── cleanup/memory/  cleanup/selfdelete/ cleanup/timestomp/ cleanup/wipe/
+├── uacbypass/       exploit/cve202430088/ system/drive/  system/folder/
+├── internal/log/    internal/compat/  testutil/       cmd/rshell/
+└── docs/            .claude/skills/   Makefile
 ```
 
 ## Acknowledgments
 
-This project was inspired by and compared against [D3Ext/maldev](https://github.com/D3Ext/maldev) by [@D3Ext](https://github.com/D3Ext), a comprehensive Go library for malware development. Several improvements (Phant0m service tag precision, process count sandbox check, internet connectivity detection) were informed by their implementation patterns.
+Inspired by and compared against [D3Ext/maldev](https://github.com/D3Ext/maldev) by [@D3Ext](https://github.com/D3Ext). Several improvements were informed by their implementation patterns.
 
 ## License
 
-This project is for authorized security research, red team operations, and penetration testing only. Unauthorized use against systems you do not own or have explicit permission to test is prohibited.
+For authorized security research, red team operations, and penetration testing only.
