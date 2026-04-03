@@ -77,6 +77,8 @@ var (
 	ProcNtQueryInformationProcess        = Ntdll.NewProc("NtQueryInformationProcess")
 	ProcRtlCreateProcessParametersEx    = Ntdll.NewProc("RtlCreateProcessParametersEx")
 	ProcRtlInitUnicodeString             = Ntdll.NewProc("RtlInitUnicodeString")
+	ProcEtwpCreateEtwThread              = Ntdll.NewProc("EtwpCreateEtwThread")
+	ProcNtQueueApcThreadEx               = Ntdll.NewProc("NtQueueApcThreadEx")
 )
 
 // advapi32.dll procs

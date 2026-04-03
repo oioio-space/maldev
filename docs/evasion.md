@@ -530,9 +530,13 @@ The Windows Event Log service writes security-critical events (logons, process c
 1. Opens the Service Control Manager and queries the `EventLog` service to get its hosting PID (the specific svchost.exe instance).
 2. Takes a thread snapshot of the entire system via `CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD)`.
 3. Iterates all threads; for each thread owned by the EventLog PID:
+   - **Service tag validation (Vista+):** Reads the thread's `SubProcessTag` via `NtQueryInformationThread` and resolves it to a service name via `I_QueryTagInformation` (from `advapi32.dll`). Only threads confirmed to belong to the `EventLog` service are terminated. This prevents collateral damage to other services sharing the same svchost.exe instance.
+   - If `I_QueryTagInformation` is unavailable (pre-Vista), falls back to killing all threads of the PID (original behavior).
    - Opens the thread with `THREAD_TERMINATE` access
    - Terminates it via `TerminateThread` (or `NtTerminateThread` via Caller)
 4. The svchost.exe process continues running (other services in the same host are unaffected), but the Event Log service has no worker threads to process events.
+
+**Note on Caller routing:** The `NtQueryInformationThread` and `I_QueryTagInformation` calls used for service tag validation are read-only queries that do not modify thread or process state. They are not routed through the Caller because they are not security-sensitive operations that EDRs typically hook for injection detection. Only `NtTerminateThread` (the destructive operation) is routed through the Caller when provided.
 
 ### Functions
 

