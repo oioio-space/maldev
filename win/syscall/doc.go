@@ -20,6 +20,8 @@
 //   - HellsGate: read SSN from unhooked ntdll prologue
 //   - HalosGate: scan neighboring stubs when target is hooked
 //   - TartarusGate: follow JMP hooks to extract SSN from trampoline
+//   - HashGate: resolve ntdll functions via PEB walk + ROR13 export hashing
+//     (no string-based resolution — uses api.ExportByHash internally)
 //   - Chain: try multiple resolvers in sequence
 //
 // Platform: Windows only.

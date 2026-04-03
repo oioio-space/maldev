@@ -77,8 +77,8 @@ err := amsi.PatchAll(nil) // patch AMSI + bypass session init
 | Crypto | [`encode`](docs/crypto.md) | Base64, Base64URL, UTF-16LE, ROT13, PowerShell | -- | Cross-platform |
 | Crypto | [`hash`](docs/crypto.md) | MD5, SHA-256, SHA-512, ROR13 (API hashing) | -- | Cross-platform |
 | Crypto | [`random`](docs/crypto.md) | Cryptographic random strings, bytes, integers | -- | Cross-platform |
-| Win | [`win/api`](docs/win.md) | DLL handles, procedure refs, memory patching | -- | Windows |
-| Win | [`win/syscall`](docs/syscalls.md) | Pluggable syscall (WinAPI/Direct/Indirect) | -- | Windows |
+| Win | [`win/api`](docs/win.md) | DLL handles, procedure refs, memory patching, PEB walk API hashing | T1106 | Windows |
+| Win | [`win/syscall`](docs/syscalls.md) | Pluggable syscall (WinAPI/Direct/Indirect), HashGate resolver | T1106 | Windows |
 | Win | [`win/ntapi`](docs/win.md) | Type-safe NT function wrappers | -- | Windows |
 | Win | [`win/token`](docs/win.md) | Token manipulation, privilege management | -- | Windows |
 | Win | [`win/privilege`](docs/win.md) | Admin detection, RunAs, elevation helpers | -- | Windows |

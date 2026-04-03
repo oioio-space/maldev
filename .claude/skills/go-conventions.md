@@ -138,16 +138,19 @@ When creating a NEW technique package, also:
 - If it implements `evasion.Technique`, verify it composes with presets
 
 ### MITRE ATT&CK Reference
-Current technique mapping:
-- T1562.001 — Impair Defenses (amsi, etw, acg, blockdlls)
-- T1562.002 — Disable Logging (phant0m, etw)
+See [docs/mitre.md](../../docs/mitre.md) for the full mapping. Key technique IDs:
 - T1055 — Process Injection (inject, herpaderping)
-- T1497 — Virtualization/Sandbox Evasion (antivm, sandbox)
+- T1106 — Native API (win/api PEB walk, win/syscall, win/ntapi)
+- T1562.001 — Impair Defenses (amsi, etw, acg, blockdlls, unhook)
+- T1562.002 — Disable Logging (phant0m, etw)
+- T1497 — Sandbox Evasion (antivm, sandbox, timing)
 - T1622 — Debugger Evasion (antidebug)
 - T1070 — Indicator Removal (selfdelete, timestomp, wipe, service)
+- T1134 — Token Manipulation (win/token, win/privilege, win/impersonate)
 - T1548.002 — Abuse Elevation (uacbypass)
-- T1573.002 — Encrypted Channel (c2/transport, c2/cert)
-- T1057 — Process Discovery (process/enum)
+- T1082 — System Info Discovery (win/domain, win/version)
+- T1120 — Peripheral Device Discovery (system/drive)
+- T1083 — File Discovery (system/folder)
 
 ## Checklist (Run Before Every Commit)
 

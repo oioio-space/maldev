@@ -9,8 +9,14 @@
 | T1055.001 | Process Injection: DLL Injection | `pe/srdi` |
 | T1057 | Process Discovery | `process/enum` |
 | T1059 | Command and Scripting Interpreter | `c2/shell`, `c2/meterpreter` |
+| T1082 | System Information Discovery | `win/domain`, `win/version` |
+| T1083 | File and Directory Discovery | `system/folder` |
 | T1070.004 | Indicator Removal: File Deletion | `cleanup/selfdelete`, `cleanup/wipe` |
+| T1106 | Native API | `win/api` (PEB walk, API hashing), `win/syscall` (direct/indirect syscalls, HashGate), `win/ntapi` |
 | T1070.006 | Indicator Removal: Timestomp | `cleanup/timestomp` |
+| T1120 | Peripheral Device Discovery | `system/drive` |
+| T1134 | Access Token Manipulation | `win/token`, `win/privilege` |
+| T1134.001 | Token Impersonation/Theft | `win/impersonate`, `win/token` |
 | T1134.002 | Access Token Manipulation: Create Process with Token | `process/session` |
 | T1497 | Virtualization/Sandbox Evasion | `evasion/sandbox` |
 | T1497.001 | Sandbox Evasion: System Checks | `evasion/antivm` |

@@ -281,6 +281,8 @@ func ROR13(name string) uint32
 
 **Why ROR13 exists:** ROR13 is the canonical API hashing algorithm used in Windows shellcode. Instead of embedding plaintext API names like `"VirtualAlloc"` (which signature scanners flag), shellcode stores the ROR13 hash and resolves functions by walking the PEB export table and comparing hashes at runtime. Nearly every public shellcode framework (Metasploit, Cobalt Strike, Donut) uses this exact algorithm.
 
+**Practical usage in maldev:** The `win/api` package provides `ResolveByHash`, `ModuleByHash`, and `ExportByHash` which implement the PEB walk + export hash comparison using these ROR13 hashes. Pre-computed constants (`api.HashKernel32`, `api.HashLoadLibraryA`, etc.) are provided so the binary contains zero plaintext API names. The `win/syscall.HashGateResolver` uses this internally to resolve SSN numbers without string-based function lookups. See [Syscall Methods](syscalls.md) for details.
+
 **How the algorithm works:**
 
 ```
