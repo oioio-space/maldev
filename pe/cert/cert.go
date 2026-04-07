@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -63,12 +64,27 @@ func Read(pePath string) (*Certificate, error) {
 }
 
 // Has checks whether a PE file contains an Authenticode certificate.
+// Only reads the PE headers (~1 KB), not the entire file.
 func Has(pePath string) (bool, error) {
-	_, err := Read(pePath)
-	if errors.Is(err, ErrNoCertificate) {
-		return false, nil
+	f, err := os.Open(pePath)
+	if err != nil {
+		return false, fmt.Errorf("open PE: %w", err)
 	}
-	return err == nil, err
+	defer f.Close()
+
+	// 1 KB is enough for DOS header + PE signature + COFF + optional header
+	// + data directories on both PE32 and PE32+.
+	buf := make([]byte, 1024)
+	n, err := io.ReadAtLeast(f, buf, dosHeaderSize)
+	if err != nil {
+		return false, ErrInvalidPE
+	}
+
+	certOffset, certSize, _, err := findSecurityDir(buf[:n])
+	if err != nil {
+		return false, err
+	}
+	return certOffset != 0 || certSize != 0, nil
 }
 
 // Strip removes the Authenticode certificate from a PE file and writes

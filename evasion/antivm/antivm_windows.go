@@ -353,7 +353,7 @@ func DetectAll(cfg Config) ([]string, error) {
 		}
 		if checks&CheckNIC != 0 && len(vendor.Nic) > 0 {
 			if found, _, err := DetectNic(vendor.Nic); err != nil {
-				return results, fmt.Errorf("NIC check for %s: %w", vendor.Name, err)
+				return results, fmt.Errorf("NIC check: %w", err)
 			} else if found {
 				seen[vendor.Name] = true
 				results = append(results, vendor.Name)
@@ -362,7 +362,7 @@ func DetectAll(cfg Config) ([]string, error) {
 		}
 		if checks&CheckProcess != 0 && len(vendor.Proc) > 0 {
 			if found, _, err := DetectProcess(vendor.Proc); err != nil {
-				return results, fmt.Errorf("process check for %s: %w", vendor.Name, err)
+				return results, fmt.Errorf("process check: %w", err)
 			} else if found {
 				seen[vendor.Name] = true
 				results = append(results, vendor.Name)
