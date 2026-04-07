@@ -42,7 +42,7 @@ func Read(pePath string) (*Certificate, error) {
 		return nil, fmt.Errorf("read PE: %w", err)
 	}
 
-	certOffset, certSize, err := findSecurityDir(data)
+	certOffset, certSize, _, err := findSecurityDir(data)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func Strip(pePath, dst string) error {
 		return fmt.Errorf("read PE: %w", err)
 	}
 
-	certOffset, certSize, err := findSecurityDir(data)
+	certOffset, certSize, dirEntryOffset, err := findSecurityDir(data)
 	if err != nil {
 		return err
 	}
@@ -94,11 +94,8 @@ func Strip(pePath, dst string) error {
 	}
 	data = data[:certOffset]
 
-	// Zero out the security directory entry.
-	dirEntryOffset, err := securityDirOffset(data)
-	if err != nil {
-		return err
-	}
+	// Zero out the security directory entry (offset was resolved once
+	// by findSecurityDir — avoids double PE header parsing).
 	binary.LittleEndian.PutUint32(data[dirEntryOffset:], 0)   // VirtualAddress
 	binary.LittleEndian.PutUint32(data[dirEntryOffset+4:], 0) // Size
 
@@ -133,7 +130,7 @@ func Write(pePath string, c *Certificate) error {
 	}
 
 	// If the PE already has a certificate, truncate at the old offset.
-	oldOffset, oldSize, err := findSecurityDir(data)
+	oldOffset, oldSize, dirEntryOffset, err := findSecurityDir(data)
 	if err != nil {
 		return err
 	}
@@ -142,12 +139,6 @@ func Write(pePath string, c *Certificate) error {
 			return ErrInvalidPE
 		}
 		data = data[:oldOffset]
-	}
-
-	// Locate the security directory entry so we can patch it.
-	dirEntryOffset, err := securityDirOffset(data)
-	if err != nil {
-		return err
 	}
 
 	// WIN_CERTIFICATE structures must be 8-byte aligned per PE spec.
@@ -188,16 +179,17 @@ func Import(path string) (*Certificate, error) {
 }
 
 // findSecurityDir locates the security directory entry in the PE data
-// and returns the certificate file offset and size.
-func findSecurityDir(data []byte) (offset, size uint32, err error) {
-	entryOffset, err := securityDirOffset(data)
+// and returns the certificate file offset, size, and the byte offset of
+// the directory entry itself (for patching by Strip/Write).
+func findSecurityDir(data []byte) (certOffset, certSize, dirEntryOffset uint32, err error) {
+	dirEntryOffset, err = securityDirOffset(data)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 
-	offset = binary.LittleEndian.Uint32(data[entryOffset:])
-	size = binary.LittleEndian.Uint32(data[entryOffset+4:])
-	return offset, size, nil
+	certOffset = binary.LittleEndian.Uint32(data[dirEntryOffset:])
+	certSize = binary.LittleEndian.Uint32(data[dirEntryOffset+4:])
+	return certOffset, certSize, dirEntryOffset, nil
 }
 
 // securityDirOffset returns the byte offset within the PE data where the

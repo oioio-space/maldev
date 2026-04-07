@@ -173,6 +173,7 @@ func CaptureRect(x, y, width, height int) ([]byte, error) {
 	}
 
 	var buf bytes.Buffer
+	buf.Grow(pixelBytes / 2) // PNG compresses to ~30-50% of raw; avoids realloc cycles
 	if err := png.Encode(&buf, img); err != nil {
 		return nil, err
 	}
