@@ -7,8 +7,8 @@
 | ATT&CK ID | Technique Name | Package(s) | D3FEND Countermeasure |
 |-----------|---------------|------------|----------------------|
 | T1027 | Obfuscated Files or Information | `evasion/sleepmask`, `pe/strip` | D3-SMRA (System Memory Range Analysis) |
-| T1047.001 | Boot or Logon Autostart Execution: Registry Run Keys | `persistence/registry` | D3-SBV (Service Binary Verification) |
 | T1027.002 | Software Packing | `pe/morph` | D3-SEA (Static Executable Analysis) |
+| T1047.001 | Boot or Logon Autostart Execution: Registry Run Keys | `persistence/registry` | D3-SBV (Service Binary Verification) |
 | T1053.005 | Scheduled Task/Job: Scheduled Task | `persistence/scheduler` | D3-SBV (Service Binary Verification) |
 | T1055 | Process Injection | `inject` (15 methods), `evasion/herpaderping` | D3-PSA (Process Spawn Analysis) |
 | T1055.001 | DLL Injection | `pe/srdi`, `inject/phantomdll` | D3-SICA (System Image Change Analysis) |
@@ -29,9 +29,9 @@
 | T1115 | Clipboard Data | `collection/clipboard` | D3-DA (Dynamic Analysis) |
 | T1120 | Peripheral Device Discovery | `system/drive` | D3-PDD (Peripheral Device Discovery) |
 | T1134 | Access Token Manipulation | `win/token`, `win/privilege` | D3-TAAN (Token Auth Normalization) |
-| T1136.001 | Create Account: Local Account | `win/user` | D3-UAP (User Account Profiling) |
 | T1134.001 | Token Impersonation/Theft | `win/impersonate`, `win/token` | D3-TAAN |
 | T1134.002 | Create Process with Token | `process/session` | D3-TAAN |
+| T1136.001 | Create Account: Local Account | `win/user` | D3-UAP (User Account Profiling) |
 | T1204.002 | User Execution: Malicious File | `system/lnk` | D3-EFA (Executable File Analysis) |
 | T1497 | Virtualization/Sandbox Evasion | `evasion/sandbox` | D3-DA (Dynamic Analysis) |
 | T1497.001 | System Checks | `evasion/antivm` | D3-DA |
