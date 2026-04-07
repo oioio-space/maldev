@@ -3,6 +3,7 @@ package cert
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 )
 
@@ -38,7 +39,7 @@ const (
 func Read(pePath string) (*Certificate, error) {
 	data, err := os.ReadFile(pePath)
 	if err != nil {
-		return nil, ErrInvalidPE
+		return nil, fmt.Errorf("read PE: %w", err)
 	}
 
 	certOffset, certSize, err := findSecurityDir(data)
@@ -65,7 +66,7 @@ func Read(pePath string) (*Certificate, error) {
 func Has(pePath string) (bool, error) {
 	data, err := os.ReadFile(pePath)
 	if err != nil {
-		return false, ErrInvalidPE
+		return false, fmt.Errorf("read PE: %w", err)
 	}
 
 	certOffset, certSize, err := findSecurityDir(data)
@@ -81,7 +82,7 @@ func Has(pePath string) (bool, error) {
 func Strip(pePath, dst string) error {
 	data, err := os.ReadFile(pePath)
 	if err != nil {
-		return ErrInvalidPE
+		return fmt.Errorf("read PE: %w", err)
 	}
 
 	certOffset, certSize, err := findSecurityDir(data)
@@ -134,7 +135,7 @@ func Write(pePath string, c *Certificate) error {
 
 	data, err := os.ReadFile(pePath)
 	if err != nil {
-		return ErrInvalidPE
+		return fmt.Errorf("read PE: %w", err)
 	}
 
 	// If the PE already has a certificate, truncate at the old offset.

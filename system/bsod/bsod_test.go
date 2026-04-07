@@ -4,23 +4,21 @@ package bsod
 
 import (
 	"testing"
+
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
 func TestTriggerExists(t *testing.T) {
-	// Verify the function exists and is callable (compile-time check).
+	// Verify the function signature is correct (compile-time check).
 	// We do NOT call Trigger() as it would crash the system.
-	var fn func() error = Trigger
+	var fn func(*wsyscall.Caller) error = Trigger
 	if fn == nil {
 		t.Fatal("Trigger function is nil")
 	}
 }
 
 func TestProcsLoaded(t *testing.T) {
-	// Verify ntdll procs can be found (they should always exist on Windows).
 	if err := procRtlAdjustPrivilege.Find(); err != nil {
-		t.Fatalf("RtlAdjustPrivilege not found in ntdll: %v", err)
-	}
-	if err := procNtRaiseHardError.Find(); err != nil {
-		t.Fatalf("NtRaiseHardError not found in ntdll: %v", err)
+		t.Fatalf("RtlAdjustPrivilege not found: %v", err)
 	}
 }

@@ -228,7 +228,7 @@ func List() ([]Info, error) {
 			continue
 		}
 		if ret != nerrSuccess {
-			return users, mapNetError("enumerate users", ret)
+			return nil, mapNetError("enumerate users", ret)
 		}
 		break
 	}

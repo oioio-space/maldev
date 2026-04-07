@@ -7,7 +7,7 @@ import (
 	"errors"
 	"image"
 	"image/png"
-	"sync"
+
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -174,58 +174,51 @@ func CaptureRect(x, y, width, height int) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Display enumeration state — populated lazily.
-var (
-	displaysOnce sync.Once
-	displays     []image.Rectangle
-)
-
-func enumDisplays() {
-	displaysOnce.Do(func() {
-		displays = nil
-		cb := func(hMonitor, hdcMonitor, lprcMonitor, dwData uintptr) uintptr {
-			var mi monitorInfo
-			mi.CbSize = uint32(unsafe.Sizeof(mi))
-			r, _, _ := procGetMonitorInfoW.Call(hMonitor, uintptr(unsafe.Pointer(&mi)))
-			if r != 0 {
-				displays = append(displays, image.Rect(
-					int(mi.RcMonitor.Left),
-					int(mi.RcMonitor.Top),
-					int(mi.RcMonitor.Right),
-					int(mi.RcMonitor.Bottom),
-				))
-			}
-			return 1 // continue enumeration
+// enumDisplays queries the current monitor layout. Called on every
+// DisplayCount/DisplayBounds/CaptureDisplay to reflect hotplug changes.
+func enumDisplays() []image.Rectangle {
+	var result []image.Rectangle
+	cb := func(hMonitor, hdcMonitor, lprcMonitor, dwData uintptr) uintptr {
+		var mi monitorInfo
+		mi.CbSize = uint32(unsafe.Sizeof(mi))
+		r, _, _ := procGetMonitorInfoW.Call(hMonitor, uintptr(unsafe.Pointer(&mi)))
+		if r != 0 {
+			result = append(result, image.Rect(
+				int(mi.RcMonitor.Left),
+				int(mi.RcMonitor.Top),
+				int(mi.RcMonitor.Right),
+				int(mi.RcMonitor.Bottom),
+			))
 		}
+		return 1 // continue enumeration
+	}
 
-		// EnumDisplayMonitors(NULL, NULL, callback, 0) enumerates all monitors.
-		procEnumDisplayMonitors.Call(0, 0, windows.NewCallback(cb), 0) //nolint:errcheck
-	})
+	procEnumDisplayMonitors.Call(0, 0, windows.NewCallback(cb), 0) //nolint:errcheck
+	return result
 }
 
 // DisplayCount returns the number of active displays.
 func DisplayCount() int {
-	enumDisplays()
-	return len(displays)
+	return len(enumDisplays())
 }
 
 // DisplayBounds returns the pixel bounds of a display by index (0-based).
 // Returns an empty rectangle if the index is out of range.
 func DisplayBounds(index int) image.Rectangle {
-	enumDisplays()
-	if index < 0 || index >= len(displays) {
+	d := enumDisplays()
+	if index < 0 || index >= len(d) {
 		return image.Rectangle{}
 	}
-	return displays[index]
+	return d[index]
 }
 
 // CaptureDisplay takes a screenshot of a specific display by index (0-based).
 func CaptureDisplay(index int) ([]byte, error) {
-	enumDisplays()
-	if index < 0 || index >= len(displays) {
+	d := enumDisplays()
+	if index < 0 || index >= len(d) {
 		return nil, ErrDisplayIndex
 	}
-	bounds := displays[index]
+	bounds := d[index]
 	return CaptureRect(
 		bounds.Min.X, bounds.Min.Y,
 		bounds.Dx(), bounds.Dy(),

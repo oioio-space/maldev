@@ -90,12 +90,14 @@ func Exists(ctx context.Context, name string) bool {
 	return runSchtasks(ctx, args) == nil
 }
 
-// buildTR constructs the /TR value, quoting the command and appending args.
+// buildTR constructs the /TR value, quoting the command path to handle
+// spaces in directory names (e.g., "C:\Program Files\...").
 func buildTR(command, args string) string {
+	quoted := `"` + command + `"`
 	if args == "" {
-		return command
+		return quoted
 	}
-	return command + " " + args
+	return quoted + " " + args
 }
 
 // runSchtasks executes schtasks.exe with a hidden console window.

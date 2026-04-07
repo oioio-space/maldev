@@ -1,7 +1,8 @@
 // Package startup provides StartUp folder persistence via LNK shortcut files.
 //
 // Technique: StartUp folder persistence via LNK shortcut files.
-// MITRE ATT&CK: T1547.001 (Boot or Logon Autostart Execution: Registry Run Keys)
+// MITRE ATT&CK: T1547.001 (Boot or Logon Autostart Execution: Startup Folder),
+// T1547.009 (Shortcut Modification)
 // Platform: Windows
 // Detection: Medium -- StartUp folder is monitored by security products.
 //
