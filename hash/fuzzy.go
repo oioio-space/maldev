@@ -27,7 +27,8 @@ func SsdeepCompare(hash1, hash2 string) (int, error) {
 }
 
 // TLSH computes the TLSH (Trend Locality Sensitive Hash) of data.
-// TLSH requires a minimum of 50 bytes of input.
+// Minimum input: 50 bytes (library enforced). Inputs under 256 bytes
+// may produce less reliable similarity hashes.
 func TLSH(data []byte) (string, error) {
 	t, err := tlsh.HashBytes(data)
 	if err != nil {

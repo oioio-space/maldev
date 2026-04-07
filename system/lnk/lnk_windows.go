@@ -14,13 +14,12 @@ import (
 type WindowStyle int
 
 const (
-	// StyleHidden launches the target with no visible window.
-	StyleHidden WindowStyle = 0
 	// StyleNormal launches the target in a normal window.
+	// IWshShortcut only supports values 1, 3, and 7.
 	StyleNormal WindowStyle = 1
 	// StyleMaximized launches the target in a maximized window.
 	StyleMaximized WindowStyle = 3
-	// StyleMinimized launches the target in a minimized window.
+	// StyleMinimized launches the target in a minimized window (most common for persistence).
 	StyleMinimized WindowStyle = 7
 )
 

@@ -25,7 +25,7 @@ func TestBuilderChaining(t *testing.T) {
 		SetIconLocation("icon").
 		SetDescription("desc").
 		SetHotkey("Ctrl+Alt+T").
-		SetWindowStyle(StyleHidden)
+		SetWindowStyle(StyleMinimized)
 
 	if got != s {
 		t.Fatal("builder methods must return the same pointer")
@@ -50,8 +50,8 @@ func TestBuilderChaining(t *testing.T) {
 	if s.hotkey != "Ctrl+Alt+T" {
 		t.Errorf("hotkey = %q, want %q", s.hotkey, "Ctrl+Alt+T")
 	}
-	if s.windowStyle != StyleHidden {
-		t.Errorf("windowStyle = %d, want %d", s.windowStyle, StyleHidden)
+	if s.windowStyle != StyleMinimized {
+		t.Errorf("windowStyle = %d, want %d", s.windowStyle, StyleMinimized)
 	}
 	if !s.styleSet {
 		t.Error("styleSet should be true after SetWindowStyle")
@@ -65,7 +65,7 @@ func TestSave(t *testing.T) {
 	err := New().
 		SetTargetPath(`C:\Windows\System32\cmd.exe`).
 		SetArguments("/c echo ok").
-		SetWindowStyle(StyleHidden).
+		SetWindowStyle(StyleMinimized).
 		Save(lnkPath)
 	if err != nil {
 		t.Fatalf("Save() error: %v", err)

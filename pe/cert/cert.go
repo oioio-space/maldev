@@ -150,6 +150,11 @@ func Write(pePath string, c *Certificate) error {
 		return err
 	}
 
+	// WIN_CERTIFICATE structures must be 8-byte aligned per PE spec.
+	if pad := uint32(len(data)) % 8; pad != 0 {
+		data = append(data, make([]byte, 8-pad)...)
+	}
+
 	// Append certificate at end of file.
 	newOffset := uint32(len(data))
 	newSize := uint32(len(c.Raw))

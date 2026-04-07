@@ -20,7 +20,7 @@ var ErrTaskDelete = errors.New("failed to delete scheduled task")
 type Trigger int
 
 const (
-	TriggerLogon   Trigger = iota // Run at user logon
+	TriggerLogon   Trigger = iota // Run at user logon (requires elevation)
 	TriggerStartup                // Run at system startup (requires elevation)
 	TriggerDaily                  // Run daily
 )

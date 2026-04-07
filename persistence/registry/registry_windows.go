@@ -84,7 +84,7 @@ func Get(hive Hive, keyType KeyType, name string) (string, error) {
 
 // Delete removes a value from the specified Run/RunOnce key.
 func Delete(hive Hive, keyType KeyType, name string) error {
-	k, err := registry.OpenKey(rootKey(hive), keyPath(keyType), registry.ALL_ACCESS)
+	k, err := registry.OpenKey(rootKey(hive), keyPath(keyType), registry.SET_VALUE)
 	if err != nil {
 		return fmt.Errorf("open registry key: %w", err)
 	}

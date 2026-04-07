@@ -5,6 +5,8 @@ package user
 import (
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -283,7 +285,18 @@ func modifyGroupMembership(name, group string, proc *windows.LazyProc) error {
 	if err != nil {
 		return fmt.Errorf("encoding group: %w", err)
 	}
-	namePtr, err := windows.UTF16PtrFromString(name)
+
+	// LOCALGROUP_MEMBERS_INFO_3 expects a domain-qualified name
+	// (COMPUTER\user). Bare usernames work on standalone machines but
+	// can fail on domain-joined hosts. Qualify with local hostname.
+	qualified := name
+	if !strings.Contains(name, `\`) {
+		if hostname, err := os.Hostname(); err == nil {
+			qualified = hostname + `\` + name
+		}
+	}
+
+	namePtr, err := windows.UTF16PtrFromString(qualified)
 	if err != nil {
 		return fmt.Errorf("encoding name: %w", err)
 	}

