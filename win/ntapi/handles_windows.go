@@ -99,7 +99,7 @@ func FindHandleByType(targetPID uint32, referenceHandle windows.Handle) (uintptr
 	var typeIndex uint16
 	for i := uintptr(0); i < count; i++ {
 		entry := HandleEntry(buf, i)
-		if entry.UniqueProcessId == uintptr(currentPID) &&
+		if entry.UniqueProcessID == uintptr(currentPID) &&
 			entry.HandleValue == uintptr(referenceHandle) {
 			typeIndex = entry.ObjectTypeIndex
 			break
@@ -112,7 +112,7 @@ func FindHandleByType(targetPID uint32, referenceHandle windows.Handle) (uintptr
 	// Pass 2: find a matching handle in the target process.
 	for i := uintptr(0); i < count; i++ {
 		entry := HandleEntry(buf, i)
-		if entry.UniqueProcessId == uintptr(targetPID) &&
+		if entry.UniqueProcessID == uintptr(targetPID) &&
 			entry.ObjectTypeIndex == typeIndex {
 			return entry.HandleValue, nil
 		}
@@ -121,10 +121,10 @@ func FindHandleByType(targetPID uint32, referenceHandle windows.Handle) (uintptr
 	return 0, fmt.Errorf("no handle of specified type found")
 }
 
-// GetKernelPointerByHandle leaks the kernel-space address of a handle
+// KernelPointerByHandle leaks the kernel-space address of a handle
 // object by enumerating all system handles and matching by PID + handle value.
 // This is the usermode alternative to a kernel read primitive.
-func GetKernelPointerByHandle(handle windows.Handle) (uintptr, error) {
+func KernelPointerByHandle(handle windows.Handle) (uintptr, error) {
 	currentPID := windows.GetCurrentProcessId()
 
 	buf, count, err := EnumSystemHandles(0)
@@ -135,7 +135,7 @@ func GetKernelPointerByHandle(handle windows.Handle) (uintptr, error) {
 
 	for i := uintptr(0); i < count; i++ {
 		entry := HandleEntry(buf, i)
-		if entry.UniqueProcessId == uintptr(currentPID) &&
+		if entry.UniqueProcessID == uintptr(currentPID) &&
 			entry.HandleValue == uintptr(handle) {
 			return entry.Object, nil
 		}

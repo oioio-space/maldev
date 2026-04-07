@@ -93,10 +93,10 @@ func Current() *Version {
 	return &wv
 }
 
-// WindowsVersion is a richer version descriptor that includes the Update Build
+// Info is a richer version descriptor that includes the Update Build
 // Revision (UBR/Revision) read from the registry and an optional Vulnerable flag
 // set by vulnerability-check helpers.
-type WindowsVersion struct {
+type Info struct {
 	Major      uint32
 	Minor      uint32
 	Build      uint32
@@ -137,13 +137,13 @@ func readUBR() (uint32, error) {
 
 // Windows returns the current Windows version including the UBR
 // (Update Build Revision) read from the registry.
-func Windows() (*WindowsVersion, error) {
+func Windows() (*Info, error) {
 	info := windows.RtlGetVersion()
 	ubr, err := readUBR()
 	if err != nil {
 		return nil, fmt.Errorf("reading UBR: %w", err)
 	}
-	return &WindowsVersion{
+	return &Info{
 		Major:    info.MajorVersion,
 		Minor:    info.MinorVersion,
 		Build:    info.BuildNumber,
@@ -178,7 +178,7 @@ var cve202430088Table = map[uint32]cveEntry{
 // CVE202430088 checks if the system is vulnerable to CVE-2024-30088.
 // Returns true for Windows 10/11 and Server builds before June 2024 patch.
 // The Edition field is populated with the human-readable Windows edition.
-func CVE202430088() (*WindowsVersion, error) {
+func CVE202430088() (*Info, error) {
 	v, err := Windows()
 	if err != nil {
 		return nil, err

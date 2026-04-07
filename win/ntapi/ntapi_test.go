@@ -77,7 +77,7 @@ func TestEnumSystemHandles(t *testing.T) {
 	assert.Greater(t, count, uintptr(0), "system must have at least one open handle")
 }
 
-func TestGetKernelPointerByHandle(t *testing.T) {
+func TestKernelPointerByHandle(t *testing.T) {
 	var tok windows.Token
 	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &tok)
 	require.NoError(t, err)
@@ -85,7 +85,7 @@ func TestGetKernelPointerByHandle(t *testing.T) {
 
 	// The function must locate the handle without error. The kernel pointer
 	// itself may be zero when the OS restricts kernel address exposure.
-	_, err = GetKernelPointerByHandle(windows.Handle(tok))
+	_, err = KernelPointerByHandle(windows.Handle(tok))
 	require.NoError(t, err)
 }
 

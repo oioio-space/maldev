@@ -72,19 +72,19 @@ func base64Decode(data []byte) []byte {
 	return decoded[:n]
 }
 
-// MalleableOption configures a MalleableTransport.
-type MalleableOption func(*MalleableTransport)
+// MalleableOption configures a Malleable.
+type MalleableOption func(*Malleable)
 
 // WithTLSConfig sets a custom TLS transport for HTTPS connections.
 func WithTLSConfig(tlsTransport *http.Transport) MalleableOption {
-	return func(m *MalleableTransport) {
+	return func(m *Malleable) {
 		m.httpClient.Transport = tlsTransport
 	}
 }
 
-// MalleableTransport wraps an HTTP transport with a malleable profile,
+// Malleable wraps an HTTP transport with a malleable profile,
 // disguising C2 traffic as legitimate web requests.
-type MalleableTransport struct {
+type Malleable struct {
 	address    string
 	timeout    time.Duration
 	profile    *Profile
@@ -98,10 +98,10 @@ type MalleableTransport struct {
 	conn     net.Conn // underlying connection for RemoteAddr
 }
 
-// NewMalleable creates a MalleableTransport that shapes C2 traffic according
+// NewMalleable creates a Malleable that shapes C2 traffic according
 // to the given profile.
-func NewMalleable(address string, timeout time.Duration, profile *Profile, opts ...MalleableOption) *MalleableTransport {
-	m := &MalleableTransport{
+func NewMalleable(address string, timeout time.Duration, profile *Profile, opts ...MalleableOption) *Malleable {
+	m := &Malleable{
 		address: address,
 		timeout: timeout,
 		profile: profile,
@@ -117,7 +117,7 @@ func NewMalleable(address string, timeout time.Duration, profile *Profile, opts 
 
 // Connect establishes the HTTP transport. For malleable profiles this
 // validates reachability by performing an initial GET request.
-func (m *MalleableTransport) Connect(ctx context.Context) error {
+func (m *Malleable) Connect(ctx context.Context) error {
 	m.mu.Lock()
 	m.closed = false
 	m.recvBuf.Reset()
@@ -144,7 +144,7 @@ func (m *MalleableTransport) Connect(ctx context.Context) error {
 // Read reads decoded C2 data. It performs a GET request to retrieve data
 // from the server, decodes it using the profile decoder, and copies it
 // into the caller's buffer.
-func (m *MalleableTransport) Read(p []byte) (int, error) {
+func (m *Malleable) Read(p []byte) (int, error) {
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -189,7 +189,7 @@ func (m *MalleableTransport) Read(p []byte) (int, error) {
 }
 
 // Write encodes and sends C2 data via a POST request shaped by the profile.
-func (m *MalleableTransport) Write(p []byte) (int, error) {
+func (m *Malleable) Write(p []byte) (int, error) {
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -221,7 +221,7 @@ func (m *MalleableTransport) Write(p []byte) (int, error) {
 }
 
 // Close marks the transport as closed.
-func (m *MalleableTransport) Close() error {
+func (m *Malleable) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.closed = true
@@ -230,7 +230,7 @@ func (m *MalleableTransport) Close() error {
 
 // RemoteAddr returns the remote address. Handles both full URLs
 // (https://host:port) and bare host:port addresses.
-func (m *MalleableTransport) RemoteAddr() net.Addr {
+func (m *Malleable) RemoteAddr() net.Addr {
 	host := m.address
 	if u, err := url.Parse(m.address); err == nil && u.Host != "" {
 		host = u.Host
@@ -243,7 +243,7 @@ func (m *MalleableTransport) RemoteAddr() net.Addr {
 }
 
 // applyHeaders sets profile headers and User-Agent on the request.
-func (m *MalleableTransport) applyHeaders(req *http.Request) {
+func (m *Malleable) applyHeaders(req *http.Request) {
 	if m.profile.UserAgent != "" {
 		req.Header.Set("User-Agent", m.profile.UserAgent)
 	}
@@ -253,7 +253,7 @@ func (m *MalleableTransport) applyHeaders(req *http.Request) {
 }
 
 // nextGetURI returns the next GET URI from the profile, cycling through the list.
-func (m *MalleableTransport) nextGetURI() string {
+func (m *Malleable) nextGetURI() string {
 	if len(m.profile.GetURIs) == 0 {
 		return "/"
 	}
@@ -265,7 +265,7 @@ func (m *MalleableTransport) nextGetURI() string {
 }
 
 // nextPostURI returns the next POST URI from the profile, cycling through the list.
-func (m *MalleableTransport) nextPostURI() string {
+func (m *Malleable) nextPostURI() string {
 	if len(m.profile.PostURIs) == 0 {
 		return "/"
 	}

@@ -26,7 +26,7 @@ type ListEntry struct {
 // SystemHandle is a single entry in the SYSTEM_HANDLE_INFORMATION_EX array.
 type SystemHandle struct {
 	Object                uintptr
-	UniqueProcessId       uintptr
+	UniqueProcessID       uintptr
 	HandleValue           uintptr
 	GrantedAccess         uint32
 	CreatorBackTraceIndex uint16

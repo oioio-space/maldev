@@ -2,11 +2,14 @@
 
 # PE Operations
 
-This page documents the three PE-related packages in maldev:
+This page documents the six PE-related packages in maldev:
 
 - **`pe/parse`** -- Parse, inspect, and write PE files (cross-platform)
 - **`pe/morph`** -- Mutate UPX section headers to break automatic unpackers
 - **`pe/srdi`** -- Convert a DLL into position-independent shellcode (sRDI)
+- **`pe/cert`** -- Read, write, copy, and strip Authenticode certificates
+- **`pe/strip`** -- Sanitize Go PE binaries (timestamps, pclntab, section names)
+- **`pe/bof`** -- Beacon Object File (BOF) loader for in-memory COFF execution
 
 ---
 
@@ -612,5 +615,296 @@ func main() {
     }
 
     fmt.Printf("Shellcode: %d bytes\n", len(shellcode))
+}
+```
+
+---
+
+## pe/cert -- Authenticode Certificate Manipulation
+
+Package `cert` provides read, write, copy, and strip operations for PE Authenticode certificates. Useful for signature cloning (copying a valid certificate from a signed binary to an unsigned payload) and certificate stripping.
+
+**MITRE ATT&CK:** T1553.002 (Subvert Trust Controls: Code Signing)
+**Platform:** Cross-platform (operates on raw PE bytes)
+**Detection:** Low -- certificate manipulation leaves no runtime artifacts; modified PE files may fail signature verification.
+
+### Types
+
+#### `Certificate`
+
+```go
+type Certificate struct {
+    Raw []byte // WIN_CERTIFICATE structure(s) including headers
+}
+```
+
+Holds the raw Authenticode certificate data extracted from a PE file.
+
+### Errors
+
+```go
+var (
+    ErrNoCertificate = errors.New("PE file has no Authenticode certificate")
+    ErrInvalidPE     = errors.New("invalid PE file")
+)
+```
+
+### Functions
+
+#### `Read`
+
+```go
+func Read(pePath string) (*Certificate, error)
+```
+
+**Purpose:** Extracts the Authenticode certificate from a PE file.
+
+**Parameters:**
+- `pePath` -- Path to the PE file on disk.
+
+**Returns:** A `*Certificate` containing the raw WIN_CERTIFICATE data, or `ErrNoCertificate` if the file has no certificate.
+
+**How it works:** Reads the PE file, locates the security directory entry (data directory index 4), and copies the certificate blob from the file offset.
+
+---
+
+#### `Has`
+
+```go
+func Has(pePath string) (bool, error)
+```
+
+**Purpose:** Checks whether a PE file contains an Authenticode certificate without extracting it.
+
+---
+
+#### `Strip`
+
+```go
+func Strip(pePath, dst string) error
+```
+
+**Purpose:** Removes the Authenticode certificate from a PE file.
+
+**Parameters:**
+- `pePath` -- Source PE file path.
+- `dst` -- Destination path. If empty, the file is modified in place.
+
+**How it works:** Truncates the file at the certificate offset and zeroes the security directory entry.
+
+---
+
+#### `Copy`
+
+```go
+func Copy(srcPE, dstPE string) error
+```
+
+**Purpose:** Copies the Authenticode certificate from one PE file to another (signature cloning). The destination file must already exist.
+
+**Example:**
+
+```go
+import "github.com/oioio-space/maldev/pe/cert"
+
+// Clone Microsoft's signature onto our payload
+err := cert.Copy(`C:\Windows\System32\kernel32.dll`, `C:\Temp\implant.exe`)
+```
+
+---
+
+#### `Write`
+
+```go
+func Write(pePath string, c *Certificate) error
+```
+
+**Purpose:** Writes raw certificate data to a PE file, replacing any existing certificate. The certificate blob is appended at the end of the file and the security directory entry is patched.
+
+---
+
+#### `Export`
+
+```go
+func (c *Certificate) Export(path string) error
+```
+
+**Purpose:** Saves the raw certificate data to a standalone file for later reuse.
+
+---
+
+#### `Import`
+
+```go
+func Import(path string) (*Certificate, error)
+```
+
+**Purpose:** Loads raw certificate data from a file previously saved with `Export`.
+
+---
+
+## pe/strip -- Go PE Binary Sanitization
+
+Package `strip` provides PE binary sanitization to remove Go-specific metadata and compilation artifacts that fingerprint the toolchain. Breaks tools like `redress`, `GoReSym`, and IDA's `go_parser` plugin.
+
+**MITRE ATT&CK:** T1027.002 (Obfuscated Files or Information: Software Packing)
+**Platform:** Cross-platform (operates on PE byte slices)
+**Detection:** Low
+
+### Functions
+
+#### `SetTimestamp`
+
+```go
+func SetTimestamp(peData []byte, t time.Time) []byte
+```
+
+**Purpose:** Overwrites `IMAGE_FILE_HEADER.TimeDateStamp` with the Unix epoch representation of `t`.
+
+**Parameters:**
+- `peData` -- Raw PE bytes.
+- `t` -- Desired compilation timestamp.
+
+**Returns:** The modified PE bytes (same underlying slice).
+
+---
+
+#### `WipePclntab`
+
+```go
+func WipePclntab(peData []byte) []byte
+```
+
+**Purpose:** Searches for the Go pclntab magic (`0xFFFFFFF1` for Go 1.20+, `0xFFFFFFF0` for Go 1.16+) and zeros the first 32 bytes of each occurrence. This breaks Go-specific analysis tools.
+
+---
+
+#### `RenameSections`
+
+```go
+func RenameSections(peData []byte, renames map[string]string) []byte
+```
+
+**Purpose:** Renames PE sections according to the provided map. Section names are 8-byte null-padded ASCII fields.
+
+**Parameters:**
+- `peData` -- Raw PE bytes.
+- `renames` -- Map of old section name to new name, e.g., `map[string]string{".gopclntab": ".rdata2"}`.
+
+---
+
+#### `Sanitize`
+
+```go
+func Sanitize(peData []byte) []byte
+```
+
+**Purpose:** Applies all available sanitizations with sensible defaults: timestamp set to a random date in 2023-2024, pclntab wiped, and Go-specific sections renamed (`.gopclntab` -> `.rdata2`, `.go.buildinfo` -> `.rsrc2`, `.noptrdata` -> `.data2`).
+
+**Example:**
+
+```go
+import (
+    "os"
+    "github.com/oioio-space/maldev/pe/strip"
+)
+
+raw, _ := os.ReadFile("implant.exe")
+clean := strip.Sanitize(raw)
+os.WriteFile("implant_clean.exe", clean, 0o644)
+```
+
+---
+
+## pe/bof -- Beacon Object File Loader
+
+Package `bof` provides a minimal Beacon Object File (BOF) loader for in-memory COFF execution. BOFs are compiled COFF (.o) object files that can be loaded and executed without writing a full PE to disk.
+
+**MITRE ATT&CK:** T1059 (Command and Scripting Interpreter)
+**Platform:** Windows (amd64)
+**Detection:** Medium -- executable memory allocation (RWX) is visible to EDR, but the payload never touches disk.
+
+### Types
+
+#### `BOF`
+
+```go
+type BOF struct {
+    Data  []byte
+    Entry string // entry point function name (default: "go")
+}
+```
+
+Represents a parsed COFF object file. Set `Entry` before calling `Execute` to specify a custom entry point function name.
+
+### Functions
+
+#### `Load`
+
+```go
+func Load(data []byte) (*BOF, error)
+```
+
+**Purpose:** Parses a COFF object file from raw bytes. Validates the COFF header and machine type (x64 only).
+
+**Parameters:**
+- `data` -- Raw COFF object file bytes (.o file).
+
+**Returns:** A `*BOF` ready for execution, or an error if the file is invalid or not x64.
+
+---
+
+#### `Execute`
+
+```go
+func (b *BOF) Execute(args []byte) ([]byte, error)
+```
+
+**Purpose:** Runs the BOF's entry point with the given arguments. The BOF is loaded into executable memory, relocations are applied, and the entry function is called using the BOF calling convention: `go(char *data, int len)`.
+
+**Parameters:**
+- `args` -- Raw argument bytes passed to the BOF entry function. Pass `nil` for no arguments.
+
+**Returns:** Output bytes (currently `nil`) and any execution error.
+
+**How it works:**
+1. Parses section headers from the COFF data.
+2. Locates the `.text` section containing machine code.
+3. Allocates RWX memory via `VirtualAlloc` and copies the `.text` data.
+4. Applies COFF relocations (`IMAGE_REL_AMD64_ADDR64`, `IMAGE_REL_AMD64_ADDR32NB`, `IMAGE_REL_AMD64_REL32`).
+5. Resolves the entry point symbol from the COFF symbol table.
+6. Calls the entry function via `syscall.Syscall`.
+7. Frees the executable memory on return.
+
+**Limitations:**
+- Beacon API functions (`BeaconOutput`, `BeaconFormatAlloc`, etc.) are NOT resolved. BOFs that call Beacon APIs will crash.
+- Only x64 COFF files are supported.
+- Only basic relocation types are handled.
+
+**Example:**
+
+```go
+import (
+    "log"
+    "os"
+
+    "github.com/oioio-space/maldev/pe/bof"
+)
+
+func main() {
+    data, err := os.ReadFile("mybof.o")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    b, err := bof.Load(data)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    _, err = b.Execute(nil)
+    if err != nil {
+        log.Fatal(err)
+    }
 }
 ```

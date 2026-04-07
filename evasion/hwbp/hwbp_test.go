@@ -7,7 +7,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/oioio-space/maldev/evasion"
 )
+
+func TestTechnique_ImplementsInterface(t *testing.T) {
+	var _ evasion.Technique = Technique()
+}
 
 func TestDetect(t *testing.T) {
 	// In a normal test environment, no hardware breakpoints should be set.

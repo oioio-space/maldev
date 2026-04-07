@@ -12,6 +12,7 @@ The `cleanup/` module provides post-exploitation anti-forensics: self-deletion, 
 | `cleanup/service` | Hide Windows services via DACL manipulation | T1070 -- Indicator Removal on Host | Windows |
 | `cleanup/wipe` | Secure multi-pass file overwrite + delete | T1070.004 -- Indicator Removal: File Deletion | Cross-platform |
 | `cleanup/timestomp` | Modify file timestamps | T1070.006 -- Indicator Removal: Timestomp | Cross-platform (full on Windows) |
+| `cleanup/memory` | Secure memory wiping and deallocation | T1070 -- Indicator Removal on Host | Windows |
 
 ---
 
@@ -333,3 +334,73 @@ err := timestomp.CopyFromFull(
 | `CopyFromFull` | Create + Access + Modify | No | Yes |
 
 To avoid SI/FN discrepancy detection, the timestomped file should be newly created (so FN matches SI naturally) rather than an existing file with a different FN creation time.
+
+---
+
+## cleanup/memory -- Secure Memory Wiping
+
+Package `memory` provides secure memory zeroing and deallocation for sensitive data (shellcode, keys, decrypted payloads). Ensures that memory contents cannot be recovered from process dumps or forensic analysis.
+
+**MITRE ATT&CK:** T1070 (Indicator Removal on Host)
+**Platform:** Windows
+**Detection:** Low -- memory deallocation is normal process behavior.
+
+### Functions
+
+#### `WipeAndFree`
+
+```go
+func WipeAndFree(addr, size uintptr) error
+```
+
+**Purpose:** Zeros a memory region and releases it. The region must have been allocated with `VirtualAlloc` (`MEM_COMMIT`).
+
+**Parameters:**
+- `addr` -- Base address of the memory region.
+- `size` -- Size of the region in bytes.
+
+**How it works:**
+1. Changes page protection to `PAGE_READWRITE` (the region may be `RX` or `PAGE_NOACCESS`).
+2. Zeros every byte via `SecureZero`.
+3. Releases the pages with `VirtualFree(MEM_RELEASE)`.
+
+**When to use:** After shellcode execution completes, after decryption keys are no longer needed, or before process exit to minimize forensic artifacts in memory dumps.
+
+**Example:**
+
+```go
+import "github.com/oioio-space/maldev/cleanup/memory"
+
+// After shellcode has finished executing
+err := memory.WipeAndFree(shellcodeAddr, shellcodeSize)
+if err != nil {
+    log.Printf("memory cleanup failed: %v", err)
+}
+```
+
+---
+
+#### `SecureZero`
+
+```go
+func SecureZero(buf []byte)
+```
+
+**Purpose:** Overwrites a byte slice with zeros in a way that the compiler cannot optimize away.
+
+**Parameters:**
+- `buf` -- Byte slice to zero. No-op if empty.
+
+**How it works:** Writes zeros through a volatile-like pointer and calls `runtime.KeepAlive` to prevent dead-store elimination. This is critical because the Go compiler (and LLVM/GCC for CGo) may eliminate zeroing writes to memory that is not read afterwards.
+
+**When to use:** For zeroing sensitive data in Go-managed memory (byte slices, structs) that cannot be freed with `VirtualFree`.
+
+**Example:**
+
+```go
+import "github.com/oioio-space/maldev/cleanup/memory"
+
+key := []byte("supersecretkey123")
+defer memory.SecureZero(key)
+// ... use key for decryption ...
+```

@@ -37,7 +37,7 @@
 // Default self-injection (simplest):
 //
 //	cfg := &meterpreter.Config{
-//	    Transport: meterpreter.TransportTCP,
+//	    Transport: meterpreter.TCP,
 //	    Host:      "192.168.1.10",
 //	    Port:      "4444",
 //	    Timeout:   30 * time.Second,
@@ -56,7 +56,7 @@
 //	    Use(inject.WithCPUDelay).
 //	    Create()
 //	cfg := &meterpreter.Config{
-//	    Transport: meterpreter.TransportTCP,
+//	    Transport: meterpreter.TCP,
 //	    Host:      "192.168.1.10",
 //	    Port:      "4444",
 //	    Timeout:   30 * time.Second,
@@ -74,7 +74,7 @@
 //	    WithFallback().
 //	    Create()
 //	cfg := &meterpreter.Config{
-//	    Transport: meterpreter.TransportHTTPS,
+//	    Transport: meterpreter.HTTPS,
 //	    Host:      "192.168.1.10",
 //	    Port:      "8443",
 //	    Timeout:   30 * time.Second,

@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// TLSTransport implements Transport over TLS with optional certificate pinning.
-type TLSTransport struct {
+// TLS implements Transport over TLS with optional certificate pinning.
+type TLS struct {
 	address     string
 	timeout     time.Duration
 	certPath    string
@@ -21,26 +21,26 @@ type TLSTransport struct {
 	conn        net.Conn
 }
 
-// TLSOption configures a TLSTransport.
-type TLSOption func(*TLSTransport)
+// TLSOption configures a TLS.
+type TLSOption func(*TLS)
 
 // WithInsecure disables server certificate verification.
 func WithInsecure(insecure bool) TLSOption {
-	return func(t *TLSTransport) {
+	return func(t *TLS) {
 		t.insecure = insecure
 	}
 }
 
 // WithFingerprint enables certificate pinning via SHA256 fingerprint verification.
 func WithFingerprint(fp string) TLSOption {
-	return func(t *TLSTransport) {
+	return func(t *TLS) {
 		t.fingerprint = fp
 	}
 }
 
 // NewTLS creates a new TLS transport.
-func NewTLS(address string, timeout time.Duration, certPath, keyPath string, opts ...TLSOption) *TLSTransport {
-	t := &TLSTransport{
+func NewTLS(address string, timeout time.Duration, certPath, keyPath string, opts ...TLSOption) *TLS {
+	t := &TLS{
 		address:  address,
 		timeout:  timeout,
 		certPath: certPath,
@@ -56,7 +56,7 @@ func NewTLS(address string, timeout time.Duration, certPath, keyPath string, opt
 
 // Connect establishes a TLS connection with optional client certificates
 // and certificate pinning. Any existing connection is closed before dialing.
-func (t *TLSTransport) Connect(ctx context.Context) error {
+func (t *TLS) Connect(ctx context.Context) error {
 	if t.conn != nil {
 		t.conn.Close()
 		t.conn = nil
@@ -103,12 +103,12 @@ func (t *TLSTransport) Connect(ctx context.Context) error {
 }
 
 // verifyFingerprint checks the server certificate against the pinned fingerprint.
-func (t *TLSTransport) verifyFingerprint(rawCerts [][]byte) error {
+func (t *TLS) verifyFingerprint(rawCerts [][]byte) error {
 	return verifyFP(rawCerts, t.fingerprint)
 }
 
 // Read reads from the TLS connection.
-func (t *TLSTransport) Read(p []byte) (int, error) {
+func (t *TLS) Read(p []byte) (int, error) {
 	if t.conn == nil {
 		return 0, io.ErrClosedPipe
 	}
@@ -116,7 +116,7 @@ func (t *TLSTransport) Read(p []byte) (int, error) {
 }
 
 // Write writes to the TLS connection.
-func (t *TLSTransport) Write(p []byte) (int, error) {
+func (t *TLS) Write(p []byte) (int, error) {
 	if t.conn == nil {
 		return 0, io.ErrClosedPipe
 	}
@@ -124,7 +124,7 @@ func (t *TLSTransport) Write(p []byte) (int, error) {
 }
 
 // Close closes the TLS connection.
-func (t *TLSTransport) Close() error {
+func (t *TLS) Close() error {
 	if t.conn == nil {
 		return nil
 	}
@@ -132,7 +132,7 @@ func (t *TLSTransport) Close() error {
 }
 
 // RemoteAddr returns the remote address.
-func (t *TLSTransport) RemoteAddr() net.Addr {
+func (t *TLS) RemoteAddr() net.Addr {
 	if t.conn == nil {
 		return nil
 	}

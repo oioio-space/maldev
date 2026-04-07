@@ -42,7 +42,7 @@ func TestFetchStageTCPMock(t *testing.T) {
 
 	addr := ln.Addr().(*net.TCPAddr)
 	cfg := &Config{
-		Transport: TransportTCP,
+		Transport: TCP,
 		Host:      "127.0.0.1",
 		Port:      strconv.Itoa(addr.Port),
 		Timeout:   5 * time.Second,
@@ -66,7 +66,7 @@ func TestFetchStageTCPMock(t *testing.T) {
 }
 
 func TestPayloadName(t *testing.T) {
-	name := PayloadName(TransportTCP)
+	name := PayloadName(TCP)
 
 	assert.Contains(t, name, "meterpreter", "payload name must contain 'meterpreter'")
 	assert.Contains(t, name, "reverse_tcp", "payload name must contain 'reverse_tcp'")
@@ -74,7 +74,7 @@ func TestPayloadName(t *testing.T) {
 
 func TestNewStager(t *testing.T) {
 	cfg := &Config{
-		Transport: TransportTCP,
+		Transport: TCP,
 		Host:      "127.0.0.1",
 		Port:      "4444",
 		Timeout:   5 * time.Second,
@@ -100,7 +100,7 @@ func (m *mockInjector) Inject(shellcode []byte) error {
 func TestNewStagerWithInjector(t *testing.T) {
 	mock := &mockInjector{}
 	cfg := &Config{
-		Transport: TransportTCP,
+		Transport: TCP,
 		Host:      "127.0.0.1",
 		Port:      "4444",
 		Timeout:   5 * time.Second,
@@ -141,7 +141,7 @@ func TestStagerWithInjector_DelegatesToInjector(t *testing.T) {
 	mock := &mockInjector{}
 	addr := ln.Addr().(*net.TCPAddr)
 	cfg := &Config{
-		Transport: TransportTCP,
+		Transport: TCP,
 		Host:      "127.0.0.1",
 		Port:      strconv.Itoa(addr.Port),
 		Timeout:   5 * time.Second,
@@ -183,7 +183,7 @@ func TestStagerWithInjector_PropagatesError(t *testing.T) {
 	mock := &mockInjector{err: injErr}
 	addr := ln.Addr().(*net.TCPAddr)
 	cfg := &Config{
-		Transport: TransportTCP,
+		Transport: TCP,
 		Host:      "127.0.0.1",
 		Port:      strconv.Itoa(addr.Port),
 		Timeout:   5 * time.Second,
@@ -199,7 +199,7 @@ func TestStagerWithInjector_PropagatesError(t *testing.T) {
 
 func TestConfigInjectorNil_UsesDefaultPath(t *testing.T) {
 	cfg := &Config{
-		Transport: TransportTCP,
+		Transport: TCP,
 		Host:      "127.0.0.1",
 		Port:      "4444",
 		Timeout:   5 * time.Second,

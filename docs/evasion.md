@@ -15,6 +15,8 @@ The `evasion/` module provides composable defense evasion techniques for Windows
 | `evasion/blockdlls` | Block non-Microsoft DLLs | T1562.001 -- Impair Defenses | Low | Windows 10+ |
 | `evasion/phant0m` | Event Log thread termination | T1562.002 -- Disable Event Logging | High | Windows |
 | `evasion/herpaderping` | Process image tampering via kernel section cache | T1055 -- Process Injection | Medium | Windows 10+ |
+| `evasion/hwbp` | Hardware breakpoint detection and clearing | T1622 -- Debugger Evasion | Low | Windows |
+| `evasion/sleepmask` | Encrypt memory regions during sleep | T1027 -- Obfuscated Files | Medium | Windows |
 | `evasion/antidebug` | Debugger detection | T1622 -- Debugger Evasion | Low | Cross-platform |
 | `evasion/antivm` | VM/hypervisor detection | T1497.001 -- System Checks | Low | Cross-platform |
 | `evasion/timing` | CPU-burning delays | T1497.003 -- Time Based Evasion | Low | Cross-platform |
@@ -1104,3 +1106,217 @@ if errs != nil {
 ### Limitations
 - `Aggressive` preset applies ACG and BlockDLLs, which are irreversible
 - Presets are fixed combinations -- for fine-grained control, compose your own `[]evasion.Technique`
+
+---
+
+## hwbp -- Hardware Breakpoint Detection and Clearing
+
+**MITRE ATT&CK:** T1622 -- Debugger Evasion
+**Platform:** Windows
+**Detection:** Low
+
+### Why use this?
+
+EDR products and security researchers use hardware breakpoints (debug registers DR0-DR3) to monitor specific API calls without modifying code. Unlike software breakpoints (INT 3 / `0xCC`), hardware breakpoints leave no visible byte changes in memory, making them harder to detect via integrity checks. However, they are visible through `GetThreadContext`. This package detects and clears hardware breakpoints across all threads in the current process.
+
+### How it works
+
+Each x64 thread has 4 debug address registers (DR0-DR3) and a control register (DR7). DR7 contains enable bits for each breakpoint. The package reads the thread context with `CONTEXT_DEBUG_REGISTERS`, checks which DR registers are non-zero with corresponding DR7 enable bits, and optionally zeros all debug registers.
+
+### Types
+
+#### `Breakpoint`
+
+```go
+type Breakpoint struct {
+    Register int     // DR index (0-3)
+    Address  uintptr // Address being monitored
+    ThreadID uint32  // Thread that has the breakpoint set
+}
+```
+
+### Functions
+
+#### `Detect`
+
+```go
+func Detect() ([]Breakpoint, error)
+```
+
+**Purpose:** Reads the debug registers of the current thread and returns any active hardware breakpoints (DR0-DR3 with corresponding DR7 enable bits).
+
+---
+
+#### `DetectAll`
+
+```go
+func DetectAll() ([]Breakpoint, error)
+```
+
+**Purpose:** Enumerates all threads in the current process and returns hardware breakpoints found on any thread. Uses `process/enum.Threads` for thread enumeration.
+
+---
+
+#### `ClearAll`
+
+```go
+func ClearAll() (int, error)
+```
+
+**Purpose:** Clears all hardware breakpoints on all threads in the current process by zeroing DR0-DR3, DR6, and DR7. Returns the number of threads modified.
+
+**How it works:** Opens each thread with `THREAD_GET_CONTEXT | THREAD_SET_CONTEXT`, reads the context, zeros all debug registers, and writes the context back.
+
+---
+
+#### `Technique`
+
+```go
+func Technique() evasion.Technique
+```
+
+**Purpose:** Returns an `evasion.Technique` adapter that detects and clears all hardware breakpoints. Name: `"hwbp:DetectAll"`. Calls `DetectAll()` followed by `ClearAll()`.
+
+**Example:**
+
+```go
+import "github.com/oioio-space/maldev/evasion/hwbp"
+
+// Check for EDR hardware breakpoints
+bps, err := hwbp.DetectAll()
+if err != nil {
+    log.Fatal(err)
+}
+if len(bps) > 0 {
+    log.Printf("found %d hardware breakpoints, clearing...", len(bps))
+    cleared, _ := hwbp.ClearAll()
+    log.Printf("cleared breakpoints on %d threads", cleared)
+}
+```
+
+### Advantages
+- Detects a common EDR instrumentation technique that is invisible to memory integrity scans
+- Clearing is non-destructive to the process -- no code is modified
+- Works with the `evasion.Technique` interface for composable pipelines
+
+### Limitations
+- Only detects user-mode hardware breakpoints; kernel debuggers set breakpoints via different mechanisms
+- Some EDRs may re-set breakpoints after they are cleared
+- Requires `THREAD_GET_CONTEXT` and `THREAD_SET_CONTEXT` access, which may be restricted
+
+---
+
+## sleepmask -- Encrypted Sleep
+
+**MITRE ATT&CK:** T1027 -- Obfuscated Files or Information
+**Platform:** Windows
+**Detection:** Medium
+
+### Why use this?
+
+Memory scanners (both EDR real-time scanners and manual forensic tools) look for known shellcode and implant signatures in process memory. During sleep periods -- when the implant is idle between C2 check-ins -- the payload sits in memory unprotected. Sleep masking encrypts the implant's memory regions with a random XOR key before sleeping, then decrypts after waking. This defeats static memory signature scans during the sleep window.
+
+### How it works
+
+1. Generates a 32-byte cryptographically random XOR key.
+2. XOR-encrypts each registered memory region in-place.
+3. Downgrades page protection from `PAGE_EXECUTE_READ` (or whatever the original was) to `PAGE_READWRITE` -- removing the execute permission prevents code execution from the encrypted pages and is less suspicious to scanners looking for RWX regions.
+4. Sleeps for the specified duration (either `NtDelayExecution` via `time.Sleep` or CPU-burn busy wait).
+5. Restores `PAGE_READWRITE` temporarily, XOR-decrypts each region, then restores the **original** page permissions.
+6. Zeros the XOR key from memory.
+
+### Types
+
+#### `Region`
+
+```go
+type Region struct {
+    Addr uintptr // Base address of the memory region
+    Size uintptr // Size in bytes
+}
+```
+
+#### `SleepMethod`
+
+```go
+type SleepMethod int
+
+const (
+    MethodNtDelay SleepMethod = iota // Uses NtDelayExecution (standard, hookable)
+    MethodBusyTrig                    // CPU-burn trigonometric busy wait (defeats Sleep hooks)
+)
+```
+
+#### `Mask`
+
+```go
+type Mask struct {
+    // unexported fields
+}
+```
+
+### Functions
+
+#### `New`
+
+```go
+func New(regions ...Region) *Mask
+```
+
+**Purpose:** Creates a `Mask` for the given memory regions. Default sleep method is `MethodNtDelay`.
+
+---
+
+#### `WithMethod`
+
+```go
+func (m *Mask) WithMethod(method SleepMethod) *Mask
+```
+
+**Purpose:** Sets the sleep method. Returns the `Mask` for chaining.
+
+---
+
+#### `Sleep`
+
+```go
+func (m *Mask) Sleep(d time.Duration)
+```
+
+**Purpose:** Encrypts all registered regions, sleeps for the given duration, then decrypts and restores original page permissions.
+
+**Parameters:**
+- `d` -- Sleep duration. If zero or negative, returns immediately.
+
+**Example:**
+
+```go
+import (
+    "time"
+    "github.com/oioio-space/maldev/evasion/sleepmask"
+)
+
+// Register the shellcode region for encryption during sleep
+mask := sleepmask.New(sleepmask.Region{
+    Addr: shellcodeAddr,
+    Size: shellcodeSize,
+}).WithMethod(sleepmask.MethodBusyTrig)
+
+// Encrypted sleep loop
+for {
+    doC2Checkin()
+    mask.Sleep(30 * time.Second)
+}
+```
+
+### Advantages
+- Defeats static memory signature scans during the sleep window
+- Random key per sleep cycle prevents key reuse attacks
+- Preserves original page permissions (does not hardcode `PAGE_EXECUTE_READ`)
+- `MethodBusyTrig` defeats hooks on `Sleep`/`NtDelayExecution`
+
+### Limitations
+- XOR encryption is trivially reversible if the key is recovered from a memory dump taken at the right moment
+- The encrypt/decrypt transitions create brief windows where the memory is visible in plaintext
+- `VirtualProtect` calls during encrypt/decrypt are observable by EDR
+- Does not protect against kernel-mode memory scanning

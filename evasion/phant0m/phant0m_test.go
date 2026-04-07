@@ -9,8 +9,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/oioio-space/maldev/evasion"
 	"github.com/oioio-space/maldev/testutil"
 )
+
+func TestTechnique_ImplementsInterface(t *testing.T) {
+	var _ evasion.Technique = Technique()
+}
 
 // requireManual skips unless MALDEV_MANUAL=1 is set.
 func requireManual(t *testing.T) {

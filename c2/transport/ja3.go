@@ -60,11 +60,11 @@ func (p JA3Profile) helloID() utls.ClientHelloID {
 	}
 }
 
-// UTLSTransport implements Transport over TLS with JA3 fingerprint spoofing
+// UTLS implements Transport over TLS with JA3 fingerprint spoofing
 // via uTLS. The TLS ClientHello is crafted to match a specific browser's
 // fingerprint, making the connection indistinguishable from legitimate
 // browser traffic to JA3/JA4-based network detection.
-type UTLSTransport struct {
+type UTLS struct {
 	address     string
 	timeout     time.Duration
 	profile     JA3Profile
@@ -74,27 +74,27 @@ type UTLSTransport struct {
 	conn        net.Conn
 }
 
-// UTLSOption configures a UTLSTransport.
-type UTLSOption func(*UTLSTransport)
+// UTLSOption configures a UTLS.
+type UTLSOption func(*UTLS)
 
 // WithJA3Profile sets the browser profile to mimic.
 func WithJA3Profile(p JA3Profile) UTLSOption {
-	return func(t *UTLSTransport) { t.profile = p }
+	return func(t *UTLS) { t.profile = p }
 }
 
 // WithSNI sets a custom Server Name Indication (for domain fronting).
 func WithSNI(sni string) UTLSOption {
-	return func(t *UTLSTransport) { t.sni = sni }
+	return func(t *UTLS) { t.sni = sni }
 }
 
 // WithUTLSInsecure disables server certificate verification.
 func WithUTLSInsecure(insecure bool) UTLSOption {
-	return func(t *UTLSTransport) { t.insecure = insecure }
+	return func(t *UTLS) { t.insecure = insecure }
 }
 
 // WithUTLSFingerprint enables certificate pinning.
 func WithUTLSFingerprint(fp string) UTLSOption {
-	return func(t *UTLSTransport) { t.fingerprint = fp }
+	return func(t *UTLS) { t.fingerprint = fp }
 }
 
 // NewUTLS creates a new TLS transport with JA3 fingerprint spoofing.
@@ -106,8 +106,8 @@ func WithUTLSFingerprint(fp string) UTLSOption {
 //	    transport.WithJA3Profile(transport.JA3Chrome),
 //	    transport.WithUTLSInsecure(true),
 //	)
-func NewUTLS(address string, timeout time.Duration, opts ...UTLSOption) *UTLSTransport {
-	t := &UTLSTransport{
+func NewUTLS(address string, timeout time.Duration, opts ...UTLSOption) *UTLS {
+	t := &UTLS{
 		address: address,
 		timeout: timeout,
 		profile: JA3Chrome,
@@ -119,7 +119,7 @@ func NewUTLS(address string, timeout time.Duration, opts ...UTLSOption) *UTLSTra
 }
 
 // Connect establishes a TLS connection with the configured JA3 profile.
-func (t *UTLSTransport) Connect(ctx context.Context) error {
+func (t *UTLS) Connect(ctx context.Context) error {
 	if t.conn != nil {
 		t.conn.Close()
 		t.conn = nil
@@ -162,28 +162,28 @@ func (t *UTLSTransport) Connect(ctx context.Context) error {
 	return nil
 }
 
-func (t *UTLSTransport) Read(p []byte) (int, error) {
+func (t *UTLS) Read(p []byte) (int, error) {
 	if t.conn == nil {
 		return 0, io.ErrClosedPipe
 	}
 	return t.conn.Read(p)
 }
 
-func (t *UTLSTransport) Write(p []byte) (int, error) {
+func (t *UTLS) Write(p []byte) (int, error) {
 	if t.conn == nil {
 		return 0, io.ErrClosedPipe
 	}
 	return t.conn.Write(p)
 }
 
-func (t *UTLSTransport) Close() error {
+func (t *UTLS) Close() error {
 	if t.conn == nil {
 		return nil
 	}
 	return t.conn.Close()
 }
 
-func (t *UTLSTransport) RemoteAddr() net.Addr {
+func (t *UTLS) RemoteAddr() net.Addr {
 	if t.conn == nil {
 		return nil
 	}

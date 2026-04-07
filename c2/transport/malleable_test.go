@@ -53,7 +53,7 @@ func TestNewMalleable(t *testing.T) {
 	assert.Equal(t, p, m.profile)
 }
 
-func TestMalleableTransport_WriteRead(t *testing.T) {
+func TestMalleable_WriteRead(t *testing.T) {
 	// Echo server that returns the POST body on GET.
 	var lastBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +88,7 @@ func TestMalleableTransport_WriteRead(t *testing.T) {
 	assert.Equal(t, msg, buf[:n])
 }
 
-func TestMalleableTransport_ClosedPipe(t *testing.T) {
+func TestMalleable_ClosedPipe(t *testing.T) {
 	p := JQueryCDN()
 	m := NewMalleable("http://127.0.0.1:9999", 1*time.Second, p)
 	m.closed = true
@@ -100,7 +100,7 @@ func TestMalleableTransport_ClosedPipe(t *testing.T) {
 	assert.ErrorIs(t, err, io.ErrClosedPipe)
 }
 
-func TestMalleableTransport_RemoteAddr(t *testing.T) {
+func TestMalleable_RemoteAddr(t *testing.T) {
 	p := JQueryCDN()
 	m := NewMalleable("127.0.0.1:8080", 1*time.Second, p)
 	addr := m.RemoteAddr()

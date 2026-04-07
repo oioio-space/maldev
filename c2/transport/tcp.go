@@ -7,16 +7,16 @@ import (
 	"time"
 )
 
-// TCPTransport implements Transport over plain TCP.
-type TCPTransport struct {
+// TCP implements Transport over plain TCP.
+type TCP struct {
 	address string
 	timeout time.Duration
 	conn    net.Conn
 }
 
 // NewTCP creates a new TCP transport.
-func NewTCP(address string, timeout time.Duration) *TCPTransport {
-	return &TCPTransport{
+func NewTCP(address string, timeout time.Duration) *TCP {
+	return &TCP{
 		address: address,
 		timeout: timeout,
 	}
@@ -24,7 +24,7 @@ func NewTCP(address string, timeout time.Duration) *TCPTransport {
 
 // Connect establishes a TCP connection with timeout and context support.
 // Any existing connection is closed before dialing.
-func (t *TCPTransport) Connect(ctx context.Context) error {
+func (t *TCP) Connect(ctx context.Context) error {
 	if t.conn != nil {
 		t.conn.Close()
 		t.conn = nil
@@ -44,7 +44,7 @@ func (t *TCPTransport) Connect(ctx context.Context) error {
 }
 
 // Read reads from the connection.
-func (t *TCPTransport) Read(p []byte) (int, error) {
+func (t *TCP) Read(p []byte) (int, error) {
 	if t.conn == nil {
 		return 0, io.ErrClosedPipe
 	}
@@ -52,7 +52,7 @@ func (t *TCPTransport) Read(p []byte) (int, error) {
 }
 
 // Write writes to the connection.
-func (t *TCPTransport) Write(p []byte) (int, error) {
+func (t *TCP) Write(p []byte) (int, error) {
 	if t.conn == nil {
 		return 0, io.ErrClosedPipe
 	}
@@ -60,7 +60,7 @@ func (t *TCPTransport) Write(p []byte) (int, error) {
 }
 
 // Close closes the connection.
-func (t *TCPTransport) Close() error {
+func (t *TCP) Close() error {
 	if t.conn == nil {
 		return nil
 	}
@@ -68,7 +68,7 @@ func (t *TCPTransport) Close() error {
 }
 
 // RemoteAddr returns the remote address.
-func (t *TCPTransport) RemoteAddr() net.Addr {
+func (t *TCP) RemoteAddr() net.Addr {
 	if t.conn == nil {
 		return nil
 	}

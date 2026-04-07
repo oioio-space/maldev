@@ -7,7 +7,7 @@ import (
 )
 
 // verifyFP checks the first server certificate against a SHA256 fingerprint.
-// Shared by TLSTransport and UTLSTransport for certificate pinning.
+// Shared by TLS and UTLS for certificate pinning.
 func verifyFP(rawCerts [][]byte, expected string) error {
 	if len(rawCerts) == 0 {
 		return fmt.Errorf("no certificates received")

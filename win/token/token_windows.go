@@ -47,8 +47,8 @@ type Token struct {
 	token windows.Token
 }
 
-// TokenUserDetail exposes token user details.
-type TokenUserDetail struct {
+// UserDetail exposes token user details.
+type UserDetail struct {
 	Username       string
 	Domain         string
 	AccountType    uint32
@@ -56,7 +56,7 @@ type TokenUserDetail struct {
 	Environ        []string
 }
 
-func (t TokenUserDetail) String() string {
+func (t UserDetail) String() string {
 	return fmt.Sprintf("Username: %s, Domain: %s, Account Type: %d, UserProfileDir: %s",
 		t.Username, t.Domain, t.AccountType, t.UserProfileDir)
 }
@@ -248,24 +248,24 @@ func lookupPrivilegeNameByLUID(luid uint64) (string, string, error) {
 }
 
 // UserDetails returns the user details associated with the token.
-func (t *Token) UserDetails() (TokenUserDetail, error) {
+func (t *Token) UserDetails() (UserDetail, error) {
 	uSid, err := t.token.GetTokenUser()
 	if err != nil {
-		return TokenUserDetail{}, err
+		return UserDetail{}, err
 	}
 	user, domain, typ, err := uSid.User.Sid.LookupAccount("")
 	if err != nil {
-		return TokenUserDetail{}, err
+		return UserDetail{}, err
 	}
 	uProfDir, err := t.token.GetUserProfileDirectory()
 	if err != nil {
-		return TokenUserDetail{}, err
+		return UserDetail{}, err
 	}
 	env, err := t.token.Environ(false)
 	if err != nil {
-		return TokenUserDetail{}, err
+		return UserDetail{}, err
 	}
-	return TokenUserDetail{
+	return UserDetail{
 		Username:       user,
 		Domain:         domain,
 		AccountType:    typ,

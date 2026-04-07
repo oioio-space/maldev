@@ -7,8 +7,8 @@
 //
 // The Transport interface defines Connect, Read, Write, Close, and RemoteAddr
 // methods. Two implementations are provided:
-//   - TCPTransport: plain TCP connections with configurable timeout
-//   - TLSTransport: TLS connections with optional client certificates,
+//   - TCP: plain TCP connections with configurable timeout
+//   - TLS: TLS connections with optional client certificates,
 //     InsecureSkipVerify, and SHA256 certificate fingerprint pinning
 //
 // The factory function New creates the appropriate transport from

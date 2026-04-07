@@ -65,7 +65,7 @@ func (s *Stager) stageLinux() error {
 // fetchStageLinux retrieves the stage and returns the socket fd.
 func (s *Stager) fetchStageLinux() ([]byte, int, error) {
 	switch s.config.Transport {
-	case TransportTCP:
+	case TCP:
 		return s.fetchStageTCPLinux()
 	default:
 		return nil, -1, fmt.Errorf("transport %s not yet implemented for Linux (use tcp)", s.config.Transport)
