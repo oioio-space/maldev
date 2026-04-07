@@ -115,12 +115,11 @@ func CaptureRect(x, y, width, height int) ([]byte, error) {
 	}
 	defer procDeleteObject.Call(hBitmap) //nolint:errcheck
 
-	// Select bitmap into memory DC.
+	// Select bitmap into memory DC for BitBlt.
 	old, _, _ := procSelectObject.Call(hdcMem, hBitmap)
 	if old == 0 {
 		return nil, ErrCapture
 	}
-	defer procSelectObject.Call(hdcMem, old) //nolint:errcheck
 
 	// Copy pixels from screen to memory DC.
 	r, _, _ := procBitBlt.Call(
@@ -129,8 +128,13 @@ func CaptureRect(x, y, width, height int) ([]byte, error) {
 		srcCopy,
 	)
 	if r == 0 {
+		procSelectObject.Call(hdcMem, old) //nolint:errcheck
 		return nil, ErrCapture
 	}
+
+	// MSDN requires the bitmap to NOT be selected into a DC when
+	// calling GetDIBits. Deselect it by restoring the old bitmap.
+	procSelectObject.Call(hdcMem, old) //nolint:errcheck
 
 	// Extract pixel data via GetDIBits.
 	bmi := bitmapInfoHeader{

@@ -113,13 +113,18 @@ make verify         # build + test + cross-compile
 maldev/
 ├── crypto/          encode/          hash/          random/         useragent/
 ├── win/api/         win/syscall/     win/ntapi/     win/token/      win/privilege/
+├── win/version/     win/domain/      win/impersonate/ win/user/
 ├── evasion/amsi/    evasion/etw/     evasion/unhook/ evasion/sleepmask/ evasion/hwbp/
-├── inject/          process/enum/    pe/strip/      pe/bof/         pe/morph/    pe/cert/
+├── evasion/acg/     evasion/blockdlls/ evasion/antidebug/ evasion/antivm/
+├── evasion/herpaderping/ evasion/phant0m/ evasion/sandbox/ evasion/timing/
+├── inject/          process/enum/    process/session/
+├── pe/parse/        pe/strip/        pe/bof/        pe/morph/       pe/cert/
 ├── c2/shell/        c2/transport/    c2/meterpreter/ c2/cert/
-├── persistence/registry/ persistence/startup/ persistence/scheduler/
+├── persistence/registry/ persistence/startup/ persistence/scheduler/ persistence/service/
 ├── collection/keylog/ collection/clipboard/ collection/screenshot/
-├── cleanup/memory/  cleanup/selfdelete/ cleanup/timestomp/ cleanup/wipe/
-├── uacbypass/       exploit/cve202430088/ system/drive/  system/folder/  system/lnk/
+├── cleanup/memory/  cleanup/selfdelete/ cleanup/service/ cleanup/timestomp/ cleanup/wipe/
+├── system/drive/    system/folder/   system/network/ system/lnk/     system/bsod/
+├── uacbypass/       exploit/cve202430088/
 ├── internal/log/    internal/compat/  testutil/       cmd/rshell/
 └── docs/            .claude/skills/   Makefile
 ```
