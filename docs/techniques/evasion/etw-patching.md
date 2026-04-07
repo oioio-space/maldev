@@ -4,17 +4,17 @@
 
 ## For Beginners
 
-Windows has security cameras everywhere -- they record which programs run, what files they open, what network connections they make. This surveillance system is called ETW (Event Tracing for Windows). Almost every security product (Defender, CrowdStrike, SentinelOne, Elastic) relies on ETW events to detect malicious behavior in real time.
+Think of security cameras in a building. They record everything that happens: who enters, who exits, what they carry. Even if you get past the front door, the cameras capture your movements. Now imagine you replace the live camera feed with a still image of an empty hallway. The security monitors show nothing happening. Guards watching the screens see an empty, quiet building while you move freely.
 
-ETW patching is like replacing the security camera feeds with a static image. The cameras are still mounted on the walls, still powered on, but the feed shows nothing interesting. Technically, you overwrite the entry points of the functions responsible for writing ETW events so they immediately return "success" without actually writing anything. From that moment, the process generates zero telemetry -- it is invisible to any ETW consumer.
+ETW (Event Tracing for Windows) is the operating system's built-in telemetry framework. It is the camera system for Windows. When a process calls certain APIs, allocates memory, creates threads, or loads DLLs, ETW events are generated. Security products consume these events to detect malicious behavior. Even if you bypass AMSI and unhook ntdll, ETW can still report what you are doing.
 
-This is often the second evasion step (after AMSI bypass). Without ETW, security products lose visibility into .NET assembly loads, PowerShell commands, network connections, and many other high-value signals.
+ETW patching overwrites the entry points of the five `EtwEventWrite*` functions in `ntdll.dll` with `xor rax, rax; ret` (`48 33 C0 C3`). This makes every ETW write call return `STATUS_SUCCESS` without actually logging anything. An additional patch targets `NtTraceEvent`, a lower-level function used by some providers. After patching, the process generates zero ETW telemetry.
 
 ## How It Works
 
 ```mermaid
 flowchart TD
-    subgraph Target["ntdll.dll Functions Patched"]
+    subgraph Functions["Patched Functions (6 total)"]
         F1[EtwEventWrite]
         F2[EtwEventWriteEx]
         F3[EtwEventWriteFull]
@@ -23,14 +23,9 @@ flowchart TD
         F6[NtTraceEvent]
     end
 
-    Patch["Patch: 48 33 C0 C3\n(xor rax,rax; ret)"] --> F1
-    Patch --> F2
-    Patch --> F3
-    Patch --> F4
-    Patch --> F5
-    Patch --> F6
+    Patch["Patch: 48 33 C0 C3\nxor rax, rax; ret"] --> F1 & F2 & F3 & F4 & F5 & F6
 
-    F1 --> Result[All return STATUS_SUCCESS\nwithout logging anything]
+    F1 & F2 & F3 & F4 & F5 & F6 --> Result[All return STATUS_SUCCESS\nzero events logged]
 
     style Patch fill:#5c1a1a,color:#fff
     style Result fill:#2d5016,color:#fff
@@ -38,22 +33,10 @@ flowchart TD
 
 **Patch details:**
 
-The x64 stub `48 33 C0 C3` translates to:
-- `48 33 C0` -- `xor rax, rax` (set return value to 0 = STATUS_SUCCESS)
-- `C3` -- `ret` (return immediately)
-
-This 4-byte patch overwrites the function prologue. The function appears to succeed from the caller's perspective, but no event data is written.
-
-**Six functions patched:**
-
-1. **EtwEventWrite** -- Primary event writing function used by most providers.
-2. **EtwEventWriteEx** -- Extended version with additional parameters.
-3. **EtwEventWriteFull** -- Full event write with all options.
-4. **EtwEventWriteString** -- String-based event writing.
-5. **EtwEventWriteTransfer** -- Activity-correlated event writing.
-6. **NtTraceEvent** -- Lower-level NT function used by some providers. Patched separately via `PatchNtTraceEvent()`.
-
-Functions not present on the current OS version are silently skipped.
+- **Byte sequence:** `48 33 C0 C3` -- `xor rax, rax` (zero the return register) + `ret` (return immediately).
+- **Functions patched:** Five `EtwEventWrite*` variants in ntdll, plus `NtTraceEvent` as a lower-level fallback.
+- **Skip logic:** Functions not present on the current OS version (e.g., older Windows) are silently skipped.
+- **Memory protection:** Each patch uses `VirtualProtect` (or `NtProtectVirtualMemory` via Caller) to make the code page writable, writes the 4 bytes, and restores the original protection.
 
 ## Usage
 
@@ -72,8 +55,8 @@ func main() {
         log.Fatal(err)
     }
 
-    // Also patch NtTraceEvent for complete coverage.
-    if err := etw.PatchNtTraceEvent(nil); err != nil {
+    // Or patch everything including NtTraceEvent.
+    if err := etw.PatchAll(nil); err != nil {
         log.Fatal(err)
     }
 }
@@ -91,23 +74,27 @@ import (
     "github.com/oioio-space/maldev/evasion/amsi"
     "github.com/oioio-space/maldev/evasion/etw"
     "github.com/oioio-space/maldev/evasion/unhook"
+    "github.com/oioio-space/maldev/inject"
     wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
 func main() {
+    shellcode := []byte{0x90, 0x90, 0xCC}
+
     caller := wsyscall.New(wsyscall.MethodIndirect,
         wsyscall.Chain(wsyscall.NewHellsGate(), wsyscall.NewHalosGate()))
 
-    // Apply AMSI + ETW + selective unhook as a batch.
+    // Layer evasion: AMSI → ETW → selective unhook.
     techniques := []evasion.Technique{
         amsi.ScanBufferPatch(),
-        etw.All(),        // patches all 6 functions
-        unhook.Full(),     // restore entire ntdll .text
+        etw.All(),                                    // blind ETW
+        unhook.Classic("NtAllocateVirtualMemory"),     // unhook allocation
     }
-    if errs := evasion.ApplyAll(techniques, caller); errs != nil {
-        for name, err := range errs {
-            log.Printf("%s: %v", name, err)
-        }
+    evasion.ApplyAll(techniques, caller)
+
+    // Inject with full telemetry blinding.
+    if err := inject.ThreadPoolExec(shellcode); err != nil {
+        log.Fatal(err)
     }
 }
 ```
@@ -116,26 +103,23 @@ func main() {
 
 | Aspect | Detail |
 |--------|--------|
-| Stealth | Medium -- patching ntdll in-memory is detectable by integrity checks. Using a Caller avoids hooks on `VirtualProtect`. |
-| Coverage | Comprehensive -- patches all known ETW writing functions plus the kernel-level `NtTraceEvent`. |
-| Scope | Process-local. Other processes and kernel-mode ETW are not affected. |
-| Compatibility | Windows 7+. Functions not present on older versions are silently skipped. |
-| Limitations | Kernel-mode ETW providers (e.g., Microsoft-Windows-Threat-Intelligence) are not affected -- they write events from ring 0. Some EDR products detect ntdll modification via periodic integrity scanning. |
-| Side effects | Disabling ETW may cause legitimate application telemetry to stop (e.g., performance counters). |
+| Stealth | Medium -- patching ntdll is detectable by integrity checks, but eliminates all ETW-based detection going forward. |
+| Effectiveness | High -- completely silences ETW event generation in the process. No events reach consumers. |
+| Scope | Process-wide. All ETW providers in the process are silenced. |
+| Coverage | 6 functions patched (5 EtwEventWrite variants + NtTraceEvent). Covers both high-level and low-level write paths. |
+| OS compatibility | Missing functions are silently skipped (safe on older Windows). |
+| Detection vectors | ntdll integrity monitoring, kernel-level ETW consumers (which bypass the patch), periodic memory scanning. |
+| Kernel ETW | Does NOT affect kernel-mode ETW providers. Kernel callbacks (e.g., `PsSetCreateThreadNotifyRoutine`) still fire. |
 
 ## Compared to Other Implementations
 
 | Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
 |---------|--------|--------|--------------|--------------|
-| EtwEventWrite patch | Yes | Yes | BOF | Yes |
-| EtwEventWriteEx | Yes | No | No | No |
-| EtwEventWriteFull | Yes | No | No | No |
-| EtwEventWriteString | Yes | No | No | No |
-| EtwEventWriteTransfer | Yes | No | No | No |
-| NtTraceEvent | Yes | No | No | No |
-| Caller-routed | Yes | No | N/A | No |
-| Technique interface | `etw.All()` | Built-in | Profile | Function |
-| Graceful skip (missing procs) | Yes | No | N/A | No |
+| Functions patched | 6 (5 EtwEventWrite* + NtTraceEvent) | 1 (EtwEventWrite) | None (profile-based) | 1 (EtwEventWrite) |
+| Caller-routed patches | Yes | No | N/A | No |
+| Technique interface | `evasion.Technique` | Built-in | N/A | Function |
+| Skip missing functions | Yes | No | N/A | No |
+| PatchAll convenience | Yes | No | N/A | No |
 
 ## API Reference
 
@@ -150,6 +134,6 @@ func PatchNtTraceEvent(caller *wsyscall.Caller) error
 // PatchAll applies both Patch and PatchNtTraceEvent.
 func PatchAll(caller *wsyscall.Caller) error
 
-// Technique constructors:
-func All() evasion.Technique  // wraps PatchAll
+// Technique constructor for use with evasion.ApplyAll:
+func All() evasion.Technique
 ```

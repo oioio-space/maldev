@@ -4,48 +4,46 @@
 
 ## For Beginners
 
-Some security tools use an invisible surveillance technique: hardware breakpoints. Instead of modifying your code (like software breakpoints or hooks), they program the CPU's debug registers (DR0 through DR3) to trigger an alert when specific memory addresses are read, written, or executed. This is invisible to normal code inspection -- there are no modified bytes, no detour jumps, nothing in memory that looks wrong.
+Some security systems use invisible tripwires instead of visible ones. Whereas a software hook modifies the code itself (and can be detected by checking the code bytes), a hardware breakpoint uses the CPU's built-in debug registers to monitor specific memory addresses without modifying any code. When the CPU executes an instruction at a watched address, it triggers a debug exception that the security tool catches.
 
-Think of it like invisible laser tripwires in a museum. The regular security guards (EDR hooks) stand at the doors and you can see them. But invisible lasers crisscross the room, and if you step through one, a silent alarm goes off. Hardware breakpoint detection scans for these invisible tripwires by reading the CPU's debug registers. If any DR0-DR3 register contains a non-zero address with a corresponding enable bit in DR7, a breakpoint is active.
+The x86/x64 CPU has four debug address registers (DR0-DR3) that can each watch one address. DR6 records which breakpoint fired, and DR7 controls which breakpoints are enabled. EDR products and analysis tools set hardware breakpoints on sensitive functions (like `NtAllocateVirtualMemory` or `AmsiScanBuffer`) to intercept calls without leaving any visible hooks in the code.
 
-Clearing these breakpoints is like disabling the lasers. You zero out DR0-DR7 on every thread in the process, removing all hardware breakpoints set by any security tool or debugger.
+This technique detects and clears hardware breakpoints on all threads in the current process. Detection checks DR0-DR3 for non-zero addresses with corresponding DR7 enable bits. Clearing zeroes all debug registers (DR0-DR7) on every thread, removing all hardware breakpoints.
 
 ## How It Works
 
 ```mermaid
 flowchart TD
-    subgraph Detection
-        D1[Get current thread ID] --> D2[OpenThread with GET_CONTEXT]
-        D2 --> D3[GetThreadContext\nCONTEXT_DEBUG_REGISTERS]
-        D3 --> D4{DR0-DR3 non-zero\nAND DR7 enable bit set?}
-        D4 -->|Yes| D5[Breakpoint found:\nregister, address, thread]
-        D4 -->|No| D6[No breakpoints]
+    subgraph Detect["Detection"]
+        D1[Enumerate all threads\nCreateToolhelp32Snapshot] --> D2[For each thread:\nOpenThread + GetThreadContext]
+        D2 --> D3{DR0-DR3 non-zero\nAND DR7 enabled?}
+        D3 -->|Yes| D4[Report breakpoint:\nregister, address, thread ID]
+        D3 -->|No| D5[No breakpoint on this thread]
     end
 
-    subgraph Clearing
-        C1[Enumerate all process threads\nCreateToolhelp32Snapshot] --> C2[For each thread]
-        C2 --> C3[OpenThread with\nGET_CONTEXT + SET_CONTEXT]
-        C3 --> C4[GetThreadContext]
-        C4 --> C5[Zero DR0-DR7]
-        C5 --> C6[SetThreadContext]
+    subgraph Clear["Clearing"]
+        C1[Enumerate all threads] --> C2[For each thread:\nOpenThread + GetThreadContext]
+        C2 --> C3[Zero DR0, DR1, DR2, DR3]
+        C3 --> C4[Zero DR6, DR7]
+        C4 --> C5[SetThreadContext]
     end
 
-    style D5 fill:#5c1a1a,color:#fff
-    style D6 fill:#2d5016,color:#fff
+    style D4 fill:#5c1a1a,color:#fff
     style C5 fill:#2d5016,color:#fff
 ```
 
-**Detection logic:**
+**Detection flow:**
 
-For each debug register DR0-DR3, check:
-1. Is the address non-zero? (`DR[i] != 0`)
-2. Is the corresponding local enable bit set in DR7? (`DR7 & (1 << (2*i)) != 0`)
+1. **Enumerate threads** -- `CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD)` to find all threads belonging to the current process.
+2. **Read debug registers** -- For each thread, `OpenThread` with `THREAD_GET_CONTEXT`, then `GetThreadContext` with `CONTEXT_DEBUG_REGISTERS`.
+3. **Check enables** -- For each DR (0-3), check if the address is non-zero AND the corresponding DR7 enable bit (L0/L1/L2/L3) is set.
+4. **Report** -- Return a list of `Breakpoint` structs with register index, watched address, and thread ID.
 
-If both conditions are true, there is an active hardware breakpoint at that address.
+**Clearing flow:**
 
-**Clearing logic:**
-
-Zero all debug registers: DR0=0, DR1=0, DR2=0, DR3=0, DR6=0, DR7=0. This disables all breakpoints and clears all status flags.
+1. Same thread enumeration.
+2. For each thread, `OpenThread` with `THREAD_GET_CONTEXT | THREAD_SET_CONTEXT`.
+3. Read context, zero all DR registers (DR0-DR7), write context back.
 
 ## Usage
 
@@ -66,15 +64,22 @@ func main() {
         log.Fatal(err)
     }
     for _, bp := range bps {
-        fmt.Printf("DR%d = 0x%X on thread %d\n", bp.Register, bp.Address, bp.ThreadID)
+        fmt.Printf("DR%d watching 0x%X on thread %d\n",
+            bp.Register, bp.Address, bp.ThreadID)
     }
 
     // Detect on ALL threads in the process.
-    allBPs, _ := hwbp.DetectAll()
-    fmt.Printf("Found %d breakpoints across all threads\n", len(allBPs))
+    allBPs, err := hwbp.DetectAll()
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Found %d hardware breakpoints\n", len(allBPs))
 
     // Clear all hardware breakpoints on all threads.
-    cleared, _ := hwbp.ClearAll()
+    cleared, err := hwbp.ClearAll()
+    if err != nil {
+        log.Fatal(err)
+    }
     fmt.Printf("Cleared breakpoints on %d threads\n", cleared)
 }
 ```
@@ -85,32 +90,32 @@ func main() {
 package main
 
 import (
-    "context"
     "log"
     "os"
 
     "github.com/oioio-space/maldev/evasion/hwbp"
-    "github.com/oioio-space/maldev/evasion/sandbox"
+    "github.com/oioio-space/maldev/evasion"
+    "github.com/oioio-space/maldev/evasion/preset"
+    "github.com/oioio-space/maldev/inject"
 )
 
 func main() {
-    // 1. Check for hardware breakpoints (indicates debugging/analysis).
+    shellcode := []byte{0x90, 0x90, 0xCC}
+
+    // 1. Check for hardware breakpoints -- sign of active analysis.
     bps, _ := hwbp.DetectAll()
     if len(bps) > 0 {
-        log.Printf("WARNING: %d hardware breakpoints detected", len(bps))
-        // Clear them to continue unmonitored.
+        log.Printf("WARNING: %d hardware breakpoints detected, clearing...", len(bps))
         hwbp.ClearAll()
     }
 
-    // 2. Run full sandbox detection.
-    checker := sandbox.New(sandbox.DefaultConfig())
-    sandboxed, reason, _ := checker.IsSandboxed(context.Background())
-    if sandboxed {
-        log.Printf("Sandbox detected: %s", reason)
-        os.Exit(0) // bail out
-    }
+    // 2. Apply evasion.
+    evasion.ApplyAll(preset.Stealth(), nil)
 
-    // 3. Proceed with offensive operations...
+    // 3. Inject.
+    if err := inject.ThreadPoolExec(shellcode); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
@@ -118,40 +123,40 @@ func main() {
 
 | Aspect | Detail |
 |--------|--------|
-| Stealth | High -- reading/clearing debug registers is a normal operation. No memory modification, no API hooking. |
-| Coverage | Detects/clears all 4 hardware breakpoint registers across all threads. |
-| Detection vectors | DR0-DR3 addresses and DR7 enable bits. Also reports the thread ID for each breakpoint. |
-| Limitations | Only detects x86/x64 hardware breakpoints (DR0-DR3). Does not detect software breakpoints (INT3 patches) or EDR hooks. The `CreateToolhelp32Snapshot` call for thread enumeration may be logged. |
-| Re-setting | A debugger can re-set breakpoints after clearing. This is a one-time sweep, not persistent protection. |
-| Thread access | Requires `THREAD_GET_CONTEXT | THREAD_SET_CONTEXT` on each thread, which is available for threads in the same process. |
+| Stealth | High -- reading/clearing debug registers is a normal debugging operation. No memory patches required. |
+| Detection scope | All four hardware breakpoints (DR0-DR3) on all threads in the process. |
+| Thread coverage | `DetectAll` and `ClearAll` enumerate every thread via Toolhelp32. |
+| Clearing completeness | Zeroes DR0-DR7 including DR6 (status) and DR7 (control). |
+| Limitations | Requires `THREAD_GET_CONTEXT` / `THREAD_SET_CONTEXT` access on each thread. Cannot detect kernel-mode debug breakpoints. New threads created after clearing may get new breakpoints from EDR. |
+| Race condition | EDR may re-set breakpoints after clearing. Consider clearing immediately before the sensitive operation. |
 
 ## Compared to Other Implementations
 
 | Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
 |---------|--------|--------|--------------|--------------|
-| Detect on current thread | `Detect()` | No | No | No |
-| Detect on all threads | `DetectAll()` | No | No | No |
-| Clear all threads | `ClearAll()` | No | No | No |
-| Returns Breakpoint structs | Yes (register, addr, tid) | N/A | N/A | N/A |
-| Thread enumeration | Toolhelp32 | N/A | N/A | N/A |
-| DR7 enable bit validation | Yes | N/A | N/A | N/A |
+| Detection (read DRs) | Yes | No | No | No |
+| Clear all threads | Yes | No | No | No |
+| Single-thread detect | `Detect()` | N/A | N/A | N/A |
+| Breakpoint details | Register, address, thread ID | N/A | N/A | N/A |
+| Thread enumeration | Toolhelp32 snapshot | N/A | N/A | N/A |
 
 ## API Reference
 
 ```go
-// Breakpoint describes a hardware breakpoint found in debug registers.
+// Breakpoint describes a hardware breakpoint.
 type Breakpoint struct {
     Register int     // DR index (0-3)
     Address  uintptr // Address being monitored
     ThreadID uint32  // Thread with the breakpoint
 }
 
-// Detect returns hardware breakpoints on the current thread.
+// Detect reads debug registers of the current thread.
 func Detect() ([]Breakpoint, error)
 
-// DetectAll returns hardware breakpoints on all threads in the process.
+// DetectAll checks all threads in the current process.
 func DetectAll() ([]Breakpoint, error)
 
-// ClearAll zeros DR0-DR7 on all threads. Returns count of threads modified.
+// ClearAll clears hardware breakpoints on all threads.
+// Returns the number of threads modified.
 func ClearAll() (int, error)
 ```
