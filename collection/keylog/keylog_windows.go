@@ -147,8 +147,9 @@ func hookProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 			Time:    time.Now(),
 		}
 
-		ev.Character = translateKey(kb.VkCode, kb.ScanCode, kb.Flags)
-		ev.Window, ev.Process = foregroundInfo()
+		hwnd, _, _ := procGetForegroundWindow.Call()
+		ev.Character = translateKey(kb.VkCode, kb.ScanCode, kb.Flags, hwnd)
+		ev.Window, ev.Process = foregroundInfo(hwnd)
 
 		st := globalState.Load()
 
@@ -166,15 +167,16 @@ func hookProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 }
 
 // translateKey converts a virtual key code to a Unicode character string.
-func translateKey(vkCode, scanCode, flags uint32) string {
+// hwnd is the foreground window handle (resolved once in hookProc to avoid
+// redundant GetForegroundWindow calls on the hot path).
+func translateKey(vkCode, scanCode, flags uint32, hwnd uintptr) string {
 	var keyState [256]byte
 	procGetKeyboardState.Call(uintptr(unsafe.Pointer(&keyState[0]))) //nolint:errcheck
 
 	// Get the keyboard layout for the foreground thread.
-	fgWnd, _, _ := procGetForegroundWindow.Call()
 	var tid uint32
-	if fgWnd != 0 {
-		threadID, _, _ := procGetWindowThreadProcessID.Call(fgWnd, 0)
+	if hwnd != 0 {
+		threadID, _, _ := procGetWindowThreadProcessID.Call(hwnd, 0)
 		tid = uint32(threadID)
 	}
 	hkl, _, _ := procGetKeyboardLayout.Call(uintptr(tid))
@@ -203,8 +205,8 @@ func translateKey(vkCode, scanCode, flags uint32) string {
 }
 
 // foregroundInfo returns the title and process name of the foreground window.
-func foregroundInfo() (title, process string) {
-	hwnd, _, _ := procGetForegroundWindow.Call()
+// hwnd is resolved once in hookProc to avoid redundant syscalls.
+func foregroundInfo(hwnd uintptr) (title, process string) {
 	if hwnd == 0 {
 		return "", ""
 	}

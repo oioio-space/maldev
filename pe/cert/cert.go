@@ -64,17 +64,11 @@ func Read(pePath string) (*Certificate, error) {
 
 // Has checks whether a PE file contains an Authenticode certificate.
 func Has(pePath string) (bool, error) {
-	data, err := os.ReadFile(pePath)
-	if err != nil {
-		return false, fmt.Errorf("read PE: %w", err)
+	_, err := Read(pePath)
+	if errors.Is(err, ErrNoCertificate) {
+		return false, nil
 	}
-
-	certOffset, certSize, err := findSecurityDir(data)
-	if err != nil {
-		return false, err
-	}
-
-	return certOffset != 0 || certSize != 0, nil
+	return err == nil, err
 }
 
 // Strip removes the Authenticode certificate from a PE file and writes
@@ -191,53 +185,13 @@ func Import(path string) (*Certificate, error) {
 // findSecurityDir locates the security directory entry in the PE data
 // and returns the certificate file offset and size.
 func findSecurityDir(data []byte) (offset, size uint32, err error) {
-	if len(data) < dosHeaderSize {
-		return 0, 0, ErrInvalidPE
+	entryOffset, err := securityDirOffset(data)
+	if err != nil {
+		return 0, 0, err
 	}
 
-	// DOS header: e_magic must be "MZ".
-	if data[0] != 'M' || data[1] != 'Z' {
-		return 0, 0, ErrInvalidPE
-	}
-
-	peOffset := binary.LittleEndian.Uint32(data[0x3C:])
-	if int(peOffset)+peSignatureSize+coffHeaderSize > len(data) {
-		return 0, 0, ErrInvalidPE
-	}
-
-	// Verify PE signature "PE\x00\x00".
-	if data[peOffset] != 'P' || data[peOffset+1] != 'E' ||
-		data[peOffset+2] != 0 || data[peOffset+3] != 0 {
-		return 0, 0, ErrInvalidPE
-	}
-
-	optHeaderStart := peOffset + peSignatureSize + coffHeaderSize
-	if int(optHeaderStart)+2 > len(data) {
-		return 0, 0, ErrInvalidPE
-	}
-
-	magic := binary.LittleEndian.Uint16(data[optHeaderStart:])
-
-	// The data directory array starts at different offsets depending on
-	// whether this is PE32 (offset 96 into optional header) or PE32+
-	// (offset 112 into optional header).
-	var dataDirStart uint32
-	switch magic {
-	case magic32:
-		dataDirStart = optHeaderStart + 96
-	case magic64:
-		dataDirStart = optHeaderStart + 112
-	default:
-		return 0, 0, ErrInvalidPE
-	}
-
-	secEntryStart := dataDirStart + securityDirIndex*dataDirEntrySize
-	if int(secEntryStart)+dataDirEntrySize > len(data) {
-		return 0, 0, ErrInvalidPE
-	}
-
-	offset = binary.LittleEndian.Uint32(data[secEntryStart:])
-	size = binary.LittleEndian.Uint32(data[secEntryStart+4:])
+	offset = binary.LittleEndian.Uint32(data[entryOffset:])
+	size = binary.LittleEndian.Uint32(data[entryOffset+4:])
 	return offset, size, nil
 }
 

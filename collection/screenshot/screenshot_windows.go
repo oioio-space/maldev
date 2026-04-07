@@ -156,15 +156,16 @@ func CaptureRect(x, y, width, height int) ([]byte, error) {
 		return nil, ErrCapture
 	}
 
-	// Convert BGRA pixels to NRGBA image.
-	img := image.NewNRGBA(image.Rect(0, 0, width, height))
-	for i := 0; i < width*height; i++ {
-		off := i * 4
-		// GDI returns BGRA byte order.
-		img.Pix[off+0] = pixels[off+2] // R
-		img.Pix[off+1] = pixels[off+1] // G
-		img.Pix[off+2] = pixels[off+0] // B
-		img.Pix[off+3] = 255           // A
+	// Convert BGRA→NRGBA in-place: swap B and R channels, set alpha to 255.
+	// Reuses the pixels slice directly to avoid a second allocation.
+	for i := 0; i < len(pixels); i += 4 {
+		pixels[i+0], pixels[i+2] = pixels[i+2], pixels[i+0]
+		pixels[i+3] = 255
+	}
+	img := &image.NRGBA{
+		Pix:    pixels,
+		Stride: width * 4,
+		Rect:   image.Rect(0, 0, width, height),
 	}
 
 	var buf bytes.Buffer
@@ -174,26 +175,29 @@ func CaptureRect(x, y, width, height int) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// enumMonitorCallback is allocated once to avoid leaking a windows.NewCallback
+// trampoline on every enumDisplays() call. Results are passed via dwData.
+var enumMonitorCallback = windows.NewCallback(func(hMonitor, hdcMonitor, lprcMonitor, dwData uintptr) uintptr {
+	var mi monitorInfo
+	mi.CbSize = uint32(unsafe.Sizeof(mi))
+	r, _, _ := procGetMonitorInfoW.Call(hMonitor, uintptr(unsafe.Pointer(&mi)))
+	if r != 0 {
+		result := (*[]image.Rectangle)(unsafe.Pointer(dwData))
+		*result = append(*result, image.Rect(
+			int(mi.RcMonitor.Left),
+			int(mi.RcMonitor.Top),
+			int(mi.RcMonitor.Right),
+			int(mi.RcMonitor.Bottom),
+		))
+	}
+	return 1
+})
+
 // enumDisplays queries the current monitor layout. Called on every
 // DisplayCount/DisplayBounds/CaptureDisplay to reflect hotplug changes.
 func enumDisplays() []image.Rectangle {
 	var result []image.Rectangle
-	cb := func(hMonitor, hdcMonitor, lprcMonitor, dwData uintptr) uintptr {
-		var mi monitorInfo
-		mi.CbSize = uint32(unsafe.Sizeof(mi))
-		r, _, _ := procGetMonitorInfoW.Call(hMonitor, uintptr(unsafe.Pointer(&mi)))
-		if r != 0 {
-			result = append(result, image.Rect(
-				int(mi.RcMonitor.Left),
-				int(mi.RcMonitor.Top),
-				int(mi.RcMonitor.Right),
-				int(mi.RcMonitor.Bottom),
-			))
-		}
-		return 1 // continue enumeration
-	}
-
-	procEnumDisplayMonitors.Call(0, 0, windows.NewCallback(cb), 0) //nolint:errcheck
+	procEnumDisplayMonitors.Call(0, 0, enumMonitorCallback, uintptr(unsafe.Pointer(&result))) //nolint:errcheck
 	return result
 }
 

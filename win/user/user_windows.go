@@ -160,14 +160,39 @@ func RemoveFromGroup(name, group string) error {
 	return modifyGroupMembership(name, group, procNetLocalGroupDelMembers)
 }
 
+// adminGroupName resolves the locale-independent Administrators group name
+// from the well-known SID S-1-5-32-544. On non-English Windows the group
+// has a localized name (e.g., "Administratoren" in German).
+func adminGroupName() (string, error) {
+	sid, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		return "", fmt.Errorf("resolve admin SID: %w", err)
+	}
+	account, _, _, err := sid.LookupAccount("")
+	if err != nil {
+		return "", fmt.Errorf("lookup admin group: %w", err)
+	}
+	return account, nil
+}
+
 // SetAdmin adds a user to the built-in Administrators group.
+// Uses SID-based lookup for locale independence.
 func SetAdmin(name string) error {
-	return AddToGroup(name, "Administrators")
+	group, err := adminGroupName()
+	if err != nil {
+		return err
+	}
+	return AddToGroup(name, group)
 }
 
 // RevokeAdmin removes a user from the built-in Administrators group.
+// Uses SID-based lookup for locale independence.
 func RevokeAdmin(name string) error {
-	return RemoveFromGroup(name, "Administrators")
+	group, err := adminGroupName()
+	if err != nil {
+		return err
+	}
+	return RemoveFromGroup(name, group)
 }
 
 // Exists checks whether a local user account exists.

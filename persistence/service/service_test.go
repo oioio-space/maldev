@@ -6,21 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"os/exec"
-	"syscall"
 	"testing"
-)
 
-func isAdmin() bool {
-	cmd := exec.Command("net", "session")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	return cmd.Run() == nil
-}
+	"github.com/oioio-space/maldev/win/user"
+)
 
 func TestExists(t *testing.T) {
 	// SCM read access may require elevation on some configurations.
 	if !Exists("Winmgmt") {
-		if !isAdmin() {
+		if !user.IsAdmin() {
 			t.Skip("SCM access denied without elevation")
 		}
 		t.Fatal("Exists returned false for Winmgmt service")
@@ -36,7 +30,7 @@ func TestExistsNonExistent(t *testing.T) {
 }
 
 func TestIsRunning(t *testing.T) {
-	if !isAdmin() {
+	if !user.IsAdmin() {
 		t.Skip("SCM query access may require elevation")
 	}
 	if !IsRunning("Winmgmt") {
@@ -45,7 +39,7 @@ func TestIsRunning(t *testing.T) {
 }
 
 func TestInstallAccessDenied(t *testing.T) {
-	if isAdmin() {
+	if user.IsAdmin() {
 		t.Skip("test requires non-elevated process")
 	}
 

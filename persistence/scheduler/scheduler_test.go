@@ -4,19 +4,13 @@ package scheduler
 
 import (
 	"context"
-	"os/exec"
-	"syscall"
 	"testing"
+
+	"github.com/oioio-space/maldev/win/user"
 )
 
-func isAdmin() bool {
-	cmd := exec.Command("net", "session")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	return cmd.Run() == nil
-}
-
 func TestCreateAndDelete(t *testing.T) {
-	if !isAdmin() {
+	if !user.IsAdmin() {
 		t.Skip("schtasks requires elevation")
 	}
 
