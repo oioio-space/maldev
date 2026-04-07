@@ -61,9 +61,12 @@ Each technique has a dedicated page with beginner explanation, technical details
 | **[Syscalls](docs/techniques/syscalls/README.md)** | [Direct & Indirect](docs/techniques/syscalls/direct-indirect.md) · [API Hashing](docs/techniques/syscalls/api-hashing.md) · [SSN Resolvers](docs/techniques/syscalls/ssn-resolvers.md) |
 | **[C2 & Transport](docs/techniques/c2/README.md)** | [Reverse Shell](docs/techniques/c2/reverse-shell.md) · [Meterpreter](docs/techniques/c2/meterpreter.md) · [Transport](docs/techniques/c2/transport.md) · [Malleable HTTP](docs/techniques/c2/malleable-profiles.md) |
 | **[PE Operations](docs/techniques/pe/README.md)** | [Strip & Sanitize](docs/techniques/pe/strip-sanitize.md) · [BOF Loader](docs/techniques/pe/bof-loader.md) · [Morph](docs/techniques/pe/morph.md) |
+| **[Persistence](docs/techniques/persistence/README.md)** | Registry Run/RunOnce · StartUp Folder LNK · Task Scheduler |
+| **[Collection](docs/techniques/collection/README.md)** | Keylogging · Clipboard Capture · Screen Capture |
+| **[PE Operations](docs/techniques/pe/README.md)** | [Strip & Sanitize](docs/techniques/pe/strip-sanitize.md) · [BOF Loader](docs/techniques/pe/bof-loader.md) · [Morph](docs/techniques/pe/morph.md) · Certificate Theft |
 | **[Cleanup](docs/techniques/cleanup/README.md)** | [Self-Delete](docs/techniques/cleanup/self-delete.md) · [Timestomp](docs/techniques/cleanup/timestomp.md) · [Memory Wipe](docs/techniques/cleanup/memory-wipe.md) |
 | **[Tokens & Privileges](docs/techniques/tokens/README.md)** | [Token Theft](docs/techniques/tokens/token-theft.md) · [Impersonation](docs/techniques/tokens/impersonation.md) · [Privilege Escalation](docs/techniques/tokens/privilege-escalation.md) |
-| **[Crypto & Encoding](docs/techniques/crypto/README.md)** | [Payload Encryption](docs/techniques/crypto/payload-encryption.md) |
+| **[Crypto & Encoding](docs/techniques/crypto/README.md)** | [Payload Encryption](docs/techniques/crypto/payload-encryption.md) · Fuzzy Hashing (ssdeep, TLSH) |
 
 ### 🧪 Composed Examples
 
@@ -85,6 +88,8 @@ Detailed API documentation for each package (function signatures, parameters, re
 | C2 APIs | [docs/c2.md](docs/c2.md) |
 | Windows Primitives | [docs/win.md](docs/win.md) |
 | PE Operations | [docs/pe.md](docs/pe.md) |
+| Persistence APIs | [docs/persistence.md](docs/persistence.md) |
+| Collection APIs | [docs/collection.md](docs/collection.md) |
 | Crypto & Encoding | [docs/crypto.md](docs/crypto.md) |
 | Cleanup APIs | [docs/cleanup.md](docs/cleanup.md) |
 | System Info | [docs/system.md](docs/system.md) |
@@ -110,10 +115,12 @@ maldev/
 ├── crypto/          encode/          hash/          random/         useragent/
 ├── win/api/         win/syscall/     win/ntapi/     win/token/      win/privilege/
 ├── evasion/amsi/    evasion/etw/     evasion/unhook/ evasion/sleepmask/ evasion/hwbp/
-├── inject/          process/enum/    pe/strip/      pe/bof/         pe/morph/
+├── inject/          process/enum/    pe/strip/      pe/bof/         pe/morph/    pe/cert/
 ├── c2/shell/        c2/transport/    c2/meterpreter/ c2/cert/
+├── persistence/registry/ persistence/startup/ persistence/scheduler/
+├── collection/keylog/ collection/clipboard/ collection/screenshot/
 ├── cleanup/memory/  cleanup/selfdelete/ cleanup/timestomp/ cleanup/wipe/
-├── uacbypass/       exploit/cve202430088/ system/drive/  system/folder/
+├── uacbypass/       exploit/cve202430088/ system/drive/  system/folder/  system/lnk/
 ├── internal/log/    internal/compat/  testutil/       cmd/rshell/
 └── docs/            .claude/skills/   Makefile
 ```

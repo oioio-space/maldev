@@ -5,6 +5,9 @@ go 1.24
 require (
 	github.com/creack/pty v1.1.24
 	github.com/ebitengine/purego v0.8.2
+	github.com/glaslos/ssdeep v1.0.0
+	github.com/glaslos/tlsh v0.4.0
+	github.com/go-ole/go-ole v1.3.0
 	github.com/refraction-networking/utls v1.8.2
 	github.com/saferwall/pe v1.5.6
 	github.com/stretchr/testify v1.11.1

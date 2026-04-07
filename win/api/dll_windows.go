@@ -18,6 +18,7 @@ var (
 	Netapi32 = windows.NewLazySystemDLL("netapi32.dll")
 	Amsi     = windows.NewLazySystemDLL("amsi.dll")
 	Crypt32  = windows.NewLazySystemDLL("crypt32.dll")
+	Gdi32    = windows.NewLazySystemDLL("gdi32.dll")
 )
 
 // Thread access rights.
