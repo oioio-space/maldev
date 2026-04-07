@@ -151,10 +151,9 @@ func EventVwr(path string) error {
 		return err
 	}
 
-	// Wait for eventvwr.exe to read the registry key.
-	// TODO: Replace with process completion wait for reliability.
-	time.Sleep(2 * time.Second)
-
+	// Registry writes are synchronous — launch eventvwr immediately.
+	// eventvwr.exe reads HKCU\...\mscfile\shell\open\command on startup
+	// and elevates the command without a UAC prompt.
 	cmd := exec.Command("cmd.exe", "/C", "eventvwr.exe")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	return cmd.Run()
