@@ -1,6 +1,6 @@
 # Cleanup & Anti-Forensics
 
-[<- Back to Techniques](../../../docs/)
+[<- Back to README](../../../README.md)
 
 The `cleanup/` package tree provides post-operation cleanup techniques: self-deletion of the running executable, timestomping to manipulate file metadata, and secure memory wiping to eliminate forensic evidence.
 

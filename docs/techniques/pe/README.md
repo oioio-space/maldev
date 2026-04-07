@@ -1,6 +1,6 @@
 # PE Manipulation
 
-[<- Back to Techniques](../../../docs/)
+[<- Back to README](../../../README.md)
 
 The `pe/` package tree provides tools for manipulating Portable Executable files: stripping Go-specific metadata, loading COFF object files (BOFs), and morphing UPX-packed binaries to evade signature detection.
 

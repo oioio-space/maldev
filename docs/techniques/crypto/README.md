@@ -1,6 +1,6 @@
 # Cryptography & Encoding
 
-[<- Back to Techniques](../../../docs/)
+[<- Back to README](../../../README.md)
 
 The `crypto/` and `encode/` packages provide payload encryption and encoding: AES-256-GCM, XChaCha20-Poly1305, XOR, RC4, Base64, ROT13, and UTF-16LE encoding for PowerShell.
 

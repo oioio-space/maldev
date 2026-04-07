@@ -381,20 +381,6 @@ sleep, _ := random.RandomDuration(5*time.Second, 30*time.Second)
 time.Sleep(sleep)
 ```
 
-### FileExists
-
-```go
-func FileExists(path string) bool
-```
-
-**Purpose:** Reports whether a file exists and is accessible.
-
-```go
-if random.FileExists("/tmp/lock") {
-    // already running
-}
-```
-
 ---
 
 ## Choosing an Encryption Algorithm

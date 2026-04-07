@@ -1,6 +1,6 @@
 # Token Manipulation
 
-[<- Back to Techniques](../../../docs/)
+[<- Back to README](../../../README.md)
 
 The `win/token`, `win/impersonate`, `win/privilege`, and `uacbypass` packages provide Windows token manipulation: stealing tokens from other processes, thread impersonation, privilege escalation, and UAC bypass.
 

@@ -1,6 +1,6 @@
 # Syscall Methods & SSN Resolvers
 
-[<- Back to Techniques](../../../docs/)
+[<- Back to README](../../../README.md)
 
 The `win/syscall` package provides four syscall invocation methods and five SSN resolvers. Together they allow any injection or evasion code to transparently switch between standard WinAPI calls and stealthy indirect syscalls that defeat EDR hooking.
 

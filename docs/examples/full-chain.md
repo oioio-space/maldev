@@ -1,6 +1,6 @@
 # Example: Full Attack Chain
 
-[← Back to Examples](../README.md)
+[← Back to README](../../README.md)
 
 A complete implant lifecycle: reconnaissance → evasion → injection → persistence → cleanup.
 

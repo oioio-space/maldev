@@ -505,7 +505,7 @@ func main() {
     }
 
     fmt.Printf("Generated %d bytes of shellcode\n", len(shellcode))
-    // shellcode is now ready for injection via inject.Remote() etc.
+    // shellcode is now ready for injection via inject.NewInjector() etc.
 }
 ```
 

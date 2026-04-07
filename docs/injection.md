@@ -5,7 +5,7 @@
 MITRE ATT&CK: **T1055 — Process Injection**
 
 The `inject` package provides a unified API for shellcode injection across Windows and Linux.
-It supports 13 injection methods, automatic fallback chains, shellcode validation, and
+It supports 15 injection methods, automatic fallback chains, shellcode validation, and
 optional EDR bypass via direct/indirect syscalls on Windows.
 
 ---

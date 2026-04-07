@@ -1,6 +1,6 @@
 # Command & Control (C2)
 
-[<- Back to Techniques](../../../docs/)
+[<- Back to README](../../../README.md)
 
 The `c2/` package tree provides a complete C2 communication stack: transport layer (TCP, TLS, uTLS with JA3 spoofing), reverse shell with automatic reconnection, Meterpreter staging, and malleable HTTP profiles for traffic blending.
 

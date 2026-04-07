@@ -20,7 +20,7 @@ Package `keylog` installs a low-level keyboard hook (`WH_KEYBOARD_LL`) via `SetW
 
 **MITRE ATT&CK:** T1056.001 (Input Capture: Keylogging)
 **Platform:** Windows
-**Detection:** Medium -- `SetWindowsHookExW` with `WH_KEYBOARD_LL` is a known indicator.
+**Detection:** High -- keyboard hooks are monitored by most EDR products.
 
 ### Types
 
@@ -129,7 +129,7 @@ Package `clipboard` provides clipboard text reading and real-time monitoring via
 
 **MITRE ATT&CK:** T1115 (Clipboard Data)
 **Platform:** Windows
-**Detection:** Low -- clipboard access is normal application behavior.
+**Detection:** Medium -- clipboard access via OpenClipboard is observable but common.
 
 ### Errors
 
@@ -221,7 +221,7 @@ Package `screenshot` captures screen content via the Windows GDI API (`BitBlt` +
 
 **MITRE ATT&CK:** T1113 (Screen Capture)
 **Platform:** Windows
-**Detection:** Low -- GDI screen capture is normal application behavior (used by screen sharing, recording tools, etc.).
+**Detection:** Medium -- GDI operations are common; behavioral detection focuses on frequency and context.
 
 ### Errors
 

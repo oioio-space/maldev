@@ -6,7 +6,7 @@
 
 Process injection is a family of techniques that place executable code (shellcode) into another process's memory and trigger its execution. This allows malware to run inside a trusted process, inheriting its identity, permissions, and trust level. Security tools watching for suspicious new processes see nothing unusual -- the code runs inside an already-running, legitimate application.
 
-maldev provides a unified `inject` package with 16+ injection methods across Windows and Linux, a fluent builder API, middleware decorators for evasion, and automatic fallback support.
+maldev provides a unified `inject` package with 15 injection methods across Windows and Linux, a fluent builder API, middleware decorators for evasion, and automatic fallback support.
 
 ## Technique Comparison
 
