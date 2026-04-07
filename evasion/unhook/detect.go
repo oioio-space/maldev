@@ -53,12 +53,12 @@ func DetectHooked(funcNames []string) ([]string, error) {
 	for _, name := range funcNames {
 		proc := ntdll.NewProc(name)
 		if err := proc.Find(); err != nil {
-			return nil, fmt.Errorf("find proc %s: %w", name, err)
+			return nil, fmt.Errorf("find proc: %w", err)
 		}
 
 		var prologue [4]byte
 		if err := readPrologue4(proc.Addr(), &prologue); err != nil {
-			return nil, fmt.Errorf("read prologue %s: %w", name, err)
+			return nil, fmt.Errorf("read prologue: %w", err)
 		}
 		if prologue != cleanSyscallPrologue {
 			hooked = append(hooked, name)
@@ -124,12 +124,12 @@ func Inspect(funcNames []string) ([]HookInfo, error) {
 	for _, name := range funcNames {
 		proc := ntdll.NewProc(name)
 		if err := proc.Find(); err != nil {
-			return nil, fmt.Errorf("find proc %s: %w", name, err)
+			return nil, fmt.Errorf("find proc: %w", err)
 		}
 
 		var prologue [8]byte
 		if err := readPrologue8(proc.Addr(), &prologue); err != nil {
-			return nil, fmt.Errorf("read prologue %s: %w", name, err)
+			return nil, fmt.Errorf("read prologue: %w", err)
 		}
 		hooked := [4]byte(prologue[:4]) != cleanSyscallPrologue
 

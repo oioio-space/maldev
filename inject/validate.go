@@ -37,7 +37,7 @@ func (c *Config) Validate() error {
 	}
 
 	if remoteMethods[c.Method] && c.PID <= 0 && c.ProcessPath == "" {
-		return fmt.Errorf("method '%s' requires a valid PID or process name/path", c.Method)
+		return fmt.Errorf("method requires a target PID or process path")
 	}
 
 	// Methods requiring a ProcessPath
@@ -47,7 +47,7 @@ func (c *Config) Validate() error {
 	}
 
 	if processPathMethods[c.Method] && c.ProcessPath == "" {
-		return fmt.Errorf("method '%s' requires a process path", c.Method)
+		return fmt.Errorf("method requires a process path")
 	}
 
 	return nil

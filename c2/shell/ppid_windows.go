@@ -68,7 +68,7 @@ func ParentPID(pid uint32) (uint32, error) {
 		return p == pid
 	})
 	if err != nil {
-		return 0, fmt.Errorf("process %d not found", pid)
+		return 0, fmt.Errorf("target process not found")
 	}
 	return proc.PPID, nil
 }

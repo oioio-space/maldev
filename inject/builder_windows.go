@@ -119,7 +119,7 @@ func (b *InjectorBuilder) Create() (Injector, error) {
 
 	// Validate method/PID combinations
 	if needsRemotePID(b.method) && b.pid == 0 {
-		return nil, fmt.Errorf("method %s requires a target PID", b.method)
+		return nil, fmt.Errorf("method requires a target PID")
 	}
 
 	cfg := &WindowsConfig{

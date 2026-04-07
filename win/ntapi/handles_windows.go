@@ -118,7 +118,7 @@ func FindHandleByType(targetPID uint32, referenceHandle windows.Handle) (uintptr
 		}
 	}
 
-	return 0, fmt.Errorf("no handle of type %d found in PID %d", typeIndex, targetPID)
+	return 0, fmt.Errorf("no handle of specified type found")
 }
 
 // GetKernelPointerByHandle leaks the kernel-space address of a handle

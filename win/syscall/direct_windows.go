@@ -134,7 +134,7 @@ func (c *Caller) callWinAPI(name string, args ...uintptr) (uintptr, error) {
 	}
 	r, _, err := proc.Call(args...)
 	if r != 0 {
-		return r, fmt.Errorf("%s: NTSTATUS 0x%08X: %w", name, uint32(r), err)
+		return r, fmt.Errorf("syscall failed: NTSTATUS 0x%08X: %w", uint32(r), err)
 	}
 	return 0, nil
 }
@@ -157,7 +157,7 @@ func (c *Caller) callDirect(name string, args ...uintptr) (uintptr, error) {
 
 	ssn, err := c.resolver.Resolve(name)
 	if err != nil {
-		return 0, fmt.Errorf("resolve SSN for %s: %w", name, err)
+		return 0, fmt.Errorf("resolve SSN: %w", err)
 	}
 
 	// Direct syscall stub layout (11 bytes, pre-allocated):
@@ -182,7 +182,7 @@ func (c *Caller) callDirect(name string, args ...uintptr) (uintptr, error) {
 	c.mu.Unlock()
 
 	if r != 0 {
-		return r, fmt.Errorf("%s: NTSTATUS 0x%08X", name, uint32(r))
+		return r, fmt.Errorf("syscall failed: NTSTATUS 0x%08X", uint32(r))
 	}
 	return 0, nil
 }
@@ -197,7 +197,7 @@ func (c *Caller) callIndirect(name string, args ...uintptr) (uintptr, error) {
 
 	ssn, err := c.resolver.Resolve(name)
 	if err != nil {
-		return 0, fmt.Errorf("resolve SSN for %s: %w", name, err)
+		return 0, fmt.Errorf("resolve SSN: %w", err)
 	}
 
 	// Find a syscall;ret gadget inside ntdll
@@ -230,7 +230,7 @@ func (c *Caller) callIndirect(name string, args ...uintptr) (uintptr, error) {
 	c.mu.Unlock()
 
 	if r != 0 {
-		return r, fmt.Errorf("%s: NTSTATUS 0x%08X", name, uint32(r))
+		return r, fmt.Errorf("syscall failed: NTSTATUS 0x%08X", uint32(r))
 	}
 	return 0, nil
 }

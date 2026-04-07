@@ -175,7 +175,9 @@ func StealViaDuplicateHandle(hProcess windows.Handle, remoteTokenHandle uintptr)
 	return New(dupToken, Primary), nil
 }
 
-// StealByName finds a process by name and steals its token.
+// StealByName looks up a process by name and steals its token.
+// NOTE: imports process/enum (Layer 2) from Layer 1 — accepted exception
+// because this is a convenience wrapper over Steal.
 func StealByName(processName string) (*Token, error) {
 	procs, err := enum.FindByName(processName)
 	if err != nil || len(procs) == 0 {

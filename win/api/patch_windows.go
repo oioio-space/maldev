@@ -54,7 +54,7 @@ func PatchMemoryWithCaller(addr uintptr, patch []byte, caller *wsyscall.Caller) 
 	var oldProtect uint32
 
 	// Use NtProtectVirtualMemory via the caller.
-	process := uintptr(0xFFFFFFFFFFFFFFFF) // current process pseudo-handle
+	process := ^uintptr(0) // current process pseudo-handle
 	baseAddr := addr
 	regionSize := size
 

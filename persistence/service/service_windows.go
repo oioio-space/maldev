@@ -188,6 +188,11 @@ func openService(name string) (*mgr.Mgr, *mgr.Service, error) {
 	return m, s, nil
 }
 
+const (
+	stopTimeout      = 10 * time.Second
+	stopPollInterval = 300 * time.Millisecond
+)
+
 // stopService sends a stop control and waits briefly for the service to stop.
 func stopService(s *mgr.Service) error {
 	status, err := s.Control(svc.Stop)
@@ -195,10 +200,10 @@ func stopService(s *mgr.Service) error {
 		return mapError(err)
 	}
 
-	// Wait up to 10 seconds for the service to reach stopped state.
-	deadline := time.Now().Add(10 * time.Second)
+	// Wait up to stopTimeout for the service to reach stopped state.
+	deadline := time.Now().Add(stopTimeout)
 	for status.State != svc.Stopped && time.Now().Before(deadline) {
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(stopPollInterval)
 		status, err = s.Query()
 		if err != nil {
 			return mapError(err)

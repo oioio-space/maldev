@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/oioio-space/maldev/win/api"
 	"golang.org/x/sys/windows"
+
+	"github.com/oioio-space/maldev/process/enum"
+	"github.com/oioio-space/maldev/win/api"
 )
 
 const contextDebugRegisters = 0x00100010 // CONTEXT_DEBUG_REGISTERS (x64)
@@ -124,27 +126,5 @@ func clearOnThread(tid uint32) error {
 }
 
 func currentProcessThreads() ([]uint32, error) {
-	pid := windows.GetCurrentProcessId()
-	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
-	if err != nil {
-		return nil, fmt.Errorf("snapshot: %w", err)
-	}
-	defer windows.CloseHandle(snap)
-
-	var te windows.ThreadEntry32
-	te.Size = uint32(unsafe.Sizeof(te))
-	if err := windows.Thread32First(snap, &te); err != nil {
-		return nil, fmt.Errorf("enumerate: %w", err)
-	}
-
-	var tids []uint32
-	for {
-		if te.OwnerProcessID == pid {
-			tids = append(tids, te.ThreadID)
-		}
-		if err := windows.Thread32Next(snap, &te); err != nil {
-			break
-		}
-	}
-	return tids, nil
+	return enum.Threads(windows.GetCurrentProcessId())
 }

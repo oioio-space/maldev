@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"golang.org/x/sys/windows"
-
 	"github.com/oioio-space/maldev/evasion"
 	"github.com/oioio-space/maldev/evasion/preset"
+	"github.com/oioio-space/maldev/win/user"
 )
 
 // applyEvasion applies the provided evasion techniques on Windows.
@@ -39,32 +38,7 @@ func PatchDefenses() error {
 }
 
 // IsAdmin checks if the current process has admin privileges.
+// Delegates to win/user.IsAdmin to avoid duplicating SID/token logic.
 func IsAdmin() bool {
-	var sid *windows.SID
-	err := windows.AllocateAndInitializeSid(
-		&windows.SECURITY_NT_AUTHORITY,
-		2,
-		windows.SECURITY_BUILTIN_DOMAIN_RID,
-		windows.DOMAIN_ALIAS_RID_ADMINS,
-		0, 0, 0, 0, 0, 0,
-		&sid,
-	)
-	if err != nil {
-		return false
-	}
-	defer windows.FreeSid(sid)
-
-	var token windows.Token
-	proc, _ := windows.GetCurrentProcess()
-	if err := windows.OpenProcessToken(proc, windows.TOKEN_QUERY, &token); err != nil {
-		return false
-	}
-	defer token.Close()
-
-	member, err := token.IsMember(sid)
-	if err != nil {
-		return false
-	}
-
-	return member
+	return user.IsAdmin()
 }

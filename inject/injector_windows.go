@@ -211,7 +211,7 @@ func (w *windowsInjector) injectQueueUserAPC(shellcode []byte) error {
 		return fmt.Errorf("failed to find threads: %w", err)
 	}
 	if len(threadIDs) == 0 {
-		return fmt.Errorf("no threads found for PID %d", w.config.PID)
+		return fmt.Errorf("no threads found for target process")
 	}
 
 	success := false
@@ -527,7 +527,7 @@ func (w *windowsInjector) injectNtQueueApcThreadEx(shellcode []byte) error {
 		return fmt.Errorf("failed to find threads: %w", err)
 	}
 	if len(threadIDs) == 0 {
-		return fmt.Errorf("no threads found for PID %d", w.config.PID)
+		return fmt.Errorf("no threads found for target process")
 	}
 
 	// NtQueueApcThreadEx with QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC (flag=1)
@@ -687,7 +687,7 @@ func allocateAndWriteMemoryLocalWithCaller(shellcode []byte, caller *wsyscall.Ca
 		return addr, nil
 	}
 
-	currentProcess := uintptr(0xFFFFFFFFFFFFFFFF) // pseudo-handle
+	currentProcess := ^uintptr(0) // pseudo-handle
 
 	// 1. NtAllocateVirtualMemory (PAGE_READWRITE)
 	var baseAddr uintptr

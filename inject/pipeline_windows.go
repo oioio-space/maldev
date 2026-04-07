@@ -146,7 +146,7 @@ func (e *queueAPCExec) Execute(addr uintptr) error {
 		return fmt.Errorf("find threads: %w", err)
 	}
 	if len(threadIDs) == 0 {
-		return fmt.Errorf("no threads found for PID %d", e.pid)
+		return fmt.Errorf("no threads found for target process")
 	}
 
 	for _, tid := range threadIDs {

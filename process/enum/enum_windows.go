@@ -48,6 +48,34 @@ func List() ([]Process, error) {
 	return procs, nil
 }
 
+// Threads returns the thread IDs belonging to the given process.
+// Uses CreateToolhelp32Snapshot with TH32CS_SNAPTHREAD.
+func Threads(pid uint32) ([]uint32, error) {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer windows.CloseHandle(snap)
+
+	var te windows.ThreadEntry32
+	te.Size = uint32(unsafe.Sizeof(te))
+
+	if err := windows.Thread32First(snap, &te); err != nil {
+		return nil, err
+	}
+
+	var tids []uint32
+	for {
+		if te.OwnerProcessID == pid {
+			tids = append(tids, te.ThreadID)
+		}
+		if err := windows.Thread32Next(snap, &te); err != nil {
+			break
+		}
+	}
+	return tids, nil
+}
+
 // processFromEntry converts a ProcessEntry32 to a Process, populating
 // SessionID via ProcessIdToSessionId (silently 0 on failure).
 func processFromEntry(e *windows.ProcessEntry32) Process {
