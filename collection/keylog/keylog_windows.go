@@ -43,6 +43,7 @@ const (
 	wmKeyup      = 0x0101
 	wmSyskeydown = 0x0104
 	wmSyskeyup   = 0x0105
+	wmQuit       = 0x0012
 )
 
 // Virtual key codes for modifier and special key detection.
@@ -156,7 +157,7 @@ func Start(ctx context.Context) (<-chan Event, error) {
 
 		go func() {
 			<-ctx.Done()
-			procPostThreadMessageW.Call(uintptr(tid), 0x0012, 0, 0) //nolint:errcheck
+			procPostThreadMessageW.Call(uintptr(tid), wmQuit, 0, 0) //nolint:errcheck
 		}()
 
 		// Standard Win32 message pump — required for LL hooks.
@@ -199,6 +200,10 @@ func hookProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 		shift := asyncKeyDown(vkShift)
 		alt := asyncKeyDown(vkMenu)
 
+		// Resolve foreground window once per keystroke to avoid redundant
+		// GetForegroundWindow syscalls across translateKey and fillWindow.
+		hwnd, _, _ := procGetForegroundWindow.Call()
+
 		{
 			ev := Event{
 				KeyCode: int(vk),
@@ -208,31 +213,27 @@ func hookProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 				Time:    time.Now(),
 			}
 
-			// Detect common Ctrl shortcuts before translating.
 			if ctrl && !alt {
 				if label := ctrlShortcut(vk); label != "" {
 					ev.Character = label
 					if vk == 'V' || vk == 'v' {
 						ev.Clipboard = readClipboardText()
 					}
-					fillWindow(&ev)
+					fillWindowWith(&ev, hwnd)
 					send(&ev)
 					goto next
 				}
 			}
 
-			// Label non-printable keys.
 			if label := specialKeyLabel(vk); label != "" {
 				ev.Character = label
-				fillWindow(&ev)
+				fillWindowWith(&ev, hwnd)
 				send(&ev)
 				goto next
 			}
 
-			// Translate printable character via ToUnicodeEx.
-			hwnd, _, _ := procGetForegroundWindow.Call()
 			ev.Character = translateKey(vk, kb.ScanCode, kb.Flags, hwnd)
-			fillWindow(&ev)
+			fillWindowWith(&ev, hwnd)
 			send(&ev)
 		}
 	}
@@ -254,15 +255,15 @@ func send(ev *Event) {
 	}
 }
 
-// fillWindow populates the Window and Process fields using a cached
-// foreground window lookup. Only re-queries when the hwnd changes.
-func fillWindow(ev *Event) {
+// fillWindowWith populates the Window and Process fields using a cached
+// lookup. The hwnd is resolved once per keystroke in hookProc to avoid
+// redundant GetForegroundWindow syscalls.
+func fillWindowWith(ev *Event, hwnd uintptr) {
 	st := globalState.Load()
 	if st == nil {
 		return
 	}
 
-	hwnd, _, _ := procGetForegroundWindow.Call()
 	if hwnd == st.cachedHwnd && st.cachedHwnd != 0 {
 		ev.Window = st.cachedTitle
 		ev.Process = st.cachedProcess

@@ -9,6 +9,8 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/oioio-space/maldev/cleanup/memory"
+
 	"github.com/oioio-space/maldev/evasion/timing"
 )
 
@@ -81,10 +83,8 @@ func (m *Mask) Sleep(d time.Duration) {
 		windows.VirtualProtect(r.Addr, r.Size, origProtect[i], &tmp)
 	}
 
-	// Zero the key from memory.
-	for i := range key {
-		key[i] = 0
-	}
+	// Securely zero the key to resist dead-store elimination.
+	memory.SecureZero(key)
 }
 
 // xorRegion applies repeating-key XOR to a memory region in-place.

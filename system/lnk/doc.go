@@ -13,7 +13,7 @@
 //
 // Key features:
 //   - Fluent builder API for shortcut construction
-//   - Configurable window style (hidden, normal, maximized, minimized)
+//   - Configurable window style (normal, maximized, minimized)
 //   - All COM resources properly released on completion or error
 //
 // Limitations:
@@ -25,6 +25,6 @@
 //	err := lnk.New().
 //	    SetTargetPath(`C:\Windows\System32\cmd.exe`).
 //	    SetArguments("/c whoami").
-//	    SetWindowStyle(lnk.StyleHidden).
+//	    SetWindowStyle(lnk.StyleMinimized).
 //	    Save(`C:\Users\Public\Desktop\link.lnk`)
 package lnk

@@ -5,7 +5,6 @@ package privilege
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"os/user"
@@ -19,6 +18,7 @@ import (
 	"github.com/oioio-space/maldev/win/api"
 	"github.com/oioio-space/maldev/win/impersonate"
 	"github.com/oioio-space/maldev/win/token"
+	wuser "github.com/oioio-space/maldev/win/user"
 )
 
 const (
@@ -49,34 +49,12 @@ func IsAdminGroupMember() (bool, error) {
 }
 
 // IsAdmin returns whether the process is running as administrator and whether
-// the token is elevated.
+// the token is elevated. Delegates the SID membership check to win/user.IsAdmin
+// and adds the elevation status via Token.IsElevated.
 func IsAdmin() (admin bool, elevated bool, err error) {
-	var sid *windows.SID
+	admin = wuser.IsAdmin()
 
-	err = windows.AllocateAndInitializeSid(
-		&windows.SECURITY_NT_AUTHORITY,
-		2,
-		windows.SECURITY_BUILTIN_DOMAIN_RID,
-		windows.DOMAIN_ALIAS_RID_ADMINS,
-		0, 0, 0, 0, 0, 0,
-		&sid)
-	if err != nil {
-		return false, false, err
-	}
-	defer windows.FreeSid(sid)
-
-	var t windows.Token
-	proc, _ := windows.GetCurrentProcess()
-	if err = windows.OpenProcessToken(proc, windows.TOKEN_QUERY, &t); err != nil {
-		return false, false, fmt.Errorf("OpenProcessToken: %w", err)
-	}
-	defer t.Close()
-
-	admin, err = t.IsMember(sid)
-	if err != nil {
-		return false, false, err
-	}
-
+	t := windows.GetCurrentProcessToken()
 	return admin, t.IsElevated(), nil
 }
 
