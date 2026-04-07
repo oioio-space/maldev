@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oioio-space/maldev/inject"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -80,4 +81,77 @@ func TestNewStager(t *testing.T) {
 
 	s := NewStager(cfg)
 	require.NotNil(t, s, "NewStager must return a non-nil Stager")
+}
+
+func TestNewStagerWithInjectionConfig(t *testing.T) {
+	cfg := &Config{
+		Transport:   TransportTCP,
+		Host:        "127.0.0.1",
+		Port:        "4444",
+		Timeout:     5 * time.Second,
+		Method:      inject.MethodCreateThread,
+		TargetPID:   0,
+		ProcessPath: "",
+		Fallback:    true,
+	}
+
+	s := NewStager(cfg)
+	require.NotNil(t, s)
+	assert.Equal(t, inject.MethodCreateThread, s.config.Method)
+	assert.True(t, s.config.Fallback)
+	assert.Equal(t, 0, s.config.TargetPID)
+}
+
+func TestNewStagerWithRemoteInjection(t *testing.T) {
+	cfg := &Config{
+		Transport: TransportTCP,
+		Host:      "127.0.0.1",
+		Port:      "4444",
+		Timeout:   5 * time.Second,
+		Method:    inject.MethodCreateRemoteThread,
+		TargetPID: 1234,
+		Fallback:  true,
+	}
+
+	s := NewStager(cfg)
+	require.NotNil(t, s)
+	assert.Equal(t, inject.MethodCreateRemoteThread, s.config.Method)
+	assert.Equal(t, 1234, s.config.TargetPID)
+}
+
+func TestNewStagerWithSpawnAndInject(t *testing.T) {
+	cfg := &Config{
+		Transport:   TransportHTTPS,
+		Host:        "10.0.0.1",
+		Port:        "8443",
+		Timeout:     30 * time.Second,
+		TLSInsecure: true,
+		Method:      inject.MethodEarlyBirdAPC,
+		ProcessPath: `C:\Windows\System32\notepad.exe`,
+		Fallback:    true,
+	}
+
+	s := NewStager(cfg)
+	require.NotNil(t, s)
+	assert.Equal(t, inject.MethodEarlyBirdAPC, s.config.Method)
+	assert.Equal(t, `C:\Windows\System32\notepad.exe`, s.config.ProcessPath)
+}
+
+func TestDefaultMethodForStage(t *testing.T) {
+	m := inject.DefaultMethodForStage()
+	assert.NotEmpty(t, m, "DefaultMethodForStage must return a non-empty method")
+}
+
+func TestConfigMethodEmpty_UsesDefaultPath(t *testing.T) {
+	// When Method is empty, the stager should use the default
+	// executeInMemory path (no inject package routing).
+	cfg := &Config{
+		Transport: TransportTCP,
+		Host:      "127.0.0.1",
+		Port:      "4444",
+		Timeout:   5 * time.Second,
+	}
+
+	s := NewStager(cfg)
+	assert.Empty(t, s.config.Method, "empty Method means default self-injection path")
 }

