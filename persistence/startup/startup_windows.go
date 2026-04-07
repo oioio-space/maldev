@@ -92,6 +92,24 @@ func remove(dir, name string) error {
 	return nil
 }
 
+// Shortcut returns a persistence.Mechanism that manages a StartUp folder
+// LNK shortcut. Satisfies persistence.Mechanism via duck typing.
+func Shortcut(name, targetPath, args string) *ShortcutMechanism {
+	return &ShortcutMechanism{name: name, targetPath: targetPath, args: args}
+}
+
+// ShortcutMechanism implements persistence.Mechanism for StartUp folder shortcuts.
+type ShortcutMechanism struct {
+	name       string
+	targetPath string
+	args       string
+}
+
+func (m *ShortcutMechanism) Name() string              { return "startup:user" }
+func (m *ShortcutMechanism) Install() error             { return Install(m.name, m.targetPath, m.args) }
+func (m *ShortcutMechanism) Uninstall() error           { return Remove(m.name) }
+func (m *ShortcutMechanism) Installed() (bool, error)   { return Exists(m.name), nil }
+
 // Exists checks if a shortcut exists in the user's Startup folder.
 func Exists(name string) bool {
 	dir, err := UserDir()

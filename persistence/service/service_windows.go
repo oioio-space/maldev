@@ -102,6 +102,22 @@ func Uninstall(name string) error {
 	return nil
 }
 
+// Mechanism implements persistence.Mechanism for Windows services.
+// Satisfies the interface via duck typing (no parent package import).
+type Mechanism struct {
+	cfg *Config
+}
+
+// Service returns a persistence.Mechanism that manages a Windows service.
+func Service(cfg *Config) *Mechanism {
+	return &Mechanism{cfg: cfg}
+}
+
+func (m *Mechanism) Name() string              { return "service:" + m.cfg.Name }
+func (m *Mechanism) Install() error             { return Install(m.cfg) }
+func (m *Mechanism) Uninstall() error           { return Uninstall(m.cfg.Name) }
+func (m *Mechanism) Installed() (bool, error)   { return Exists(m.cfg.Name), nil }
+
 // Exists checks if a Windows service exists.
 func Exists(name string) bool {
 	m, s, err := openService(name)

@@ -96,6 +96,38 @@ func Delete(hive Hive, keyType KeyType, name string) error {
 	return nil
 }
 
+// RunKey returns a persistence.Mechanism that manages a Run/RunOnce registry
+// value. Satisfies the persistence.Mechanism interface via duck typing.
+func RunKey(hive Hive, keyType KeyType, name, value string) *RunKeyMechanism {
+	return &RunKeyMechanism{hive: hive, keyType: keyType, name: name, value: value}
+}
+
+// RunKeyMechanism implements persistence.Mechanism for registry Run/RunOnce keys.
+type RunKeyMechanism struct {
+	hive    Hive
+	keyType KeyType
+	name    string
+	value   string
+}
+
+func (m *RunKeyMechanism) Name() string {
+	h := "HKCU"
+	if m.hive == HiveLocalMachine {
+		h = "HKLM"
+	}
+	k := "Run"
+	if m.keyType == KeyRunOnce {
+		k = "RunOnce"
+	}
+	return "registry:" + h + ":" + k
+}
+
+func (m *RunKeyMechanism) Install() error   { return Set(m.hive, m.keyType, m.name, m.value) }
+func (m *RunKeyMechanism) Uninstall() error { return Delete(m.hive, m.keyType, m.name) }
+func (m *RunKeyMechanism) Installed() (bool, error) {
+	return Exists(m.hive, m.keyType, m.name)
+}
+
 // Exists checks whether a value exists in the specified Run/RunOnce key.
 func Exists(hive Hive, keyType KeyType, name string) (bool, error) {
 	_, err := Get(hive, keyType, name)

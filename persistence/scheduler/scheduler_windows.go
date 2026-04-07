@@ -100,6 +100,22 @@ func buildTR(command, args string) string {
 	return quoted + " " + args
 }
 
+// ScheduledTask returns a persistence.Mechanism that manages a scheduled
+// task. Satisfies persistence.Mechanism via duck typing.
+func ScheduledTask(task *Task) *TaskMechanism {
+	return &TaskMechanism{task: task}
+}
+
+// TaskMechanism implements persistence.Mechanism for Task Scheduler.
+type TaskMechanism struct {
+	task *Task
+}
+
+func (m *TaskMechanism) Name() string            { return "scheduler:" + m.task.Name }
+func (m *TaskMechanism) Install() error           { return Create(context.Background(), m.task) }
+func (m *TaskMechanism) Uninstall() error         { return Delete(context.Background(), m.task.Name) }
+func (m *TaskMechanism) Installed() (bool, error) { return Exists(context.Background(), m.task.Name), nil }
+
 // runSchtasks executes schtasks.exe with a hidden console window.
 func runSchtasks(ctx context.Context, args []string) error {
 	cmd := exec.CommandContext(ctx, "schtasks.exe", args...)
