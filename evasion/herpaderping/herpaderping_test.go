@@ -44,13 +44,6 @@ func TestRunInvalidPE(t *testing.T) {
 	assert.Contains(t, err.Error(), "NtCreateSection")
 }
 
-func requireManual(t *testing.T) {
-	t.Helper()
-	if os.Getenv("MALDEV_MANUAL") == "" {
-		t.Skip("manual test: set MALDEV_MANUAL=1 (requires VM)")
-	}
-}
-
 // TestRunWithDecoy performs a full herpaderping execution using cmd.exe /c echo
 // as the payload and svchost.exe as the decoy.
 //
@@ -73,7 +66,7 @@ func requireManual(t *testing.T) {
 //
 //	The target file is cleaned up automatically by t.TempDir().
 func TestRunWithDecoy(t *testing.T) {
-	requireManual(t)
+	testutil.RequireManual(t)
 	testutil.RequireIntrusive(t)
 
 	dir := t.TempDir()

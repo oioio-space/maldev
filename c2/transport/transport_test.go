@@ -127,3 +127,33 @@ func TestTCPRemoteAddr(t *testing.T) {
 	remote := tr.RemoteAddr()
 	assert.NotNil(t, remote, "RemoteAddr should not be nil after Connect")
 }
+
+func TestNewTLS_Options(t *testing.T) {
+	// Verify WithInsecure and WithFingerprint are callable option functions
+	// that produce a valid TLS transport without needing a real connection.
+	tr := NewTLS("127.0.0.1:4443", 2*time.Second, "", "",
+		WithInsecure(true),
+		WithFingerprint("AA:BB:CC"),
+	)
+	require.NotNil(t, tr, "NewTLS with options must return a non-nil *TLS")
+}
+
+func TestWithFingerprint(t *testing.T) {
+	fp := "AB:CD:EF:01:23:45"
+	opt := WithFingerprint(fp)
+	require.NotNil(t, opt, "WithFingerprint must return a non-nil TLSOption")
+
+	// Apply to a bare TLS struct and verify the field is set.
+	tr := &TLS{}
+	opt(tr)
+	assert.Equal(t, fp, tr.fingerprint)
+}
+
+func TestNewUTLS_Options(t *testing.T) {
+	tr := NewUTLS("127.0.0.1:443", 2*time.Second,
+		WithJA3Profile(JA3Chrome),
+		WithSNI("example.com"),
+		WithUTLSInsecure(true),
+	)
+	require.NotNil(t, tr, "NewUTLS with options must return a non-nil *UTLS")
+}

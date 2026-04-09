@@ -1,6 +1,12 @@
 ---
 name: go-conventions
-description: Use when writing, modifying, reviewing, or creating any Go code — enforces naming conventions, anti-stutter rules, package structure, build tags, error handling, unsafe.Pointer safety, and MITRE documentation requirements. Reference for all Go style rules in this project.
+description: >
+  Trigger: when writing, modifying, reviewing, or creating any .go file.
+  Purpose: enforce naming conventions (camelCase/PascalCase, ID not Id,
+  anti-stutter), package structure, build tags, error handling (%w/%v),
+  unsafe.Pointer safety, MITRE doc.go requirements, x/sys/windows dedup.
+  Keywords: naming, convention, Go style, stutter, camelCase, PascalCase,
+  build tag, doc.go, MITRE, error handling, unsafe.Pointer.
 ---
 
 # Go Conventions Skill

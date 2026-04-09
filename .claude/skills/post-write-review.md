@@ -1,6 +1,11 @@
 ---
 name: post-write-review
-description: Use AUTOMATICALLY after writing, modifying, or creating any Go code in this project — performs two mandatory checks (naming/conventions compliance and design pattern opportunities) on the code just written. Triggers on ANY code change including edits, new files, refactors, and bug fixes. This is not optional.
+description: >
+  Trigger: after Edit/Write on any .go file, after refactoring, after bug fixes.
+  Purpose: two mandatory checks on code just written — (1) naming/conventions
+  compliance (camelCase, anti-stutter, receivers, OPSEC errors, Caller syscall)
+  and (2) design pattern opportunities (Builder, Strategy, Decorator, State).
+  Keywords: naming, convention, stutter, PascalCase, design pattern, post-write.
 ---
 
 # Post-Write Automatic Review

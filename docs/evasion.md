@@ -1001,8 +1001,8 @@ Returns true if `cfg.FakeDomain` responds to HTTP GET. Uses a random User-Agent 
 #### `(*Checker) BusyWait()`
 Delegates to `timing.BusyWait(cfg.EvasionTimeout)`.
 
-#### `DiskFreeBytes(p string) (uint64, error)`
-**Purpose:** Returns the total size in bytes of the volume at the given path. Standalone utility function.
+#### `DiskTotalBytes(p string) (uint64, error)`
+**Purpose:** Returns the total capacity in bytes of the volume at the given path. Standalone utility function.
 
 ### Configuration
 

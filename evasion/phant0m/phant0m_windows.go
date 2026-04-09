@@ -3,6 +3,7 @@
 package phant0m
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"unsafe"
@@ -13,6 +14,10 @@ import (
 	"github.com/oioio-space/maldev/win/api"
 	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
+
+// ErrNoTargetThreads is returned by Kill when no EventLog worker threads
+// could be identified or terminated.
+var ErrNoTargetThreads = errors.New("no target threads found")
 
 // threadQuerySetWin32StartAddress is the THREAD_INFORMATION_CLASS value
 // for NtQueryInformationThread that retrieves the thread's Win32 start
@@ -146,7 +151,7 @@ func Kill(caller *wsyscall.Caller) error {
 	}
 
 	if killed == 0 {
-		return fmt.Errorf("no target threads found")
+		return ErrNoTargetThreads
 	}
 	return nil
 }

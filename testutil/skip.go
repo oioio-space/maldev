@@ -29,3 +29,12 @@ func RequireIntrusive(t *testing.T) {
 		t.Skip("intrusive test: set MALDEV_INTRUSIVE=1 to run")
 	}
 }
+
+// RequireManual skips the test unless MALDEV_MANUAL=1 is set.
+// Manual tests require admin privileges and should run in a VM.
+func RequireManual(t *testing.T) {
+	t.Helper()
+	if os.Getenv("MALDEV_MANUAL") == "" {
+		t.Skip("manual test: set MALDEV_MANUAL=1 (requires admin + VM)")
+	}
+}

@@ -110,3 +110,33 @@ func TestCallByHash_IndirectSyscall(t *testing.T) {
 	assert.Error(t, err)
 	assert.NotZero(t, r)
 }
+
+func TestNewHellsGate(t *testing.T) {
+	r := NewHellsGate()
+	require.NotNil(t, r, "NewHellsGate must return a non-nil SSNResolver")
+
+	// Verify it satisfies the SSNResolver interface by resolving a known function.
+	ssn, err := r.Resolve("NtClose")
+	require.NoError(t, err)
+	assert.Greater(t, ssn, uint16(0))
+}
+
+func TestNewHalosGate(t *testing.T) {
+	r := NewHalosGate()
+	require.NotNil(t, r, "NewHalosGate must return a non-nil SSNResolver")
+
+	// Verify it satisfies the SSNResolver interface by resolving a known function.
+	ssn, err := r.Resolve("NtClose")
+	require.NoError(t, err)
+	assert.Greater(t, ssn, uint16(0))
+}
+
+func TestNewTartarus(t *testing.T) {
+	r := NewTartarus()
+	require.NotNil(t, r, "NewTartarus must return a non-nil SSNResolver")
+
+	// Verify it satisfies the SSNResolver interface by resolving a known function.
+	ssn, err := r.Resolve("NtClose")
+	require.NoError(t, err)
+	assert.Greater(t, ssn, uint16(0))
+}

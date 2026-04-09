@@ -2,6 +2,7 @@ package shell
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,4 +38,33 @@ func TestNewShell(t *testing.T) {
 	s := New(nil, nil)
 	require.NotNil(t, s, "New must return a non-nil Shell")
 	assert.False(t, s.IsRunning(), "a newly created Shell must not be running")
+}
+
+func TestNewShellCurrentPhase(t *testing.T) {
+	s := New(nil, nil)
+	assert.Equal(t, PhaseIdle, s.CurrentPhase(), "new Shell must start in PhaseIdle")
+}
+
+func TestDefaultConfigMaxBackoff(t *testing.T) {
+	cfg := DefaultConfig()
+	assert.Equal(t, 5*time.Minute, cfg.MaxBackoff)
+	assert.InDelta(t, 0.25, cfg.JitterFactor, 0.001)
+}
+
+func TestShellWaitAfterStop(t *testing.T) {
+	// Shell never started, so doneCh is open. Manually close it to
+	// verify Wait returns.
+	s := New(nil, nil)
+	s.sm.markDone()
+
+	done := make(chan struct{})
+	go func() {
+		s.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Wait did not return after markDone")
+	}
 }

@@ -4,6 +4,7 @@ package inject
 
 import (
 	"fmt"
+	"syscall"
 	"unsafe"
 
 	"github.com/oioio-space/maldev/win/api"
@@ -74,8 +75,8 @@ func executeEnumWindows(addr uintptr) error {
 	ret, _, err := api.ProcEnumWindows.Call(addr, 0)
 	// EnumWindows returns 0 on failure, but our callback intentionally
 	// returns 0 to stop enumeration. Only treat as error if the syscall
-	// itself failed (ret==0 AND err is a real error code).
-	if ret == 0 && err != nil && err.Error() != "The operation completed successfully." {
+	// itself failed with a real error code (not ERROR_SUCCESS).
+	if ret == 0 && err != nil && err != syscall.Errno(0) {
 		return fmt.Errorf("callback execution failed: %w", err)
 	}
 	return nil

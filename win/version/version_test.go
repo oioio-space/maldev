@@ -25,6 +25,14 @@ func TestWindows(t *testing.T) {
 	assert.NotEmpty(t, wv, "expected non-empty WindowsVersion")
 }
 
+func TestCVE202430088(t *testing.T) {
+	info, err := CVE202430088()
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.Greater(t, info.Build, uint32(0))
+	t.Logf("CVE-2024-30088 vulnerable=%v build=%d", info.Vulnerable, info.Build)
+}
+
 func TestVersionString(t *testing.T) {
 	v := Current()
 	require.NotNil(t, v)

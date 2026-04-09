@@ -1,6 +1,12 @@
 ---
 name: package-design-review
-description: Use when creating a new package, reviewing an existing package in depth, or refactoring a package — checks architecture, API surface, type design, state management, concurrency, and reusability. Triggers on package-level work (not single-function edits).
+description: >
+  Trigger: when creating a new Go package, reviewing a package in depth,
+  refactoring a package API, or when asked to "look at" / "check" a package.
+  Purpose: check architecture, API surface, type naming (anti-stutter), String()
+  on enums, OS-native IDs, state encapsulation, channel typing, polling
+  optimization, reusability audit, Observer pattern for monitoring.
+  Keywords: package, new package, doc.go, API design, refactor package, review.
 ---
 
 # Package Design Review

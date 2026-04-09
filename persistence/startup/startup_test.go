@@ -26,6 +26,29 @@ func TestUserDir(t *testing.T) {
 	}
 }
 
+func TestMachineDir(t *testing.T) {
+	dir, err := MachineDir()
+	if err != nil {
+		t.Fatalf("MachineDir: %v", err)
+	}
+	if dir == "" {
+		t.Fatal("MachineDir returned empty string")
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("Stat(%q): %v", dir, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("%q is not a directory", dir)
+	}
+}
+
+func TestExistsNonexistent(t *testing.T) {
+	if Exists("zzz_nonexistent_startup_item_999") {
+		t.Error("Exists returned true for non-existent startup item")
+	}
+}
+
 func TestInstallAndRemove(t *testing.T) {
 	const name = "maldev_test_startup"
 

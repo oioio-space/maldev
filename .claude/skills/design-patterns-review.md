@@ -1,6 +1,11 @@
 ---
 name: design-patterns-review
-description: Use when writing new Go code, creating new packages, adding features, refactoring, or reviewing code — automatically evaluate whether design patterns from refactoring.guru could improve the implementation. Triggers on any code modification task.
+description: >
+  Trigger: after Edit/Write on .go files, when creating new packages, refactoring,
+  or reviewing code architecture.
+  Purpose: evaluate whether design patterns (Builder, Strategy, Decorator, Template
+  Method, State, Chain, Facade, Flyweight) would improve the implementation.
+  Keywords: pattern, refactor, architecture, duplication, switch, strategy, builder.
 ---
 
 # Design Patterns Review

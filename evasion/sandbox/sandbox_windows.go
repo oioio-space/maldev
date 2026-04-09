@@ -63,8 +63,8 @@ func (c *Checker) HasEnoughRAM() (bool, error) {
 	return ram >= minBytes, nil
 }
 
-// DiskFreeBytes returns the total size in bytes of the volume containing the given path.
-func DiskFreeBytes(p string) (uint64, error) {
+// DiskTotalBytes returns the total size in bytes of the volume containing the given path.
+func DiskTotalBytes(p string) (uint64, error) {
 	ptr, err := windows.UTF16PtrFromString(p)
 	if err != nil {
 		return 0, err
@@ -88,7 +88,7 @@ func (c *Checker) HasEnoughDisk() (bool, error) {
 	if path == "" {
 		path = `C:\`
 	}
-	total, err := DiskFreeBytes(path)
+	total, err := DiskTotalBytes(path)
 	if err != nil {
 		return false, err
 	}

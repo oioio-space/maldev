@@ -1,6 +1,12 @@
 ---
 name: go-styleguide
-description: Google Go Style Guide best practices — apply when writing, reviewing, or refactoring Go code in this project
+description: >
+  Trigger: when writing, reviewing, or refactoring any .go file.
+  Purpose: Google Go Style Guide best practices — error handling (%w/%v),
+  interfaces (accept interfaces return concrete), documentation, variable
+  declarations, shadowing avoidance. Supplements go-conventions.
+  Keywords: error handling, interface, documentation, variable, shadowing,
+  Go style, Google style guide, fmt.Errorf, %w, sentinel error.
 ---
 
 # Google Go Style Guide

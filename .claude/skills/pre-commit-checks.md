@@ -1,6 +1,11 @@
 ---
 name: pre-commit-checks
-description: Run before every git commit and push to verify code quality, documentation, tests, credentials, and versioning
+description: >
+  Trigger: before git commit, before git push, when user says "commit" or "push".
+  Purpose: verify build passes, tests pass, doc.go exists for new technique
+  packages, no credentials leaked (gho_*, ghp_*, sk-*, AKIA*), ignore/ not
+  staged, naming conventions followed, README links valid.
+  Keywords: commit, push, pre-commit, credential scan, ignore folder, go build.
 ---
 
 # Pre-Commit & Pre-Push Checks

@@ -8,15 +8,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-)
 
-// requireManual skips unless MALDEV_MANUAL=1 is set.
-func requireManual(t *testing.T) {
-	t.Helper()
-	if os.Getenv("MALDEV_MANUAL") == "" {
-		t.Skip("manual test: set MALDEV_MANUAL=1 (requires valid credentials + VM)")
-	}
-}
+	"github.com/oioio-space/maldev/testutil"
+)
 
 // TestImpersonateThread impersonates a local or domain account on a locked OS
 // thread, verifies the effective token owner changes, then reverts.
@@ -43,7 +37,7 @@ func requireManual(t *testing.T) {
 //
 //	No persistent changes; RevertToSelf is deferred inside ImpersonateThread.
 func TestImpersonateThread(t *testing.T) {
-	requireManual(t)
+	testutil.RequireManual(t)
 
 	user := os.Getenv("MALDEV_TEST_USER")
 	pass := os.Getenv("MALDEV_TEST_PASS")
@@ -83,7 +77,7 @@ func TestImpersonateThread(t *testing.T) {
 //
 //	The token is closed at the end of the test; no persistent changes.
 func TestLogonUserW(t *testing.T) {
-	requireManual(t)
+	testutil.RequireManual(t)
 
 	user := os.Getenv("MALDEV_TEST_USER")
 	pass := os.Getenv("MALDEV_TEST_PASS")

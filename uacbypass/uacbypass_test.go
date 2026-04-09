@@ -3,18 +3,27 @@
 package uacbypass
 
 import (
-	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/windows/registry"
+
+	"github.com/oioio-space/maldev/testutil"
 )
 
-// requireManual skips unless MALDEV_MANUAL=1 is set.
-func requireManual(t *testing.T) {
+// requireUAC skips if UAC is disabled (EnableLUA=0).
+func requireUAC(t *testing.T) {
 	t.Helper()
-	if os.Getenv("MALDEV_MANUAL") == "" {
-		t.Skip("manual test: set MALDEV_MANUAL=1 (requires non-elevated user + UAC enabled + VM)")
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE,
+		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`, registry.QUERY_VALUE)
+	if err != nil {
+		return // can't check, proceed anyway
+	}
+	defer k.Close()
+	val, _, err := k.GetIntegerValue("EnableLUA")
+	if err == nil && val == 0 {
+		t.Skip("UAC is disabled (EnableLUA=0) — bypass tests require UAC enabled")
 	}
 }
 
@@ -40,7 +49,8 @@ func requireManual(t *testing.T) {
 //	taskkill /F /IM calc.exe
 //	Registry keys are cleaned up automatically by FODHelper's defer blocks.
 func TestFODHelper(t *testing.T) {
-	requireManual(t)
+	testutil.RequireManual(t)
+	requireUAC(t)
 
 	err := FODHelper("calc.exe")
 	require.NoError(t, err)
@@ -72,7 +82,8 @@ func TestFODHelper(t *testing.T) {
 //	taskkill /F /IM calc.exe
 //	Registry key HKCU\Software\Classes\mscfile\shell\open\command is cleaned by defer.
 func TestEventVwr(t *testing.T) {
-	requireManual(t)
+	testutil.RequireManual(t)
+	requireUAC(t)
 
 	err := EventVwr("calc.exe")
 	require.NoError(t, err)
@@ -104,7 +115,8 @@ func TestEventVwr(t *testing.T) {
 //	taskkill /F /IM calc.exe
 //	HKCU\Environment\windir value is restored by defer DeleteValue.
 func TestSilentCleanup(t *testing.T) {
-	requireManual(t)
+	testutil.RequireManual(t)
+	requireUAC(t)
 
 	err := SilentCleanup("calc.exe")
 	require.NoError(t, err)
@@ -136,7 +148,8 @@ func TestSilentCleanup(t *testing.T) {
 //	taskkill /F /IM calc.exe
 //	Registry key HKCU\Software\Classes\exefile\shell\open\command is cleaned by defer.
 func TestSLUI(t *testing.T) {
-	requireManual(t)
+	testutil.RequireManual(t)
+	requireUAC(t)
 
 	err := SLUI("calc.exe")
 	require.NoError(t, err)

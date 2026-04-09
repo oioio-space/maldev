@@ -1,6 +1,14 @@
 ---
 name: os-api-correctness
-description: Use AUTOMATICALLY when writing, modifying, or reviewing code that calls Windows APIs (MSDN), Linux syscalls, or manipulates OS structures — verifies function signatures, return value semantics (NTSTATUS vs BOOL vs HANDLE), struct layouts, syscall numbers, constants, and flag combinations against official sources. Understands intentional maldev tricks (memory patching, undocumented APIs, PE header walking) and does not flag them as errors.
+description: >
+  Trigger: after Edit/Write on .go files that call Windows APIs, NT syscalls,
+  Linux syscalls, or manipulate OS structures (api.Proc*.Call, windows.*, syscall.*,
+  unsafe.Pointer on PE headers).
+  Purpose: verify function signatures, return value semantics (NTSTATUS vs BOOL vs
+  HANDLE), struct layouts, syscall numbers, constants, flag combinations against
+  MSDN/man pages. Understands intentional maldev tricks (patching, undocumented APIs,
+  PE walking, syscall stubs) and does not flag them.
+  Keywords: NTSTATUS, BOOL, HANDLE, MSDN, syscall, NtCreate, VirtualAlloc, api.Proc.
 ---
 
 # OS API Correctness Verification

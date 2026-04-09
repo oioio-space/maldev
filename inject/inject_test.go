@@ -96,3 +96,25 @@ func TestNtQueueApcThreadExFallbackChain(t *testing.T) {
 	require.NotEmpty(t, chain)
 	assert.Equal(t, MethodNtQueueApcThreadEx, chain[0])
 }
+
+func TestDefaultMethodForStage(t *testing.T) {
+	m := DefaultMethodForStage()
+	require.NotEmpty(t, m, "DefaultMethodForStage must return a non-empty method")
+	err := ValidateMethod(m)
+	assert.NoError(t, err, "DefaultMethodForStage %q must be a valid method", m)
+}
+
+func TestNewStats(t *testing.T) {
+	method := DefaultMethod()
+	size := 4096
+	pid := 1234
+
+	s := NewStats(method, size, pid)
+	require.NotNil(t, s, "NewStats must return a non-nil *Stats")
+	assert.Equal(t, method, s.Method)
+	assert.Equal(t, size, s.ShellcodeSize)
+	assert.Equal(t, pid, s.TargetPID)
+	assert.False(t, s.StartTime.IsZero(), "StartTime should be set")
+	assert.False(t, s.Success, "Success should default to false")
+	assert.Nil(t, s.Error, "Error should default to nil")
+}

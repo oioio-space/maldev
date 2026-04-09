@@ -220,3 +220,62 @@ func TestDefaultMethodForStage(t *testing.T) {
 	m := inject.DefaultMethodForStage()
 	assert.NotEmpty(t, m, "DefaultMethodForStage must return a non-empty method")
 }
+
+func TestPayloadNameAllTransports(t *testing.T) {
+	tests := []struct {
+		transport Transport
+		suffix    string
+	}{
+		{TCP, "reverse_tcp"},
+		{HTTP, "reverse_http"},
+		{HTTPS, "reverse_https"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.transport), func(t *testing.T) {
+			name := PayloadName(tt.transport)
+
+			// Must follow "<os>/<arch>/meterpreter/<suffix>" format.
+			assert.Contains(t, name, "meterpreter/"+tt.suffix)
+			assert.Regexp(t, `^(windows|linux|osx|\w+)/(x64|x86|aarch64)/meterpreter/reverse_(tcp|http|https)$`, name)
+		})
+	}
+}
+
+func TestPayloadNamePlatformPrefix(t *testing.T) {
+	name := PayloadName(TCP)
+	switch runtime.GOOS {
+	case "windows":
+		assert.True(t, name[:7] == "windows", "expected windows prefix, got %s", name)
+	case "linux":
+		assert.True(t, name[:5] == "linux", "expected linux prefix, got %s", name)
+	case "darwin":
+		assert.True(t, name[:3] == "osx", "expected osx prefix, got %s", name)
+	}
+}
+
+func TestNewStagerNilConfig(t *testing.T) {
+	// NewStager with nil config must not panic; it stores nil directly.
+	s := NewStager(nil)
+	require.NotNil(t, s, "NewStager(nil) must return a non-nil Stager")
+}
+
+func TestTransportConstants(t *testing.T) {
+	assert.Equal(t, Transport("tcp"), TCP)
+	assert.Equal(t, Transport("http"), HTTP)
+	assert.Equal(t, Transport("https"), HTTPS)
+}
+
+func TestFetchStageUnsupportedTransport(t *testing.T) {
+	cfg := &Config{
+		Transport: Transport("ftp"),
+		Host:      "127.0.0.1",
+		Port:      "4444",
+		Timeout:   time.Second,
+	}
+	s := NewStager(cfg)
+	s.ctx = context.Background()
+	_, err := s.fetchStage()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported transport")
+}

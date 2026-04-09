@@ -1,6 +1,11 @@
 ---
 name: test-coverage-enforcement
-description: Use AUTOMATICALLY after writing or modifying any Go code — ensures every new or changed exported function, type, method, and pattern has corresponding tests. Triggers on any code change. Do NOT consider work complete until tests exist. Also use when creating new packages to verify test file exists.
+description: >
+  Trigger: after Edit/Write on any .go file, after creating a new Go package,
+  before marking a task as complete, before git commit.
+  Purpose: enforce that every new/changed exported function, type, method, and
+  pattern has corresponding _test.go coverage. Block completion until tests exist.
+  Keywords: test, _test.go, coverage, assert, require, TestXxx, go test, testutil.
 ---
 
 # Test Coverage Enforcement

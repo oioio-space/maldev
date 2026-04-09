@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestIsAdmin(t *testing.T) {
@@ -53,5 +55,78 @@ func TestAddAccessDenied(t *testing.T) {
 	}
 	if !errors.Is(err, ErrAccessDenied) {
 		t.Errorf("Add error = %v; expected ErrAccessDenied", err)
+	}
+}
+
+// TestAddDeleteLifecycle creates a user, verifies it exists, then deletes it.
+func TestAddDeleteLifecycle(t *testing.T) {
+	if !IsAdmin() {
+		t.Skip("requires admin")
+	}
+	if os.Getenv("MALDEV_MANUAL") == "" {
+		t.Skip("manual test: set MALDEV_MANUAL=1")
+	}
+
+	const name = "maldev_test_user"
+	const pass = "T3st@Pass!99"
+
+	// Cleanup in case previous run left it behind.
+	Delete(name)
+
+	if err := Add(name, pass); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	defer Delete(name)
+
+	if !Exists(name) {
+		t.Fatal("user was created but Exists returns false")
+	}
+
+	// SetPassword
+	if err := SetPassword(name, "N3w@Pass!88"); err != nil {
+		t.Errorf("SetPassword: %v", err)
+	}
+
+	// SetAdmin / RevokeAdmin
+	if err := SetAdmin(name); err != nil {
+		t.Errorf("SetAdmin: %v", err)
+	}
+	if err := RevokeAdmin(name); err != nil {
+		t.Errorf("RevokeAdmin: %v", err)
+	}
+
+	// AddToGroup / RemoveFromGroup — resolve the localized Users group name
+	// via its well-known SID (locale-independent).
+	usersSID, err := windows.CreateWellKnownSid(windows.WinBuiltinUsersSid)
+	if err != nil {
+		t.Logf("skipping AddToGroup/RemoveFromGroup: cannot create Users SID: %v", err)
+	} else {
+		usersGroup, _, _, err := usersSID.LookupAccount("")
+		if err != nil {
+			t.Logf("skipping AddToGroup/RemoveFromGroup: cannot resolve Users SID: %v", err)
+		} else {
+			if err := AddToGroup(name, usersGroup); err != nil {
+				t.Errorf("AddToGroup(%q): %v", usersGroup, err)
+			}
+			if err := RemoveFromGroup(name, usersGroup); err != nil {
+				t.Errorf("RemoveFromGroup(%q): %v", usersGroup, err)
+			}
+		}
+	}
+
+	// Delete
+	if err := Delete(name); err != nil {
+		t.Errorf("Delete: %v", err)
+	}
+	if Exists(name) {
+		t.Error("user still exists after Delete")
+	}
+}
+
+// TestDeleteNonexistent verifies deleting a non-existent user returns an error.
+func TestDeleteNonexistent(t *testing.T) {
+	err := Delete("zzz_nonexistent_user_999")
+	if err == nil {
+		t.Error("Delete of non-existent user should return error")
 	}
 }

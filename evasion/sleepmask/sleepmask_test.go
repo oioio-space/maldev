@@ -59,3 +59,16 @@ func TestSleepMask_NoRegions(t *testing.T) {
 	mask := New()
 	mask.Sleep(10 * time.Millisecond) // no-op, no panic
 }
+
+func TestNew(t *testing.T) {
+	// Verify New returns a non-nil *Mask with and without regions.
+	t.Run("no_regions", func(t *testing.T) {
+		m := New()
+		require.NotNil(t, m, "New() without regions must return non-nil *Mask")
+	})
+
+	t.Run("with_region", func(t *testing.T) {
+		m := New(Region{Addr: 0x1000, Size: 64})
+		require.NotNil(t, m, "New() with a region must return non-nil *Mask")
+	})
+}

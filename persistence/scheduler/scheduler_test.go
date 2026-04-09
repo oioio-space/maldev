@@ -45,6 +45,32 @@ func TestCreateAndDelete(t *testing.T) {
 	}
 }
 
+func TestExistsNonExistent(t *testing.T) {
+	ctx := context.Background()
+	if Exists(ctx, `maldev_zzz_nonexistent_task_999`) {
+		t.Error("Exists returned true for non-existent task")
+	}
+}
+
+func TestScheduledTaskMechanism(t *testing.T) {
+	task := &Task{
+		Name:    "maldev_test_mech",
+		Command: `C:\Windows\System32\notepad.exe`,
+		Trigger: TriggerLogon,
+	}
+	mech := ScheduledTask(task)
+	if mech == nil {
+		t.Fatal("ScheduledTask returned nil")
+	}
+}
+
+func TestTriggerLogonConstant(t *testing.T) {
+	// TriggerLogon should be the zero value (iota).
+	if TriggerLogon != 0 {
+		t.Errorf("TriggerLogon = %d; expected 0", TriggerLogon)
+	}
+}
+
 func TestDeleteNonExistent(t *testing.T) {
 	ctx := context.Background()
 

