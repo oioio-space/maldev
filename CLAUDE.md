@@ -33,6 +33,12 @@ go test $(go list ./...)
 
 # Linux cross-compile
 GOOS=linux GOARCH=amd64 go build $(go list ./...)
+
+# VM tests (admin/risky tests in isolated VMs)
+# Use /vm-test skill or:
+./scripts/vm-run-tests.sh windows "./..." "-v -count=1"
+./scripts/vm-run-tests.sh linux "./..." "-count=1"
+./scripts/vm-run-tests.sh all "./..." "-count=1"
 ```
 
 ## Package Structure
