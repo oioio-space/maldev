@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -113,6 +114,9 @@ func TestNewStagerWithInjector(t *testing.T) {
 }
 
 func TestStagerWithInjector_DelegatesToInjector(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("mock uses Windows staging protocol (4-byte size prefix)")
+	}
 	// Build a mock TCP server that sends a valid stage.
 	payload := make([]byte, 100) // 100 bytes > 50 min
 	for i := range payload {
@@ -158,6 +162,9 @@ func TestStagerWithInjector_DelegatesToInjector(t *testing.T) {
 }
 
 func TestStagerWithInjector_PropagatesError(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("mock uses Windows staging protocol (4-byte size prefix)")
+	}
 	payload := make([]byte, 100)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

@@ -1,6 +1,7 @@
 package inject
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -67,12 +68,18 @@ func TestConfigValidateInvalidMethod(t *testing.T) {
 }
 
 func TestEtwpCreateEtwThreadInAvailableMethods(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only injection method")
+	}
 	methods := AvailableMethods()
 	assert.Contains(t, methods, MethodEtwpCreateEtwThread,
 		"AvailableMethods should include MethodEtwpCreateEtwThread")
 }
 
 func TestNtQueueApcThreadExInAvailableMethods(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only injection method")
+	}
 	methods := AvailableMethods()
 	assert.Contains(t, methods, MethodNtQueueApcThreadEx,
 		"AvailableMethods should include MethodNtQueueApcThreadEx")

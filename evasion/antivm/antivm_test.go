@@ -52,15 +52,14 @@ func TestConfigCustomVendors(t *testing.T) {
 }
 
 func TestDetectEmptyVendors(t *testing.T) {
-	// Empty vendor list should detect nothing.
+	// Empty vendor list means file/NIC/process checks have nothing to match.
+	// However, DMI/CPUID checks (always-on) may still detect a VM.
 	cfg := Config{Vendors: []Vendor{}, Checks: CheckFiles | CheckNIC}
-	name, err := Detect(cfg)
+	_, err := Detect(cfg)
 	if err != nil {
 		t.Fatalf("Detect with empty vendors returned error: %v", err)
 	}
-	if name != "" {
-		t.Errorf("Detect with empty vendors = %q, want empty", name)
-	}
+	// We don't assert name=="" because DMI/CPUID detection is vendor-independent.
 }
 
 func TestDetectProcessNoPanic(t *testing.T) {

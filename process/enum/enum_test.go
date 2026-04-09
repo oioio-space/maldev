@@ -2,6 +2,7 @@ package enum
 
 import (
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,6 +30,9 @@ func TestListContainsSelf(t *testing.T) {
 }
 
 func TestSessionIDPopulated(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("SessionID semantics are Windows-specific (ProcessIdToSessionId)")
+	}
 	self := uint32(os.Getpid())
 
 	procs, err := List()
