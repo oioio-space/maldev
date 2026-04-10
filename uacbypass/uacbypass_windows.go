@@ -21,7 +21,7 @@ import (
 // FODHelper executes a program specified by path using the FODHelper UAC bypass.
 // Only works on Windows 10 and later.
 func FODHelper(path string) error {
-	randKeyName, _ := random.RandomString(5)
+	randKeyName, _ := random.String(5)
 
 	k, _, err := registry.CreateKey(
 		registry.CURRENT_USER,

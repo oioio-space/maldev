@@ -232,7 +232,7 @@ func (m *Malleable) Close() error {
 // (https://host:port) and bare host:port addresses.
 func (m *Malleable) RemoteAddr() net.Addr {
 	host := m.address
-	if u, err := url.Parse(m.address); err == nil && u.Host != "" {
+	if u, parseErr := url.Parse(m.address); parseErr == nil && u.Host != "" {
 		host = u.Host
 	}
 	addr, err := net.ResolveTCPAddr("tcp", host)

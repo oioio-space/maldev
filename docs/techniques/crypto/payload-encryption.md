@@ -171,7 +171,7 @@ original := encode.ROT13(obfuscated)
 import "github.com/oioio-space/maldev/encode"
 
 // Encode a PowerShell script as Base64 UTF-16LE (for powershell -EncodedCommand)
-encoded := encode.EncodePowerShell("Write-Host 'Hello'")
+encoded := encode.PowerShell("Write-Host 'Hello'")
 // Can be run as: powershell -EncodedCommand <encoded>
 ```
 
@@ -302,5 +302,5 @@ func Base64URLEncode(data []byte) string
 func Base64URLDecode(data string) ([]byte, error)
 func ROT13(s string) string
 func ToUTF16LE(s string) []byte
-func EncodePowerShell(script string) string
+func PowerShell(script string) string
 ```

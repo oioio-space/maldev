@@ -5,6 +5,7 @@ package unhook
 import (
 	"fmt"
 
+	"github.com/oioio-space/maldev/win/api"
 	"golang.org/x/sys/windows"
 )
 
@@ -47,7 +48,7 @@ var cleanSyscallPrologue = [4]byte{0x4C, 0x8B, 0xD1, 0xB8}
 //	    // apply unhooking before proceeding
 //	}
 func DetectHooked(funcNames []string) ([]string, error) {
-	ntdll := windows.NewLazySystemDLL("ntdll.dll")
+	ntdll := api.Ntdll
 	var hooked []string
 
 	for _, name := range funcNames {
@@ -118,7 +119,7 @@ type HookInfo struct {
 //	    }
 //	}
 func Inspect(funcNames []string) ([]HookInfo, error) {
-	ntdll := windows.NewLazySystemDLL("ntdll.dll")
+	ntdll := api.Ntdll
 	results := make([]HookInfo, 0, len(funcNames))
 
 	for _, name := range funcNames {

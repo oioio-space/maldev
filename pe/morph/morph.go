@@ -45,7 +45,7 @@ func UPXMorph(peData []byte) ([]byte, error) {
 		name := section.String()
 		if strings.Contains(name, "UPX") {
 			offset := sectionHeaderOffset(peData, i)
-			s, err := random.RandomString(8)
+			s, err := random.String(8)
 			if err != nil {
 				return peData, fmt.Errorf("generate random name: %w", err)
 			}

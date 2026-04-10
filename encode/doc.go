@@ -19,5 +19,5 @@
 //
 //	encoded := encode.Base64Encode(shellcode)
 //	decoded, _ := encode.Base64Decode(encoded)
-//	psCmd := encode.EncodePowerShell("Get-Process")
+//	psCmd := encode.PowerShell("Get-Process")
 package encode

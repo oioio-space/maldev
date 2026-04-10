@@ -1,4 +1,4 @@
-//go:build !go1.21
+//go:build !go1.22
 
 // Copyright 2023 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style

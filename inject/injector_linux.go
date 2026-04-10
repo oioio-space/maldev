@@ -45,7 +45,7 @@ func (l *linuxInjector) injectMemFD(shellcode []byte) error {
 
 	fd, _, errno := syscall.Syscall(sysMemfdCreate, uintptr(unsafe.Pointer(nameBytes)), 0, 0)
 	if errno != 0 {
-		return fmt.Errorf("memfd_create failed: %v (kernel >= 3.17 required)", errno)
+		return fmt.Errorf("memfd_create failed (kernel >= 3.17 required): %w", errno)
 	}
 	defer syscall.Close(int(fd))
 

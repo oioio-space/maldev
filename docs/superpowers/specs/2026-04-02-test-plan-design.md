@@ -204,11 +204,11 @@ Tests that run anywhere with `go test`. No system dependencies.
 
 | Test | What it validates |
 |------|------------------|
-| `TestRandomStringLength` | Output length matches requested |
-| `TestRandomStringUnique` | Two calls produce different results |
-| `TestRandomBytesLength` | Output length matches requested |
-| `TestRandomIntRange` | Result within [min, max) |
-| `TestRandomIntInvalidRange` | `max <= min` returns error |
+| `TestStringLength` | Output length matches requested |
+| `TestStringUnique` | Two calls produce different results |
+| `TestBytesLength` | Output length matches requested |
+| `TestIntRange` | Result within [min, max) |
+| `TestIntInvalidRange` | `max <= min` returns error |
 | `TestFileExists` | Existing file → true, non-existing → false |
 
 ### 4.5 `pe/parse/` (NEW)

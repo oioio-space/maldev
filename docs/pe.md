@@ -344,7 +344,7 @@ func UPXMorph(peData []byte) ([]byte, error)
 **How it works:**
 1. Parses the PE to enumerate section headers
 2. For each section whose name contains "UPX", calculates the file offset of the section header's Name field using the COFF header layout
-3. Overwrites the 8-byte Name field with cryptographically random bytes via `random.RandomString`
+3. Overwrites the 8-byte Name field with cryptographically random bytes via `random.String`
 
 **Example:**
 

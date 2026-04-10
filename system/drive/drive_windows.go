@@ -7,6 +7,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/oioio-space/maldev/win/api"
 	"golang.org/x/sys/windows"
 )
 
@@ -109,7 +110,7 @@ func devicePath(root string) string {
 	return syscall.UTF16ToString(buf[:n])
 }
 
-var procQueryDosDeviceW = windows.NewLazySystemDLL("kernel32.dll").NewProc("QueryDosDeviceW")
+var procQueryDosDeviceW = api.Kernel32.NewProc("QueryDosDeviceW")
 
 // queryDosDevice wraps QueryDosDeviceW. Returns the number of chars written.
 func queryDosDevice(deviceName *uint16, targetPath *uint16, maxLen uint32) (uint32, error) {

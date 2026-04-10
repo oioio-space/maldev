@@ -61,8 +61,8 @@ func TestToUTF16LEEmpty(t *testing.T) {
 	}
 }
 
-func TestEncodePowerShell(t *testing.T) {
-	result := EncodePowerShell("Get-Process")
+func TestPowerShell(t *testing.T) {
+	result := PowerShell("Get-Process")
 	if result == "" {
 		t.Fatal("expected non-empty result")
 	}
@@ -73,9 +73,9 @@ func TestEncodePowerShell(t *testing.T) {
 	}
 }
 
-func TestEncodePowerShellRoundtrip(t *testing.T) {
+func TestPowerShellRoundtrip(t *testing.T) {
 	script := "Write-Host 'Hello'"
-	encoded := EncodePowerShell(script)
+	encoded := PowerShell(script)
 	decoded, err := Base64Decode(encoded)
 	if err != nil {
 		t.Fatal(err)

@@ -20,7 +20,7 @@ func ToUTF16LE(s string) []byte {
 	return b
 }
 
-func EncodePowerShell(script string) string {
+func PowerShell(script string) string {
 	return base64.StdEncoding.EncodeToString(ToUTF16LE(script))
 }
 

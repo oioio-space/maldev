@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-func TestRandomString(t *testing.T) {
-	s, err := RandomString(32)
+func TestString(t *testing.T) {
+	s, err := String(32)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,14 +20,14 @@ func TestRandomString(t *testing.T) {
 		}
 	}
 	// Two random strings should differ
-	s2, _ := RandomString(32)
+	s2, _ := String(32)
 	if s == s2 {
 		t.Fatal("two random strings are identical")
 	}
 }
 
-func TestRandomStringZeroLength(t *testing.T) {
-	s, err := RandomString(0)
+func TestStringZeroLength(t *testing.T) {
+	s, err := String(0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,8 +36,8 @@ func TestRandomStringZeroLength(t *testing.T) {
 	}
 }
 
-func TestRandomBytes(t *testing.T) {
-	b, err := RandomBytes(64)
+func TestBytes(t *testing.T) {
+	b, err := Bytes(64)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,26 +57,26 @@ func TestRandomBytes(t *testing.T) {
 	}
 }
 
-func TestRandomInt(t *testing.T) {
+func TestInt(t *testing.T) {
 	for i := 0; i < 100; i++ {
-		n, err := RandomInt(10, 20)
+		n, err := Int(10, 20)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if n < 10 || n >= 20 {
-			t.Fatalf("RandomInt(10, 20) = %d, out of range", n)
+			t.Fatalf("Int(10, 20) = %d, out of range", n)
 		}
 	}
 }
 
-func TestRandomDuration(t *testing.T) {
+func TestDuration(t *testing.T) {
 	for i := 0; i < 50; i++ {
-		d, err := RandomDuration(100, 200)
+		d, err := Duration(100, 200)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if d < 100 || d >= 200 {
-			t.Fatalf("RandomDuration(100, 200) = %d, out of range", d)
+			t.Fatalf("Duration(100, 200) = %d, out of range", d)
 		}
 	}
 }

@@ -590,7 +590,7 @@ func Interactive(typ Type) (*Token, error) {
 
 	err := windows.WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, 0, 1, (**windows.WTS_SESSION_INFO)(unsafe.Pointer(&sessionPointer)), &sessionCount)
 	if err != nil {
-		return nil, fmt.Errorf("error while enumerating sessions: %v", err)
+		return nil, fmt.Errorf("error while enumerating sessions: %w", err)
 	}
 	defer windows.WTSFreeMemory(sessionPointer)
 
