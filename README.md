@@ -39,6 +39,22 @@ injector, _ := inject.NewWindowsInjector(&inject.WindowsConfig{
 injector.Inject(shellcode)
 ```
 
+## Packages
+
+| Category | Packages | Highlights |
+|----------|----------|------------|
+| **Crypto & Encoding** | `crypto/` `encode/` `hash/` `random/` `useragent/` | AES-GCM, ChaCha20, XOR, RC4, Base64, UTF-16LE, ROR13, ssdeep, TLSH |
+| **Windows Primitives** | `win/api/` `win/syscall/` `win/ntapi/` `win/token/` `win/privilege/` `win/impersonate/` `win/user/` `win/domain/` `win/version/` | PEB walk, 4 syscall methods (WinAPI/NativeAPI/Direct/Indirect), 5 SSN resolvers (Hell's/Halo's/Tartarus/Hash Gate, Chain), token theft, privilege escalation |
+| **Evasion** | `evasion/amsi/` `etw/` `unhook/` `sleepmask/` `hwbp/` `acg/` `blockdlls/` `antidebug/` `antivm/` `sandbox/` `timing/` `herpaderping/` `phant0m/` | AMSI/ETW patching, ntdll unhooking (Classic/Full/Perun), sleep encryption, HW breakpoint detection, Herpaderping |
+| **Injection** | `inject/` | 15+ methods: CreateThread, EarlyBird APC, ThreadHijack, NtQueueApcThreadEx, EtwpCreateEtwThread, SectionMap, PhantomDLL, Callback, ThreadPool, KernelCallbackTable, Fiber, DirectSyscall + Linux (Ptrace, MemFD, ProcMem) |
+| **PE Operations** | `pe/srdi/` `pe/parse/` `pe/strip/` `pe/bof/` `pe/morph/` `pe/cert/` | PE-to-shellcode via [Donut](https://github.com/Binject/go-donut) (EXE/DLL/.NET/VBS/JS), BOF COFF loader, PE sanitization, Authenticode cert manipulation |
+| **C2** | `c2/shell/` `c2/transport/` `c2/meterpreter/` `c2/cert/` | Reverse shell with PTY (Linux) + reconnect, Meterpreter staging (TCP/HTTP/HTTPS), TLS with JA3 fingerprinting, malleable C2, PPID spoofing |
+| **System** | `system/ads/` `system/drive/` `system/folder/` `system/network/` `system/lnk/` `system/bsod/` `system/ui/` | NTFS Alternate Data Streams CRUD + hidden files, drive monitoring, special folder paths, LNK creation |
+| **Persistence** | `persistence/registry/` `persistence/startup/` `persistence/scheduler/` `persistence/service/` | Run/RunOnce keys, Startup folder LNK, Task Scheduler, Windows service |
+| **Collection** | `collection/keylog/` `collection/clipboard/` `collection/screenshot/` | Keyboard hook with process context, clipboard monitoring, multi-monitor screen capture |
+| **Cleanup** | `cleanup/selfdelete/` `cleanup/memory/` `cleanup/service/` `cleanup/timestomp/` `cleanup/wipe/` | Self-deletion (ADS rename + batch + reboot), secure memory wipe, service DACL hiding, timestomping |
+| **Privilege & Exploits** | `uacbypass/` `exploit/cve202430088/` | 4 UAC bypass methods (FODHelper, SLUI, SilentCleanup, EventVwr), CVE-2024-30088 kernel LPE |
+
 ## Documentation
 
 Full documentation is available in the [Wiki](https://github.com/oioio-space/maldev/wiki):

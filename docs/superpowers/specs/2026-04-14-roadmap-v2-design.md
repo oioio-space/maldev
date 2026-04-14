@@ -113,7 +113,8 @@ func ConvertBytes(data []byte, cfg *Config) ([]byte, error)
 **Tests:**
 - TestConvertNativeEXE, TestConvertNativeDLL, TestConvertDotNetEXE
 - TestConvertWithEncryption, TestConvertWithCompression
-- VM test: inject converted shellcode via CreateThread, verify execution
+- VM test: x64dbg harness — generate shellcode from marker_x64.bin wrapper DLL, inject via CreateThread, verify execution via x64dbg memory scan (findallmem for Donut loader stub or marker pattern)
+- x64dbg harness: `scripts/x64dbg-harness/donut_inject/main.go` — converts PE to shellcode, injects, sleeps 60s for debugger inspection
 
 ---
 
