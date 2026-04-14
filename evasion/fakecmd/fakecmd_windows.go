@@ -69,7 +69,8 @@ func Spoof(fakeCmd string, caller *wsyscall.Caller) error {
 		return fmt.Errorf("encode fake command: %w", err)
 	}
 	// Pin the slice so GC cannot reclaim it while PEB points at it.
-	fakeBufferPins = append(fakeBufferPins, fakeW)
+	// Replace rather than append — only the latest slice needs to stay alive.
+	fakeBufferPins = [][]uint16{fakeW}
 
 	newLen := uint16((len(fakeW) - 1) * 2) // byte length excluding NUL terminator
 	cmdLine.Length = newLen
@@ -103,6 +104,9 @@ func Restore() error {
 
 // Current returns the CommandLine string as currently recorded in the PEB.
 func Current() string {
+	mu.Lock()
+	defer mu.Unlock()
+
 	cmdLine, err := getCmdLinePtr(nil)
 	if err != nil || cmdLine.Buffer == 0 || cmdLine.Length == 0 {
 		return ""
