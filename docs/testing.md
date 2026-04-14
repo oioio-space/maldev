@@ -262,6 +262,19 @@ MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1 go test $(go list ./... | grep -v scripts) -c
 | Windows 10 (VM) | 64 | 0 | 9 methods × 4 callers + 12 standalone | 22 sessions |
 | Ubuntu 25.10 (VM) | 26 | 0 | 4 methods (procmem, memfd, ptrace, purego) | N/A (Linux) |
 
+## PPID Spoofing
+
+The `c2/shell` package includes a PPID spoofer (`PPIDSpoofer`) that creates child processes under a fake parent via `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS`.
+
+| Function | Test | Result | Notes |
+|----------|------|--------|-------|
+| ParentPID | TestParentPID | ✅ | Returns parent PID of current process |
+| NewPPIDSpoofer | TestNewPPIDSpoofer | ✅ | Constructor, default targets |
+| FindTargetProcess | TestPPIDSpooferFunctional | ⚠️ SKIP | Exploit Guard blocks CreateProcess with spoofed parent on Win 10 22H2 |
+| SysProcAttr | TestPPIDSpooferSysProcAttrNoTarget | ✅ | Error on missing target |
+
+**Known Limitation:** Windows 10 22H2 with Exploit Guard / ASR rules blocks `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS`. The technique works on systems without these protections.
+
 ## Known Limitations
 
 | Issue | Impact | Workaround |
@@ -274,3 +287,5 @@ MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1 go test $(go list ./... | grep -v scripts) -c
 | findallmem after x64dbg attach | Returns 0 results | Use InitDebug or self-scan |
 | Syscall stubs transient | Freed after Caller GC | Scan during execution, not after |
 | MSF exits on stdin EOF | Handler dies after -r/-x commands | Add `sleep 3600` as last -x command |
+| PPID spoofing blocked | Exploit Guard / ASR on Win 10 22H2 | Disable Exploit Guard or test on older OS |
+| Ubuntu no host-only NIC | Cannot reach Kali for meterpreter | Add nic2 hostonly (requires VM shutdown) |
