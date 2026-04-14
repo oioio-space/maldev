@@ -161,3 +161,15 @@ func TestThreadEffectiveTokenOwner(t *testing.T) {
 	assert.NotEmpty(t, user, "expected non-empty username")
 	t.Logf("current effective token owner: %s\\%s", domain, user)
 }
+
+// TestRunAsTrustedInstallerNotElevated verifies that RunAsTrustedInstaller
+// returns a useful error when the caller lacks the admin privileges required
+// to open the SCM and start TrustedInstaller.
+func TestRunAsTrustedInstallerNotElevated(t *testing.T) {
+	if windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("elevated: full TI test requires VM — skipping in unit test")
+	}
+	// Without elevation, starting TI service should fail with a useful error.
+	_, err := RunAsTrustedInstaller("cmd.exe")
+	require.Error(t, err)
+}
