@@ -17,9 +17,12 @@ require (
 )
 
 require (
+	github.com/Binject/debug v0.0.0-20210312092933-6277045c2fdf // indirect
+	github.com/Binject/go-donut v0.0.0-20220908180326-fcdcc35d591c // indirect
 	github.com/andybalholm/brotli v1.0.6 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/edsrzf/mmap-go v1.1.0 // indirect
+	github.com/google/uuid v1.2.0 // indirect
 	github.com/klauspost/compress v1.17.4 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/secDre4mer/pkcs7 v0.0.0-20240322103146-665324a4461d // indirect
