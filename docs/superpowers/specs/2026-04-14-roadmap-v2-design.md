@@ -433,33 +433,63 @@ func DumpPID(pid int, caller *wsyscall.Caller) ([]byte, error)
 
 ---
 
-### 3.3 LSA Secret Dumper
+### 3.3 Secrets Dumper (SAM + LSA + Cached Creds + NTDS.dit)
 
-**Package:** `collection/lsa/`
-**MITRE:** T1003.004 — OS Credential Dumping: LSA Secrets
-**Source:** gtworek/PSBits LSASecretDumper.c (rewrite)
-**Credit:** gtworek/PSBits
+**Package:** `collection/secrets/`
+**MITRE:** T1003.002 (SAM), T1003.004 (LSA Secrets), T1003.005 (Cached Domain Creds), T1003.003 (NTDS.dit)
+**Source:** C-Sto/gosecretsdump (reference for SAM/ESE parsing) + gtworek/PSBits (LSA API approach)
+**Credit:** C-Sto/gosecretsdump, gtworek/PSBits
 **Refs:**
+- https://github.com/C-Sto/gosecretsdump
 - https://github.com/gtworek/PSBits/blob/master/LSASecretDumper/LSASecretDumper.c
 
 **API:**
 
 ```go
+type SAMEntry struct {
+    Username string
+    RID      uint32
+    NTHash   []byte
+    LMHash   []byte
+}
+
 type Secret struct {
     Name  string
     Value []byte
 }
 
-// DumpSecrets enumerates and decrypts all LSA secrets.
+type CachedCred struct {
+    Domain   string
+    Username string
+    Hash     []byte
+}
+
+// DumpSAM extracts SAM hashes from local registry hives.
+// Requires SYSTEM token.
+func DumpSAM() ([]SAMEntry, error)
+
+// DumpSAMFromFiles parses offline SAM + SYSTEM hive files.
+func DumpSAMFromFiles(samPath, systemPath string) ([]SAMEntry, error)
+
+// DumpLSASecrets enumerates and decrypts all LSA secrets.
 // Requires SYSTEM token (impersonate winlogon.exe first).
-func DumpSecrets() ([]Secret, error)
+func DumpLSASecrets() ([]Secret, error)
+
+// DumpCachedCreds extracts cached domain credentials from SECURITY hive.
+// Requires SYSTEM token.
+func DumpCachedCreds() ([]CachedCred, error)
+
+// DumpNTDS parses an NTDS.dit + SYSTEM hive pair (offline AD dump).
+func DumpNTDS(ntdsPath, systemPath string) ([]SAMEntry, error)
 ```
 
 **Implementation:**
-- Impersonate winlogon.exe via `win/token.StealByName("winlogon.exe")`
-- Enumerate `SECURITY\Policy\Secrets` registry subkeys
-- For each secret: copy key to temp location, call `LsaRetrievePrivateData()` which auto-decrypts
-- Clean up temp keys after extraction
+- **SAM hashes:** Parse SAM registry hive, decrypt with SYSTEM bootkey (RC4/AES)
+- **LSA secrets:** Impersonate winlogon.exe via `win/token.StealByName()`, use `LsaRetrievePrivateData()` API
+- **Cached creds:** Parse SECURITY hive `Cache\NL$X` entries, decrypt with LSA key
+- **NTDS.dit:** ESE (Extensible Storage Engine) database parser for AD ntds.dit files
+- Reference gosecretsdump's `pkg/ditreader`, `pkg/esent`, `pkg/samreader` for parsing logic
+- Modernize: proper Go modules, error wrapping, `*wsyscall.Caller` for NT operations
 
 ---
 
@@ -773,6 +803,7 @@ Sprint 6 (polish) — depends on all previous
 | FourCoreLabs/LolDriverScan | Driver scanning concept | system/drivers/ |
 | FourCoreLabs/TrustedInstallerPOC | TI impersonation pattern | win/impersonate/ |
 | moonD4rk/HackBrowserData | Browser extraction concepts + crypto | collection/browser/ |
+| C-Sto/gosecretsdump | SAM/LSA/NTDS.dit parsing (pure Go secretsdump) | collection/secrets/ |
 | S3cur3Th1sSh1t | HideProcess + minidump callback | evasion/, collection/ |
 | ropnop/go-clr | CLR hosting COM wrappers | pe/clr/ |
 | OsandaMalith/CallbackShellcode | Additional callback methods | inject/ |
