@@ -87,3 +87,31 @@ func TestListOnFileWithNoADS(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, streams, "no alternate streams should be listed")
 }
+
+func TestCreateUndeletable(t *testing.T) {
+	dir := t.TempDir()
+
+	path, err := CreateUndeletable(dir, []byte("hidden payload"))
+	require.NoError(t, err)
+	t.Logf("Created undeletable file: %s", path)
+
+	// Verify the file exists and contains our data.
+	data, err := ReadUndeletable(path)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("hidden payload"), data)
+
+	// Verify the name uses the trailing dots trick.
+	assert.Contains(t, path, "...", "path should use reserved name trick")
+}
+
+func TestCreateUndeletableEmpty(t *testing.T) {
+	dir := t.TempDir()
+
+	// Empty payload should still create the file without error.
+	path, err := CreateUndeletable(dir, nil)
+	require.NoError(t, err)
+
+	data, err := ReadUndeletable(path)
+	require.NoError(t, err)
+	assert.Empty(t, data)
+}
