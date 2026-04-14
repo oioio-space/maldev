@@ -110,10 +110,5 @@ func Write(path, streamName string, data []byte) error {
 
 // Delete removes a named alternate data stream.
 func Delete(path, streamName string) error {
-	adsPath := path + ":" + streamName
-	err := os.Remove(adsPath)
-	if err != nil {
-		return fmt.Errorf("delete ADS %q: %w", streamName, err)
-	}
-	return nil
+	return os.Remove(path + ":" + streamName)
 }

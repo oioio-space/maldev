@@ -38,16 +38,13 @@ func CreateUndeletable(dir string, data []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("CreateFile: %w", err)
 	}
+	defer windows.CloseHandle(handle) //nolint:errcheck
 
 	if len(data) > 0 {
 		var written uint32
-		err = windows.WriteFile(handle, data, &written, nil)
-		windows.CloseHandle(handle)
-		if err != nil {
+		if err = windows.WriteFile(handle, data, &written, nil); err != nil {
 			return "", fmt.Errorf("WriteFile: %w", err)
 		}
-	} else {
-		windows.CloseHandle(handle)
 	}
 
 	return fullPath, nil

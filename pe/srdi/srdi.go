@@ -117,21 +117,26 @@ func ConvertBytes(data []byte, cfg *Config) ([]byte, error) {
 // ConvertDLL converts a DLL file into position-independent shellcode.
 // Shorthand for ConvertFile with Type set to ModuleDLL.
 func ConvertDLL(dllPath string, cfg *Config) ([]byte, error) {
-	if cfg == nil {
-		cfg = DefaultConfig()
-	}
-	cfg.Type = ModuleDLL
-	return ConvertFile(dllPath, cfg)
+	c := configWithType(cfg, ModuleDLL)
+	return ConvertFile(dllPath, c)
 }
 
 // ConvertDLLBytes converts raw DLL bytes into shellcode.
 // Shorthand for ConvertBytes with Type set to ModuleDLL.
 func ConvertDLLBytes(dllBytes []byte, cfg *Config) ([]byte, error) {
+	c := configWithType(cfg, ModuleDLL)
+	return ConvertBytes(dllBytes, c)
+}
+
+// configWithType returns a copy of cfg with Type overridden.
+// If cfg is nil, DefaultConfig() is used as the base.
+func configWithType(cfg *Config, t ModuleType) *Config {
 	if cfg == nil {
 		cfg = DefaultConfig()
 	}
-	cfg.Type = ModuleDLL
-	return ConvertBytes(dllBytes, cfg)
+	copy := *cfg
+	copy.Type = t
+	return &copy
 }
 
 // mapConfig converts our Config to go-donut's DonutConfig.
