@@ -297,7 +297,52 @@ const (
 
 ---
 
-### 2.6 EnableAllPrivileges
+### 2.6 CLR Hosting — In-Process .NET Assembly Execution
+
+**Package:** `pe/clr/`
+**MITRE:** T1620 — Reflective Code Loading
+**Source:** ropnop/go-clr (rewrite + modernize)
+**Credit:** ropnop/go-clr
+**Refs:**
+- https://github.com/ropnop/go-clr
+- https://github.com/lesnuages/go-execute-assembly (reference only, not used — requires native DLL)
+
+**API:**
+
+```go
+// Runtime represents a loaded CLR runtime (.NET Framework v2 or v4).
+type Runtime struct { ... }
+
+// Load initializes the CLR in the current process.
+// Prefers .NET v4, falls back to v2. Caller routes COM syscalls.
+func Load(caller *wsyscall.Caller) (*Runtime, error)
+
+// InstalledRuntimes returns all .NET Framework versions available on the system.
+func InstalledRuntimes() ([]string, error)
+
+// ExecuteAssembly loads a .NET EXE from memory and executes its entry point.
+// Returns captured stdout/stderr output.
+func (r *Runtime) ExecuteAssembly(assembly []byte, args []string) (string, error)
+
+// ExecuteDLL loads a .NET DLL from memory and invokes a specific method.
+func (r *Runtime) ExecuteDLL(dll []byte, typeName, methodName, arg string) (int, error)
+```
+
+**Implementation:**
+- COM vtable wrappers: ICLRMetaHost, ICLRRuntimeInfo, ICORRuntimeHost
+- `AppDomain.Load_3()` for in-memory .NET EXE loading via SafeArray
+- Replace `syscall.NewLazyDLL` with `win/api` DLL handles
+- Route COM calls through optional `*wsyscall.Caller` where possible
+- Capture stdout: redirect `Console.SetOut` to capture .NET console output
+- Prerequisite: `evasion/amsi.PatchAll()` before loading hostile assemblies
+
+**Complements go-donut:**
+- `pe/clr/` = run .NET in current process (Seatbelt, SharpHound, Rubeus)
+- `pe/srdi/` = convert .NET to shellcode for injection into remote process via `inject/`
+
+---
+
+### 2.7 EnableAllPrivileges
 
 **Package:** `win/token/` (add function to existing)
 **Refs:**
@@ -686,11 +731,12 @@ Sprint 1 (foundations)
   ├── pe/srdi/ (go-donut) ─── used by inject/ (real shellcode gen)
   └── README refactor
 
-Sprint 2 (evasion) — independent of Sprint 1
+Sprint 2 (evasion + CLR) — independent of Sprint 1
   ├── evasion/fakecmd/ ─────── uses win/ntapi
   ├── win/impersonate/ (TI) ── uses c2/shell.PPIDSpoofer pattern
   ├── evasion/hideprocess/ ─── uses win/ntapi
   ├── evasion/stealthopen/ ─── uses win/api
+  ├── pe/clr/ ──────────────── CLR hosting, uses win/api + evasion/amsi
   ├── inject/ callbacks ────── extends existing
   └── win/token EnableAll ──── extends existing
 
@@ -728,6 +774,7 @@ Sprint 6 (polish) — depends on all previous
 | FourCoreLabs/TrustedInstallerPOC | TI impersonation pattern | win/impersonate/ |
 | moonD4rk/HackBrowserData | Browser extraction concepts + crypto | collection/browser/ |
 | S3cur3Th1sSh1t | HideProcess + minidump callback | evasion/, collection/ |
+| ropnop/go-clr | CLR hosting COM wrappers | pe/clr/ |
 | OsandaMalith/CallbackShellcode | Additional callback methods | inject/ |
 | guitmz/go-liora | ELF/PE infection concepts | pe/infect/ |
 | nixhacker.com + shubham0d | Symlink AV delete | evasion/avdelete/ |
