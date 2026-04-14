@@ -72,8 +72,8 @@ Tests every injection method × every syscall calling convention. 35 combination
 | ModuleStomp | ✅ SESSION_OK | Local, needs CreateThread for execution |
 | ExecuteCallback (EnumWindows) | ✅ SESSION_OK | Local, synchronous |
 | ExecuteCallback (TimerQueue) | ✅ SESSION_OK | Local, timer thread |
-| ExecuteCallback (CertEnumStore) | ❌ | Not yet tested with meterpreter |
-| SpawnWithSpoofedArgs | ❌ | Not yet tested with meterpreter |
+| ExecuteCallback (CertEnumStore) | ✅ SESSION_OK | Local, synchronous (Kali session 48 confirmed) |
+| SpawnWithSpoofedArgs | ✅ SPOOF_OK | Process arg spoofing — real args executed, fake visible |
 
 ## Meterpreter End-to-End
 
@@ -102,9 +102,9 @@ VBoxManage guestcontrol Windows10 copyto --target-directory "C:\Temp\" /tmp/msf_
 
 msfconsole exits when stdin closes (not a crash — EOF). `nohup`/`screen` don't help because they close stdin. Fix: add `sleep 3600` as the LAST MSF `-x` command. This is an MSF sleep (not bash), keeping the process alive while the handler runs.
 
-### Results (2026-04-13)
+### Results (2026-04-14)
 
-21 unique meterpreter sessions established across 20 injection techniques.
+22 unique meterpreter sessions established across all 21 injection techniques (including CertEnumStore). SpawnWithSpoofedArgs verified separately (not a shellcode injection — confirms PEB argument overwrite).
 
 ## Evasion Tests
 
@@ -131,7 +131,7 @@ msfconsole exits when stdin closes (not a crash — EOF). `nohup`/`screen` don't
 
 | Function | WinAPI | NativeAPI | Direct | Indirect | Verification |
 |----------|--------|-----------|--------|----------|-------------|
-| ClassicUnhook | ✅ | — | — | — | Target: NtAllocateVirtualMemory, stub restored |
+| ClassicUnhook | ✅ | ✅ | ✅ | ✅ | Target: NtCreateSection, stub = 4C 8B D1 B8 |
 | FullUnhook | ✅ | ✅ | ✅ | ✅ | All ntdll stubs = 4C 8B D1 B8 |
 
 ClassicUnhook safelist: NtClose, NtCreateFile, NtReadFile, NtWriteFile, NtQueryVolumeInformationFile, NtQueryInformationFile, NtSetInformationFile, NtFsControlFile — all rejected to prevent Go runtime deadlock.

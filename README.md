@@ -48,6 +48,7 @@ injector.Inject(shellcode)
 | **[Getting Started](docs/getting-started.md)** | First steps — concepts, terminology, your first implant |
 | **[Architecture](docs/architecture.md)** | Layered design, dependency flow, Mermaid diagrams |
 | **[OPSEC Build Pipeline](docs/opsec-build.md)** | garble, pe/strip, CallByHash — building for operations |
+| **[Testing](docs/testing.md)** | Battle-tested: 22 meterpreter sessions, 35 injection combos, x64dbg binary verification |
 | **[MITRE ATT&CK + D3FEND](docs/mitre.md)** | Full technique mapping with defensive countermeasures |
 
 ### 🔧 Technique Reference
