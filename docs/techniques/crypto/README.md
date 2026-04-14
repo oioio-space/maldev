@@ -46,6 +46,7 @@ graph TD
 | Document | Description |
 |----------|-------------|
 | [Payload Encryption](payload-encryption.md) | AES-GCM, ChaCha20, XOR, RC4, Base64, ROT13 |
+| [Fuzzy Hashing](fuzzy-hashing.md) | ssdeep + TLSH similarity hashing for payload comparison |
 
 ## MITRE ATT&CK
 

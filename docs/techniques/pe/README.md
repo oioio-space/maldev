@@ -60,6 +60,7 @@ graph TD
 | [BOF Loader](bof-loader.md) | Load and execute Cobalt Strike BOFs (COFF objects) |
 | [PE Morphing](morph.md) | Randomize UPX section names to evade signatures |
 | [PE-to-Shellcode](pe-to-shellcode.md) | Convert EXE/DLL/.NET/scripts to injectable shellcode via Donut |
+| [Certificate Theft](certificate-theft.md) | Read, copy, strip, and write Authenticode certificates |
 
 ## MITRE ATT&CK
 

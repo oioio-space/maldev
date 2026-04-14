@@ -127,29 +127,30 @@ func ConvertBytes(data []byte, cfg *Config) ([]byte, error)
 
 ---
 
-### 1.4 README sobre + Wiki preparation
+### ~~1.4 README sobre + Wiki preparation~~ REVISED: Complete README, NO Wiki
 
-**README:** Keep install + quick start + project structure + acknowledgments (~60 lines).
-Move all technique references, API docs, and guide links to the GitHub Wiki.
+> **Decision (2026-04-14):** GitHub Wiki abandoned — inaccessible from some devices.
+> All documentation stays in-repo (docs/ folder + README links).
+> README is COMPLETE with all technique references, API docs, guides, and examples.
 
-**Wiki structure:**
-```
-Home.md
-Getting-Started.md
-Architecture.md
-OPSEC-Build-Pipeline.md
-Testing.md
-MITRE-ATT&CK.md
-Techniques/
-  Injection/
-  Evasion/
-  Syscalls/
-  C2/
-  PE/
-  Persistence/
-  Collection/
-  Cleanup/
-  Tokens/
+~~**Wiki structure:**~~
+~~```
+~~Home.md
+~~Getting-Started.md
+~~Architecture.md
+~~OPSEC-Build-Pipeline.md
+~~Testing.md
+~~MITRE-ATT&CK.md
+~~Techniques/
+~~  Injection/
+~~  Evasion/
+~~  Syscalls/
+~~  C2/
+~~  PE/
+~~  Persistence/
+~~  Collection/
+~~  Cleanup/
+~~  Tokens/
   Crypto/
 API/
   evasion.md
