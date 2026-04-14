@@ -88,6 +88,27 @@ func TestListOnFileWithNoADS(t *testing.T) {
 	assert.Empty(t, streams, "no alternate streams should be listed")
 }
 
+func TestWriteAndReadOnDirectory(t *testing.T) {
+	dir := t.TempDir()
+	payload := []byte("directory ADS payload")
+
+	err := Write(dir, "dirstream", payload)
+	require.NoError(t, err)
+
+	got, err := Read(dir, "dirstream")
+	require.NoError(t, err)
+	assert.Equal(t, payload, got)
+
+	streams, err := List(dir)
+	require.NoError(t, err)
+	require.Len(t, streams, 1)
+	assert.Equal(t, "dirstream", streams[0].Name)
+
+	require.NoError(t, Delete(dir, "dirstream"))
+	_, err = Read(dir, "dirstream")
+	assert.Error(t, err)
+}
+
 func TestCreateUndeletable(t *testing.T) {
 	dir := t.TempDir()
 

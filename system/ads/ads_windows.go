@@ -3,12 +3,15 @@
 package ads
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/oioio-space/maldev/win/api"
 )
 
 // StreamInfo describes an alternate data stream (defined here for Windows build;
@@ -24,10 +27,10 @@ type findStreamData struct {
 	StreamName [296]uint16 // MAX_PATH + 36
 }
 
+// Use win/api.Kernel32 — the single source of truth for DLL handles.
 var (
-	modKernel32          = windows.NewLazySystemDLL("kernel32.dll")
-	procFindFirstStreamW = modKernel32.NewProc("FindFirstStreamW")
-	procFindNextStreamW  = modKernel32.NewProc("FindNextStreamW")
+	procFindFirstStreamW = api.Kernel32.NewProc("FindFirstStreamW")
+	procFindNextStreamW  = api.Kernel32.NewProc("FindNextStreamW")
 )
 
 // List returns all alternate data streams on a file (excludes the default :$DATA stream).
@@ -45,12 +48,12 @@ func List(path string) ([]StreamInfo, error) {
 		0,
 	)
 	if handle == uintptr(windows.InvalidHandle) {
-		if callErr == windows.ERROR_HANDLE_EOF {
+		if errors.Is(callErr, windows.ERROR_HANDLE_EOF) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("FindFirstStreamW: %w", callErr)
 	}
-	defer windows.FindClose(windows.Handle(handle))
+	defer windows.FindClose(windows.Handle(handle)) //nolint:errcheck // best-effort cleanup
 
 	var streams []StreamInfo
 	for {
@@ -69,7 +72,7 @@ func List(path string) ([]StreamInfo, error) {
 			uintptr(unsafe.Pointer(&fsd)),
 		)
 		if r == 0 {
-			if callErr == windows.ERROR_HANDLE_EOF {
+			if errors.Is(callErr, windows.ERROR_HANDLE_EOF) {
 				break
 			}
 			return streams, fmt.Errorf("FindNextStreamW: %w", callErr)
