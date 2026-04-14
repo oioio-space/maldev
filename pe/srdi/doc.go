@@ -1,38 +1,34 @@
-// Package srdi provides DLL-to-shellcode conversion using
-// Shellcode Reflective DLL Injection (sRDI) techniques.
+// Package srdi provides PE/DLL/EXE-to-shellcode conversion using the Donut
+// framework (github.com/Binject/go-donut).
 //
-// sRDI converts a standard Windows DLL into position-independent shellcode
-// that can be injected into any process. The generated shellcode contains a
-// minimal reflective loader that:
-//
-//  1. Walks the PEB to find kernel32.dll
-//  2. Resolves VirtualAlloc, LoadLibraryA, GetProcAddress
-//  3. Maps PE sections into freshly allocated memory
-//  4. Processes base relocations for the new address
-//  5. Resolves the import table
-//  6. Calls TLS callbacks
-//  7. Invokes DllMain (or a specified export function)
+// Supported input formats:
+//   - Native EXE (ModuleEXE)
+//   - Native DLL (ModuleDLL) — call specific export via Config.Method
+//   - .NET EXE (ModuleNetEXE)
+//   - .NET DLL (ModuleNetDLL) — specify Config.Class and Config.Method
+//   - VBScript (ModuleVBS)
+//   - JScript (ModuleJS)
+//   - XSL (ModuleXSL)
 //
 // Usage:
 //
+//	// Convert a native DLL to shellcode
 //	cfg := srdi.DefaultConfig()
-//	cfg.FunctionName = "MyExport"       // optional: call a specific export
-//	cfg.ClearHeader = true              // evasion: wipe PE header after load
+//	cfg.Type = srdi.ModuleDLL
+//	cfg.Method = "MyExport"
+//	shellcode, err := srdi.ConvertFile("payload.dll", cfg)
 //
-//	shellcode, err := srdi.ConvertDLL("payload.dll", cfg)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	// shellcode is now ready for injection
+//	// Convert raw bytes (e.g., downloaded PE)
+//	cfg := &srdi.Config{Arch: srdi.ArchX64, Type: srdi.ModuleEXE, Bypass: 3}
+//	shellcode, err := srdi.ConvertBytes(peData, cfg)
 //
-// Technique: Shellcode Reflective DLL Injection (sRDI)
+// Technique: PE-to-Shellcode Conversion (Donut)
 // MITRE ATT&CK: T1055.001 (Process Injection: DLL Injection)
-// Platform: Cross-platform (generates Windows x64 shellcode)
-// Detection: Medium -- the generated shellcode loads a DLL from memory
-// without touching disk, but memory scanners may detect the reflective loader
-// pattern or the loaded PE in memory.
+// Platform: Cross-platform generation, Windows x86/x64 shellcode output
+// Detection: Medium — memory scanners may detect the Donut loader stub.
 //
 // References:
-//   - https://github.com/monoxgas/sRDI (original sRDI by Nick Landers)
-//   - https://github.com/stephenfewer/ReflectiveDLLInjection
+//   - https://github.com/Binject/go-donut
+//   - https://github.com/TheWover/donut
+//   - https://github.com/monoxgas/sRDI
 package srdi
