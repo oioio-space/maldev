@@ -21,6 +21,7 @@ The `evasion/` module provides composable defense evasion techniques for Windows
 | `evasion/antivm` | VM/hypervisor detection | T1497.001 -- System Checks | Low | Cross-platform |
 | `evasion/timing` | CPU-burning delays | T1497.003 -- Time Based Evasion | Low | Cross-platform |
 | `evasion/sandbox` | Multi-factor sandbox detection | T1497 -- Sandbox Evasion | Low | Cross-platform |
+| `evasion/fakecmd` | PEB CommandLine overwrite | T1036.005 -- Masquerading | Low | Windows |
 | `evasion/preset` | Composable technique presets | -- | -- | Windows |
 
 ## Core Interface (`evasion`)
@@ -1320,3 +1321,49 @@ for {
 - The encrypt/decrypt transitions create brief windows where the memory is visible in plaintext
 - `VirtualProtect` calls during encrypt/decrypt are observable by EDR
 - Does not protect against kernel-mode memory scanning
+
+## fakecmd -- PEB CommandLine Spoof
+
+**Package:** `evasion/fakecmd`
+**MITRE:** T1036.005 -- Masquerading: Match Legitimate Name or Location
+**Detection:** Low — in-memory only; kernel `EPROCESS` retains the original command line.
+
+### How it works
+
+Every Windows process has a Process Environment Block (PEB) that contains a pointer to `RTL_USER_PROCESS_PARAMETERS`. That structure holds a `UNICODE_STRING CommandLine` field at offset `+0x70` (x64). Process-listing tools such as Process Explorer, `wmic process get commandline`, and PowerShell `Get-Process` read this field from the target process's memory. By walking the PEB via `NtQueryInformationProcess` and overwriting the `UNICODE_STRING` in-place, the displayed command line changes without modifying the kernel `EPROCESS.ImageFileName` or the original process creation arguments.
+
+The original UNICODE_STRING fields are saved on the first `Spoof` call and restored verbatim by `Restore`.
+
+### Usage
+
+```go
+import "github.com/oioio-space/maldev/evasion/fakecmd"
+
+// Overwrite PEB CommandLine — callers see svchost from now on.
+if err := fakecmd.Spoof(`C:\Windows\System32\svchost.exe -k netsvcs`, nil); err != nil {
+    log.Fatal(err)
+}
+defer fakecmd.Restore()
+
+// Read back what is currently in the PEB.
+fmt.Println(fakecmd.Current())
+```
+
+### API
+
+| Function | Description |
+|----------|-------------|
+| `Spoof(fakeCmd string, caller *wsyscall.Caller) error` | Overwrite PEB CommandLine with `fakeCmd`. First call saves originals. |
+| `Restore() error` | Restore original PEB CommandLine. No-op if Spoof was never called. |
+| `Current() string` | Return the CommandLine string currently in the PEB. |
+
+### Advantages
+- Zero external artifacts — no file, registry, or network indicators
+- Works without elevated privileges (own process only)
+- Compatible with all four `wsyscall.Caller` methods for EDR bypass
+
+### Limitations
+- Only affects the current process's PEB; cannot spoof remote processes without injection
+- Kernel `EPROCESS.SeAuditProcessCreationInfo` retains the real image path
+- ETW process-creation events (logged at creation time) are unaffected
+- GC pressure: fake UTF-16 buffers are pinned in memory until `Restore` is called
