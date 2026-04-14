@@ -253,14 +253,31 @@ Instead of x64dbg, Linux verification uses:
 
 # On Ubuntu VM directly
 MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1 go test $(go list ./... | grep -v scripts) -count=1 -timeout 120s
+
+# Linux meterpreter e2e (requires Kali handler running first)
+# From host: start MSF handler via KaliStartListener
+# On Ubuntu VM:
+MALDEV_MANUAL=1 MALDEV_INTRUSIVE=1 MALDEV_KALI_HOST=192.168.56.200 \
+  go test -v -run TestMeterpreterRealSessionLinux ./c2/meterpreter/ -timeout 120s
+
+# Linux shell PTY (self-contained, no Kali needed)
+MALDEV_MANUAL=1 go test -v -run "TestShellPTYLinux" ./c2/shell/ -timeout 60s
 ```
+
+### Linux e2e Results
+
+| Test | Result | Notes |
+|------|--------|-------|
+| TestShellPTYLinux | ✅ PASS | PTY echo + command output verified |
+| TestShellPTYLinuxLifecycle | ✅ PASS | Start/stop/reconnect lifecycle |
+| TestMeterpreterRealSessionLinux | ✅ PASS | Session 1 opened on Kali (192.168.56.200:4444 → 192.168.56.103) |
 
 ### Platform Test Summary
 
 | Platform | Packages OK | FAIL | Injection Methods | Meterpreter |
 |----------|------------|------|-------------------|-------------|
 | Windows 10 (VM) | 64 | 0 | 9 methods × 4 callers + 12 standalone | 22 sessions |
-| Ubuntu 25.10 (VM) | 26 | 0 | 4 methods (procmem, memfd, ptrace, purego) | N/A (Linux) |
+| Ubuntu 25.10 (VM) | 26 | 0 | 4 methods (procmem, memfd, ptrace, purego) | 1 session (Linux meterpreter) |
 
 ## PPID Spoofing
 
@@ -273,7 +290,7 @@ The `c2/shell` package includes a PPID spoofer (`PPIDSpoofer`) that creates chil
 | FindTargetProcess | TestPPIDSpooferFunctional | ⚠️ SKIP | Exploit Guard blocks CreateProcess with spoofed parent on Win 10 22H2 |
 | SysProcAttr | TestPPIDSpooferSysProcAttrNoTarget | ✅ | Error on missing target |
 
-**Known Limitation:** Windows 10 22H2 with Exploit Guard / ASR rules blocks `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS`. The technique works on systems without these protections.
+**Known Limitation:** Windows 10 22H2 blocks `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` with ACCESS_DENIED even with admin + SeDebugPrivilege + no ASR rules configured. This appears to be a kernel-level mitigation (not ASR/Exploit Guard). OpenProcess(PROCESS_CREATE_PROCESS) succeeds, but CreateProcess with the spoofed parent fails. The technique works on older Windows versions without these protections.
 
 ## Known Limitations
 
@@ -287,5 +304,7 @@ The `c2/shell` package includes a PPID spoofer (`PPIDSpoofer`) that creates chil
 | findallmem after x64dbg attach | Returns 0 results | Use InitDebug or self-scan |
 | Syscall stubs transient | Freed after Caller GC | Scan during execution, not after |
 | MSF exits on stdin EOF | Handler dies after -r/-x commands | Add `sleep 3600` as last -x command |
-| PPID spoofing blocked | Exploit Guard / ASR on Win 10 22H2 | Disable Exploit Guard or test on older OS |
-| Ubuntu no host-only NIC | Cannot reach Kali for meterpreter | Add nic2 hostonly (requires VM shutdown) |
+| PPID spoofing blocked | Kernel-level mitigation on Win 10 22H2 (not ASR) | Test on older OS or disable kernel mitigations |
+| Ubuntu no host-only NIC | Cannot reach Kali for meterpreter | Add nic2 hostonly (requires VM shutdown) — **DONE** |
+| KaliSSH inside VMs | `localhost:2223` unreachable from other VMs | Use direct host-only IPs or env vars (MALDEV_KALI_HOST) |
+| Kali DHCP IP mismatch | KaliHost=192.168.56.200, DHCP assigns .101 | `sudo ip addr add 192.168.56.200/24 dev eth1` |

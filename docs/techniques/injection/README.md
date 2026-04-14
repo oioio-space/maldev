@@ -22,6 +22,8 @@ maldev provides a unified `inject` package with 15 injection methods across Wind
 | [Phantom DLL](phantom-dll.md) | `PhantomDLLInject()` | Remote | No (caller) | Yes | Very High | High |
 | [Thread Hijack](thread-hijack.md) | `MethodThreadHijack` | Child (suspended) | No | Yes | Medium | Medium |
 | [Argument Spoofing](process-arg-spoofing.md) | `SpawnWithSpoofedArgs()` | Child (suspended) | No | Yes | Medium | Medium |
+| [EtwpCreateEtwThread](etwp-create-etw-thread.md) | `MethodEtwpCreateEtwThread` | Self | Yes (internal) | No | High | Low |
+| [NtQueueApcThreadEx](nt-queue-apc-thread-ex.md) | `MethodNtQueueApcThreadEx` | Remote | No (special APC) | Yes | Medium | Medium |
 
 ## Decision Flow
 
