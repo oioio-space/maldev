@@ -113,8 +113,8 @@ msfconsole exits when stdin closes (not a crash — EOF). `nohup`/`screen` don't
 | Function | WinAPI | NativeAPI | Direct | Indirect | Bytes Verified |
 |----------|--------|-----------|--------|----------|---------------|
 | PatchScanBuffer | ✅ | ✅ | ✅ | ✅ | 31 C0 C3 (xor eax,eax; ret) |
-| PatchOpenSession | ✅ | — | — | — | Conditional jump flipped |
-| PatchAll | ✅ | — | — | — | Both patched |
+| PatchOpenSession | ✅ | ✅ | ✅ | ✅ | Conditional jump flipped (JZ → JNZ) |
+| PatchAll | ✅ | ✅ | ✅ | ✅ | Both ScanBuffer + OpenSession patched |
 
 ### ETW Patch
 
@@ -125,7 +125,7 @@ msfconsole exits when stdin closes (not a crash — EOF). `nohup`/`screen` don't
 | EtwEventWriteFull | ✅ | ✅ | ✅ | ✅ | 48 33 C0 C3 |
 | EtwEventWriteString | ✅ | ✅ | ✅ | ✅ | 48 33 C0 C3 |
 | EtwEventWriteTransfer | ✅ | ✅ | ✅ | ✅ | 48 33 C0 C3 |
-| NtTraceEvent | ✅ | — | — | — | 48 33 C0 C3 |
+| NtTraceEvent | ✅ | ✅ | ✅ | ✅ | 48 33 C0 C3 |
 
 ### Unhook
 
@@ -224,6 +224,43 @@ Cross-validated: x64dbg reads SSN bytes from ntdll prologue (offset +4, +5) and 
 | PE Sanitize | TestSanitize | Pclntab F1FFFFFF wiped + sections renamed |
 | PE Morph UPX | TestUPXMorph | Section names randomized |
 | sRDI ConvertDLL | TestConvertDLL | Shellcode generated from DLL |
+
+## Linux Testing
+
+### Injection Methods
+
+| Method | Test | Result | Verification |
+|--------|------|--------|-------------|
+| /proc/self/mem | TestProcMemSelfInject | ✅ | Child writes via /proc/self/mem, prints PROCMEM_OK |
+| memfd_create | TestMemFDInject | ✅ | Creates anonymous fd, ForkExecs /bin/true ELF copy |
+| ptrace | TestPtraceInject | ✅ | Spawns sleep target, attaches via ptrace, injects |
+| purego (mmap+exec) | TestPureGoExec | ✅ | mmap RWX + direct call (no CGO) |
+| procmem crash verify | TestProcMemVerification | ✅ | Injection → SIGSEGV = shellcode executed |
+
+### Linux Debugger Equivalent
+
+Instead of x64dbg, Linux verification uses:
+- **`/proc/PID/maps`** — read memory layout, find RWX regions
+- **`/proc/PID/mem`** — read/write process memory directly
+- **GDB** (`gdb -p PID`) — available on Ubuntu VM for interactive debugging
+- **strace** — trace syscalls (memfd_create, mmap, ptrace)
+
+### Running Linux Tests
+
+```bash
+# On host (orchestrates VM)
+./scripts/vm-run-tests.sh linux "./..." "-v -count=1"
+
+# On Ubuntu VM directly
+MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1 go test $(go list ./... | grep -v scripts) -count=1 -timeout 120s
+```
+
+### Platform Test Summary
+
+| Platform | Packages OK | FAIL | Injection Methods | Meterpreter |
+|----------|------------|------|-------------------|-------------|
+| Windows 10 (VM) | 64 | 0 | 9 methods × 4 callers + 12 standalone | 22 sessions |
+| Ubuntu 25.10 (VM) | 26 | 0 | 4 methods (procmem, memfd, ptrace, purego) | N/A (Linux) |
 
 ## Known Limitations
 

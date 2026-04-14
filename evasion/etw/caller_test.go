@@ -13,6 +13,39 @@ import (
 	"github.com/oioio-space/maldev/win/api"
 )
 
+// TestNtTraceEventCallerMatrix tests PatchNtTraceEvent with all 4 Caller methods.
+func TestNtTraceEventCallerMatrix(t *testing.T) {
+	testutil.RequireIntrusive(t)
+
+	proc := api.Ntdll.NewProc("NtTraceEvent")
+	if err := proc.Find(); err != nil {
+		t.Skip("NtTraceEvent not present")
+	}
+
+	for _, c := range testutil.CallerMethods(t) {
+		t.Run(c.Name, func(t *testing.T) {
+			addr := proc.Addr()
+			require.NoError(t, PatchNtTraceEvent(c.Caller))
+			patched := (*[4]byte)(unsafe.Pointer(addr))
+			assert.Equal(t, byte(0x48), patched[0], "NtTraceEvent[0]")
+			assert.Equal(t, byte(0x33), patched[1], "NtTraceEvent[1]")
+			assert.Equal(t, byte(0xC0), patched[2], "NtTraceEvent[2]")
+			assert.Equal(t, byte(0xC3), patched[3], "NtTraceEvent[3]")
+		})
+	}
+}
+
+// TestPatchAllCallerMatrix tests PatchAll (5 ETW functions + NtTraceEvent) with all 4 callers.
+func TestPatchAllCallerMatrix(t *testing.T) {
+	testutil.RequireIntrusive(t)
+
+	for _, c := range testutil.CallerMethods(t) {
+		t.Run(c.Name, func(t *testing.T) {
+			require.NoError(t, PatchAll(c.Caller))
+		})
+	}
+}
+
 // TestPatchCallerMatrix tests ETW Patch with all 4 Caller methods,
 // verifying all 5 ETW functions are patched to 48 33 C0 C3.
 func TestPatchCallerMatrix(t *testing.T) {
