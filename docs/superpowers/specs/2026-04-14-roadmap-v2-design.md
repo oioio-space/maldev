@@ -297,7 +297,55 @@ const (
 
 ---
 
-### 2.6 CLR Hosting — In-Process .NET Assembly Execution
+### 2.6 Task Scheduler via COM API (replace schtasks.exe)
+
+**Package:** `persistence/scheduler/` (rewrite existing)
+**MITRE:** T1053.005 — Scheduled Task/Job: Scheduled Task
+**Source:** capnspacehook/taskmaster (reference for COM API pattern)
+**Credit:** capnspacehook/taskmaster
+**Refs:**
+- https://github.com/capnspacehook/taskmaster
+
+**Motivation:** Current `persistence/scheduler/` shells out to `schtasks.exe`, which:
+- Creates a child process visible in Sysmon Event 1
+- Logs the full command line in EDR telemetry
+- Is a well-known persistence indicator
+
+COM API via `ITaskService` is silent — no process creation, no CLI logging.
+
+**API (replaces existing):**
+
+```go
+// Create creates a scheduled task via COM API (no schtasks.exe).
+func Create(name string, opts ...Option) error
+
+// Delete removes a scheduled task via COM API.
+func Delete(name string) error
+
+// List enumerates all registered tasks.
+func List() ([]Task, error)
+
+// Run immediately executes a scheduled task.
+func Run(name string) error
+
+// Options
+func WithTriggerLogon() Option
+func WithTriggerStartup() Option
+func WithTriggerDaily(interval int) Option
+func WithTriggerTime(t time.Time) Option
+func WithAction(path string, args ...string) Option
+func WithHidden() Option
+```
+
+**Implementation:**
+- Use `go-ole` for COM interop (pure Go, no CGO)
+- `ITaskService` → `ITaskFolder` → `ITaskDefinition` → `IRegistrationInfo`
+- Register triggers and actions via COM vtable calls
+- Wrap existing API to keep backward compatibility
+
+---
+
+### 2.7 CLR Hosting — In-Process .NET Assembly Execution
 
 **Package:** `pe/clr/`
 **MITRE:** T1620 — Reflective Code Loading
@@ -761,11 +809,12 @@ Sprint 1 (foundations)
   ├── pe/srdi/ (go-donut) ─── used by inject/ (real shellcode gen)
   └── README refactor
 
-Sprint 2 (evasion + CLR) — independent of Sprint 1
+Sprint 2 (evasion + CLR + scheduler) — independent of Sprint 1
   ├── evasion/fakecmd/ ─────── uses win/ntapi
   ├── win/impersonate/ (TI) ── uses c2/shell.PPIDSpoofer pattern
   ├── evasion/hideprocess/ ─── uses win/ntapi
   ├── evasion/stealthopen/ ─── uses win/api
+  ├── persistence/scheduler/ ─ COM API rewrite (replaces schtasks.exe)
   ├── pe/clr/ ──────────────── CLR hosting, uses win/api + evasion/amsi
   ├── inject/ callbacks ────── extends existing
   └── win/token EnableAll ──── extends existing
@@ -773,7 +822,7 @@ Sprint 2 (evasion + CLR) — independent of Sprint 1
 Sprint 3 (collection) — independent of Sprint 1-2
   ├── collection/browser/ ──── standalone
   ├── collection/minidump/ ─── uses win/token, process/enum
-  ├── collection/lsa/ ──────── uses win/token.StealByName
+  ├── collection/secrets/ ──── SAM/LSA/cached/NTDS.dit, uses win/token
   ├── system/drivers/ ──────── uses pe/parse (authentihash)
   └── system/ads/ hidden ───── extends Sprint 1
 
@@ -793,6 +842,22 @@ Sprint 6 (polish) — depends on all previous
   └── Final docs
 ```
 
+## Evaluated & Skipped
+
+| Item | Reason |
+|------|--------|
+| C-Sto/BananaPhone | Our `win/syscall` is strictly superior (Tartarus Gate, Hash Gate, indirect syscalls). BananaPhone only has Hell's + Halo's Gate + direct. |
+| mmcloughlin/avo | Go ASM code generator. Useful reference for polymorphic stubs but low priority — we only have a handful of `.s` files. |
+| lesnuages/go-execute-assembly | Requires embedded C++ DLL (`HostingCLRx64.dll`) — incompatible with NO CGO spirit. go-clr is the pure Go alternative. |
+| gtworek/PSBits OfflineAddAdmin | Too niche (offline SAM manipulation requires mounting another Windows disk). |
+| gtworek/PSBits WerSvc | No source published, would require significant reverse engineering of ALPC protocol. |
+| OsandaMalith/PE2HTML | Novelty technique (inject HTML into PE), no practical offensive use. |
+| MatheuZSecurity/Singularity | Linux kernel rootkit in C. Requires kernel module loading — not portable to Go userland. |
+| skoveit/skovenet sgen | Just an agent builder with bundled Go toolchain, nothing technically novel. |
+| wcaszczxcey/XiebroC2 | Standard Go C2 with complete overlap on our inject/c2 packages. |
+| iDigitalFlame/XMT (most of it) | Heavy `go:linkname` dependency, most techniques overlap. Registry CRUD and zombie pattern noted but registry already covered by `x/sys/windows/registry`. |
+| `system/registry/` wrapper | `golang.org/x/sys/windows/registry` already sufficient. Registry calls don't use NT syscalls routable by our Caller. |
+
 ## Acknowledgments to Add
 
 | Source | Credit | Used In |
@@ -805,6 +870,7 @@ Sprint 6 (polish) — depends on all previous
 | moonD4rk/HackBrowserData | Browser extraction concepts + crypto | collection/browser/ |
 | C-Sto/gosecretsdump | SAM/LSA/NTDS.dit parsing (pure Go secretsdump) | collection/secrets/ |
 | S3cur3Th1sSh1t | HideProcess + minidump callback | evasion/, collection/ |
+| capnspacehook/taskmaster | COM-based Task Scheduler (replaces schtasks.exe) | persistence/scheduler/ |
 | ropnop/go-clr | CLR hosting COM wrappers | pe/clr/ |
 | OsandaMalith/CallbackShellcode | Additional callback methods | inject/ |
 | guitmz/go-liora | ELF/PE infection concepts | pe/infect/ |
