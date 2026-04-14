@@ -9,6 +9,7 @@
 
 - **NO CGO** anywhere in the project. Use purego, x/sys/windows, or raw syscalls.
 - All new packages must support `*wsyscall.Caller` where NT syscalls are involved.
+- All NT-level calls must support the **SSN resolvers** from `win/syscall` (Hell's Gate, Halo's Gate, Tartarus Gate, Hash Gate, Chain).
 - Every exported function must have tests, doc.go with MITRE ATT&CK ID, detection level.
 - All external code must be credited in README Acknowledgments.
 - Prefer existing maldev functions over reimplementing (pe/parse, win/token, inject/, etc.).
@@ -24,6 +25,9 @@
 **MITRE:** T1564.004 — Hide Artifacts: NTFS File Attributes
 **Source:** go-winio `backup.go` (rewrite, not vendor)
 **Credit:** microsoft/go-winio
+**Refs:**
+- https://github.com/microsoft/go-winio/blob/main/backup.go
+- https://cqureacademy.com/blog/alternate-data-streams/
 
 **API:**
 
@@ -68,6 +72,9 @@ func CreateHidden(dir, payload string) (string, error)
 **MITRE:** T1055.001 — Process Injection: DLL Injection (shellcode variant)
 **Source:** Binject/go-donut (fork + modernize)
 **Credit:** Binject/go-donut, TheWover/donut
+**Refs:**
+- https://github.com/Binject/go-donut
+- https://github.com/TheWover/donut
 
 **API (replaces existing placeholder):**
 
@@ -110,49 +117,12 @@ func ConvertBytes(data []byte, cfg *Config) ([]byte, error)
 
 ---
 
-### 1.3 Registry CRUD
+### ~~1.3 Registry CRUD~~ REMOVED
 
-**Package:** `system/registry/`
-**MITRE:** T1112 — Modify Registry
-**Source:** XMT `device/regedit` (concepts), stdlib `golang.org/x/sys/windows/registry`
-
-**API:**
-
-```go
-// Read reads a registry value. Returns typed value (string, uint32, []byte, []string).
-func Read(root Key, path, name string) (any, uint32, error)
-
-// Write writes a registry value with automatic type detection.
-func Write(root Key, path, name string, value any) error
-
-// Delete deletes a registry value.
-func Delete(root Key, path, name string) error
-
-// DeleteKey deletes a registry key and all its values.
-func DeleteKey(root Key, path string) error
-
-// Enumerate lists all value names under a key.
-func Enumerate(root Key, path string) ([]string, error)
-
-// EnumerateKeys lists all subkey names under a key.
-func EnumerateKeys(root Key, path string) ([]string, error)
-
-// KeyExists checks if a registry key exists.
-func KeyExists(root Key, path string) bool
-```
-
-**Implementation:**
-- Wrap `golang.org/x/sys/windows/registry` for simplicity and correctness
-- Add type-safe helpers (ReadString, ReadDWORD, ReadBinary, ReadMultiString)
-- Support HKLM, HKCU, HKCR, HKU, HKCC root keys
-
-**Integration:**
-- `persistence/registry/` can use `system/registry.Write()` instead of raw Win32 calls
-- `evasion/antivm/` registry checks can use `system/registry.Read()`
-
-**Tests:**
-- TestReadWriteString, TestReadWriteDWORD, TestDeleteValue, TestEnumerate
-- TestKeyExists, TestDeleteKey
+> **Raison:** `golang.org/x/sys/windows/registry` couvre déjà le CRUD registry.
+> Les appels registry ne passent pas par des NT syscalls routables par notre Caller/SSN resolvers,
+> donc un wrapper n'apporte aucune plus-value. Les packages existants (`persistence/registry/`,
+> `evasion/antivm/`) utilisent directement `x/sys/windows/registry` — c'est suffisant.
 
 ---
 
@@ -201,6 +171,8 @@ Examples/
 **MITRE:** T1036.005 — Masquerading: Match Legitimate Name or Location
 **Source:** gtworek/PSBits FakeOwnCmdLine.c (rewrite in Go)
 **Credit:** gtworek/PSBits
+**Refs:**
+- https://github.com/gtworek/PSBits/blob/master/FakeCmdLine/FakeOwnCmdLine.c
 
 **API:**
 
@@ -227,6 +199,9 @@ func Restore() error
 **MITRE:** T1134.001 — Access Token Manipulation: Token Impersonation
 **Source:** FourCoreLabs/TrustedInstallerPOC (rewrite)
 **Credit:** FourCoreLabs/TrustedInstallerPOC
+**Refs:**
+- https://github.com/FourCoreLabs/TrustedInstallerPOC
+- https://fourcore.io/blogs/no-more-access-denied-i-am-trustedinstaller
 
 **API:**
 
@@ -252,6 +227,8 @@ func RunAsTrustedInstaller(cmd string, args ...string) (*exec.Cmd, error)
 **MITRE:** T1564.001 — Hide Artifacts: Hidden Process
 **Source:** S3cur3Th1sSh1t/Creds HideProcess_Patch.cpp (rewrite)
 **Credit:** S3cur3Th1sSh1t
+**Refs:**
+- https://github.com/S3cur3Th1sSh1t/Creds/blob/master/cpp/HideProcess_Patch.cpp
 
 **API:**
 
@@ -276,6 +253,8 @@ func PatchProcessMonitor(pid int, caller *wsyscall.Caller) error
 **MITRE:** T1036 — Masquerading
 **Source:** gtworek/PSBits StealthOpen.c (rewrite)
 **Credit:** gtworek/PSBits
+**Refs:**
+- https://github.com/gtworek/PSBits/blob/master/NTFSObjectID/StealthOpen.c
 
 **API:**
 
@@ -298,6 +277,8 @@ func SetObjectID(path string, objectID [16]byte) error
 **Package:** `inject/` (extend existing callback_windows.go)
 **Source:** OsandaMalith/CallbackShellcode
 **Credit:** OsandaMalith/CallbackShellcode
+**Refs:**
+- https://github.com/OsandaMalith/CallbackShellcode
 
 **New callbacks:**
 
@@ -319,6 +300,8 @@ const (
 ### 2.6 EnableAllPrivileges
 
 **Package:** `win/token/` (add function to existing)
+**Refs:**
+- https://github.com/gtworek/PSBits/blob/master/EnableAllParentPrivileges/EnableAllParentPrivileges.c
 
 **API:**
 
@@ -339,6 +322,8 @@ func EnableAll(token windows.Token) error
 **MITRE:** T1555.003 — Credentials from Password Stores: Credentials from Web Browsers
 **Source:** moonD4rk/HackBrowserData (concepts + crypto)
 **Credit:** moonD4rk/HackBrowserData
+**Refs:**
+- https://github.com/moonD4rk/HackBrowserData
 
 **API:**
 
@@ -378,6 +363,8 @@ func Browsers() []Browser
 **MITRE:** T1003.001 — OS Credential Dumping: LSASS Memory
 **Source:** S3cur3Th1sSh1t/Creds minidump.cpp (rewrite)
 **Credit:** S3cur3Th1sSh1t
+**Refs:**
+- https://github.com/S3cur3Th1sSh1t/Creds/blob/master/cpp/minidump.cpp
 
 **API:**
 
@@ -407,6 +394,8 @@ func DumpPID(pid int, caller *wsyscall.Caller) ([]byte, error)
 **MITRE:** T1003.004 — OS Credential Dumping: LSA Secrets
 **Source:** gtworek/PSBits LSASecretDumper.c (rewrite)
 **Credit:** gtworek/PSBits
+**Refs:**
+- https://github.com/gtworek/PSBits/blob/master/LSASecretDumper/LSASecretDumper.c
 
 **API:**
 
@@ -435,6 +424,9 @@ func DumpSecrets() ([]Secret, error)
 **MITRE:** T1068 — Exploitation for Privilege Escalation (BYOVD recon)
 **Source:** FourCoreLabs/LolDriverScan (rewrite)
 **Credit:** FourCoreLabs/LolDriverScan, loldrivers.io
+**Refs:**
+- https://github.com/FourCoreLabs/LolDriverScan
+- https://www.loldrivers.io/api/drivers.json
 
 **API:**
 
@@ -490,6 +482,8 @@ func OpenUndeletable(path string) (*os.File, error)
 **MITRE:** T1090.001 — Proxy: Internal Proxy (pipe-based lateral movement)
 **Source:** go-winio pipe implementation (rewrite with Caller)
 **Credit:** microsoft/go-winio
+**Refs:**
+- https://github.com/microsoft/go-winio
 
 **API:**
 
@@ -516,6 +510,8 @@ func NewPipeListener(pipeName string, sd *SecurityDescriptor) (*PipeListener, er
 **MITRE:** T1071.004 — Application Layer Protocol: DNS
 **Source:** gin-doh concepts (rewrite)
 **Credit:** wcaszczxcey/gin-doh
+**Refs:**
+- https://github.com/wcaszczxcey/gin-doh
 
 **API:**
 
@@ -539,6 +535,9 @@ func NewDoH(resolverURL string, domain string) *DoH
 **MITRE:** T1562.001 — Impair Defenses: Disable or Modify Tools
 **Source:** nixhacker blog + SymLinkExploit POC (rewrite)
 **Credit:** nixhacker.com, shubham0d/Symbolic-link-exploitation
+**Refs:**
+- https://nixhacker.com/breaking-antivirus-arbitrary-delete-using-symbolic-link/
+- https://github.com/shubham0d/Symbolic-link-exploitation/tree/master/SymLinkExploit
 
 **API:**
 
@@ -559,6 +558,8 @@ func DeleteViaAV(targetPath string) error
 **MITRE:** T1055.009 — Process Injection (via infected binary), T1195.002 — Supply Chain
 **Source:** go-liora concepts (complete rewrite with our pe/parse)
 **Credit:** guitmz/go-liora
+**Refs:**
+- https://github.com/guitmz/go-liora
 
 **API:**
 
@@ -590,6 +591,8 @@ func InfectELF(path string, cfg *InfectConfig) error
 **MITRE:** T1620 — Reflective Code Loading
 **Source:** carved4/meltloader concepts
 **Credit:** carved4
+**Refs:**
+- https://carved.lol/
 
 **API:**
 
@@ -611,6 +614,8 @@ func LoadDLL(peBytes []byte, caller *wsyscall.Caller) (uintptr, error)
 **MITRE:** T1134 — Access Token Manipulation
 **Source:** gtworek/PSBits RunAsVA.c (rewrite)
 **Credit:** gtworek/PSBits
+**Refs:**
+- https://github.com/gtworek/PSBits/blob/master/VirtualAccounts/RunAsVA.c
 
 **API:**
 
@@ -650,6 +655,8 @@ Move all `docs/` content to GitHub Wiki:
 **Package:** `system/wallpaper/`
 **Source:** reujab/wallpaper
 **Credit:** reujab/wallpaper
+**Refs:**
+- https://github.com/reujab/wallpaper
 
 ```go
 func Get() (string, error)
@@ -671,7 +678,6 @@ func Set(path string) error
 Sprint 1 (foundations)
   ├── system/ads/ ──────────── used by cleanup/selfdelete (improvement)
   ├── pe/srdi/ (go-donut) ─── used by inject/ (real shellcode gen)
-  ├── system/registry/ ─────── used by persistence/registry (improvement)
   └── README refactor
 
 Sprint 2 (evasion) — independent of Sprint 1
