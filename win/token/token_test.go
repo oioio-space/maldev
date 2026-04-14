@@ -189,6 +189,14 @@ func TestPrivilegeString(t *testing.T) {
 	}
 }
 
+func TestEnableAll(t *testing.T) {
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("requires elevation")
+	}
+	err := EnableAll(windows.GetCurrentProcessToken())
+	require.NoError(t, err)
+}
+
 func TestUserDetailString(t *testing.T) {
 	ud := UserDetail{
 		Username:       "testuser",

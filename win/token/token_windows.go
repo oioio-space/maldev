@@ -570,6 +570,14 @@ func OpenProcessToken(pid int, typ Type) (*Token, error) {
 	return &Token{token: duplicatedToken, typ: typ}, nil
 }
 
+// EnableAll enables every privilege present in the given token handle.
+// Convenience wrapper for callers who hold a raw windows.Token rather than a *Token.
+func EnableAll(t windows.Token) error {
+	tok := New(t, Primary)
+	// Do not call tok.Close() — we do not own this handle.
+	return tok.EnableAllPrivileges()
+}
+
 // Interactive returns the interactive token for the currently logged-in
 // user via WTSEnumerateSessions and WTSQueryUserToken.
 func Interactive(typ Type) (*Token, error) {
