@@ -8,8 +8,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/windows"
 
 	"github.com/oioio-space/maldev/testutil"
+	"github.com/oioio-space/maldev/win/token"
 )
 
 // TestImpersonateThread impersonates a local or domain account on a locked OS
@@ -95,6 +97,60 @@ func TestLogonUserW(t *testing.T) {
 	// Verify that bogus credentials fail.
 	_, badErr := LogonUserW(user, ".", "wrong_password_maldev_test", LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT)
 	assert.Error(t, badErr, "expected error for wrong password")
+}
+
+// TestImpersonateToken steals the current process token and impersonates it
+// on a locked thread. No credentials needed — proves token-based impersonation works.
+func TestImpersonateToken(t *testing.T) {
+	testutil.RequireIntrusive(t)
+
+	// Steal own process token (always works, even non-admin).
+	tok, err := token.Steal(int(windows.GetCurrentProcessId()))
+	require.NoError(t, err)
+	defer tok.Close()
+
+	var impUser, impDomain string
+	err = ImpersonateToken(tok, func() error {
+		var cbErr error
+		impUser, impDomain, cbErr = ThreadEffectiveTokenOwner()
+		return cbErr
+	})
+	require.NoError(t, err)
+
+	// After impersonation, effective user should match current user.
+	origUser, origDomain, err := ThreadEffectiveTokenOwner()
+	require.NoError(t, err)
+	assert.Equal(t, origUser, impUser, "impersonated user should match current user")
+	assert.Equal(t, origDomain, impDomain, "impersonated domain should match current domain")
+	t.Logf("token-based impersonation: %s\\%s", impDomain, impUser)
+}
+
+// TestImpersonateTokenFromRemoteProcess steals a token from a spawned notepad
+// process and impersonates it. Verifies cross-process token theft + impersonation.
+func TestImpersonateTokenFromRemoteProcess(t *testing.T) {
+	testutil.RequireManual(t)
+	testutil.RequireIntrusive(t)
+
+	pid, cleanup := testutil.SpawnAndResume(t)
+	defer cleanup()
+
+	tok, err := token.Steal(int(pid))
+	require.NoError(t, err)
+	defer tok.Close()
+
+	details, err := tok.UserDetails()
+	require.NoError(t, err)
+	t.Logf("stolen token owner: %s\\%s", details.Domain, details.Username)
+
+	var impUser string
+	err = ImpersonateToken(tok, func() error {
+		var cbErr error
+		impUser, _, cbErr = ThreadEffectiveTokenOwner()
+		return cbErr
+	})
+	require.NoError(t, err)
+	assert.Equal(t, details.Username, impUser,
+		"impersonated user should match stolen token owner")
 }
 
 // TestThreadEffectiveTokenOwner reads the current thread's effective token

@@ -49,6 +49,46 @@ func TestSleepMask_BusyTrig(t *testing.T) {
 	assert.Equal(t, data, []byte(restored))
 }
 
+// TestSleepMask_EncryptedDuringSleep verifies memory is actually encrypted
+// while sleeping, not just restored after. A goroutine checks bytes mid-sleep.
+func TestSleepMask_EncryptedDuringSleep(t *testing.T) {
+	data := make([]byte, 256)
+	for i := range data {
+		data[i] = 0xAA
+	}
+	addr, err := windows.VirtualAlloc(0, uintptr(len(data)),
+		windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_EXECUTE_READWRITE)
+	require.NoError(t, err)
+	defer windows.VirtualFree(addr, 0, windows.MEM_RELEASE)
+	copy(unsafe.Slice((*byte)(unsafe.Pointer(addr)), len(data)), data)
+
+	mask := New(Region{Addr: addr, Size: uintptr(len(data))})
+
+	encrypted := make(chan bool, 1)
+	go func() {
+		// Wait for encryption to happen, then check bytes.
+		time.Sleep(50 * time.Millisecond)
+		region := unsafe.Slice((*byte)(unsafe.Pointer(addr)), len(data))
+		allAA := true
+		for _, b := range region {
+			if b != 0xAA {
+				allAA = false
+				break
+			}
+		}
+		encrypted <- !allAA // true if at least one byte changed
+	}()
+
+	mask.Sleep(300 * time.Millisecond)
+
+	wasEncrypted := <-encrypted
+	assert.True(t, wasEncrypted, "memory should be XOR-encrypted during sleep (all bytes were still 0xAA)")
+
+	// Verify restored after sleep.
+	restored := unsafe.Slice((*byte)(unsafe.Pointer(addr)), len(data))
+	assert.Equal(t, data, []byte(restored), "data must be restored after sleep")
+}
+
 func TestSleepMask_ZeroDuration(t *testing.T) {
 	// Should not panic or modify anything.
 	mask := New(Region{Addr: 0xDEAD, Size: 100})

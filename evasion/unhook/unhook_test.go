@@ -8,37 +8,42 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sys/windows"
 
 	"github.com/oioio-space/maldev/testutil"
+	"github.com/oioio-space/maldev/win/api"
 )
 
-// assertCleanSyscallStub verifies the NtClose prologue looks like an unhooked
-// x64 syscall stub: 4C 8B D1 (mov r10, rcx) followed by B8 (mov eax, <id>).
-// EDR hooks typically replace the first bytes with a JMP, so seeing 4C 8B D1 B8
-// confirms the stub has been restored to its original form.
-func assertCleanSyscallStub(t *testing.T) {
+// assertCleanSyscallStub verifies that an ntdll function has the standard x64
+// syscall prologue: 4C 8B D1 B8 (mov r10,rcx; mov eax,<SSN>).
+func assertCleanSyscallStub(t *testing.T, funcName string) {
 	t.Helper()
-	proc := windows.NewLazySystemDLL("ntdll.dll").NewProc("NtClose")
-	require.NoError(t, proc.Find(), "NtClose not found in loaded ntdll")
-	memBytes := (*[8]byte)(unsafe.Pointer(proc.Addr()))
-	assert.Equal(t, byte(0x4C), memBytes[0], "expected mov r10,rcx (0x4C) — stub may still be hooked")
-	assert.Equal(t, byte(0x8B), memBytes[1], "expected 0x8B")
-	assert.Equal(t, byte(0xD1), memBytes[2], "expected 0xD1")
-	assert.Equal(t, byte(0xB8), memBytes[3], "expected mov eax,<syscall id> (0xB8)")
+	proc := api.Ntdll.NewProc(funcName)
+	require.NoError(t, proc.Find(), "%s not found in loaded ntdll", funcName)
+	b := (*[4]byte)(unsafe.Pointer(proc.Addr()))
+	assert.Equal(t, byte(0x4C), b[0], "%s[0]: expected 0x4C (mov r10,rcx)", funcName)
+	assert.Equal(t, byte(0x8B), b[1], "%s[1]: expected 0x8B", funcName)
+	assert.Equal(t, byte(0xD1), b[2], "%s[2]: expected 0xD1", funcName)
+	assert.Equal(t, byte(0xB8), b[3], "%s[3]: expected 0xB8 (mov eax,SSN)", funcName)
+}
+
+func TestClassicUnhookRejectsRuntimeCritical(t *testing.T) {
+	for _, fn := range []string{"NtClose", "NtCreateFile", "NtReadFile", "NtWriteFile"} {
+		err := ClassicUnhook(fn, nil)
+		require.Error(t, err, "ClassicUnhook(%s) should be rejected", fn)
+		assert.Contains(t, err.Error(), "Go runtime depends on it")
+	}
 }
 
 func TestClassicUnhook(t *testing.T) {
 	testutil.RequireIntrusive(t)
 
-	err := ClassicUnhook("NtClose", nil)
+	const target = "NtAllocateVirtualMemory"
+	err := ClassicUnhook(target, nil)
 	if err != nil {
-		// Some errors are expected in restricted environments (e.g. ACG already set,
-		// ntdll not accessible from test runner). Log and skip rather than hard-fail.
 		t.Logf("ClassicUnhook returned error (may be expected in this environment): %v", err)
 		return
 	}
-	assertCleanSyscallStub(t)
+	assertCleanSyscallStub(t, target)
 }
 
 func TestFullUnhook(t *testing.T) {
@@ -46,9 +51,8 @@ func TestFullUnhook(t *testing.T) {
 
 	err := FullUnhook(nil)
 	if err != nil {
-		// Same reasoning as TestClassicUnhook — log unexpected environments.
 		t.Logf("FullUnhook returned error (may be expected in this environment): %v", err)
 		return
 	}
-	assertCleanSyscallStub(t)
+	assertCleanSyscallStub(t, "NtAllocateVirtualMemory")
 }

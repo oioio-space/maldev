@@ -39,7 +39,24 @@ GOOS=linux GOARCH=amd64 go build $(go list ./...)
 ./scripts/vm-run-tests.sh windows "./..." "-v -count=1"
 ./scripts/vm-run-tests.sh linux "./..." "-count=1"
 ./scripts/vm-run-tests.sh all "./..." "-count=1"
+
+# x64dbg binary verification (75 tests, from host)
+go run scripts/vm-test-x64dbg-mcp.go
+
+# BSOD test (crashes VM, restores snapshot)
+go run scripts/vm-test-bsod.go
+
+# Meterpreter matrix (20 injection techniques × MSF sessions)
+# Requires: Kali VM with MSF, see docs/testing.md
 ```
+
+## Test Helpers (testutil/)
+- `CallerMethods(t)` — returns WinAPI/NativeAPI/Direct/Indirect for matrix testing
+- `ScanProcessMemory(pattern)` / `ScanProcessMemoryFrom(addr, pattern)` — scan RX/RWX pages
+- `ModuleBounds(handle)` — base/end of loaded DLL
+- `WindowsSearchableCanary` — 19-byte canary with ASCII marker (for memory scanning)
+- `SpawnSacrificial(t)` / `SpawnAndResume(t)` — notepad for injection tests
+- `KaliSSH(t, cmd)` / `KaliGenerateShellcode(t, payload, lhost, lport)` — Kali MSF helpers
 
 ## Package Structure
 Single module `github.com/oioio-space/maldev`. Dependencies flow bottom-up:

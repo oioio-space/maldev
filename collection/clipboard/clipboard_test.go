@@ -5,10 +5,15 @@ package clipboard
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os/exec"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/oioio-space/maldev/testutil"
 )
 
 func TestReadText(t *testing.T) {
@@ -22,6 +27,23 @@ func TestReadText(t *testing.T) {
 	}
 	assert.NoError(t, err)
 	t.Logf("clipboard text length: %d", len(text))
+}
+
+// TestReadTextRoundtrip sets clipboard content via PowerShell, then reads it back.
+func TestReadTextRoundtrip(t *testing.T) {
+	testutil.RequireIntrusive(t)
+
+	marker := "MALDEV_CLIP_" + fmt.Sprintf("%d", time.Now().UnixNano()%100000)
+	// Set clipboard via PowerShell (reliable, uses COM underneath).
+	cmd := exec.Command("powershell", "-NoProfile", "-Command",
+		fmt.Sprintf("Set-Clipboard -Value '%s'", marker))
+	if err := cmd.Run(); err != nil {
+		t.Skipf("cannot set clipboard (non-interactive session?): %v", err)
+	}
+
+	text, err := ReadText()
+	require.NoError(t, err)
+	assert.Equal(t, marker, text, "clipboard roundtrip must return the exact string we set")
 }
 
 func TestWatch(t *testing.T) {

@@ -4,6 +4,15 @@ package testutil
 // Does nothing and returns cleanly. Verifies injection by thread completion.
 var WindowsCanaryX64 = []byte{0x31, 0xC0, 0xC3}
 
+// WindowsSearchableCanary is a longer canary for memory-scanning tests.
+// Layout: xor eax,eax; ret followed by a unique 16-byte marker that is
+// never executed (placed after ret). The marker "MALDEV_CANARY!!\n" is
+// easy to find with a memory scan and won't collide with normal PE data.
+var WindowsSearchableCanary = []byte{
+	0x31, 0xC0, 0xC3, // xor eax,eax; ret
+	'M', 'A', 'L', 'D', 'E', 'V', '_', 'C', 'A', 'N', 'A', 'R', 'Y', '!', '!', '\n',
+}
+
 // LinuxCanaryX64 writes "MALDEV_OK\n" to stdout then exits with code 0.
 //
 //	lea rsi, [rip+msg]  ; 48 8d 35 15 00 00 00

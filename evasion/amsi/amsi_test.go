@@ -11,15 +11,15 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/oioio-space/maldev/testutil"
+	"github.com/oioio-space/maldev/win/api"
 )
 
 func TestPatchScanBufferWinAPI(t *testing.T) {
 	testutil.RequireIntrusive(t)
-	amsiDLL := windows.NewLazySystemDLL("amsi.dll")
-	if err := amsiDLL.Load(); err != nil {
+	if err := api.Amsi.Load(); err != nil {
 		t.Skip("amsi.dll not available")
 	}
-	proc := amsiDLL.NewProc("AmsiScanBuffer")
+	proc := api.Amsi.NewProc("AmsiScanBuffer")
 	if err := proc.Find(); err != nil {
 		t.Skip("AmsiScanBuffer not found")
 	}
@@ -40,14 +40,13 @@ func TestPatchThenScan(t *testing.T) {
 	testutil.RequireManual(t)
 	testutil.RequireIntrusive(t)
 
-	amsiDLL := windows.NewLazySystemDLL("amsi.dll")
-	if err := amsiDLL.Load(); err != nil {
+	if err := api.Amsi.Load(); err != nil {
 		t.Skip("amsi.dll not available")
 	}
 
 	// Load the procs we need.
-	procInit := amsiDLL.NewProc("AmsiInitialize")
-	procScan := amsiDLL.NewProc("AmsiScanBuffer")
+	procInit := api.Amsi.NewProc("AmsiInitialize")
+	procScan := api.Amsi.NewProc("AmsiScanBuffer")
 	if err := procInit.Find(); err != nil {
 		t.Skip("AmsiInitialize not found")
 	}
@@ -63,7 +62,7 @@ func TestPatchThenScan(t *testing.T) {
 		t.Skipf("AmsiInitialize failed: 0x%X", hr)
 	}
 	defer func() {
-		uninit := amsiDLL.NewProc("AmsiUninitialize")
+		uninit := api.Amsi.NewProc("AmsiUninitialize")
 		if uninit.Find() == nil {
 			uninit.Call(ctx)
 		}

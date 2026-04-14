@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -25,18 +26,16 @@ var ErrNoTargetThreads = errors.New("no target threads found")
 // SubProcessTag used for service tag resolution.
 const threadQuerySetWin32StartAddress = 9
 
-// tagQueryAvailable reports whether I_QueryTagInformation can be called.
-// Cached on first invocation.
-var tagQueryAvailable *bool
+var (
+	tagQueryOnce      sync.Once
+	tagQueryAvailable bool
+)
 
 func canQueryTags() bool {
-	if tagQueryAvailable != nil {
-		return *tagQueryAvailable
-	}
-	err := api.ProcI_QueryTagInformation.Find()
-	avail := err == nil
-	tagQueryAvailable = &avail
-	return avail
+	tagQueryOnce.Do(func() {
+		tagQueryAvailable = api.ProcI_QueryTagInformation.Find() == nil
+	})
+	return tagQueryAvailable
 }
 
 // isEventLogThread checks whether a thread (identified by its TID) in the
@@ -45,34 +44,49 @@ func canQueryTags() bool {
 //
 // Returns true if the thread is confirmed to be an EventLog worker, or if
 // service tag validation is unavailable (graceful fallback).
-func isEventLogThread(pid, tid uint32) bool {
+func isEventLogThread(hProcess windows.Handle, pid, tid uint32) bool {
 	if !canQueryTags() {
-		// I_QueryTagInformation unavailable (older Windows) — fall back to
-		// killing all threads of the PID (original behavior).
 		return true
 	}
 
-	// Open the thread with QUERY_INFORMATION access to read TEB fields.
 	const threadQueryInformation = 0x0040
 	hThread, err := windows.OpenThread(threadQueryInformation, false, tid)
 	if err != nil {
-		return true // cannot verify — assume EventLog to avoid silent skip
+		return true
 	}
 	defer windows.CloseHandle(hThread)
 
-	// Read the SubProcessTag via NtQueryInformationThread(ThreadQuerySetWin32StartAddress).
-	// Despite the misleading class name, on modern Windows this returns the
-	// thread's service tag when the thread belongs to a service host process.
-	var tag uintptr
+	// Read the SubProcessTag from the TEB. The tag is at TEB offset 0x1720 (x64).
+	// First get the TEB address via NtQueryInformationThread(ThreadBasicInformation=0).
+	type threadBasicInfo struct {
+		ExitStatus                   int32
+		_                            [4]byte // padding
+		TebBaseAddress               uintptr
+		ClientID                     [2]uintptr // UniqueProcess, UniqueThread
+		AffinityMask                 uintptr
+		Priority                     int32
+		BasePriority                 int32
+	}
+	var tbi threadBasicInfo
 	r, _, _ := api.ProcNtQueryInformationThread.Call(
 		uintptr(hThread),
-		threadQuerySetWin32StartAddress,
-		uintptr(unsafe.Pointer(&tag)),
-		unsafe.Sizeof(tag),
+		0, // ThreadBasicInformation
+		uintptr(unsafe.Pointer(&tbi)),
+		unsafe.Sizeof(tbi),
 		0,
 	)
-	if r != 0 || tag == 0 {
-		// No service tag — thread is not a service worker or query failed.
+	if r != 0 || tbi.TebBaseAddress == 0 {
+		return false
+	}
+
+	// Read SubProcessTag (ULONG) from TEB+0x1720 via ReadProcessMemory.
+	var tag uint32
+	var bytesRead uintptr
+	const tebSubProcessTagOffset = 0x1720 // x64 TEB offset for SubProcessTag
+	err = windows.ReadProcessMemory(hProcess,
+		tbi.TebBaseAddress+tebSubProcessTagOffset,
+		(*byte)(unsafe.Pointer(&tag)), 4, &bytesRead)
+	if err != nil || tag == 0 {
 		return false
 	}
 
@@ -127,9 +141,16 @@ func Kill(caller *wsyscall.Caller) error {
 		return fmt.Errorf("enumerate threads: %w", err)
 	}
 
+	// Open the process once for ReadProcessMemory (TEB tag resolution).
+	hProcess, err := windows.OpenProcess(windows.PROCESS_VM_READ, false, pid)
+	if err != nil {
+		return fmt.Errorf("open EventLog process: %w", err)
+	}
+	defer windows.CloseHandle(hProcess)
+
 	killed := 0
 	for _, tid := range tids {
-		if !isEventLogThread(pid, tid) {
+		if !isEventLogThread(hProcess, pid, tid) {
 			continue
 		}
 		hThread, openErr := windows.OpenThread(windows.THREAD_TERMINATE, false, tid)

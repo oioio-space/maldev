@@ -111,6 +111,44 @@ func TestCallByHash_IndirectSyscall(t *testing.T) {
 	assert.NotZero(t, r)
 }
 
+// TestAllResolversAgree verifies that all 4 SSN resolvers return the same
+// value for the same function. If they disagree, one of them has a bug.
+func TestAllResolversAgree(t *testing.T) {
+	type namedResolver struct {
+		name string
+		r    SSNResolver
+	}
+	resolvers := []namedResolver{
+		{"HellsGate", NewHellsGate()},
+		{"HalosGate", NewHalosGate()},
+		{"Tartarus", NewTartarus()},
+		{"HashGate", NewHashGate()},
+	}
+
+	funcs := []string{
+		"NtAllocateVirtualMemory",
+		"NtProtectVirtualMemory",
+		"NtCreateThreadEx",
+		"NtClose",
+	}
+
+	for _, fn := range funcs {
+		var firstSSN uint16
+		for i, nr := range resolvers {
+			ssn, err := nr.r.Resolve(fn)
+			require.NoError(t, err, "%s failed to resolve %s", nr.name, fn)
+			if i == 0 {
+				firstSSN = ssn
+			} else {
+				assert.Equal(t, firstSSN, ssn,
+					"%s: %s returned 0x%04X but %s returned 0x%04X",
+					fn, resolvers[0].name, firstSSN, nr.name, ssn)
+			}
+		}
+		t.Logf("%s SSN=0x%04X (all 4 agree)", fn, firstSSN)
+	}
+}
+
 func TestNewHellsGate(t *testing.T) {
 	r := NewHellsGate()
 	require.NotNil(t, r, "NewHellsGate must return a non-nil SSNResolver")

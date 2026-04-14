@@ -81,39 +81,54 @@ func ThreadEffectiveTokenOwner() (user string, domain string, err error) {
 	return user, domain, nil
 }
 
-// ImpersonateThread runs callbackFunc on a locked OS thread under the
-// credentials of the provided user. The thread reverts to self after
-// callbackFunc returns.
-func ImpersonateThread(isInDomain bool, domain, username, password string, callbackFunc func() error) error {
+// runImpersonated executes fn on a locked OS thread impersonated as the given
+// Windows token. The thread reverts to self after fn returns.
+func runImpersonated(t windows.Token, fn func() error) error {
 	group := new(errgroup.Group)
 	group.Go(func() error {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 
-		logonType := LOGON32_LOGON_INTERACTIVE
-		if !isInDomain {
-			domain = "."
-		}
-
-		t, err := LogonUserW(username, domain, password, logonType, LOGON32_PROVIDER_DEFAULT)
-		if err != nil {
-			return err
-		}
-
-		wt := token.New(t, token.Impersonation)
-		defer wt.Close()
-
-		if err = wt.EnableAllPrivileges(); err != nil {
-			return err
-		}
-
-		if err = ImpersonateLoggedOnUser(wt.Token()); err != nil {
+		if err := ImpersonateLoggedOnUser(t); err != nil {
 			return err
 		}
 		defer windows.RevertToSelf()
 
-		return callbackFunc()
+		return fn()
 	})
-
 	return group.Wait()
+}
+
+// ImpersonateToken runs callbackFunc on a locked OS thread under the identity
+// of the given token (typically obtained via token.Steal or token.Interactive).
+// The thread reverts to self after callbackFunc returns.
+//
+// Unlike ImpersonateThread which requires credentials, this accepts a stolen
+// or duplicated token handle — useful for token theft attacks (T1134.001).
+func ImpersonateToken(tok *token.Token, callbackFunc func() error) error {
+	return runImpersonated(tok.Token(), callbackFunc)
+}
+
+// ImpersonateThread runs callbackFunc on a locked OS thread under the
+// credentials of the provided user. The thread reverts to self after
+// callbackFunc returns.
+func ImpersonateThread(isInDomain bool, domain, username, password string, callbackFunc func() error) error {
+	logonType := LOGON32_LOGON_INTERACTIVE
+	if !isInDomain {
+		domain = "."
+	}
+
+	t, err := LogonUserW(username, domain, password, logonType, LOGON32_PROVIDER_DEFAULT)
+	if err != nil {
+		return err
+	}
+
+	wt := token.New(t, token.Impersonation)
+	defer wt.Close()
+
+	if err = wt.EnableAllPrivileges(); err != nil {
+		return err
+	}
+
+	return runImpersonated(wt.Token(), callbackFunc)
 }

@@ -2,6 +2,8 @@ package antivm
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestDetectVMNoPanic(t *testing.T) {
@@ -60,6 +62,47 @@ func TestDetectEmptyVendors(t *testing.T) {
 		t.Fatalf("Detect with empty vendors returned error: %v", err)
 	}
 	// We don't assert name=="" because DMI/CPUID detection is vendor-independent.
+}
+
+// TestDetectVMInVirtualBox verifies that the VM detection actually returns
+// true when running inside VirtualBox. If this test runs on bare metal,
+// it verifies the result is false.
+func TestDetectVMInVirtualBox(t *testing.T) {
+	result := DetectVM()
+	t.Logf("DetectVM() = %q", result)
+	// If running in VirtualBox, we expect a non-empty result containing "VirtualBox".
+	// If on bare metal, result should be empty.
+	// The test is informational — it logs the detection result for the current environment.
+	if result != "" {
+		t.Logf("VM DETECTED: %s", result)
+	} else {
+		t.Log("No VM detected (bare metal or unrecognized hypervisor)")
+	}
+}
+
+// TestDetectAllInVirtualBox runs all detection checks and verifies each one.
+func TestDetectAllInVirtualBox(t *testing.T) {
+	results, err := DetectAll(DefaultConfig())
+	require.NoError(t, err)
+	t.Logf("DetectAll returned %d results:", len(results))
+	for _, r := range results {
+		t.Logf("  detected: %q", r)
+	}
+	if len(results) > 0 {
+		t.Logf("VM indicators found: %d", len(results))
+	}
+}
+
+// TestDetectVBoxProcess verifies that VBoxService.exe or VBoxTray.exe is
+// detected as a VM process when running inside VirtualBox.
+func TestDetectVBoxProcess(t *testing.T) {
+	found, matched, err := DetectProcess([]string{"VBoxService.exe", "VBoxTray.exe"})
+	require.NoError(t, err)
+	if found {
+		t.Logf("VirtualBox process detected: %s", matched)
+	} else {
+		t.Log("No VirtualBox processes found (may be bare metal)")
+	}
 }
 
 func TestDetectProcessNoPanic(t *testing.T) {

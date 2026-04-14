@@ -94,6 +94,40 @@ func TestRunWithDecoy(t *testing.T) {
 	t.Log("herpaderping completed successfully — process created with decoy on disk")
 }
 
+// TestRunWithMarkerPayload uses the marker_x64.bin shellcode payload wrapped
+// in a PE to prove herpaderping actually EXECUTES the payload, not just creates
+// a process. The marker shellcode writes C:\maldev_test_marker.txt.
+//
+// Note: marker_x64.bin is raw shellcode, not a PE. Herpaderping requires a PE
+// as payload (NtCreateSection SEC_IMAGE). So we use cmd.exe as the payload PE
+// and verify the process was created by checking it ran (not the marker).
+// True payload execution verification requires a custom PE that produces
+// a measurable side effect — a future enhancement.
+func TestRunVerifyProcessCreated(t *testing.T) {
+	testutil.RequireManual(t)
+	testutil.RequireIntrusive(t)
+
+	dir := t.TempDir()
+	payloadPath := `C:\Windows\System32\cmd.exe`
+	targetPath := filepath.Join(dir, "herp_verify.exe")
+
+	err := Run(Config{
+		PayloadPath: payloadPath,
+		TargetPath:  targetPath,
+	})
+	require.NoError(t, err)
+
+	// The process was created from cmd.exe via herpaderping.
+	// Verify the target file was overwritten with random bytes (no decoy = random).
+	diskContent, readErr := os.ReadFile(targetPath)
+	if readErr == nil {
+		origPayload, _ := os.ReadFile(payloadPath)
+		assert.NotEqual(t, origPayload[:64], diskContent[:64],
+			"disk content should differ from original payload (overwritten with decoy/random)")
+		t.Logf("target file size: %d (original cmd.exe: %d)", len(diskContent), len(origPayload))
+	}
+}
+
 func TestTechniqueInterface(t *testing.T) {
 	tech := Technique(Config{PayloadPath: "test.exe"})
 	assert.Equal(t, "herpaderping", tech.Name())

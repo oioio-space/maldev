@@ -27,12 +27,37 @@ import (
 	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
+// runtimeCriticalFuncs are ntdll functions called internally by the Go runtime
+// for file I/O and handle management. Patching these with INT3 or invalid bytes
+// will deadlock or crash the process because ClassicUnhook itself uses file I/O
+// (os.ReadFile) which calls these functions.
+var runtimeCriticalFuncs = map[string]bool{
+	"NtClose":              true,
+	"NtCreateFile":         true,
+	"NtReadFile":           true,
+	"NtWriteFile":          true,
+	"NtQueryVolumeInformationFile": true,
+	"NtQueryInformationFile":       true,
+	"NtSetInformationFile":         true,
+	"NtFsControlFile":              true,
+}
+
 // ClassicUnhook restores the first 5 bytes of a hooked ntdll function
 // by reading the original prologue from the clean ntdll.dll on disk.
 //
 // This works because the on-disk ntdll is never hooked — EDR hooks are
 // applied in-memory after the DLL is loaded.
+//
+// Returns an error if funcName is a Go-runtime-critical I/O function
+// (NtClose, NtCreateFile, NtReadFile, NtWriteFile, etc.) because patching
+// these would deadlock: this function reads ntdll.dll from disk, which
+// calls these same functions via the Go runtime. Use FullUnhook instead
+// to restore all functions atomically.
 func ClassicUnhook(funcName string, caller *wsyscall.Caller) error {
+	if runtimeCriticalFuncs[funcName] {
+		return fmt.Errorf("refusing to unhook %s: Go runtime depends on it for file I/O (use FullUnhook instead)", funcName)
+	}
+
 	sysDir, _ := windows.GetSystemDirectory()
 	ntdllPath := filepath.Join(sysDir, "ntdll.dll")
 
