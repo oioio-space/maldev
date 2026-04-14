@@ -556,10 +556,11 @@ func DeleteViaAV(targetPath string) error
 
 **Package:** `pe/infect/`
 **MITRE:** T1055.009 — Process Injection (via infected binary), T1195.002 — Supply Chain
-**Source:** go-liora concepts (complete rewrite with our pe/parse)
-**Credit:** guitmz/go-liora
+**Source:** go-liora + Binject/binjection concepts (rewrite with our pe/parse)
+**Credit:** guitmz/go-liora, Binject/binjection
 **Refs:**
 - https://github.com/guitmz/go-liora
+- https://github.com/Binject/binjection
 
 **API:**
 
@@ -589,21 +590,26 @@ func InfectELF(path string, cfg *InfectConfig) error
 
 **Package:** `pe/reflective/`
 **MITRE:** T1620 — Reflective Code Loading
-**Source:** carved4/meltloader concepts
-**Credit:** carved4
+**Source:** Binject/universal (fork + modernize) + carved4/meltloader concepts
+**Credit:** Binject/universal, carved4
 **Refs:**
+- https://github.com/Binject/universal
 - https://carved.lol/
 
 **API:**
 
 ```go
-// Load loads a PE file from memory without using the Windows loader.
+// Load loads a PE/ELF/Mach-O from memory without using the OS loader.
 // Performs manual mapping: section allocation, relocation, import resolution,
 // TLS callbacks, entry point execution.
-func Load(peBytes []byte, caller *wsyscall.Caller) error
+// Cross-platform: PE (Windows), ELF (Linux), Mach-O (macOS).
+func Load(imageBytes []byte, caller *wsyscall.Caller) (*Library, error)
 
-// LoadDLL loads a DLL from memory and returns a handle.
-func LoadDLL(peBytes []byte, caller *wsyscall.Caller) (uintptr, error)
+// Call invokes an exported function from a reflectively loaded library.
+func (l *Library) Call(funcName string, args ...uintptr) (uintptr, error)
+
+// LoadDLL loads a DLL from memory and returns a handle (Windows shorthand).
+func LoadDLL(peBytes []byte, caller *wsyscall.Caller) (*Library, error)
 ```
 
 ---
@@ -728,7 +734,8 @@ Sprint 6 (polish) — depends on all previous
 | wcaszczxcey/gin-doh | DoH transport concepts | c2/transport/ |
 | reujab/wallpaper | Wallpaper get/set | system/wallpaper/ |
 | loldrivers.io | Vulnerable driver database | system/drivers/ |
-| carved4 | Reflective loader concepts | pe/reflective/ |
+| Binject/universal + carved4 | Reflective loader (PE/ELF/Mach-O from memory) | pe/reflective/ |
+| Binject/binjection | Binary injection/infection patterns | pe/infect/ |
 
 ## drivers.json Update Procedure
 
