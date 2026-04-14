@@ -15,6 +15,7 @@ import (
 const (
 	fsctlCreateOrGetObjectID = 0x900C0
 	fsctlSetObjectID         = 0x900A4
+	fsctlDeleteObjectID      = 0x900A0
 	fileShareAll             = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE
 )
 
@@ -67,12 +68,31 @@ func SetObjectID(path string, objectID [16]byte) error {
 
 	buf := fileObjectIDBuf{ObjectID: objectID}
 	var returned uint32
-	return windows.DeviceIoControl(h,
-		fsctlSetObjectID,
+	if err := windows.DeviceIoControl(h, fsctlSetObjectID,
 		(*byte)(unsafe.Pointer(&buf)), uint32(unsafe.Sizeof(buf)),
-		nil, 0,
-		&returned, nil,
-	)
+		nil, 0, &returned, nil,
+	); err != nil {
+		return fmt.Errorf("FSCTL_SET_OBJECT_ID: %w", err)
+	}
+	return nil
+}
+
+// DeleteObjectID removes the NTFS Object ID from a file. Requires admin.
+// FSCTL_SET_OBJECT_ID fails if the file already has an ID; call this first.
+func DeleteObjectID(path string) error {
+	h, err := openForFsctl(path)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(h)
+
+	var returned uint32
+	if err := windows.DeviceIoControl(h, fsctlDeleteObjectID,
+		nil, 0, nil, 0, &returned, nil,
+	); err != nil {
+		return fmt.Errorf("FSCTL_DELETE_OBJECT_ID: %w", err)
+	}
+	return nil
 }
 
 // OpenByID opens a file using its NTFS Object ID, bypassing path-based EDR hooks.
