@@ -2,12 +2,16 @@
 
 package fakecmd
 
-import "errors"
+import (
+	"errors"
+
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
+)
 
 var errUnsupported = errors.New("fakecmd: not supported on this platform")
 
 // Spoof is not supported on non-Windows platforms.
-func Spoof(_ string, _ interface{}) error { return errUnsupported }
+func Spoof(_ string, _ *wsyscall.Caller) error { return errUnsupported }
 
 // Restore is not supported on non-Windows platforms.
 func Restore() error { return errUnsupported }

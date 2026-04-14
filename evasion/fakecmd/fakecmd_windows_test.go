@@ -38,11 +38,11 @@ func TestSpoofIdempotent(t *testing.T) {
 	require.Equal(t, original, Current())
 }
 
-// TestRestoreNoOp verifies Restore is safe to call when Spoof was never called.
+// TestRestoreNoOp verifies Restore is safe to call when no Spoof is active.
+// The second Restore call must be a no-op returning nil.
 func TestRestoreNoOp(t *testing.T) {
-	// Ensure clean state (in case prior test left it dirty).
-	savedBuffer = 0
-	fakeBufferPins = nil
-
+	require.NoError(t, Spoof(`C:\Windows\System32\svchost.exe`, nil))
+	require.NoError(t, Restore())
+	// Second call with no active spoof — must be a no-op.
 	require.NoError(t, Restore())
 }
