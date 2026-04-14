@@ -2,7 +2,7 @@
 
 [<- Back to README](../../../README.md)
 
-**MITRE ATT&CK:** [T1056 - Input Capture](https://attack.mitre.org/techniques/T1056/), [T1115 - Clipboard Data](https://attack.mitre.org/techniques/T1115/), [T1113 - Screen Capture](https://attack.mitre.org/techniques/T1113/)
+**MITRE ATT&CK:** [T1056 - Input Capture](https://attack.mitre.org/techniques/T1056/), [T1115 - Clipboard Data](https://attack.mitre.org/techniques/T1115/), [T1113 - Screen Capture](https://attack.mitre.org/techniques/T1113/), [T1564.004 - Hide Artifacts: NTFS File Attributes](https://attack.mitre.org/techniques/T1564/004/)
 
 ---
 
@@ -17,6 +17,7 @@ The `collection/` package provides post-exploitation data collection techniques.
 | `collection/keylog` | Low-level keyboard hook (SetWindowsHookEx) | T1056.001 | Windows | High |
 | `collection/clipboard` | Clipboard text monitoring | T1115 | Windows | Medium |
 | `collection/screenshot` | Screen capture via GDI BitBlt | T1113 | Windows | Medium |
+| `system/ads` | NTFS Alternate Data Streams (hide/store data in named streams) | T1564.004 | Windows | Medium |
 
 ## Usage
 
