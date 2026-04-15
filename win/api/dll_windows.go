@@ -91,6 +91,7 @@ var (
 	ProcTpReleaseWork                    = Ntdll.NewProc("TpReleaseWork")
 	ProcNtNotifyChangeDirectoryFile      = Ntdll.NewProc("NtNotifyChangeDirectoryFile")
 	ProcRtlRegisterWait                  = Ntdll.NewProc("RtlRegisterWait")
+	ProcRtlDeregisterWaitEx              = Ntdll.NewProc("RtlDeregisterWaitEx")
 )
 
 // advapi32.dll procs
