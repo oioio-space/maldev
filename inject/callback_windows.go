@@ -65,6 +65,10 @@ func (m CallbackMethod) String() string {
 // in the timer thread instead of a worker thread.
 const wtExecuteInTimerThread = 0x20
 
+// fileNotifyChangeFileName is the FILE_NOTIFY_CHANGE_FILE_NAME filter —
+// fires when a file is created, deleted or renamed in the watched directory.
+const fileNotifyChangeFileName = 0x01
+
 // certSystemStoreCurrentUser is the CERT_SYSTEM_STORE_CURRENT_USER constant.
 const certSystemStoreCurrentUser = 0x10000
 
@@ -196,7 +200,7 @@ func executeReadDirChanges(addr uintptr) error {
 		uintptr(unsafe.Pointer(&buf[0])),
 		uintptr(len(buf)),
 		0,    // bWatchSubtree = FALSE
-		0x01, // FILE_NOTIFY_CHANGE_FILE_NAME
+		fileNotifyChangeFileName,
 		uintptr(unsafe.Pointer(&bytesReturned)),
 		uintptr(unsafe.Pointer(overlapped)),
 		addr, // lpCompletionRoutine = shellcode
@@ -268,7 +272,7 @@ func executeNtNotifyChange(addr uintptr) error {
 		uintptr(unsafe.Pointer(overlapped)),
 		uintptr(unsafe.Pointer(&buf[0])),
 		uintptr(len(buf)),
-		0x01, // FILE_NOTIFY_CHANGE_FILE_NAME
+		fileNotifyChangeFileName,
 		0,    // WatchTree = FALSE
 	)
 	// STATUS_PENDING (0x103) means the async operation was queued successfully;

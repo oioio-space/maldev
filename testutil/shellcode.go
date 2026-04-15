@@ -13,6 +13,12 @@ var WindowsSearchableCanary = []byte{
 	'M', 'A', 'L', 'D', 'E', 'V', '_', 'C', 'A', 'N', 'A', 'R', 'Y', '!', '!', '\n',
 }
 
+// WindowsCETStubX64 is a CET-compliant no-op stub: endbr64; ret.
+// Required on Windows 11+ where indirect jumps (KiUserApcDispatcher,
+// thread-pool callbacks, etc.) are gated by the shadow stack and reject
+// non-endbr64 targets with STATUS_STACK_BUFFER_OVERRUN (0xC000070A).
+var WindowsCETStubX64 = []byte{0xF3, 0x0F, 0x1E, 0xFA, 0xC3}
+
 // LinuxCanaryX64 writes "MALDEV_OK\n" to stdout then exits with code 0.
 //
 //	lea rsi, [rip+msg]  ; 48 8d 35 15 00 00 00

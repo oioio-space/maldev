@@ -99,7 +99,7 @@ func Create(name string, opts ...Option) error {
 	}
 
 	return withTaskService(func(ts *ole.IDispatch) error {
-		root, err := oleGetFolder(ts, `\`)
+		root, err := oleFolder(ts, `\`)
 		if err != nil {
 			return err
 		}
@@ -135,7 +135,7 @@ func Create(name string, opts ...Option) error {
 func Delete(name string) error {
 	folder, leaf := splitTaskName(name)
 	return withTaskService(func(ts *ole.IDispatch) error {
-		f, err := oleGetFolder(ts, folder)
+		f, err := oleFolder(ts, folder)
 		if err != nil {
 			return err
 		}
@@ -152,7 +152,7 @@ func Exists(name string) (bool, error) {
 	folder, leaf := splitTaskName(name)
 	var found bool
 	err := withTaskService(func(ts *ole.IDispatch) error {
-		f, err := oleGetFolder(ts, folder)
+		f, err := oleFolder(ts, folder)
 		if err != nil {
 			return err
 		}
@@ -172,7 +172,7 @@ func Exists(name string) (bool, error) {
 func List() ([]Task, error) {
 	var result []Task
 	err := withTaskService(func(ts *ole.IDispatch) error {
-		f, err := oleGetFolder(ts, `\`)
+		f, err := oleFolder(ts, `\`)
 		if err != nil {
 			return err
 		}
@@ -263,14 +263,14 @@ func withTaskService(fn func(*ole.IDispatch) error) error {
 // configureDefinition populates a task definition IDispatch with settings,
 // trigger and action derived from o.
 func configureDefinition(def *ole.IDispatch, o *options) error {
-	regInfo, err := getDispatchProperty(def, "RegistrationInfo")
+	regInfo, err := dispatchProperty(def, "RegistrationInfo")
 	if err != nil {
 		return err
 	}
 	defer regInfo.Release()
 	oleutil.PutProperty(regInfo, "Description", "System maintenance task") //nolint:errcheck
 
-	settings, err := getDispatchProperty(def, "Settings")
+	settings, err := dispatchProperty(def, "Settings")
 	if err != nil {
 		return err
 	}
@@ -286,7 +286,7 @@ func configureDefinition(def *ole.IDispatch, o *options) error {
 }
 
 func addTrigger(def *ole.IDispatch, o *options) error {
-	triggers, err := getDispatchProperty(def, "Triggers")
+	triggers, err := dispatchProperty(def, "Triggers")
 	if err != nil {
 		return err
 	}
@@ -314,7 +314,7 @@ func addTrigger(def *ole.IDispatch, o *options) error {
 }
 
 func addAction(def *ole.IDispatch, o *options) error {
-	actions, err := getDispatchProperty(def, "Actions")
+	actions, err := dispatchProperty(def, "Actions")
 	if err != nil {
 		return err
 	}
@@ -331,7 +331,7 @@ func addAction(def *ole.IDispatch, o *options) error {
 	return nil
 }
 
-func oleGetFolder(ts *ole.IDispatch, folder string) (*ole.IDispatch, error) {
+func oleFolder(ts *ole.IDispatch, folder string) (*ole.IDispatch, error) {
 	v, err := oleutil.CallMethod(ts, "GetFolder", folder)
 	if err != nil {
 		return nil, fmt.Errorf("GetFolder(%s): %w", folder, err)
@@ -347,7 +347,7 @@ func callDispatch(d *ole.IDispatch, method string, args ...any) (*ole.IDispatch,
 	return v.ToIDispatch(), nil
 }
 
-func getDispatchProperty(d *ole.IDispatch, prop string) (*ole.IDispatch, error) {
+func dispatchProperty(d *ole.IDispatch, prop string) (*ole.IDispatch, error) {
 	v, err := oleutil.GetProperty(d, prop)
 	if err != nil {
 		return nil, fmt.Errorf("get %s: %w", prop, err)

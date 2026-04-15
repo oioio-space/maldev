@@ -210,42 +210,39 @@ type Runtime struct {
 // Returns ErrLegacyRuntimeUnavailable if neither path yields an
 // ICorRuntimeHost (typically .NET 3.5 not installed).
 func Load(_ *wsyscall.Caller) (*Runtime, error) {
-	candidates, err := runtimeCandidates()
+	// One metaHost for the whole function: enumerate candidates, try Path 1
+	// (CorBindToRuntimeEx, which doesn't need the metahost), then Path 2
+	// (GetInterface on each candidate) via the same handle.
+	metaHost, err := createMetaHost()
 	if err != nil {
 		return nil, err
 	}
+	defer releaseCOM(metaHost)
+	candidates := orderCandidates(enumerate(metaHost))
 
-	// Path 1: CorBindToRuntimeEx first — this path succeeds on an unmanaged
-	// host and avoids touching the metahost shim, which would otherwise
-	// lock the process into a CLR4 activation state that blocks every
-	// subsequent legacy-v2 attempt.
-	host, err := corBindToRuntimeEx(candidates)
-	if err == nil {
+	// Path 1: CorBindToRuntimeEx first — succeeds on an unmanaged host and
+	// avoids binding the metahost shim, which would otherwise lock the
+	// process into a CLR4 activation state that blocks every subsequent
+	// legacy-v2 attempt.
+	if host, err := corBindToRuntimeEx(candidates); err == nil {
 		if err := corHostStart(host); err != nil {
 			releaseCOM(host)
 			return nil, err
 		}
 		return &Runtime{host: host}, nil
 	}
-	diagErr := err // keep for diagnostics
-	_ = diagErr
 
-	// Path 2: fall back to the CLRCreateInstance metahost path.
-	metaHost, err := createMetaHost()
-	if err != nil {
-		return nil, err
-	}
-	defer releaseCOM(metaHost)
-
+	// Path 2: fall back to the CLRCreateInstance metahost path, reusing the
+	// metaHost already held above.
 	var lastErr error
 	for _, version := range candidates {
-		runtimeInfo, err := metaHostGetRuntime(metaHost, version)
+		runtimeInfo, err := metaHostRuntime(metaHost, version)
 		if err != nil {
 			lastErr = err
 			continue
 		}
 		_ = runtimeInfoBindLegacyV2(runtimeInfo)
-		host, err := runtimeInfoGetCorHost(runtimeInfo)
+		host, err := runtimeInfoCorHost(runtimeInfo)
 		releaseCOM(runtimeInfo)
 		if err != nil {
 			lastErr = err
@@ -265,16 +262,16 @@ func Load(_ *wsyscall.Caller) (*Runtime, error) {
 	return nil, ErrLegacyRuntimeUnavailable
 }
 
-// runtimeCandidates returns installed .NET versions ordered with v4 first,
-// then v2.x. Safe default when enumeration returns nothing.
-func runtimeCandidates() ([]string, error) {
-	metaHost, err := createMetaHost()
-	if err != nil {
-		return nil, err
-	}
-	defer releaseCOM(metaHost)
+// enumerate returns installed runtime version strings, ignoring errors
+// (caller falls back to a hard-coded default).
+func enumerate(metaHost uintptr) []string {
 	versions, _ := enumerateRuntimes(metaHost)
+	return versions
+}
 
+// orderCandidates sorts versions v4 first, then v2.x, and guarantees a
+// non-empty list via a safe default.
+func orderCandidates(versions []string) []string {
 	var out []string
 	for _, v := range versions {
 		if len(v) >= 2 && v[1] == '4' {
@@ -289,7 +286,7 @@ func runtimeCandidates() ([]string, error) {
 	if len(out) == 0 {
 		out = []string{"v4.0.30319"}
 	}
-	return out, nil
+	return out
 }
 
 // corBindToRuntimeEx tries each candidate version with the legacy
@@ -502,7 +499,7 @@ func enumerateRuntimes(metaHost uintptr) ([]string, error) {
 	return versions, nil
 }
 
-func metaHostGetRuntime(metaHost uintptr, version string) (uintptr, error) {
+func metaHostRuntime(metaHost uintptr, version string) (uintptr, error) {
 	versionW, err := windows.UTF16PtrFromString(version)
 	if err != nil {
 		return 0, fmt.Errorf("invalid version string: %w", err)
@@ -530,7 +527,7 @@ func runtimeInfoBindLegacyV2(runtimeInfo uintptr) error {
 	return nil
 }
 
-func runtimeInfoGetCorHost(runtimeInfo uintptr) (uintptr, error) {
+func runtimeInfoCorHost(runtimeInfo uintptr) (uintptr, error) {
 	vtbl := (*iCLRRuntimeInfoVtbl)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(runtimeInfo))))
 	var host uintptr
 	r, _, _ := syscall.SyscallN(vtbl.GetInterface,

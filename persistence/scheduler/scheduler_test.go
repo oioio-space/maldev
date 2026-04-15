@@ -9,20 +9,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/oioio-space/maldev/win/user"
+	"github.com/oioio-space/maldev/testutil"
 )
 
 const testTaskName = `\maldev-test-task`
 
-func requireAdmin(t *testing.T) {
-	t.Helper()
-	if !user.IsAdmin() {
-		t.Skip("scheduled task operations require elevation")
-	}
-}
-
 func TestCreateAndDelete(t *testing.T) {
-	requireAdmin(t)
+	testutil.RequireAdmin(t)
 
 	err := Create(testTaskName,
 		WithAction(`C:\Windows\System32\notepad.exe`),
@@ -40,7 +33,7 @@ func TestCreateAndDelete(t *testing.T) {
 }
 
 func TestCreateWithTimeAndDelete(t *testing.T) {
-	requireAdmin(t)
+	testutil.RequireAdmin(t)
 
 	err := Create(testTaskName,
 		WithAction(`C:\Windows\System32\cmd.exe`, "/c", "echo hi"),
@@ -51,7 +44,7 @@ func TestCreateWithTimeAndDelete(t *testing.T) {
 }
 
 func TestDeleteNonExistent(t *testing.T) {
-	requireAdmin(t)
+	testutil.RequireAdmin(t)
 	err := Delete(`\maldev-nonexistent-999`)
 	require.Error(t, err)
 }
@@ -84,15 +77,39 @@ func TestScheduledTaskMechanism(t *testing.T) {
 	assert.Equal(t, `scheduler:\maldev-mech`, mech.Name())
 }
 
+func TestList(t *testing.T) {
+	testutil.RequireAdmin(t)
+
+	require.NoError(t, Create(testTaskName,
+		WithAction(`C:\Windows\System32\notepad.exe`),
+		WithTriggerDaily(1),
+	))
+	defer Delete(testTaskName) //nolint:errcheck
+
+	tasks, err := List()
+	require.NoError(t, err)
+	assert.NotEmpty(t, tasks, "root folder should contain at least our test task")
+
+	var found bool
+	for _, tk := range tasks {
+		if tk.Name == "maldev-test-task" {
+			found = true
+			assert.NotEmpty(t, tk.Path)
+			break
+		}
+	}
+	assert.True(t, found, "List did not return the just-created task")
+}
+
 func TestExistsNonExistent(t *testing.T) {
-	requireAdmin(t)
+	testutil.RequireAdmin(t)
 	found, err := Exists(`\maldev-definitely-not-there-999`)
 	require.NoError(t, err)
 	assert.False(t, found)
 }
 
 func TestRunNonExistent(t *testing.T) {
-	requireAdmin(t)
+	testutil.RequireAdmin(t)
 	err := Run(`\maldev-nonexistent-run-999`)
 	require.Error(t, err)
 }
