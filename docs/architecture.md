@@ -29,11 +29,11 @@ graph TD
 
     subgraph "Layer 2 — Techniques"
         inject["inject/<br/>15 injection methods"]
-        evasion["evasion/<br/>12 evasion techniques"]
+        evasion["evasion/<br/>15 evasion techniques"]
         cleanup["cleanup/<br/>Memory, files, timestamps"]
-        pe["pe/<br/>Parse, strip, morph, BOF"]
+        pe["pe/<br/>Parse, strip, morph, BOF, srdi, cert, clr, winres"]
         process["process/<br/>Enum, session"]
-        system["system/<br/>Drive, folder, network"]
+        system["system/<br/>ads, drive, folder, network, lnk, bsod, ui"]
         uacbypass["uacbypass/"]
     end
 

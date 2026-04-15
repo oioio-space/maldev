@@ -2,14 +2,18 @@
 
 # PE Operations
 
-This page documents the six PE-related packages in maldev:
+This page documents the eight PE-related packages in maldev:
 
 - **`pe/parse`** -- Parse, inspect, and write PE files (cross-platform)
 - **`pe/morph`** -- Mutate UPX section headers to break automatic unpackers
-- **`pe/srdi`** -- Convert a DLL into position-independent shellcode (sRDI)
+- **`pe/srdi`** -- Convert a PE/DLL/.NET/VBS/JS into position-independent shellcode via Donut
 - **`pe/cert`** -- Read, write, copy, and strip Authenticode certificates
 - **`pe/strip`** -- Sanitize Go PE binaries (timestamps, pclntab, section names)
 - **`pe/bof`** -- Beacon Object File (BOF) loader for in-memory COFF execution
+- **`pe/clr`** -- In-process .NET CLR hosting (reflective assembly execution, T1620)
+- **`pe/winres`** -- Compile-time PE resource embedding for masquerading (T1036.005)
+
+Full technique walk-throughs live under [`docs/techniques/pe/`](techniques/pe/README.md).
 
 ---
 

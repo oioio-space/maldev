@@ -10,7 +10,7 @@ The `persistence/` module provides composable persistence mechanisms for Windows
 |---------|-----------|---------------|----------|
 | `persistence/registry` | Registry Run/RunOnce keys | T1047.001 -- Boot or Logon Autostart Execution | Windows |
 | `persistence/startup` | StartUp folder LNK shortcuts | T1547.009 -- Shortcut Modification | Windows |
-| `persistence/scheduler` | Task Scheduler via schtasks.exe | T1053.005 -- Scheduled Task | Windows |
+| `persistence/scheduler` | Task Scheduler via COM ITaskService | T1053.005 -- Scheduled Task | Windows |
 | `persistence/service` | Windows Service via SCM | T1543.003 -- Windows Service | Windows |
 
 ---
@@ -292,95 +292,100 @@ err := startup.Install("WindowsUpdate", `C:\Temp\payload.exe`, "")
 
 ---
 
-## persistence/scheduler -- Task Scheduler
+## persistence/scheduler -- Task Scheduler (COM ITaskService)
 
-Package `scheduler` manages persistence via the Windows Task Scheduler. Creates, deletes, and queries scheduled tasks using `schtasks.exe` with a hidden console window.
+Package `scheduler` manages Windows scheduled tasks directly through the
+`Schedule.Service` COM object (via `go-ole`). No `schtasks.exe` child
+process is spawned — the installation is invisible to Sysmon Event ID 1
+and child-process-focused EDR telemetry.
 
 **MITRE ATT&CK:** T1053.005 (Scheduled Task/Job: Scheduled Task)
 **Platform:** Windows
-**Detection:** Medium -- scheduled tasks are logged in Security event log (Event ID 4698).
+**Detection:** Medium -- task creation still logs to the Security channel
+(Event ID 4698), but the calling process itself is the only parent in the
+process tree.
 
 ### Types
 
-#### `Trigger`
-
 ```go
-type Trigger int
-
-const (
-    TriggerLogon   Trigger = iota // Run at user logon (requires elevation)
-    TriggerStartup                // Run at system startup (requires elevation)
-    TriggerDaily                  // Run daily
-)
-```
-
-#### `Task`
-
-```go
+// Task describes a registered scheduled task (returned by List).
 type Task struct {
-    Name    string  // Task name (supports backslash for folders: "Folder\TaskName")
-    Command string  // Command to execute
-    Args    string  // Command-line arguments
-    Trigger Trigger // When to run
+    Name    string
+    Path    string
+    Enabled bool
 }
+
+// Option configures a new task during Create / ScheduledTask.
+type Option func(*options)
 ```
 
-### Errors
+### Functional options
 
-```go
-var (
-    ErrTaskCreate = errors.New("failed to create scheduled task")
-    ErrTaskDelete = errors.New("failed to delete scheduled task")
-)
-```
+| Option                          | Purpose                                                  |
+|---------------------------------|----------------------------------------------------------|
+| `WithAction(path, args...)`     | Executable + optional command-line arguments (required). |
+| `WithTriggerLogon()`            | Fire at user logon (requires elevation).                 |
+| `WithTriggerStartup()`          | Fire at system boot (requires elevation).                |
+| `WithTriggerDaily(interval)`    | Fire every `interval` days.                              |
+| `WithTriggerTime(t)`            | Fire once at a specific `time.Time`.                     |
+| `WithHidden()`                  | Mark the task hidden in the Task Scheduler UI.           |
 
 ### Functions
 
 #### `Create`
 
 ```go
-func Create(ctx context.Context, task *Task) error
+func Create(name string, opts ...Option) error
 ```
 
-**Purpose:** Registers a scheduled task via `schtasks.exe /Create`.
-
-**Parameters:**
-- `ctx` -- Context for cancellation.
-- `task` -- Task configuration. The command path is automatically quoted to handle spaces.
-
-**How it works:** Builds `schtasks.exe` arguments (`/Create /TN /TR /SC /F`) and executes with `HideWindow: true`.
-
----
+Registers a task via `ITaskFolder.RegisterTaskDefinition`. `name` must
+start with a backslash: `\TaskName` for the root folder,
+`\Folder\TaskName` inside a subfolder. `WithAction` is mandatory.
 
 #### `Delete`
 
 ```go
-func Delete(ctx context.Context, name string) error
+func Delete(name string) error
 ```
 
-**Purpose:** Removes a scheduled task via `schtasks.exe /Delete /F`.
-
----
+Removes the task via `ITaskFolder.DeleteTask`. Returns an error if the
+task does not exist.
 
 #### `Exists`
 
 ```go
-func Exists(ctx context.Context, name string) bool
+func Exists(name string) (bool, error)
 ```
 
-**Purpose:** Checks if a scheduled task exists via `schtasks.exe /Query /TN`.
+Returns `true` if `ITaskFolder.GetTask` resolves the name. The `error`
+reports COM / RPC failures, not task absence.
 
----
-
-#### `ScheduledTask`
+#### `List`
 
 ```go
-func ScheduledTask(task *Task) *TaskMechanism
+func List() ([]Task, error)
 ```
 
-**Purpose:** Returns a `persistence.Mechanism` for managing a scheduled task.
+Enumerates every task directly under the root folder via
+`ITaskFolder.GetTasks`. Does not recurse into subfolders.
 
-**Example:**
+#### `Run`
+
+```go
+func Run(name string) error
+```
+
+Triggers immediate execution via `IRegisteredTask.RunEx`.
+
+#### `ScheduledTask` (persistence.Mechanism)
+
+```go
+func ScheduledTask(name string, opts ...Option) *TaskMechanism
+```
+
+Returns a `persistence.Mechanism` backed by `Create`/`Delete`/`Exists`.
+
+### Example
 
 ```go
 import "github.com/oioio-space/maldev/persistence/scheduler"
@@ -391,6 +396,8 @@ err := scheduler.Create(`\Microsoft\Windows\NetTrace\GatherNetworkInfo`,
     scheduler.WithHidden(),
 )
 ```
+
+Credit: [capnspacehook/taskmaster](https://github.com/capnspacehook/taskmaster) — reference ITaskService flow.
 
 ---
 

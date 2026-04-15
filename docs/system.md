@@ -2,7 +2,7 @@
 
 # System Information
 
-This page documents the six system packages in maldev:
+This page documents the seven system packages in maldev:
 
 - **`system/drive`** -- Drive enumeration, type detection, volume info, and monitoring (Windows)
 - **`system/folder`** -- Windows special folder paths via CSIDL constants (Windows)
@@ -10,6 +10,11 @@ This page documents the six system packages in maldev:
 - **`system/ui`** -- Message boxes and system sounds (Windows)
 - **`system/bsod`** -- Trigger Blue Screen of Death via NtRaiseHardError (Windows)
 - **`system/lnk`** -- Create Windows .lnk shortcut files via COM/OLE (Windows)
+- **`system/ads`** -- NTFS Alternate Data Streams CRUD + hidden/undeletable files (Windows, T1564.004)
+
+For in-depth technique walkthroughs:
+- ADS: [docs/techniques/collection/alternate-data-streams.md](techniques/collection/alternate-data-streams.md)
+- LNK: [docs/techniques/persistence/startup-folder.md](techniques/persistence/startup-folder.md)
 
 ---
 

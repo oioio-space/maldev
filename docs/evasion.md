@@ -22,7 +22,12 @@ The `evasion/` module provides composable defense evasion techniques for Windows
 | `evasion/timing` | CPU-burning delays | T1497.003 -- Time Based Evasion | Low | Cross-platform |
 | `evasion/sandbox` | Multi-factor sandbox detection | T1497 -- Sandbox Evasion | Low | Cross-platform |
 | `evasion/fakecmd` | PEB CommandLine overwrite | T1036.005 -- Masquerading | Low | Windows |
+| `evasion/hideprocess` | Patch `NtQuerySystemInformation` in a target process | T1564.001 -- Hidden Process | Medium | Windows |
+| `evasion/stealthopen` | Open files by NTFS Object ID (bypass path-based EDR hooks) | T1036 -- Masquerading | Low | Windows |
 | `evasion/preset` | Composable technique presets | -- | -- | Windows |
+
+Full technique walk-throughs:
+[fakecmd](techniques/evasion/fakecmd.md) · [hideprocess](techniques/evasion/hideprocess.md) · [stealthopen](techniques/evasion/stealthopen.md)
 
 ## Core Interface (`evasion`)
 
