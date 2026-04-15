@@ -115,12 +115,14 @@ func Create(name string, opts ...Option) error {
 			return err
 		}
 
+		// oleutil.CallMethod marshals nil → VT_NULL VARIANT; passing an
+		// ole.VARIANT directly crashes with "unknown type" inside invoke().
 		_, err = oleutil.CallMethod(root, "RegisterTaskDefinition",
 			name, def, taskCreateOrUpdate,
-			ole.NewVariant(ole.VT_NULL, 0),
-			ole.NewVariant(ole.VT_NULL, 0),
+			nil, // user (NULL = current)
+			nil, // password
 			taskLogonInteractiveToken,
-			ole.NewVariant(ole.VT_NULL, 0),
+			nil, // sddl
 		)
 		if err != nil {
 			return fmt.Errorf("RegisterTaskDefinition: %w", err)
@@ -221,8 +223,7 @@ func Run(name string) error {
 		task := taskVar.ToIDispatch()
 		defer task.Release()
 
-		runVar, err := oleutil.CallMethod(task, "RunEx",
-			ole.NewVariant(ole.VT_NULL, 0), 0, 0, "")
+		runVar, err := oleutil.CallMethod(task, "RunEx", nil, 0, 0, "")
 		if err != nil {
 			return fmt.Errorf("RunEx: %w", err)
 		}
@@ -297,12 +298,17 @@ func addTrigger(def *ole.IDispatch, o *options) error {
 	}
 	defer trig.Release()
 
-	switch o.trigger {
-	case triggerDaily:
+	// Task Scheduler requires StartBoundary on every trigger type — including
+	// DAILY/LOGON/BOOT, where it denotes the earliest activation time.
+	// We default to "now" for everything except explicit TIME triggers.
+	startBoundary := time.Now().Format("2006-01-02T15:04:05")
+	if o.trigger == triggerTime {
+		startBoundary = o.triggerTime.Format("2006-01-02T15:04:05")
+	}
+	oleutil.PutProperty(trig, "StartBoundary", startBoundary) //nolint:errcheck
+
+	if o.trigger == triggerDaily {
 		oleutil.PutProperty(trig, "DaysInterval", o.dailyInterval) //nolint:errcheck
-	case triggerTime:
-		oleutil.PutProperty(trig, "StartBoundary",
-			o.triggerTime.Format("2006-01-02T15:04:05")) //nolint:errcheck
 	}
 	return nil
 }

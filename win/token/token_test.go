@@ -193,8 +193,14 @@ func TestEnableAll(t *testing.T) {
 	if !windows.GetCurrentProcessToken().IsElevated() {
 		t.Skip("requires elevation")
 	}
-	err := EnableAll(windows.GetCurrentProcessToken())
+	// GetCurrentProcessToken returns a pseudo-handle that lacks
+	// TOKEN_ADJUST_PRIVILEGES access. Open a real handle for mutation.
+	var tok windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(),
+		windows.TOKEN_ADJUST_PRIVILEGES|windows.TOKEN_QUERY, &tok)
 	require.NoError(t, err)
+	defer tok.Close()
+	require.NoError(t, EnableAll(tok))
 }
 
 func TestUserDetailString(t *testing.T) {
