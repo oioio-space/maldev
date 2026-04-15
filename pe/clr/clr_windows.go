@@ -4,6 +4,7 @@ package clr
 
 import (
 	"fmt"
+	"os"
 	"syscall"
 	"unsafe"
 
@@ -27,17 +28,62 @@ var (
 
 // HRESULT values we special-case.
 const (
-	sOK                          = 0
-	sFalse                       = 1
-	corProfERuntimeUninitialized = 0x80131506
-	regdbEClassNotReg            = 0x80040154 // ICorRuntimeHost legacy unavailable
+	sOK                             = 0
+	sFalse                          = 1
+	corProfERuntimeUninitialized    = 0x80131506
+	regdbEClassNotReg               = 0x80040154 // ICorRuntimeHost legacy unavailable
+	clrEShimLegacyRuntimeAlreadyBnd = 0x80131700 // v4 already bound, can't activate legacy path
 )
 
 // ErrLegacyRuntimeUnavailable indicates ICorRuntimeHost (CLR2 legacy COM
 // hosting) is not registered. Typical on hosts without .NET Framework 3.5
 // installed or without legacy activation policy in an app.config manifest.
 // In-memory assembly execution requires this interface.
-var ErrLegacyRuntimeUnavailable = fmt.Errorf("clr: ICorRuntimeHost unavailable (install .NET 3.5 or enable useLegacyV2RuntimeActivationPolicy)")
+var ErrLegacyRuntimeUnavailable = fmt.Errorf("clr: ICorRuntimeHost unavailable (install .NET 3.5 and call InstallRuntimeActivationPolicy before Load)")
+
+// legacyActivationConfig is the minimal <exe>.config contents that the CLR
+// shim (mscoree.dll) reads at first-use to decide activation policy. With
+// useLegacyV2RuntimeActivationPolicy=true, pure-native hosts (Go binaries
+// without a managed manifest) are allowed to bind ICorRuntimeHost.
+const legacyActivationConfig = `<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <startup useLegacyV2RuntimeActivationPolicy="true">
+    <supportedRuntime version="v4.0.30319"/>
+    <supportedRuntime version="v2.0.50727"/>
+  </startup>
+</configuration>
+`
+
+// InstallRuntimeActivationPolicy writes <os.Executable()>.config next to
+// the running binary, enabling legacy v2 CLR activation policy. It MUST be
+// called before Load — once mscoree.dll has resolved activation policy for
+// the process, the choice is frozen for the lifetime of the process.
+//
+// If the config file already exists it is left untouched (assume the host
+// has supplied its own).
+//
+// Typical usage:
+//
+//	func main() {
+//	    _ = clr.InstallRuntimeActivationPolicy()
+//	    rt, err := clr.Load(nil)
+//	    …
+//	}
+//
+// Rationale: on Windows 10+, neither CLRCreateInstance nor
+// CorBindToRuntimeEx will yield ICorRuntimeHost from an unmanaged host
+// without this config. There is no embedded-manifest equivalent.
+func InstallRuntimeActivationPolicy() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("os.Executable: %w", err)
+	}
+	path := exe + ".config"
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	return os.WriteFile(path, []byte(legacyActivationConfig), 0o644)
+}
 
 // VARTYPE values used below (see wtypes.h).
 const (
@@ -112,34 +158,49 @@ type Runtime struct {
 }
 
 // Load initialises the CLR in the current process and starts ICorRuntimeHost.
-// Tries .NET v4 first (with legacy-v2 activation policy), then falls back
-// to any installed v2.x runtime. Returns ErrLegacyRuntimeUnavailable if
-// neither path produces an ICorRuntimeHost — typically meaning neither
-// .NET 3.5 nor a host app.config with useLegacyV2RuntimeActivationPolicy
-// is present.
+//
+// Strategy — two paths tried in order:
+//
+//  1. mscoree!CorBindToRuntimeEx (legacy pre-.NET-4 hosting API). Bypasses
+//     the metahost shim's default activation policy, so it works from a
+//     pure-native host with no app.config / manifest / embedded legacy
+//     policy. This is the path that succeeds on plain Go binaries.
+//
+//  2. CLRCreateInstance -> ICLRMetaHost -> GetRuntime ->
+//     BindAsLegacyV2Runtime -> GetInterface. The modern documented API;
+//     works only when the shim already has legacy v2 policy bound
+//     (via app.config useLegacyV2RuntimeActivationPolicy or a managed
+//     host). Kept as fallback for configured hosts.
+//
+// Returns ErrLegacyRuntimeUnavailable if neither path yields an
+// ICorRuntimeHost (typically .NET 3.5 not installed).
 func Load(_ *wsyscall.Caller) (*Runtime, error) {
+	candidates, err := runtimeCandidates()
+	if err != nil {
+		return nil, err
+	}
+
+	// Path 1: CorBindToRuntimeEx first — this path succeeds on an unmanaged
+	// host and avoids touching the metahost shim, which would otherwise
+	// lock the process into a CLR4 activation state that blocks every
+	// subsequent legacy-v2 attempt.
+	host, err := corBindToRuntimeEx(candidates)
+	if err == nil {
+		if err := corHostStart(host); err != nil {
+			releaseCOM(host)
+			return nil, err
+		}
+		return &Runtime{host: host}, nil
+	}
+	diagErr := err // keep for diagnostics
+	_ = diagErr
+
+	// Path 2: fall back to the CLRCreateInstance metahost path.
 	metaHost, err := createMetaHost()
 	if err != nil {
 		return nil, err
 	}
 	defer releaseCOM(metaHost)
-
-	versions, _ := enumerateRuntimes(metaHost)
-	// Priority order: v4 first (most common), then v2.x (native ICorRuntimeHost).
-	var candidates []string
-	for _, v := range versions {
-		if len(v) >= 2 && v[1] == '4' {
-			candidates = append(candidates, v)
-		}
-	}
-	for _, v := range versions {
-		if len(v) >= 2 && v[1] == '2' {
-			candidates = append(candidates, v)
-		}
-	}
-	if len(candidates) == 0 {
-		candidates = []string{"v4.0.30319"}
-	}
 
 	var lastErr error
 	for _, version := range candidates {
@@ -148,7 +209,6 @@ func Load(_ *wsyscall.Caller) (*Runtime, error) {
 			lastErr = err
 			continue
 		}
-		// Enable legacy v2 activation policy on v4 runtimes; harmless on v2.
 		_ = runtimeInfoBindLegacyV2(runtimeInfo)
 		host, err := runtimeInfoGetCorHost(runtimeInfo)
 		releaseCOM(runtimeInfo)
@@ -163,10 +223,75 @@ func Load(_ *wsyscall.Caller) (*Runtime, error) {
 		}
 		return &Runtime{host: host}, nil
 	}
+
 	if lastErr != nil {
 		return nil, lastErr
 	}
 	return nil, ErrLegacyRuntimeUnavailable
+}
+
+// runtimeCandidates returns installed .NET versions ordered with v4 first,
+// then v2.x. Safe default when enumeration returns nothing.
+func runtimeCandidates() ([]string, error) {
+	metaHost, err := createMetaHost()
+	if err != nil {
+		return nil, err
+	}
+	defer releaseCOM(metaHost)
+	versions, _ := enumerateRuntimes(metaHost)
+
+	var out []string
+	for _, v := range versions {
+		if len(v) >= 2 && v[1] == '4' {
+			out = append(out, v)
+		}
+	}
+	for _, v := range versions {
+		if len(v) >= 2 && v[1] == '2' {
+			out = append(out, v)
+		}
+	}
+	if len(out) == 0 {
+		out = []string{"v4.0.30319"}
+	}
+	return out, nil
+}
+
+// corBindToRuntimeEx tries each candidate version with the legacy
+// mscoree!CorBindToRuntimeEx entry point, yielding ICorRuntimeHost on
+// success. Returns ErrLegacyRuntimeUnavailable on REGDB_E_CLASSNOTREG,
+// otherwise the raw HRESULT.
+func corBindToRuntimeEx(candidates []string) (uintptr, error) {
+	const startupLoaderOptimizationMultiCore = 0x80
+	var lastErr error
+	for _, version := range candidates {
+		versionW, err := windows.UTF16PtrFromString(version)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var host uintptr
+		r, _, _ := api.ProcCorBindToRuntimeEx.Call(
+			uintptr(unsafe.Pointer(versionW)),
+			0, // pwszBuildFlavor (NULL = server workstation auto)
+			startupLoaderOptimizationMultiCore,
+			uintptr(unsafe.Pointer(clsidCorRuntimeHost)),
+			uintptr(unsafe.Pointer(iidICorRuntimeHost)),
+			uintptr(unsafe.Pointer(&host)),
+		)
+		if r == sOK {
+			return host, nil
+		}
+		if uint32(r) == regdbEClassNotReg {
+			lastErr = ErrLegacyRuntimeUnavailable
+			continue
+		}
+		lastErr = fmt.Errorf("CorBindToRuntimeEx(%s): HRESULT 0x%X", version, uint32(r))
+	}
+	if lastErr == nil {
+		lastErr = ErrLegacyRuntimeUnavailable
+	}
+	return 0, lastErr
 }
 
 // InstalledRuntimes returns the version strings of every .NET runtime
@@ -379,7 +504,8 @@ func runtimeInfoGetCorHost(runtimeInfo uintptr) (uintptr, error) {
 		uintptr(unsafe.Pointer(iidICorRuntimeHost)),
 		uintptr(unsafe.Pointer(&host)),
 	)
-	if uint32(r) == regdbEClassNotReg {
+	switch uint32(r) {
+	case regdbEClassNotReg, clrEShimLegacyRuntimeAlreadyBnd:
 		return 0, ErrLegacyRuntimeUnavailable
 	}
 	if r != sOK {

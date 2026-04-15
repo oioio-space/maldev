@@ -139,7 +139,8 @@ var (
 
 // mscoree.dll procs
 var (
-	ProcCLRCreateInstance = Mscoree.NewProc("CLRCreateInstance")
+	ProcCLRCreateInstance  = Mscoree.NewProc("CLRCreateInstance")
+	ProcCorBindToRuntimeEx = Mscoree.NewProc("CorBindToRuntimeEx")
 )
 
 // oleaut32.dll procs

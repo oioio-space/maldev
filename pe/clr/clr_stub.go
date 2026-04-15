@@ -27,3 +27,6 @@ func (r *Runtime) ExecuteDLL(_ []byte, _, _, _ string) error { return errUnsuppo
 
 // Close is a no-op on non-Windows platforms.
 func (r *Runtime) Close() {}
+
+// InstallRuntimeActivationPolicy returns an error on non-Windows platforms.
+func InstallRuntimeActivationPolicy() error { return errUnsupported }
