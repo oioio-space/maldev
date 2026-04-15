@@ -55,6 +55,7 @@ var (
 	ProcTerminateThread            = Kernel32.NewProc("TerminateThread")
 	ProcCreateTimerQueueTimer      = Kernel32.NewProc("CreateTimerQueueTimer")
 	ProcDeleteTimerQueue           = Kernel32.NewProc("DeleteTimerQueue")
+	ProcReadDirectoryChangesW      = Kernel32.NewProc("ReadDirectoryChangesW")
 )
 
 // ntdll.dll procs
@@ -86,6 +87,8 @@ var (
 	ProcTpPostWork                       = Ntdll.NewProc("TpPostWork")
 	ProcTpWaitForWork                    = Ntdll.NewProc("TpWaitForWork")
 	ProcTpReleaseWork                    = Ntdll.NewProc("TpReleaseWork")
+	ProcNtNotifyChangeDirectoryFile      = Ntdll.NewProc("NtNotifyChangeDirectoryFile")
+	ProcRtlRegisterWait                  = Ntdll.NewProc("RtlRegisterWait")
 )
 
 // advapi32.dll procs

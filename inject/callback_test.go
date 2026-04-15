@@ -49,9 +49,45 @@ func TestCallbackMethodString(t *testing.T) {
 		{CallbackEnumWindows, "EnumWindows"},
 		{CallbackCreateTimerQueue, "CreateTimerQueueTimer"},
 		{CallbackCertEnumSystemStore, "CertEnumSystemStore"},
+		{CallbackReadDirectoryChanges, "ReadDirectoryChangesW"},
+		{CallbackRtlRegisterWait, "RtlRegisterWait"},
+		{CallbackNtNotifyChangeDirectory, "NtNotifyChangeDirectoryFile"},
 		{CallbackMethod(99), "Unknown"},
 	}
 	for _, tt := range tests {
 		assert.Equal(t, tt.want, tt.method.String())
 	}
+}
+
+func allocate(t *testing.T) uintptr {
+	t.Helper()
+	sc := []byte{0xC3} // ret — valid x64 APC/callback stub (rcx, rdx, r8 args, returns void)
+	addr, err := windows.VirtualAlloc(0, uintptr(len(sc)),
+		windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_EXECUTE_READWRITE)
+	require.NoError(t, err)
+	var written uintptr
+	require.NoError(t, windows.WriteProcessMemory(
+		windows.CurrentProcess(), addr, &sc[0], uintptr(len(sc)), &written))
+	return addr
+}
+
+func TestExecuteCallbackReadDirectoryChanges(t *testing.T) {
+	testutil.RequireIntrusive(t)
+	sc := allocate(t)
+	defer windows.VirtualFree(sc, 0, windows.MEM_RELEASE)
+	require.NoError(t, ExecuteCallback(sc, CallbackReadDirectoryChanges))
+}
+
+func TestExecuteCallbackRtlRegisterWait(t *testing.T) {
+	testutil.RequireIntrusive(t)
+	sc := allocate(t)
+	defer windows.VirtualFree(sc, 0, windows.MEM_RELEASE)
+	require.NoError(t, ExecuteCallback(sc, CallbackRtlRegisterWait))
+}
+
+func TestExecuteCallbackNtNotifyChangeDirectory(t *testing.T) {
+	testutil.RequireIntrusive(t)
+	sc := allocate(t)
+	defer windows.VirtualFree(sc, 0, windows.MEM_RELEASE)
+	require.NoError(t, ExecuteCallback(sc, CallbackNtNotifyChangeDirectory))
 }
