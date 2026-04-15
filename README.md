@@ -47,7 +47,7 @@ injector.Inject(shellcode)
 | **Windows Primitives** | `win/api/` `win/syscall/` `win/ntapi/` `win/token/` `win/privilege/` `win/impersonate/` `win/user/` `win/domain/` `win/version/` | PEB walk, 4 syscall methods (WinAPI/NativeAPI/Direct/Indirect), 5 SSN resolvers (Hell's/Halo's/Tartarus/Hash Gate, Chain), token theft, privilege escalation |
 | **Evasion** | `evasion/amsi/` `etw/` `unhook/` `sleepmask/` `hwbp/` `acg/` `blockdlls/` `antidebug/` `antivm/` `sandbox/` `timing/` `herpaderping/` `phant0m/` `fakecmd/` `hideprocess/` `stealthopen/` | AMSI/ETW patching, ntdll unhooking (Classic/Full/Perun), sleep encryption, HW breakpoint detection, Herpaderping, PEB CommandLine spoofing, target NtQSI patching, NTFS Object ID file access |
 | **Injection** | `inject/` | 15+ methods: CreateThread, EarlyBird APC, ThreadHijack, NtQueueApcThreadEx, EtwpCreateEtwThread, SectionMap, PhantomDLL, Callback, ThreadPool, KernelCallbackTable, Fiber, DirectSyscall + Linux (Ptrace, MemFD, ProcMem) |
-| **PE Operations** | `pe/srdi/` `pe/parse/` `pe/strip/` `pe/bof/` `pe/morph/` `pe/cert/` `pe/clr/` | PE-to-shellcode via [Donut](https://github.com/Binject/go-donut) (EXE/DLL/.NET/VBS/JS), BOF COFF loader, PE sanitization, Authenticode cert manipulation, in-process .NET CLR hosting |
+| **PE Operations** | `pe/srdi/` `pe/parse/` `pe/strip/` `pe/bof/` `pe/morph/` `pe/cert/` `pe/clr/` `pe/winres/` | PE-to-shellcode via [Donut](https://github.com/Binject/go-donut) (EXE/DLL/.NET/VBS/JS), BOF COFF loader, PE sanitization, Authenticode cert manipulation, in-process .NET CLR hosting, compile-time manifest/icon/VERSIONINFO embedding (masquerade) |
 | **C2** | `c2/shell/` `c2/transport/` `c2/meterpreter/` `c2/cert/` | Reverse shell with PTY (Linux) + reconnect, Meterpreter staging (TCP/HTTP/HTTPS), TLS with JA3 fingerprinting, malleable C2, PPID spoofing |
 | **System** | `system/ads/` `system/drive/` `system/folder/` `system/network/` `system/lnk/` `system/bsod/` `system/ui/` | NTFS Alternate Data Streams CRUD + hidden files, drive monitoring, special folder paths, LNK creation |
 | **Persistence** | `persistence/registry/` `persistence/startup/` `persistence/scheduler/` `persistence/service/` | Run/RunOnce keys, Startup folder LNK, Task Scheduler, Windows service |
@@ -122,7 +122,7 @@ maldev/
 ├── evasion/antidebug/  evasion/antivm/  evasion/sandbox/  evasion/timing/
 ├── evasion/herpaderping/  evasion/phant0m/  evasion/fakecmd/  evasion/hideprocess/  evasion/stealthopen/
 ├── inject/                                                # Layer 2: Injection (15+ methods)
-├── pe/parse/  pe/srdi/  pe/strip/  pe/bof/  pe/morph/  pe/cert/  pe/clr/
+├── pe/parse/  pe/srdi/  pe/strip/  pe/bof/  pe/morph/  pe/cert/  pe/clr/  pe/winres/
 ├── process/enum/  process/session/
 ├── system/ads/  system/drive/  system/folder/  system/network/  system/lnk/  system/bsod/  system/ui/
 ├── c2/shell/  c2/transport/  c2/meterpreter/  c2/cert/   # Layer 3: C2
