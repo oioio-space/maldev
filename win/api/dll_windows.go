@@ -44,6 +44,7 @@ var (
 	ProcMoveFileExW                = Kernel32.NewProc("MoveFileExW")
 	ProcIsDebuggerPresent          = Kernel32.NewProc("IsDebuggerPresent")
 	ProcSetProcessMitigationPolicy = Kernel32.NewProc("SetProcessMitigationPolicy")
+	ProcGetProcessMitigationPolicy = Kernel32.NewProc("GetProcessMitigationPolicy")
 	ProcSetFileInformationByHandle = Kernel32.NewProc("SetFileInformationByHandle")
 	ProcWaitForSingleObject        = Kernel32.NewProc("WaitForSingleObject")
 	ProcConvertThreadToFiber       = Kernel32.NewProc("ConvertThreadToFiber")

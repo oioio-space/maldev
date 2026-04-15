@@ -331,17 +331,46 @@ Scheduler rejects DAILY triggers without it).
 | Test                                       | Result        | Gate                              |
 |--------------------------------------------|---------------|-----------------------------------|
 | TestInstalledRuntimes                      | PASS          | always                            |
-| TestLoadAndClose                           | SKIP          | ICorRuntimeHost unavailable       |
-| TestExecuteAssemblyEmpty                   | SKIP          | ICorRuntimeHost unavailable       |
-| TestExecuteDLLValidation                   | SKIP          | ICorRuntimeHost unavailable       |
+| TestLoadAndClose                           | SKIP*         | ICorRuntimeHost unavailable       |
+| TestExecuteAssemblyEmpty                   | SKIP*         | ICorRuntimeHost unavailable       |
+| TestExecuteDLLValidation                   | SKIP*         | ICorRuntimeHost unavailable       |
 | TestInstallAndRemoveRuntimeActivationPolicy | PASS          | always                            |
 
 `Load()` tries `CorBindToRuntimeEx` first, falls back to
-CLRCreateInstance+BindAsLegacyV2Runtime. Both paths fail cleanly with
-`ErrLegacyRuntimeUnavailable` on Windows 10 hosts without
-`useLegacyV2RuntimeActivationPolicy` — even with .NET 3.5 installed.
-`InstallRuntimeActivationPolicy()` drops the required `<exe>.config`
-at runtime; `RemoveRuntimeActivationPolicy()` cleans it up after Load.
+CLRCreateInstance+BindAsLegacyV2Runtime. The three `Load`-dependent tests
+run inside a **separate** helper binary — `testutil/clrhost/` — built on
+demand with a committed `<exe>.config` that enables legacy v2 activation.
+`testutil.RunCLROperation` spawns the helper, inspects its exit code, and
+maps environmental failures (exit=2, "ICorRuntimeHost unavailable") to
+`t.Skip` so the test suite stays green.
+
+> **\* Observed behaviour on Win10 build 19045.6466 + NetFx3 Enabled**:
+> even with the committed `.config` and a fresh unmanaged helper process,
+> `GetInterface(CorRuntimeHost)` still returns `REGDB_E_CLASSNOTREG`. The
+> three SKIPs therefore remain on this specific Windows build. The
+> infrastructure is in place for the moment Microsoft restores legacy
+> activation paths, or when running on an environment that does — older
+> Win10 builds, LTSC images, .NET-aware manifested hosts, etc.
+
+Runtime helpers for operational use:
+
+- `clr.InstallRuntimeActivationPolicy()` drops `<exe>.config` next to the
+  running binary before `Load`.
+- `clr.RemoveRuntimeActivationPolicy()` deletes it after `Load` succeeds
+  (mscoree has cached the policy — file no longer needed, OPSEC cleanup).
+
+### evasion/cet — CET shadow-stack manipulation
+
+| Test | Result | Notes |
+|------|--------|-------|
+| TestMarker | PASS | Verifies Marker == ENDBR64 opcode |
+| TestWrapIdempotent | PASS | Double-wrap is no-op |
+| TestWrapEmpty | PASS | nil input → just Marker |
+| TestWrapAlreadyCompliant | PASS | sc starting with ENDBR64 unchanged |
+
+`cet.Enforced()` / `cet.Disable()` are environment-dependent and not
+unit-asserted — verified manually on the Win10 VM (returns false; no CET
+enforcement on this CPU/image combo). Unit-testable on a Win11+CET host.
 
 ### pe/winres — compile-time PE resource embedding (T1036.005)
 

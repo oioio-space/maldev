@@ -34,10 +34,22 @@ const (
 
 	// CallbackRtlRegisterWait uses ntdll.RtlRegisterWait to invoke shellcode
 	// as a wait callback on an event object.
+	//
+	// CET: the wait callback runs on a threadpool thread. On Windows 11
+	// with ProcessUserShadowStackPolicy enforced, the shellcode must start
+	// with ENDBR64 (F3 0F 1E FA) or it is rejected with
+	// STATUS_STACK_BUFFER_OVERRUN (0xC000070A). See evasion/cet — call
+	// cet.Wrap(sc) or cet.Disable() before passing shellcode here.
 	CallbackRtlRegisterWait
 
 	// CallbackNtNotifyChangeDirectory uses ntdll.NtNotifyChangeDirectoryFile
 	// to invoke shellcode as an async APC completion.
+	//
+	// CET: KiUserApcDispatcher (the user-mode APC dispatcher) enforces CET
+	// strictly on Windows 11. Shellcode here MUST start with ENDBR64 or
+	// the process is terminated with STATUS_STACK_BUFFER_OVERRUN. Use
+	// evasion/cet.Wrap(sc) — or evasion/cet.Disable() once at start-up —
+	// before passing shellcode to this path.
 	CallbackNtNotifyChangeDirectory
 )
 

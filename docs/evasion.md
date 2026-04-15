@@ -24,6 +24,7 @@ The `evasion/` module provides composable defense evasion techniques for Windows
 | `evasion/fakecmd` | PEB CommandLine overwrite | T1036.005 -- Masquerading | Low | Windows |
 | `evasion/hideprocess` | Patch `NtQuerySystemInformation` in a target process | T1564.001 -- Hidden Process | Medium | Windows |
 | `evasion/stealthopen` | Open files by NTFS Object ID (bypass path-based EDR hooks) | T1036 -- Masquerading | Low | Windows |
+| `evasion/cet` | Detect / relax Intel CET shadow-stack + emit ENDBR64 marker | T1562.001 -- Impair Defenses | High | Windows 11 |
 | `evasion/preset` | Composable technique presets | -- | -- | Windows |
 
 Full technique walk-throughs:
