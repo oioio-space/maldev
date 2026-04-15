@@ -31,7 +31,27 @@ func Restore() error
 
 // Current reads the active PEB CommandLine.
 func Current() string
+
+// SpoofPID overwrites a REMOTE process PEB CommandLine via ReadProcessMemory /
+// WriteProcessMemory / NtAllocateVirtualMemory on a handle opened with
+// PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION | PROCESS_QUERY_INFORMATION.
+// No Restore counterpart — track the original string yourself if you need it.
+func SpoofPID(pid uint32, fakeCmd string, caller *wsyscall.Caller) error
 ```
+
+## Remote Spoofing
+
+`SpoofPID` applies the same PEB overwrite to another process. The target handle
+must be opened with VM read/write/operate rights, which typically requires the
+caller to hold SeDebugPrivilege or run elevated. The sequence is:
+
+1. `OpenProcess` with `PROCESS_VM_READ|PROCESS_VM_WRITE|PROCESS_VM_OPERATION|PROCESS_QUERY_INFORMATION`
+2. `NtQueryInformationProcess` → PEB address
+3. `ReadProcessMemory` → `ProcessParameters` pointer at PEB+0x20 → `CommandLine` UNICODE_STRING at PP+0x70
+4. `NtAllocateVirtualMemory` in the target for the new UTF-16 buffer
+5. `WriteProcessMemory` the new string, then patch Length / MaximumLength / Buffer of the UNICODE_STRING
+
+Like `Spoof`, only user-mode readers (debuggers, Process Hacker, sysmon ProcessAccess filters) observe the fake value. Kernel `ProcessCreate` audit records are not affected because they were stamped at CreateProcess time.
 
 ## Usage
 

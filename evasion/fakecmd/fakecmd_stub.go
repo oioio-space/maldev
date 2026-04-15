@@ -18,3 +18,6 @@ func Restore() error { return errUnsupported }
 
 // Current is not supported on non-Windows platforms.
 func Current() string { return "" }
+
+// SpoofPID is not supported on non-Windows platforms.
+func SpoofPID(_ uint32, _ string, _ *wsyscall.Caller) error { return errUnsupported }
