@@ -112,9 +112,11 @@ type Runtime struct {
 }
 
 // Load initialises the CLR in the current process and starts ICorRuntimeHost.
-// Prefers .NET v4.x; falls back to the newest installed runtime. The caller
-// parameter is accepted for API symmetry with other maldev packages — the
-// CLR startup path uses mscoree (not NT syscalls), so it is currently ignored.
+// Tries .NET v4 first (with legacy-v2 activation policy), then falls back
+// to any installed v2.x runtime. Returns ErrLegacyRuntimeUnavailable if
+// neither path produces an ICorRuntimeHost — typically meaning neither
+// .NET 3.5 nor a host app.config with useLegacyV2RuntimeActivationPolicy
+// is present.
 func Load(_ *wsyscall.Caller) (*Runtime, error) {
 	metaHost, err := createMetaHost()
 	if err != nil {
@@ -122,33 +124,49 @@ func Load(_ *wsyscall.Caller) (*Runtime, error) {
 	}
 	defer releaseCOM(metaHost)
 
-	version, err := pickRuntime(metaHost)
-	if err != nil {
-		return nil, err
+	versions, _ := enumerateRuntimes(metaHost)
+	// Priority order: v4 first (most common), then v2.x (native ICorRuntimeHost).
+	var candidates []string
+	for _, v := range versions {
+		if len(v) >= 2 && v[1] == '4' {
+			candidates = append(candidates, v)
+		}
+	}
+	for _, v := range versions {
+		if len(v) >= 2 && v[1] == '2' {
+			candidates = append(candidates, v)
+		}
+	}
+	if len(candidates) == 0 {
+		candidates = []string{"v4.0.30319"}
 	}
 
-	runtimeInfo, err := metaHostGetRuntime(metaHost, version)
-	if err != nil {
-		return nil, err
+	var lastErr error
+	for _, version := range candidates {
+		runtimeInfo, err := metaHostGetRuntime(metaHost, version)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		// Enable legacy v2 activation policy on v4 runtimes; harmless on v2.
+		_ = runtimeInfoBindLegacyV2(runtimeInfo)
+		host, err := runtimeInfoGetCorHost(runtimeInfo)
+		releaseCOM(runtimeInfo)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if err := corHostStart(host); err != nil {
+			releaseCOM(host)
+			lastErr = err
+			continue
+		}
+		return &Runtime{host: host}, nil
 	}
-	defer releaseCOM(runtimeInfo)
-
-	// ICorRuntimeHost is a legacy v2 interface; on .NET 4.x hosts we must
-	// opt into legacy activation policy before GetInterface will yield it.
-	// Failure is non-fatal: if policy is already bound the call returns
-	// CLR_E_SHIM_LEGACYRUNTIMEALREADYBOUND (0x80131700), which is fine.
-	_ = runtimeInfoBindLegacyV2(runtimeInfo)
-
-	host, err := runtimeInfoGetCorHost(runtimeInfo)
-	if err != nil {
-		return nil, err
+	if lastErr != nil {
+		return nil, lastErr
 	}
-
-	if err := corHostStart(host); err != nil {
-		releaseCOM(host)
-		return nil, err
-	}
-	return &Runtime{host: host}, nil
+	return nil, ErrLegacyRuntimeUnavailable
 }
 
 // InstalledRuntimes returns the version strings of every .NET runtime
