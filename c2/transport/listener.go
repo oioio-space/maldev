@@ -18,7 +18,33 @@ type Listener interface {
 	Addr() net.Addr
 }
 
-type tcpListener struct{ l net.Listener }
+// netListener adapts a net.Listener to the ctx-cancellable Listener interface.
+type netListener struct{ l net.Listener }
+
+func (n *netListener) Accept(ctx context.Context) (net.Conn, error) {
+	connCh := make(chan net.Conn, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		c, err := n.l.Accept()
+		if err != nil {
+			errCh <- err
+			return
+		}
+		connCh <- c
+	}()
+	select {
+	case c := <-connCh:
+		return c, nil
+	case err := <-errCh:
+		return nil, err
+	case <-ctx.Done():
+		n.l.Close()
+		return nil, ctx.Err()
+	}
+}
+
+func (n *netListener) Close() error   { return n.l.Close() }
+func (n *netListener) Addr() net.Addr { return n.l.Addr() }
 
 // NewTCPListener creates a plain-TCP Listener on addr (e.g. "0.0.0.0:4444").
 func NewTCPListener(addr string) (Listener, error) {
@@ -26,35 +52,8 @@ func NewTCPListener(addr string) (Listener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tcp listen %s: %w", addr, err)
 	}
-	return &tcpListener{l: l}, nil
+	return &netListener{l: l}, nil
 }
-
-func (t *tcpListener) Accept(ctx context.Context) (net.Conn, error) {
-	connCh := make(chan net.Conn, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		c, err := t.l.Accept()
-		if err != nil {
-			errCh <- err
-			return
-		}
-		connCh <- c
-	}()
-	select {
-	case c := <-connCh:
-		return c, nil
-	case err := <-errCh:
-		return nil, err
-	case <-ctx.Done():
-		t.l.Close()
-		return nil, ctx.Err()
-	}
-}
-
-func (t *tcpListener) Close() error   { return t.l.Close() }
-func (t *tcpListener) Addr() net.Addr { return t.l.Addr() }
-
-type tlsListener struct{ l net.Listener }
 
 // NewTLSListener creates a TLS Listener using the provided *tls.Config.
 func NewTLSListener(addr string, cfg *tls.Config) (Listener, error) {
@@ -62,30 +61,5 @@ func NewTLSListener(addr string, cfg *tls.Config) (Listener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tls listen %s: %w", addr, err)
 	}
-	return &tlsListener{l: l}, nil
+	return &netListener{l: l}, nil
 }
-
-func (t *tlsListener) Accept(ctx context.Context) (net.Conn, error) {
-	connCh := make(chan net.Conn, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		c, err := t.l.Accept()
-		if err != nil {
-			errCh <- err
-			return
-		}
-		connCh <- c
-	}()
-	select {
-	case c := <-connCh:
-		return c, nil
-	case err := <-errCh:
-		return nil, err
-	case <-ctx.Done():
-		t.l.Close()
-		return nil, ctx.Err()
-	}
-}
-
-func (t *tlsListener) Close() error   { return t.l.Close() }
-func (t *tlsListener) Addr() net.Addr { return t.l.Addr() }

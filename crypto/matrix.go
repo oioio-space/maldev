@@ -15,13 +15,15 @@ func NewMatrixKey(n int) (key [][]byte, inverse [][]byte, err error) {
 		return nil, nil, fmt.Errorf("matrix: n must be 2, 3, or 4; got %d", n)
 	}
 	buf := make([]byte, n*n)
+	m := make([][]byte, n)
+	for i := range m {
+		m[i] = make([]byte, n)
+	}
 	for attempt := 0; attempt < 1000; attempt++ {
 		if _, err = rand.Read(buf); err != nil {
 			return nil, nil, fmt.Errorf("matrix: rand: %w", err)
 		}
-		m := make([][]byte, n)
 		for i := range m {
-			m[i] = make([]byte, n)
 			copy(m[i], buf[i*n:])
 		}
 		det := matDet(m, n)

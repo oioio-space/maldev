@@ -227,6 +227,21 @@ func SpoofPID(pid uint32, fakeCmd string, caller *wsyscall.Caller) error {
 		return fmt.Errorf("fakecmd: NtAllocateVirtualMemory in target: NTSTATUS 0x%X", uint32(allocStatus))
 	}
 
+	// Free the remote allocation if any step below fails — otherwise we leave
+	// a PAGE_READWRITE buffer in the target that never gets wired into the PEB.
+	success := false
+	defer func() {
+		if !success && remoteAddr != 0 {
+			freeSize := uintptr(0)
+			api.Ntdll.NewProc("NtFreeVirtualMemory").Call(
+				uintptr(handle),
+				uintptr(unsafe.Pointer(&remoteAddr)),
+				uintptr(unsafe.Pointer(&freeSize)),
+				uintptr(windows.MEM_RELEASE),
+			)
+		}
+	}()
+
 	fakeBytes := unsafe.Slice((*byte)(unsafe.Pointer(&fakeUTF16[0])), byteLen)
 	if err := windows.WriteProcessMemory(handle, remoteAddr,
 		&fakeBytes[0], byteLen, nil); err != nil {
@@ -252,6 +267,7 @@ func SpoofPID(pid uint32, fakeCmd string, caller *wsyscall.Caller) error {
 		return fmt.Errorf("fakecmd: patch Buffer: %w", err)
 	}
 
+	success = true
 	return nil
 }
 

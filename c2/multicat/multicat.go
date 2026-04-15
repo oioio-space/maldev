@@ -13,8 +13,14 @@ import (
 	"github.com/oioio-space/maldev/c2/transport"
 )
 
-const bannerDeadline = 500 * time.Millisecond
-const eventBufSize = 64
+const (
+	// BannerPrefix is the wire-protocol prefix an agent sends on connect to
+	// announce its hostname: "BANNER:<hostname>\n". Read within bannerDeadline.
+	BannerPrefix = "BANNER:"
+
+	bannerDeadline = 500 * time.Millisecond
+	eventBufSize   = 64
+)
 
 // EventType identifies what kind of session lifecycle event occurred.
 type EventType int
@@ -103,8 +109,8 @@ func (m *Manager) handle(conn net.Conn) {
 	scanner := bufio.NewReader(conn)
 	line, err := scanner.ReadString('\n')
 	conn.SetReadDeadline(time.Time{})
-	if err == nil && strings.HasPrefix(line, "BANNER:") {
-		meta.Hostname = strings.TrimSpace(strings.TrimPrefix(line, "BANNER:"))
+	if err == nil && strings.HasPrefix(line, BannerPrefix) {
+		meta.Hostname = strings.TrimSpace(strings.TrimPrefix(line, BannerPrefix))
 	}
 
 	sess := &Session{Meta: meta, conn: conn}

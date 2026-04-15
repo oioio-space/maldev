@@ -44,10 +44,7 @@ func DecryptXTEA(key [16]byte, data []byte) ([]byte, error) {
 	for i := 0; i < len(data); i += 8 {
 		v0 := binary.LittleEndian.Uint32(data[i:])
 		v1 := binary.LittleEndian.Uint32(data[i+4:])
-		var sum uint32
-		for j := 0; j < xteaRounds/2; j++ {
-			sum += teaDelta
-		}
+		sum := teaFinalSum
 		for j := 0; j < xteaRounds/2; j++ {
 			v1 -= (((v0 << 4) ^ (v0 >> 5)) + v0) ^ (sum + k[(sum>>11)&3])
 			sum -= teaDelta

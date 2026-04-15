@@ -10,6 +10,17 @@ const (
 	teaRounds        = 64
 )
 
+// teaFinalSum = teaDelta * teaRounds/2, precomputed at package init because Go
+// rejects the overflowing constant product at compile time. Used as the initial
+// sum for both TEA and XTEA decryption (both use 64 rounds).
+var teaFinalSum = func() uint32 {
+	var s uint32
+	for i := 0; i < teaRounds/2; i++ {
+		s += teaDelta
+	}
+	return s
+}()
+
 // EncryptTEA encrypts data using TEA (Tiny Encryption Algorithm) with a 16-byte key.
 // Data is PKCS7-padded to a multiple of 8 bytes. Not cryptographically recommended
 // for high-security use — prefer AES/ChaCha20. Use for lightweight shellcode obfuscation.
@@ -48,10 +59,7 @@ func DecryptTEA(key [16]byte, data []byte) ([]byte, error) {
 	for i := 0; i < len(data); i += 8 {
 		v0 := binary.LittleEndian.Uint32(data[i:])
 		v1 := binary.LittleEndian.Uint32(data[i+4:])
-		var sum uint32
-		for j := 0; j < teaRounds/2; j++ {
-			sum += teaDelta
-		}
+		sum := teaFinalSum
 		for j := 0; j < teaRounds/2; j++ {
 			v1 -= ((v0 << 4) + k2) ^ (v0 + sum) ^ ((v0 >> 5) + k3)
 			v0 -= ((v1 << 4) + k0) ^ (v1 + sum) ^ ((v1 >> 5) + k1)
