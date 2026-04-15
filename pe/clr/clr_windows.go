@@ -1,0 +1,555 @@
+//go:build windows
+
+package clr
+
+import (
+	"fmt"
+	"syscall"
+	"unsafe"
+
+	"github.com/go-ole/go-ole"
+	"github.com/go-ole/go-ole/oleutil"
+	"golang.org/x/sys/windows"
+
+	"github.com/oioio-space/maldev/win/api"
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
+)
+
+// CLR COM interface GUIDs.
+var (
+	clsidCLRMetaHost   = ole.NewGUID("{9280188D-0E8E-4867-B30C-7FA83884E8DE}")
+	iidICLRMetaHost    = ole.NewGUID("{D332DB9E-B9B3-4125-8207-A14884F53216}")
+	iidICLRRuntimeInfo = ole.NewGUID("{BD39D1D2-BA2F-486A-89B0-B4B0CB466891}")
+	// CLSID_CorRuntimeHost and IID_ICorRuntimeHost share the same GUID.
+	clsidCorRuntimeHost = ole.NewGUID("{CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}")
+	iidICorRuntimeHost  = ole.NewGUID("{CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}")
+)
+
+// HRESULT values we special-case.
+const (
+	sOK                          = 0
+	sFalse                       = 1
+	corProfERuntimeUninitialized = 0x80131506
+	regdbEClassNotReg            = 0x80040154 // ICorRuntimeHost legacy unavailable
+)
+
+// ErrLegacyRuntimeUnavailable indicates ICorRuntimeHost (CLR2 legacy COM
+// hosting) is not registered. Typical on hosts without .NET Framework 3.5
+// installed or without legacy activation policy in an app.config manifest.
+// In-memory assembly execution requires this interface.
+var ErrLegacyRuntimeUnavailable = fmt.Errorf("clr: ICorRuntimeHost unavailable (install .NET 3.5 or enable useLegacyV2RuntimeActivationPolicy)")
+
+// VARTYPE values used below (see wtypes.h).
+const (
+	vtUI1  = 17
+	vtBstr = 8
+)
+
+// iUnknownVtbl lays out the first three slots of every COM interface vtable.
+type iUnknownVtbl struct {
+	QueryInterface uintptr
+	AddRef         uintptr
+	Release        uintptr
+}
+
+// iCLRMetaHostVtbl matches ICLRMetaHost in metahost.h.
+type iCLRMetaHostVtbl struct {
+	iUnknownVtbl
+	GetRuntime                       uintptr
+	GetVersionFromFile               uintptr
+	EnumerateInstalledRuntimes       uintptr
+	EnumerateLoadedRuntimes          uintptr
+	RequestRuntimeLoadedNotification uintptr
+	QueryLegacyV2RuntimeBinding      uintptr
+	ExitProcess                      uintptr
+}
+
+// iCLRRuntimeInfoVtbl matches ICLRRuntimeInfo (partial).
+type iCLRRuntimeInfoVtbl struct {
+	iUnknownVtbl
+	GetVersionString       uintptr
+	GetRuntimeDirectory    uintptr
+	IsLoaded               uintptr
+	LoadErrorString        uintptr
+	LoadLibrary            uintptr
+	GetProcAddress         uintptr
+	GetInterface           uintptr
+	IsLoadable             uintptr
+	SetDefaultStartupFlags uintptr
+	GetDefaultStartupFlags uintptr
+	BindAsLegacyV2Runtime  uintptr
+	IsStarted              uintptr
+}
+
+// iCorRuntimeHostVtbl matches ICorRuntimeHost (partial — through GetDefaultDomain).
+type iCorRuntimeHostVtbl struct {
+	iUnknownVtbl
+	CreateLogicalThreadState    uintptr
+	DeleteLogicalThreadState    uintptr
+	SwitchInLogicalThreadState  uintptr
+	SwitchOutLogicalThreadState uintptr
+	LocksHeldByLogicalThread    uintptr
+	MapFile                     uintptr
+	GetConfiguration            uintptr
+	Start                       uintptr
+	Stop                        uintptr
+	CreateDomain                uintptr
+	GetDefaultDomain            uintptr
+}
+
+// iEnumUnknownVtbl matches IEnumUnknown.
+type iEnumUnknownVtbl struct {
+	iUnknownVtbl
+	Next  uintptr
+	Skip  uintptr
+	Reset uintptr
+	Clone uintptr
+}
+
+// Runtime wraps a loaded and started ICorRuntimeHost.
+type Runtime struct {
+	host uintptr // ICorRuntimeHost*
+}
+
+// Load initialises the CLR in the current process and starts ICorRuntimeHost.
+// Prefers .NET v4.x; falls back to the newest installed runtime. The caller
+// parameter is accepted for API symmetry with other maldev packages — the
+// CLR startup path uses mscoree (not NT syscalls), so it is currently ignored.
+func Load(_ *wsyscall.Caller) (*Runtime, error) {
+	metaHost, err := createMetaHost()
+	if err != nil {
+		return nil, err
+	}
+	defer releaseCOM(metaHost)
+
+	version, err := pickRuntime(metaHost)
+	if err != nil {
+		return nil, err
+	}
+
+	runtimeInfo, err := metaHostGetRuntime(metaHost, version)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseCOM(runtimeInfo)
+
+	// ICorRuntimeHost is a legacy v2 interface; on .NET 4.x hosts we must
+	// opt into legacy activation policy before GetInterface will yield it.
+	// Failure is non-fatal: if policy is already bound the call returns
+	// CLR_E_SHIM_LEGACYRUNTIMEALREADYBOUND (0x80131700), which is fine.
+	_ = runtimeInfoBindLegacyV2(runtimeInfo)
+
+	host, err := runtimeInfoGetCorHost(runtimeInfo)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := corHostStart(host); err != nil {
+		releaseCOM(host)
+		return nil, err
+	}
+	return &Runtime{host: host}, nil
+}
+
+// InstalledRuntimes returns the version strings of every .NET runtime
+// installed on the system (e.g. "v2.0.50727", "v4.0.30319").
+func InstalledRuntimes() ([]string, error) {
+	metaHost, err := createMetaHost()
+	if err != nil {
+		return nil, err
+	}
+	defer releaseCOM(metaHost)
+	return enumerateRuntimes(metaHost)
+}
+
+// Close releases the ICorRuntimeHost reference (but does not Stop the CLR —
+// the runtime cannot be cleanly unloaded from the process it started in).
+func (rt *Runtime) Close() {
+	if rt != nil && rt.host != 0 {
+		releaseCOM(rt.host)
+		rt.host = 0
+	}
+}
+
+// ExecuteAssembly loads a .NET EXE from memory into the default AppDomain
+// and invokes its entry point with args.
+func (rt *Runtime) ExecuteAssembly(assembly []byte, args []string) error {
+	if len(assembly) == 0 {
+		return fmt.Errorf("empty assembly")
+	}
+	domainDisp, err := rt.defaultDomainDispatch()
+	if err != nil {
+		return err
+	}
+	defer domainDisp.Release()
+
+	asmObj, err := loadAssembly(domainDisp, assembly)
+	if err != nil {
+		return err
+	}
+	defer asmObj.Release()
+
+	epVar, err := oleutil.GetProperty(asmObj, "EntryPoint")
+	if err != nil {
+		return fmt.Errorf("get EntryPoint: %w", err)
+	}
+	ep := epVar.ToIDispatch()
+	defer ep.Release()
+
+	argsVariant, cleanup, err := buildInvokeArgs(args)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	if _, err := oleutil.CallMethod(ep, "Invoke",
+		ole.NewVariant(ole.VT_NULL, 0), argsVariant); err != nil {
+		return fmt.Errorf("EntryPoint.Invoke: %w", err)
+	}
+	return nil
+}
+
+// ExecuteDLL loads a .NET DLL from memory, resolves typeName.methodName,
+// and invokes it with a single string argument.
+func (rt *Runtime) ExecuteDLL(dll []byte, typeName, methodName, arg string) error {
+	if len(dll) == 0 {
+		return fmt.Errorf("empty dll")
+	}
+	if typeName == "" || methodName == "" {
+		return fmt.Errorf("typeName and methodName are required")
+	}
+	domainDisp, err := rt.defaultDomainDispatch()
+	if err != nil {
+		return err
+	}
+	defer domainDisp.Release()
+
+	asmObj, err := loadAssembly(domainDisp, dll)
+	if err != nil {
+		return err
+	}
+	defer asmObj.Release()
+
+	typeVar, err := oleutil.CallMethod(asmObj, "GetType_2", typeName)
+	if err != nil {
+		return fmt.Errorf("GetType_2(%s): %w", typeName, err)
+	}
+	typeObj := typeVar.ToIDispatch()
+	defer typeObj.Release()
+
+	instVar, err := oleutil.CallMethod(asmObj, "CreateInstance", typeName)
+	if err != nil {
+		return fmt.Errorf("CreateInstance(%s): %w", typeName, err)
+	}
+	inst := instVar.ToIDispatch()
+	defer inst.Release()
+
+	if _, err := oleutil.CallMethod(typeObj, "InvokeMember_3",
+		methodName,
+		256, // BindingFlags.InvokeMethod
+		ole.NewVariant(ole.VT_NULL, 0),
+		instVar,
+		[]string{arg},
+	); err != nil {
+		return fmt.Errorf("InvokeMember_3(%s): %w", methodName, err)
+	}
+	return nil
+}
+
+// createMetaHost calls CLRCreateInstance to obtain an ICLRMetaHost*.
+func createMetaHost() (uintptr, error) {
+	var metaHost uintptr
+	r, _, _ := api.ProcCLRCreateInstance.Call(
+		uintptr(unsafe.Pointer(clsidCLRMetaHost)),
+		uintptr(unsafe.Pointer(iidICLRMetaHost)),
+		uintptr(unsafe.Pointer(&metaHost)),
+	)
+	if r != sOK {
+		return 0, fmt.Errorf("CLRCreateInstance: HRESULT 0x%X", uint32(r))
+	}
+	return metaHost, nil
+}
+
+// pickRuntime chooses the preferred installed runtime (v4 first).
+// If enumeration fails or returns empty, falls back to a safe default.
+func pickRuntime(metaHost uintptr) (string, error) {
+	versions, err := enumerateRuntimes(metaHost)
+	if err != nil || len(versions) == 0 {
+		return "v4.0.30319", nil
+	}
+	for _, v := range versions {
+		if len(v) >= 2 && v[1] == '4' {
+			return v, nil
+		}
+	}
+	return versions[len(versions)-1], nil
+}
+
+func enumerateRuntimes(metaHost uintptr) ([]string, error) {
+	vtbl := (*iCLRMetaHostVtbl)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(metaHost))))
+
+	var enumUnk uintptr
+	r, _, _ := syscall.SyscallN(vtbl.EnumerateInstalledRuntimes,
+		metaHost,
+		uintptr(unsafe.Pointer(&enumUnk)),
+	)
+	if r != sOK {
+		return nil, fmt.Errorf("EnumerateInstalledRuntimes: HRESULT 0x%X", uint32(r))
+	}
+	defer releaseCOM(enumUnk)
+
+	enumVtbl := (*iEnumUnknownVtbl)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(enumUnk))))
+	var versions []string
+	for {
+		var runtimeInfo uintptr
+		var fetched uint32
+		r, _, _ := syscall.SyscallN(enumVtbl.Next,
+			enumUnk,
+			1,
+			uintptr(unsafe.Pointer(&runtimeInfo)),
+			uintptr(unsafe.Pointer(&fetched)),
+		)
+		if fetched == 0 || r == sFalse {
+			break
+		}
+		if r != sOK {
+			return versions, fmt.Errorf("IEnumUnknown.Next: HRESULT 0x%X", uint32(r))
+		}
+		ver := runtimeVersion(runtimeInfo)
+		releaseCOM(runtimeInfo)
+		if ver != "" {
+			versions = append(versions, ver)
+		}
+	}
+	return versions, nil
+}
+
+func metaHostGetRuntime(metaHost uintptr, version string) (uintptr, error) {
+	versionW, err := windows.UTF16PtrFromString(version)
+	if err != nil {
+		return 0, fmt.Errorf("invalid version string: %w", err)
+	}
+	vtbl := (*iCLRMetaHostVtbl)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(metaHost))))
+	var runtimeInfo uintptr
+	r, _, _ := syscall.SyscallN(vtbl.GetRuntime,
+		metaHost,
+		uintptr(unsafe.Pointer(versionW)),
+		uintptr(unsafe.Pointer(iidICLRRuntimeInfo)),
+		uintptr(unsafe.Pointer(&runtimeInfo)),
+	)
+	if r != sOK {
+		return 0, fmt.Errorf("ICLRMetaHost.GetRuntime(%s): HRESULT 0x%X", version, uint32(r))
+	}
+	return runtimeInfo, nil
+}
+
+func runtimeInfoBindLegacyV2(runtimeInfo uintptr) error {
+	vtbl := (*iCLRRuntimeInfoVtbl)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(runtimeInfo))))
+	r, _, _ := syscall.SyscallN(vtbl.BindAsLegacyV2Runtime, runtimeInfo)
+	if r != sOK {
+		return fmt.Errorf("BindAsLegacyV2Runtime: HRESULT 0x%X", uint32(r))
+	}
+	return nil
+}
+
+func runtimeInfoGetCorHost(runtimeInfo uintptr) (uintptr, error) {
+	vtbl := (*iCLRRuntimeInfoVtbl)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(runtimeInfo))))
+	var host uintptr
+	r, _, _ := syscall.SyscallN(vtbl.GetInterface,
+		runtimeInfo,
+		uintptr(unsafe.Pointer(clsidCorRuntimeHost)),
+		uintptr(unsafe.Pointer(iidICorRuntimeHost)),
+		uintptr(unsafe.Pointer(&host)),
+	)
+	if uint32(r) == regdbEClassNotReg {
+		return 0, ErrLegacyRuntimeUnavailable
+	}
+	if r != sOK {
+		return 0, fmt.Errorf("ICLRRuntimeInfo.GetInterface(ICorRuntimeHost): HRESULT 0x%X", uint32(r))
+	}
+	return host, nil
+}
+
+func corHostStart(host uintptr) error {
+	vtbl := (*iCorRuntimeHostVtbl)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(host))))
+	r, _, _ := syscall.SyscallN(vtbl.Start, host)
+	if r != sOK && uint32(r) != corProfERuntimeUninitialized {
+		return fmt.Errorf("ICorRuntimeHost.Start: HRESULT 0x%X", uint32(r))
+	}
+	return nil
+}
+
+func runtimeVersion(runtimeInfo uintptr) string {
+	vtbl := (*iCLRRuntimeInfoVtbl)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(runtimeInfo))))
+	buf := make([]uint16, 64)
+	size := uint32(len(buf))
+	r, _, _ := syscall.SyscallN(vtbl.GetVersionString,
+		runtimeInfo,
+		uintptr(unsafe.Pointer(&buf[0])),
+		uintptr(unsafe.Pointer(&size)),
+	)
+	if r != sOK {
+		return ""
+	}
+	return windows.UTF16ToString(buf[:size])
+}
+
+// defaultDomainDispatch returns the default AppDomain as an IDispatch.
+// Caller must Release() the returned dispatch.
+func (rt *Runtime) defaultDomainDispatch() (*ole.IDispatch, error) {
+	vtbl := (*iCorRuntimeHostVtbl)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(rt.host))))
+	var domainUnk uintptr
+	r, _, _ := syscall.SyscallN(vtbl.GetDefaultDomain,
+		rt.host,
+		uintptr(unsafe.Pointer(&domainUnk)),
+	)
+	if r != sOK {
+		return nil, fmt.Errorf("ICorRuntimeHost.GetDefaultDomain: HRESULT 0x%X", uint32(r))
+	}
+	defer releaseCOM(domainUnk)
+
+	unknown := (*ole.IUnknown)(unsafe.Pointer(domainUnk))
+	disp, err := unknown.QueryInterface(ole.IID_IDispatch)
+	if err != nil {
+		return nil, fmt.Errorf("AppDomain QI IDispatch: %w", err)
+	}
+	return disp, nil
+}
+
+// loadAssembly calls AppDomain.Load_3(rawAssembly) and returns the Assembly
+// object as IDispatch. Caller must Release().
+func loadAssembly(domain *ole.IDispatch, data []byte) (*ole.IDispatch, error) {
+	sa, err := newByteSafeArray(data)
+	if err != nil {
+		return nil, err
+	}
+	defer destroySafeArray(sa)
+
+	variant := ole.NewVariant(ole.VT_ARRAY|vtUI1, int64(sa))
+	result, err := oleutil.CallMethod(domain, "Load_3", &variant)
+	if err != nil {
+		return nil, fmt.Errorf("AppDomain.Load_3: %w", err)
+	}
+	return result.ToIDispatch(), nil
+}
+
+// buildInvokeArgs builds the args VARIANT expected by MethodInfo.Invoke:
+// VT_NULL for no args, VT_ARRAY|VT_BSTR SAFEARRAY otherwise.
+// The returned cleanup function frees the SAFEARRAY / BSTRs.
+func buildInvokeArgs(args []string) (ole.VARIANT, func(), error) {
+	if len(args) == 0 {
+		return ole.NewVariant(ole.VT_NULL, 0), func() {}, nil
+	}
+	// EntryPoint signature is Main(string[] args) — a single parameter of
+	// type string[]. MethodInfo.Invoke takes object[] where each element is
+	// a parameter, so we need an outer SAFEARRAY of length 1 whose element
+	// is the BSTR[] SAFEARRAY of user args.
+	inner, err := newBstrSafeArray(args)
+	if err != nil {
+		return ole.VARIANT{}, nil, err
+	}
+	outer, err := newVariantSafeArrayWithOne(ole.VT_ARRAY|vtBstr, uintptr(inner))
+	if err != nil {
+		destroySafeArray(inner)
+		return ole.VARIANT{}, nil, err
+	}
+	cleanup := func() {
+		destroySafeArray(outer)
+		destroySafeArray(inner)
+	}
+	return ole.NewVariant(ole.VT_ARRAY|ole.VT_VARIANT, int64(outer)), cleanup, nil
+}
+
+// --- SAFEARRAY helpers ---
+
+func newByteSafeArray(data []byte) (uintptr, error) {
+	sa, _, _ := api.ProcSafeArrayCreateVector.Call(vtUI1, 0, uintptr(len(data)))
+	if sa == 0 {
+		return 0, fmt.Errorf("SafeArrayCreateVector(UI1) failed")
+	}
+	var dataPtr uintptr
+	r, _, _ := api.ProcSafeArrayAccessData.Call(sa, uintptr(unsafe.Pointer(&dataPtr)))
+	if r != sOK {
+		api.ProcSafeArrayDestroy.Call(sa) //nolint:errcheck
+		return 0, fmt.Errorf("SafeArrayAccessData: HRESULT 0x%X", uint32(r))
+	}
+	dst := unsafe.Slice((*byte)(unsafe.Pointer(dataPtr)), len(data))
+	copy(dst, data)
+	api.ProcSafeArrayUnaccessData.Call(sa) //nolint:errcheck
+	return sa, nil
+}
+
+func newBstrSafeArray(strs []string) (uintptr, error) {
+	sa, _, _ := api.ProcSafeArrayCreateVector.Call(vtBstr, 0, uintptr(len(strs)))
+	if sa == 0 {
+		return 0, fmt.Errorf("SafeArrayCreateVector(BSTR) failed")
+	}
+	for i, s := range strs {
+		bstr, err := sysAllocString(s)
+		if err != nil {
+			api.ProcSafeArrayDestroy.Call(sa) //nolint:errcheck
+			return 0, err
+		}
+		idx := int32(i)
+		r, _, _ := api.ProcSafeArrayPutElement.Call(
+			sa,
+			uintptr(unsafe.Pointer(&idx)),
+			bstr,
+		)
+		api.ProcSysFreeString.Call(bstr) //nolint:errcheck — PutElement copies the BSTR
+		if r != sOK {
+			api.ProcSafeArrayDestroy.Call(sa) //nolint:errcheck
+			return 0, fmt.Errorf("SafeArrayPutElement[%d]: HRESULT 0x%X", i, uint32(r))
+		}
+	}
+	return sa, nil
+}
+
+// newVariantSafeArrayWithOne creates a length-1 SAFEARRAY of VARIANT whose
+// single element wraps innerSafeArray as a VT_ARRAY|elemVT variant.
+func newVariantSafeArrayWithOne(elemVT ole.VT, innerSafeArray uintptr) (uintptr, error) {
+	const vtVariant = 12
+	sa, _, _ := api.ProcSafeArrayCreateVector.Call(vtVariant, 0, 1)
+	if sa == 0 {
+		return 0, fmt.Errorf("SafeArrayCreateVector(VARIANT) failed")
+	}
+	v := ole.NewVariant(elemVT, int64(innerSafeArray))
+	var idx int32
+	r, _, _ := api.ProcSafeArrayPutElement.Call(
+		sa,
+		uintptr(unsafe.Pointer(&idx)),
+		uintptr(unsafe.Pointer(&v)),
+	)
+	if r != sOK {
+		api.ProcSafeArrayDestroy.Call(sa) //nolint:errcheck
+		return 0, fmt.Errorf("SafeArrayPutElement(VARIANT): HRESULT 0x%X", uint32(r))
+	}
+	return sa, nil
+}
+
+func sysAllocString(s string) (uintptr, error) {
+	p, err := windows.UTF16PtrFromString(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid string: %w", err)
+	}
+	bstr, _, _ := api.ProcSysAllocString.Call(uintptr(unsafe.Pointer(p)))
+	if bstr == 0 {
+		return 0, fmt.Errorf("SysAllocString failed")
+	}
+	return bstr, nil
+}
+
+func destroySafeArray(sa uintptr) {
+	if sa != 0 {
+		api.ProcSafeArrayDestroy.Call(sa) //nolint:errcheck
+	}
+}
+
+// releaseCOM invokes IUnknown::Release on a raw COM interface pointer.
+func releaseCOM(ptr uintptr) {
+	if ptr == 0 {
+		return
+	}
+	vtbl := (*iUnknownVtbl)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(ptr))))
+	syscall.SyscallN(vtbl.Release, ptr) //nolint:errcheck
+}

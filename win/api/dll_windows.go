@@ -19,6 +19,8 @@ var (
 	Amsi     = windows.NewLazySystemDLL("amsi.dll")
 	Crypt32  = windows.NewLazySystemDLL("crypt32.dll")
 	Gdi32    = windows.NewLazySystemDLL("gdi32.dll")
+	Mscoree  = windows.NewLazySystemDLL("mscoree.dll")
+	Oleaut32 = windows.NewLazySystemDLL("oleaut32.dll")
 )
 
 // Thread access rights.
@@ -132,4 +134,20 @@ var (
 var (
 	ProcAmsiScanBuffer  = Amsi.NewProc("AmsiScanBuffer")
 	ProcAmsiOpenSession = Amsi.NewProc("AmsiOpenSession")
+)
+
+// mscoree.dll procs
+var (
+	ProcCLRCreateInstance = Mscoree.NewProc("CLRCreateInstance")
+)
+
+// oleaut32.dll procs
+var (
+	ProcSafeArrayCreateVector  = Oleaut32.NewProc("SafeArrayCreateVector")
+	ProcSafeArrayAccessData    = Oleaut32.NewProc("SafeArrayAccessData")
+	ProcSafeArrayUnaccessData  = Oleaut32.NewProc("SafeArrayUnaccessData")
+	ProcSafeArrayDestroy       = Oleaut32.NewProc("SafeArrayDestroy")
+	ProcSafeArrayPutElement    = Oleaut32.NewProc("SafeArrayPutElement")
+	ProcSysAllocString         = Oleaut32.NewProc("SysAllocString")
+	ProcSysFreeString          = Oleaut32.NewProc("SysFreeString")
 )
