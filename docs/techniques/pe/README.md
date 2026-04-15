@@ -61,6 +61,7 @@ graph TD
 | [PE Morphing](morph.md) | Randomize UPX section names to evade signatures |
 | [PE-to-Shellcode](pe-to-shellcode.md) | Convert EXE/DLL/.NET/scripts to injectable shellcode via Donut |
 | [Certificate Theft](certificate-theft.md) | Read, copy, strip, and write Authenticode certificates |
+| [CLR Hosting](clr.md) | In-process .NET assembly execution via ICorRuntimeHost — T1620 |
 
 ## MITRE ATT&CK
 
@@ -69,6 +70,7 @@ graph TD
 | Obfuscated Files: Software Packing | [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | PE strip + UPX morphing |
 | Command and Scripting Interpreter | [T1059](https://attack.mitre.org/techniques/T1059/) | BOF execution |
 | Process Injection: DLL Injection | [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | PE-to-shellcode via Donut |
+| Reflective Code Loading | [T1620](https://attack.mitre.org/techniques/T1620/) | In-memory .NET execution via CLR hosting |
 
 ## D3FEND Countermeasures
 

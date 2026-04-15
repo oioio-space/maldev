@@ -8,6 +8,7 @@
 |-----------|---------------|------------|----------------------|
 | T1027 | Obfuscated Files or Information | `evasion/sleepmask`, `pe/strip` | D3-SMRA (System Memory Range Analysis) |
 | T1027.002 | Software Packing | `pe/morph` | D3-SEA (Static Executable Analysis) |
+| T1036 | Masquerading | `evasion/stealthopen` | D3-FHA (File Hash Analysis) |
 | T1036.005 | Masquerading: Match Legitimate Name or Location | `evasion/fakecmd` | D3-PLA (Process Listing Analysis) |
 | T1047.001 | Boot or Logon Autostart Execution: Registry Run Keys | `persistence/registry` | D3-SBV (Service Binary Verification) |
 | T1053.005 | Scheduled Task/Job: Scheduled Task | `persistence/scheduler` | D3-SBV (Service Binary Verification) |
@@ -45,6 +46,9 @@
 | T1562.001 | Disable or Modify Tools | `evasion/amsi`, `evasion/etw`, `evasion/unhook`, `evasion/acg`, `evasion/blockdlls` | D3-AIPA (Application Integrity Analysis) |
 | T1562.002 | Disable Windows Event Logging | `evasion/phant0m` | D3-EAL (Execution Activity Logging) |
 | T1564 | Hide Artifacts | `cleanup/service` | D3-FRA |
+| T1564.001 | Hide Artifacts: Hidden Process | `evasion/hideprocess` | D3-PLA (Process Listing Analysis) |
+| T1564.004 | Hide Artifacts: NTFS File Attributes | `system/ads` | D3-FRA (File Removal Analysis) |
+| T1620 | Reflective Code Loading | `pe/clr` | D3-AIPA (Application Integrity Analysis) |
 | T1573.002 | Asymmetric Cryptography | `c2/transport` (TLS, uTLS) | D3-DNSTA (DNS Traffic Analysis) |
 | T1622 | Debugger Evasion | `evasion/antidebug`, `evasion/hwbp` | D3-DICA (Debug Instruction Analysis) |
 

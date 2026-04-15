@@ -50,11 +50,10 @@ err = startup.Remove("MyApp")
 ```go
 import "github.com/oioio-space/maldev/persistence/scheduler"
 
-err := scheduler.Create(ctx, &scheduler.Task{
-    Name:    "MyTask",
-    Command: `C:\path\to\binary.exe`,
-    Trigger: scheduler.TriggerLogon,
-})
+err := scheduler.Create(`\MyTask`,
+    scheduler.WithAction(`C:\path\to\binary.exe`),
+    scheduler.WithTriggerLogon(),
+)
 ```
 
 ### Windows Service
