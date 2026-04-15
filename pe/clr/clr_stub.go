@@ -30,3 +30,6 @@ func (r *Runtime) Close() {}
 
 // InstallRuntimeActivationPolicy returns an error on non-Windows platforms.
 func InstallRuntimeActivationPolicy() error { return errUnsupported }
+
+// RemoveRuntimeActivationPolicy returns an error on non-Windows platforms.
+func RemoveRuntimeActivationPolicy() error { return errUnsupported }

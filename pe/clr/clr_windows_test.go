@@ -4,6 +4,7 @@ package clr
 
 import (
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -46,6 +47,48 @@ func TestExecuteAssemblyEmpty(t *testing.T) {
 	err := rt.ExecuteAssembly(nil, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "empty")
+}
+
+func TestInstallAndRemoveRuntimeActivationPolicy(t *testing.T) {
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	cfg := exe + ".config"
+
+	// Remember prior state so we don't clobber a real host config.
+	var priorBytes []byte
+	priorExists := false
+	if data, err := os.ReadFile(cfg); err == nil {
+		priorExists = true
+		priorBytes = data
+		require.NoError(t, os.Remove(cfg))
+	}
+	defer func() {
+		if priorExists {
+			_ = os.WriteFile(cfg, priorBytes, 0o644)
+		} else {
+			_ = os.Remove(cfg)
+		}
+	}()
+
+	// Install writes the file.
+	require.NoError(t, InstallRuntimeActivationPolicy())
+	data, err := os.ReadFile(cfg)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "useLegacyV2RuntimeActivationPolicy")
+
+	// Second Install is a no-op (file preserved).
+	require.NoError(t, InstallRuntimeActivationPolicy())
+	data2, err := os.ReadFile(cfg)
+	require.NoError(t, err)
+	assert.Equal(t, data, data2)
+
+	// Remove deletes it.
+	require.NoError(t, RemoveRuntimeActivationPolicy())
+	_, err = os.Stat(cfg)
+	assert.True(t, os.IsNotExist(err), "config should be gone after Remove")
+
+	// Remove on missing file is not an error.
+	require.NoError(t, RemoveRuntimeActivationPolicy())
 }
 
 func TestExecuteDLLValidation(t *testing.T) {

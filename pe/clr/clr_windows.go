@@ -3,6 +3,7 @@
 package clr
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"syscall"
@@ -54,6 +55,16 @@ const legacyActivationConfig = `<?xml version="1.0" encoding="utf-8"?>
 </configuration>
 `
 
+// configPath returns <os.Executable()>.config — the file that mscoree
+// reads to resolve activation policy for the current process.
+func configPath() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("os.Executable: %w", err)
+	}
+	return exe + ".config", nil
+}
+
 // InstallRuntimeActivationPolicy writes <os.Executable()>.config next to
 // the running binary, enabling legacy v2 CLR activation policy. It MUST be
 // called before Load — once mscoree.dll has resolved activation policy for
@@ -67,22 +78,46 @@ const legacyActivationConfig = `<?xml version="1.0" encoding="utf-8"?>
 //	func main() {
 //	    _ = clr.InstallRuntimeActivationPolicy()
 //	    rt, err := clr.Load(nil)
+//	    if err != nil { log.Fatal(err) }
+//	    defer rt.Close()
+//	    defer clr.RemoveRuntimeActivationPolicy() // OPSEC cleanup
 //	    …
 //	}
 //
 // Rationale: on Windows 10+, neither CLRCreateInstance nor
 // CorBindToRuntimeEx will yield ICorRuntimeHost from an unmanaged host
 // without this config. There is no embedded-manifest equivalent.
+//
+// OPSEC: the written file is a forensic artefact. Pair every install with
+// a RemoveRuntimeActivationPolicy() call once Load() succeeds.
 func InstallRuntimeActivationPolicy() error {
-	exe, err := os.Executable()
+	path, err := configPath()
 	if err != nil {
-		return fmt.Errorf("os.Executable: %w", err)
+		return err
 	}
-	path := exe + ".config"
 	if _, err := os.Stat(path); err == nil {
 		return nil
 	}
 	return os.WriteFile(path, []byte(legacyActivationConfig), 0o644)
+}
+
+// RemoveRuntimeActivationPolicy deletes <os.Executable()>.config. Safe to
+// call any time AFTER Load() has returned — mscoree resolves and caches
+// activation policy on first use, so the file is no longer consulted for
+// the lifetime of the process.
+//
+// Missing file is treated as success. This is the OPSEC counterpart of
+// InstallRuntimeActivationPolicy: it removes the on-disk forensic trace
+// while keeping the loaded runtime fully functional.
+func RemoveRuntimeActivationPolicy() error {
+	path, err := configPath()
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // VARTYPE values used below (see wtypes.h).
