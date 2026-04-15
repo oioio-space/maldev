@@ -15,6 +15,13 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// Note on ADS package: cleanup/selfdelete intentionally does not use system/ads.
+// system/ads operates on named streams via CreateFile("path:streamname") — a high-level
+// approach for reading/writing ADS content. selfdelete.Run() instead renames the DEFAULT
+// stream (:$DATA) to a throwaway name using SetFileInformationByHandle + FILE_RENAME_INFO,
+// which is a lower-level operation with no equivalent in system/ads. The two packages are
+// complementary, not redundant.
+
 // ErrInvalidHandle is returned when a file handle is invalid.
 var ErrInvalidHandle = errors.New("invalid handle")
 
