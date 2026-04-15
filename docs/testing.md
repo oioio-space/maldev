@@ -292,6 +292,82 @@ The `c2/shell` package includes a PPID spoofer (`PPIDSpoofer`) that creates chil
 
 **Known Limitation:** Windows 10 22H2 blocks `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` with ACCESS_DENIED even with admin + SeDebugPrivilege + no ASR rules configured. This appears to be a kernel-level mitigation (not ASR/Exploit Guard). OpenProcess(PROCESS_CREATE_PROCESS) succeeds, but CreateProcess with the spoofed parent fails. The technique works on older Windows versions without these protections.
 
+## Sprint 2 Additions (2026-04-15)
+
+Three new feature packages + one doc overhaul were battle-tested this
+session. Host runs and VM runs both captured; bugs fixed on the spot.
+
+### inject callbacks — 3 new execution methods
+
+| Method                              | Test                                          | Result | Fix landed during session |
+|-------------------------------------|-----------------------------------------------|--------|---------------------------|
+| CallbackReadDirectoryChanges        | TestExecuteCallbackReadDirectoryChanges       | PASS   | –                         |
+| CallbackRtlRegisterWait             | TestExecuteCallbackRtlRegisterWait            | PASS   | WT_EXECUTEONLYONCE + RtlDeregisterWaitEx(INVALID_HANDLE_VALUE) to avoid post-free callback crash |
+| CallbackNtNotifyChangeDirectory     | TestExecuteCallbackNtNotifyChangeDirectory    | PASS   | STATUS_PENDING(0x103) accepted as success; Win11 CET stub requires endbr64 prefix |
+
+Allocator helper moved to `testutil.WindowsCETStubX64` (shared CET-safe
+`endbr64;ret` shellcode; required by Win11 KiUserApcDispatcher).
+
+### persistence/scheduler — COM ITaskService rewrite
+
+| Test                          | Result | Notes                                             |
+|-------------------------------|--------|---------------------------------------------------|
+| TestCreateAndDelete           | PASS   | RegisterTaskDefinition + DeleteTask round-trip    |
+| TestCreateWithTimeAndDelete   | PASS   | TIME trigger                                      |
+| TestDeleteNonExistent         | PASS   | Error surface                                     |
+| TestCreateRequiresAction      | PASS   | Option validation                                 |
+| TestSplitTaskName             | PASS   | Unit test for path parsing                        |
+| TestScheduledTaskMechanism    | PASS   | persistence.Mechanism interface                   |
+| TestExistsNonExistent         | PASS   | Non-admin returns false cleanly                   |
+| TestRunNonExistent            | PASS   | Error surface                                     |
+| TestList                      | PASS   | Root-folder enumeration                           |
+
+Two bugs fixed during the VM run: `ole.NewVariant(VT_NULL)` → `nil`
+(oleutil marshaller panic), and `StartBoundary` now always set (Task
+Scheduler rejects DAILY triggers without it).
+
+### pe/clr — in-process .NET hosting
+
+| Test                                       | Result        | Gate                              |
+|--------------------------------------------|---------------|-----------------------------------|
+| TestInstalledRuntimes                      | PASS          | always                            |
+| TestLoadAndClose                           | SKIP          | ICorRuntimeHost unavailable       |
+| TestExecuteAssemblyEmpty                   | SKIP          | ICorRuntimeHost unavailable       |
+| TestExecuteDLLValidation                   | SKIP          | ICorRuntimeHost unavailable       |
+| TestInstallAndRemoveRuntimeActivationPolicy | PASS          | always                            |
+
+`Load()` tries `CorBindToRuntimeEx` first, falls back to
+CLRCreateInstance+BindAsLegacyV2Runtime. Both paths fail cleanly with
+`ErrLegacyRuntimeUnavailable` on Windows 10 hosts without
+`useLegacyV2RuntimeActivationPolicy` — even with .NET 3.5 installed.
+`InstallRuntimeActivationPolicy()` drops the required `<exe>.config`
+at runtime; `RemoveRuntimeActivationPolicy()` cleans it up after Load.
+
+### pe/winres — compile-time PE resource embedding (T1036.005)
+
+End-to-end validation via `pe/winres/internal/e2e_cmd_test`:
+
+| Step                                | Result                                                        |
+|-------------------------------------|---------------------------------------------------------------|
+| Generator read-only scan of System32 | PASS (5 identities × 2 UAC variants = 10 sub-packages)       |
+| Blank-import → `go build`            | PASS (syso auto-linked)                                       |
+| VERSIONINFO match                    | PASS — `Get-Item masqtest.exe` shows CompanyName "Microsoft Corporation", OriginalFilename "Cmd.Exe", full cmd.exe metadata |
+
+### process/session — WTS enumeration
+
+| Test                     | Result | VM observation                                       |
+|--------------------------|--------|------------------------------------------------------|
+| TestList                 | PASS   | Services(id=0,Disconnected) + Console(id=1,Active,test@DESKTOP-T8IB37P) |
+| TestActiveSubsetOfList   | PASS   | invariant Active ⊆ List                              |
+| TestSessionStateString   | PASS   | enum→name mapping                                    |
+
+### Windows 11 CET gotcha
+
+`KiUserApcDispatcher` rejects non-endbr64 indirect targets with
+`STATUS_STACK_BUFFER_OVERRUN (0xC000070A)`. Any future test that
+allocates a shellcode stub for an APC path must start with `F3 0F 1E FA`
+(endbr64). Use `testutil.WindowsCETStubX64`.
+
 ## Known Limitations
 
 | Issue | Impact | Workaround |
