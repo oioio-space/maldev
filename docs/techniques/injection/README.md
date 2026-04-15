@@ -8,6 +8,24 @@ Process injection is a family of techniques that place executable code (shellcod
 
 maldev provides a unified `inject` package with 15 injection methods across Windows and Linux, a fluent builder API, middleware decorators for evasion, and automatic fallback support.
 
+## Target Categories
+
+The **Target** column below tells you *where* the shellcode ends up running
+— this drives the OpSec trade-offs and the API surface you need.
+
+| Target              | Meaning                                                                                  | Who pays the cost        | Typical API calls                                    |
+|---------------------|------------------------------------------------------------------------------------------|--------------------------|------------------------------------------------------|
+| **Self**            | Shellcode runs inside the current `maldev`-built process.                                | Our own process          | None cross-process — direct `VirtualAlloc` + exec    |
+| **Local**           | Same as Self, but the technique deliberately avoids spawning a new thread (callback abuse, pool work, module stomping). Useful when any visible `CreateThread` would be flagged. | Our own process          | `VirtualAlloc` / `EnumWindows` / `TpPostWork` / stomp |
+| **Remote**          | Shellcode runs inside an already-running OS process (PID supplied by the caller). Requires `PROCESS_VM_WRITE` + `PROCESS_VM_OPERATION` (+ possibly `PROCESS_CREATE_THREAD`). | Target PID's process     | `OpenProcess` + `VirtualAllocEx` + `WriteProcessMemory` + thread trigger |
+| **Child (suspended)** | We *spawn* a new process in `CREATE_SUSPENDED` state, write shellcode into it, then resume. The child never executes its original entry point. | Newly-created child process | `CreateProcess(CREATE_SUSPENDED)` + write + resume/APC/hijack |
+
+**Stealth ranking by target** (generally): Local > Child (suspended) >
+Remote. Local avoids cross-process memory primitives entirely; Child is
+acceptable because the process tree is predictable (our malware spawned
+it); Remote is the loudest — `WriteProcessMemory` into an unrelated
+running process is a classic EDR trigger.
+
 ## Technique Comparison
 
 | Technique | Method Constant | Target | Creates Thread? | Uses WriteProcessMemory? | Stealth | Complexity |
