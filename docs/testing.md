@@ -397,6 +397,94 @@ End-to-end validation via `pe/winres/internal/e2e_cmd_test`:
 allocates a shellcode stub for an APC path must start with `F3 0F 1E FA`
 (endbr64). Use `testutil.WindowsCETStubX64`.
 
+## Sprint 2 Extensions (2026-04-15)
+
+Five additional packages landed on top of the Sprint 2 base. All tested
+on host and on Windows10 VM (snapshot INIT restored between runs).
+
+### c2/transport — server-side Listener interface
+
+Adds `Listener`, `NewTCPListener`, `NewTLSListener` as the symmetric of
+`Transport` for operator-side reverse-shell handlers. Thin wrappers over
+`net.Listen` / `tls.Listen` with context-cancelable `Accept`.
+
+Tests (11 PASS, 1 SKIP in loopback race):
+`TestTCPRoundTrip`, `TestTCPReconnect`, `TestTCPRemoteAddr`,
+`TestTCPContextCancel` (SKIP: loopback accepts before ctx fires),
+`TestTCPContextCancelNonRoutable` (non-routable addr forces the cancel
+path), `TestNewTLS_Options`, `TestWithFingerprint`,
+`TestNewUTLS_Options`, plus malleable HTTP tests.
+
+### c2/multicat — multi-session reverse-shell manager
+
+Operator-side listener that multiplexes inbound shells into numbered
+sessions, reads an optional `BANNER:<hostname>\n` within 500 ms, and
+emits lifecycle events on a buffered channel. Never embedded in the
+implant.
+
+MITRE: T1571.
+
+Tests (6 PASS, in-memory with `net.Pipe`):
+`TestListenAccept`, `TestSessionsIDSequential`, `TestBannerHostname`,
+`TestRemoveSession`, `TestEvents`, `TestGet`. Tests write `"\n"` from
+the client side to unblock the 500 ms banner-read deadline so the
+session registers before `Sessions()` snapshot.
+
+### crypto — lightweight obfuscation primitives
+
+Non-cryptographic but signature-breaking transforms: **TEA**, **XTEA**
+(8-byte block, 16-byte key, 64 rounds, PKCS7), **ArithShift**
+(position-dependent byte add), **S-Box** (random 256-byte permutation +
+inverse via Fisher-Yates on `crypto/rand`), and **MatrixTransform** /
+"Agent Smith" (Hill cipher mod 256, n∈{2,3,4}, adjugate inverse).
+
+MITRE: T1027 / T1027.013.
+
+Tests: `TestTEARoundtrip`, `TestXTEARoundtrip`,
+`TestArithShiftRoundtrip`, `TestSBoxRoundtrip`,
+`TestMatrixTransformRoundtrip` (iterates n=2,3,4). All PASS on host + VM.
+
+**Gotcha:** a compile-time `uint32(teaDelta * rounds/2)` overflows the
+untyped-constant range in Go. The runtime sum loop `for j { sum += teaDelta }`
+replaces it. `matDet` needs an explicit `n == 1` case for 2×2 matrix
+inversion (recursive cofactor minors land at 1×1).
+
+### evasion/fakecmd — SpoofPID remote PEB overwrite
+
+Extends the existing self-spoof to a remote process. Opens the target
+with `PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION |
+PROCESS_QUERY_INFORMATION`, walks PEB→ProcessParameters→CommandLine,
+allocates a new UTF-16 buffer in the target with
+`NtAllocateVirtualMemory`, writes the fake string, and patches
+`Length` / `MaximumLength` / `Buffer` of the UNICODE_STRING in place.
+No Restore counterpart — the caller tracks the original.
+
+Signature accepts an optional `*wsyscall.Caller` that routes both
+`NtQueryInformationProcess` and `NtAllocateVirtualMemory`.
+
+MITRE: T1036.005.
+
+Test: `TestSpoofPID` (PASS, VM elevated). Spawns notepad, calls
+`SpoofPID(pid, fake, nil)`, then reads the remote PEB back via
+`readRemoteCmdLine` and asserts equality. Skipped on host when not
+running as admin via `testutil.RequireAdmin`.
+
+### encode — markdown documentation page
+
+No new Go code. Creates `docs/techniques/encode/README.md` covering
+Base64/Base64URL/UTF-16LE/PowerShell/ROT13, when to encode vs encrypt,
+and the `encrypt → encode` layering pattern. All existing `encode`
+tests continue to PASS.
+
+### VM Infra Fixes Landed With This Sprint
+
+- **Persistent shared folder** `maldev` on Windows10 VM with `--automount
+  --auto-mount-point "Z:"` so `Z:\scripts\vm-test.ps1` resolves.
+- **`vm-test.ps1` tolerates comma-separated `-Packages`** because
+  `VBoxManage guestcontrol` drops internal whitespace from `--` args;
+  multi-package runs must pass a single `./...` glob, commas, or invoke
+  the runner once per package.
+
 ## Known Limitations
 
 | Issue | Impact | Workaround |
