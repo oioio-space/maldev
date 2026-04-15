@@ -32,15 +32,8 @@ func TestCreateAndDelete(t *testing.T) {
 	require.NoError(t, err)
 	defer Delete(testTaskName) //nolint:errcheck
 
-	tasks, err := List()
+	found, err := Exists(testTaskName)
 	require.NoError(t, err)
-	found := false
-	for _, tk := range tasks {
-		if tk.Name == "maldev-test-task" {
-			found = true
-			break
-		}
-	}
 	assert.True(t, found, "task not found after Create")
 
 	require.NoError(t, Delete(testTaskName))

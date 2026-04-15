@@ -4,6 +4,7 @@ package scheduler
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-ole/go-ole"
@@ -57,7 +58,7 @@ type Option func(*options)
 func WithAction(path string, args ...string) Option {
 	return func(o *options) {
 		o.action = path
-		o.actionArgs = joinArgs(args)
+		o.actionArgs = strings.Join(args, " ")
 	}
 }
 
@@ -373,17 +374,6 @@ func splitTaskName(name string) (folder, leaf string) {
 		}
 	}
 	return `\`, name
-}
-
-func joinArgs(args []string) string {
-	if len(args) == 0 {
-		return ""
-	}
-	out := args[0]
-	for _, a := range args[1:] {
-		out += " " + a
-	}
-	return out
 }
 
 // TaskMechanism implements persistence.Mechanism for the Task Scheduler.
