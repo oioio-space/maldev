@@ -21,6 +21,7 @@ var (
 	Gdi32    = windows.NewLazySystemDLL("gdi32.dll")
 	Mscoree  = windows.NewLazySystemDLL("mscoree.dll")
 	Oleaut32 = windows.NewLazySystemDLL("oleaut32.dll")
+	Wtsapi32 = windows.NewLazySystemDLL("wtsapi32.dll")
 )
 
 // Thread access rights.
@@ -141,6 +142,11 @@ var (
 var (
 	ProcCLRCreateInstance  = Mscoree.NewProc("CLRCreateInstance")
 	ProcCorBindToRuntimeEx = Mscoree.NewProc("CorBindToRuntimeEx")
+)
+
+// wtsapi32.dll procs
+var (
+	ProcWTSQuerySessionInformationW = Wtsapi32.NewProc("WTSQuerySessionInformationW")
 )
 
 // oleaut32.dll procs

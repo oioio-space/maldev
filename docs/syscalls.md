@@ -4,6 +4,33 @@
 
 The `win/syscall` package provides a `Caller` that routes NT function calls through four strategies, allowing the same injection or evasion code to transparently switch between detectable WinAPI calls and stealthy indirect syscalls.
 
+### Related package — `win/ntapi`
+
+`win/ntapi` is the layer immediately underneath `win/syscall`:
+
+- **Native NT structures** — `PEB`, `TEB`, `RTL_USER_PROCESS_PARAMETERS`,
+  `CLIENT_ID`, `OBJECT_ATTRIBUTES`, `UNICODE_STRING`, `PROCESS_BASIC_INFORMATION`
+  mirrored as Go structs with correct x64 layout + offsets.
+- **Helpers** — PEB walk (`CurrentPEB`, `ModuleBaseFromPEB`), unicode-string
+  builders (`NewUnicodeString`), status-code mapping (`NTSTATUS.Error`).
+- **Used by** — `evasion/unhook`, `evasion/phant0m`, `inject/phantomdll`,
+  `inject/modulestomp`, `evasion/fakecmd`, `evasion/hideprocess`,
+  `evasion/stealthopen`, `pe/clr`.
+
+`win/ntapi` does **not** execute syscalls — it supplies the data
+structures `win/syscall`'s `Caller` operates on. Typical usage:
+
+```go
+import (
+    "github.com/oioio-space/maldev/win/ntapi"
+    wsyscall "github.com/oioio-space/maldev/win/syscall"
+)
+
+peb := ntapi.CurrentPEB()
+ntdllBase := ntapi.ModuleBaseFromPEB(peb, "ntdll.dll")
+// … then use wsyscall.Caller to invoke Nt* functions …
+```
+
 ---
 
 ## How Windows Syscalls Work

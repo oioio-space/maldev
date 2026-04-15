@@ -2,10 +2,23 @@
 
 # Privilege Escalation
 
-This page documents the two privilege escalation packages in maldev:
+This page documents privilege-related packages in maldev:
 
 - **`uacbypass`** -- UAC bypass via auto-elevated Windows executables (T1548.002)
 - **`exploit/cve202430088`** -- Kernel TOCTOU race condition for LPE to SYSTEM (CVE-2024-30088)
+- **`win/privilege`** -- SeDebug / SeImpersonate / SeBackup privilege enable/disable via AdjustTokenPrivileges (T1134)
+
+> **Related API docs**
+> - Token theft, duplication and impersonation: [`docs/win.md`](win.md) (package `win/token`)
+> - Cross-user impersonation: [`docs/win.md`](win.md) (package `win/impersonate`)
+> - Technique walkthroughs: [`docs/techniques/tokens/`](techniques/tokens/README.md)
+
+`win/privilege` exposes the full SE_NAMES enum and two entrypoints:
+`Enable(name)` / `Disable(name)` — thin wrappers around
+`OpenProcessToken` + `LookupPrivilegeValue` + `AdjustTokenPrivileges`.
+See package source for the complete constant list; the most commonly
+used are `SeDebugPrivilege`, `SeImpersonatePrivilege`,
+`SeBackupPrivilege`, `SeTakeOwnershipPrivilege`.
 
 ---
 

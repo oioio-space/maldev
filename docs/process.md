@@ -247,6 +247,102 @@ func main() {
 
 ---
 
+#### `List`
+
+```go
+func List() ([]Info, error)
+```
+
+**Purpose:** Enumerates every Terminal Services session on the current
+server (console, RDP, services, disconnected sessions, listeners) and
+returns each with its user + domain populated.
+
+**Returns:** Slice of `Info` structs.
+
+**How it works:**
+1. `WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, …)` returns the
+   raw `WTS_SESSION_INFO[]` array (ID, WinStation name, state).
+2. For each session, `WTSQuerySessionInformationW` retrieves `WTSUserName`
+   and `WTSDomainName` — the logged-on user, if any.
+3. `WTSFreeMemory` is called for every allocation (array + each string).
+
+**No elevation required** — WTSEnumerateSessions works from any user
+account.
+
+**Example:**
+
+```go
+import "github.com/oioio-space/maldev/process/session"
+
+sessions, _ := session.List()
+for _, s := range sessions {
+    fmt.Printf("id=%d name=%s state=%s user=%s\\%s\n",
+        s.ID, s.Name, s.State, s.Domain, s.User)
+}
+```
+
+Typical output on a single-user Windows 10 box:
+
+```
+id=0 name=Services state=Disconnected user= domain=
+id=1 name=Console  state=Active       user=m.bachmann domain=LAPTOP-A1IU4LCG
+id=65537 name=RDP-Tcp state=Listen    user= domain=
+```
+
+---
+
+#### `Active`
+
+```go
+func Active() ([]Info, error)
+```
+
+**Purpose:** Convenience filter — `List()` restricted to sessions whose
+state is `StateActive` AND whose `User` is non-empty. Excludes the
+Services session (ID 0), listeners, and disconnected/locked sessions.
+
+**When to use:**
+- Choosing an injection target session (Console vs RDP user).
+- Selecting a user to impersonate via `WTSQueryUserToken` + `ImpersonateLoggedOnUser`.
+- Auditing logged-in users for a compromise report.
+
+---
+
+### Types
+
+#### `Info`
+
+```go
+type Info struct {
+    ID     uint32       // session ID: 0 = Services, 1 = Console, 2+ = RDP / fast-user-switch
+    Name   string       // WinStation name ("Console", "RDP-Tcp#0", …)
+    State  SessionState // connection state
+    User   string       // logged-on user, empty for listener / services
+    Domain string       // user's domain, empty when User is empty
+}
+```
+
+#### `SessionState`
+
+Enum mirroring `WTS_CONNECTSTATE_CLASS`:
+
+| Constant              | Value | Meaning                                                                     |
+|-----------------------|-------|-----------------------------------------------------------------------------|
+| `StateActive`         | 0     | User logged in and interactive on the console.                              |
+| `StateConnected`      | 1     | Session has a user but hasn't completed logon.                              |
+| `StateConnectQuery`   | 2     | WinStation is accepting a connection request.                               |
+| `StateShadow`         | 3     | Session is being shadowed by another one.                                   |
+| `StateDisconnected`   | 4     | User was logged in but session is now detached (RDP hang-up, lock screen).  |
+| `StateIdle`           | 5     | Session is waiting for a client to connect.                                 |
+| `StateListen`         | 6     | Listener endpoint (e.g. `RDP-Tcp`, service transport).                      |
+| `StateReset`          | 7     | Session is being reset.                                                     |
+| `StateDown`           | 8     | Session is down for reasons other than normal logoff.                       |
+| `StateInit`           | 9     | Session is being initialised.                                               |
+
+`SessionState.String()` returns the MSDN-style name.
+
+---
+
 #### `ImpersonateThreadOnActiveSession`
 
 ```go
