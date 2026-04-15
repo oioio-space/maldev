@@ -6,10 +6,11 @@
 
 | ATT&CK ID | Technique Name | Package(s) | D3FEND Countermeasure |
 |-----------|---------------|------------|----------------------|
-| T1027 | Obfuscated Files or Information | `evasion/sleepmask`, `pe/strip` | D3-SMRA (System Memory Range Analysis) |
+| T1027 | Obfuscated Files or Information | `evasion/sleepmask`, `pe/strip`, `crypto` (TEA/XTEA/ArithShift/SBox/MatrixTransform) | D3-SMRA (System Memory Range Analysis) |
+| T1027.013 | Encrypted/Encoded File | `crypto`, `encode` | D3-FCA (File Content Analysis) |
 | T1027.002 | Software Packing | `pe/morph` | D3-SEA (Static Executable Analysis) |
 | T1036 | Masquerading | `evasion/stealthopen` | D3-FHA (File Hash Analysis) |
-| T1036.005 | Masquerading: Match Legitimate Name or Location | `evasion/fakecmd`, `pe/winres/masquerade` | D3-PLA (Process Listing Analysis) |
+| T1036.005 | Masquerading: Match Legitimate Name or Location | `evasion/fakecmd` (self + remote via `SpoofPID`), `pe/winres/masquerade` | D3-PLA (Process Listing Analysis) |
 | T1047.001 | Boot or Logon Autostart Execution: Registry Run Keys | `persistence/registry` | D3-SBV (Service Binary Verification) |
 | T1053.005 | Scheduled Task/Job: Scheduled Task | `persistence/scheduler` | D3-SBV (Service Binary Verification) |
 | T1055 | Process Injection | `inject` (15 methods), `evasion/herpaderping` | D3-PSA (Process Spawn Analysis) |
@@ -49,6 +50,7 @@
 | T1564.001 | Hide Artifacts: Hidden Process | `evasion/hideprocess` | D3-PLA (Process Listing Analysis) |
 | T1564.004 | Hide Artifacts: NTFS File Attributes | `system/ads` | D3-FRA (File Removal Analysis) |
 | T1620 | Reflective Code Loading | `pe/clr` | D3-AIPA (Application Integrity Analysis) |
+| T1571 | Non-Standard Port | `c2/multicat` (operator-side multi-session listener) | D3-NTA (Network Traffic Analysis) |
 | T1573.002 | Asymmetric Cryptography | `c2/transport` (TLS, uTLS) | D3-DNSTA (DNS Traffic Analysis) |
 | T1622 | Debugger Evasion | `evasion/antidebug`, `evasion/hwbp` | D3-DICA (Debug Instruction Analysis) |
 
