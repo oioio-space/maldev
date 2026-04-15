@@ -3,79 +3,103 @@
 package scheduler
 
 import (
-	"context"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/oioio-space/maldev/win/user"
 )
 
-func TestCreateAndDelete(t *testing.T) {
+const testTaskName = `\maldev-test-task`
+
+func requireAdmin(t *testing.T) {
+	t.Helper()
 	if !user.IsAdmin() {
-		t.Skip("schtasks requires elevation")
-	}
-
-	ctx := context.Background()
-	const name = `maldev_test_scheduler`
-
-	// Clean up in case a previous test run left debris.
-	defer func() {
-		_ = Delete(ctx, name)
-	}()
-
-	task := &Task{
-		Name:    name,
-		Command: `C:\Windows\System32\notepad.exe`,
-		Trigger: TriggerLogon,
-	}
-
-	if err := Create(ctx, task); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	if !Exists(ctx, name) {
-		t.Fatal("Exists returned false after Create")
-	}
-
-	if err := Delete(ctx, name); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-
-	if Exists(ctx, name) {
-		t.Fatal("Exists returned true after Delete")
+		t.Skip("scheduled task operations require elevation")
 	}
 }
 
-func TestExistsNonExistent(t *testing.T) {
-	ctx := context.Background()
-	if Exists(ctx, `maldev_zzz_nonexistent_task_999`) {
-		t.Error("Exists returned true for non-existent task")
+func TestCreateAndDelete(t *testing.T) {
+	requireAdmin(t)
+
+	err := Create(testTaskName,
+		WithAction(`C:\Windows\System32\notepad.exe`),
+		WithTriggerDaily(1),
+		WithHidden(),
+	)
+	require.NoError(t, err)
+	defer Delete(testTaskName) //nolint:errcheck
+
+	tasks, err := List()
+	require.NoError(t, err)
+	found := false
+	for _, tk := range tasks {
+		if tk.Name == "maldev-test-task" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "task not found after Create")
+
+	require.NoError(t, Delete(testTaskName))
+}
+
+func TestCreateWithTimeAndDelete(t *testing.T) {
+	requireAdmin(t)
+
+	err := Create(testTaskName,
+		WithAction(`C:\Windows\System32\cmd.exe`, "/c", "echo hi"),
+		WithTriggerTime(time.Now().Add(24*time.Hour)),
+	)
+	require.NoError(t, err)
+	require.NoError(t, Delete(testTaskName))
+}
+
+func TestDeleteNonExistent(t *testing.T) {
+	requireAdmin(t)
+	err := Delete(`\maldev-nonexistent-999`)
+	require.Error(t, err)
+}
+
+func TestCreateRequiresAction(t *testing.T) {
+	err := Create(`\maldev-noaction`, WithTriggerLogon())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "WithAction")
+}
+
+func TestSplitTaskName(t *testing.T) {
+	tests := []struct{ in, folder, leaf string }{
+		{`\MyTask`, `\`, `MyTask`},
+		{`\Folder\MyTask`, `\Folder`, `MyTask`},
+		{`MyTask`, `\`, `MyTask`},
+	}
+	for _, tt := range tests {
+		f, l := splitTaskName(tt.in)
+		assert.Equal(t, tt.folder, f, "folder for %q", tt.in)
+		assert.Equal(t, tt.leaf, l, "leaf for %q", tt.in)
 	}
 }
 
 func TestScheduledTaskMechanism(t *testing.T) {
-	task := &Task{
-		Name:    "maldev_test_mech",
-		Command: `C:\Windows\System32\notepad.exe`,
-		Trigger: TriggerLogon,
-	}
-	mech := ScheduledTask(task)
-	if mech == nil {
-		t.Fatal("ScheduledTask returned nil")
-	}
+	mech := ScheduledTask(`\maldev-mech`,
+		WithAction(`C:\Windows\System32\notepad.exe`),
+		WithTriggerLogon(),
+	)
+	require.NotNil(t, mech)
+	assert.Equal(t, `scheduler:\maldev-mech`, mech.Name())
 }
 
-func TestTriggerLogonConstant(t *testing.T) {
-	// TriggerLogon should be the zero value (iota).
-	if TriggerLogon != 0 {
-		t.Errorf("TriggerLogon = %d; expected 0", TriggerLogon)
-	}
+func TestExistsNonExistent(t *testing.T) {
+	requireAdmin(t)
+	found, err := Exists(`\maldev-definitely-not-there-999`)
+	require.NoError(t, err)
+	assert.False(t, found)
 }
 
-func TestDeleteNonExistent(t *testing.T) {
-	ctx := context.Background()
-
-	err := Delete(ctx, `maldev_test_nonexistent_task`)
-	if err == nil {
-		t.Fatal("Delete of non-existent task should return error")
-	}
+func TestRunNonExistent(t *testing.T) {
+	requireAdmin(t)
+	err := Run(`\maldev-nonexistent-run-999`)
+	require.Error(t, err)
 }

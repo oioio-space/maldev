@@ -6,7 +6,7 @@
 //	mechanisms := []persistence.Mechanism{
 //	    registry.RunKey(registry.HiveCurrentUser, registry.KeyRun, "MyApp", binPath),
 //	    startup.Shortcut("MyApp", binPath, ""),
-//	    scheduler.ScheduledTask(&scheduler.Task{Name: "MyTask", Command: binPath, Trigger: scheduler.TriggerLogon}),
+//	    scheduler.ScheduledTask(`\MyTask`, scheduler.WithAction(binPath), scheduler.WithTriggerLogon()),
 //	    service.Service(&service.Config{Name: "MySvc", BinPath: binPath, StartType: service.StartAuto}),
 //	}
 //	errs := persistence.InstallAll(mechanisms)
@@ -16,6 +16,6 @@
 // Sub-packages:
 //   - registry: Run/RunOnce key persistence (Windows)
 //   - startup: StartUp folder LNK shortcut persistence (Windows)
-//   - scheduler: Task Scheduler persistence via schtasks.exe (Windows)
+//   - scheduler: Task Scheduler persistence via COM ITaskService (Windows)
 //   - service: Windows service persistence via SCM (Windows)
 package persistence

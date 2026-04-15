@@ -3,126 +3,403 @@
 package scheduler
 
 import (
-	"context"
-	"errors"
 	"fmt"
-	"os/exec"
-	"syscall"
+	"time"
+
+	"github.com/go-ole/go-ole"
+	"github.com/go-ole/go-ole/oleutil"
 )
 
-// ErrTaskCreate is returned when task creation fails.
-var ErrTaskCreate = errors.New("failed to create scheduled task")
+// Task describes a registered scheduled task (returned by List).
+type Task struct {
+	Name    string
+	Path    string
+	Enabled bool
+}
 
-// ErrTaskDelete is returned when task deletion fails.
-var ErrTaskDelete = errors.New("failed to delete scheduled task")
-
-// Trigger defines when a scheduled task runs.
-type Trigger int
+type triggerKind int
 
 const (
-	TriggerLogon   Trigger = iota // Run at user logon (requires elevation)
-	TriggerStartup                // Run at system startup (requires elevation)
-	TriggerDaily                  // Run daily
+	triggerDaily triggerKind = iota
+	triggerLogon
+	triggerBoot
+	triggerTime
 )
 
-// triggerFlag maps a Trigger to its schtasks /SC parameter value.
-func triggerFlag(t Trigger) string {
-	switch t {
-	case TriggerStartup:
-		return "ONSTART"
-	case TriggerDaily:
-		return "DAILY"
-	default:
-		return "ONLOGON"
+// taskTriggerType2 values match the MSDN TASK_TRIGGER_TYPE2 enum.
+const (
+	taskTriggerTimeID  = 1
+	taskTriggerDailyID = 2
+	taskTriggerBootID  = 8
+	taskTriggerLogonID = 9
+)
+
+const (
+	taskCreateOrUpdate         = 6
+	taskLogonInteractiveToken  = 3
+	taskActionExec             = 0
+	rpcChangedMode             = 0x80010106
+)
+
+type options struct {
+	action        string
+	actionArgs    string
+	trigger       triggerKind
+	dailyInterval int
+	triggerTime   time.Time
+	hidden        bool
+}
+
+// Option configures a scheduled task.
+type Option func(*options)
+
+// WithAction sets the executable and optional command-line arguments.
+func WithAction(path string, args ...string) Option {
+	return func(o *options) {
+		o.action = path
+		o.actionArgs = joinArgs(args)
 	}
 }
 
-// Task configures a scheduled task.
-type Task struct {
-	Name    string  // Task name (supports backslash for folders: "Folder\TaskName")
-	Command string  // Command to execute
-	Args    string  // Command-line arguments
-	Trigger Trigger // When to run
+// WithTriggerLogon fires the task at user logon (requires elevation).
+func WithTriggerLogon() Option { return func(o *options) { o.trigger = triggerLogon } }
+
+// WithTriggerStartup fires the task at system startup (requires elevation).
+func WithTriggerStartup() Option { return func(o *options) { o.trigger = triggerBoot } }
+
+// WithTriggerDaily fires the task every interval days.
+func WithTriggerDaily(interval int) Option {
+	return func(o *options) {
+		o.trigger = triggerDaily
+		o.dailyInterval = interval
+	}
 }
 
-// Create registers a scheduled task via schtasks.exe.
-func Create(ctx context.Context, task *Task) error {
-	if task.Name == "" {
-		return fmt.Errorf("task name must not be empty")
+// WithTriggerTime fires the task once at a specific time.
+func WithTriggerTime(t time.Time) Option {
+	return func(o *options) {
+		o.trigger = triggerTime
+		o.triggerTime = t
 	}
-	if task.Command == "" {
-		return fmt.Errorf("task command must not be empty")
-	}
-
-	args := []string{
-		"/Create",
-		"/TN", task.Name,
-		"/TR", buildTR(task.Command, task.Args),
-		"/SC", triggerFlag(task.Trigger),
-		"/F", // force overwrite if exists
-	}
-
-	if err := runSchtasks(ctx, args); err != nil {
-		return fmt.Errorf("%w: %w", ErrTaskCreate, err)
-	}
-	return nil
 }
 
-// Delete removes a scheduled task.
-func Delete(ctx context.Context, name string) error {
-	args := []string{
-		"/Delete",
-		"/TN", name,
-		"/F", // suppress confirmation prompt
+// WithHidden marks the task as hidden in the Task Scheduler UI.
+func WithHidden() Option { return func(o *options) { o.hidden = true } }
+
+// Create registers a scheduled task via COM ITaskService. Name must start
+// with a backslash: `\TaskName` or `\Folder\TaskName`.
+func Create(name string, opts ...Option) error {
+	o := &options{trigger: triggerDaily, dailyInterval: 1}
+	for _, opt := range opts {
+		opt(o)
 	}
-	if err := runSchtasks(ctx, args); err != nil {
-		return fmt.Errorf("%w: %w", ErrTaskDelete, err)
+	if o.action == "" {
+		return fmt.Errorf("WithAction is required")
 	}
-	return nil
+
+	return withTaskService(func(ts *ole.IDispatch) error {
+		root, err := oleGetFolder(ts, `\`)
+		if err != nil {
+			return err
+		}
+		defer root.Release()
+
+		def, err := callDispatch(ts, "NewTask", 0)
+		if err != nil {
+			return fmt.Errorf("NewTask: %w", err)
+		}
+		defer def.Release()
+
+		if err := configureDefinition(def, o); err != nil {
+			return err
+		}
+
+		_, err = oleutil.CallMethod(root, "RegisterTaskDefinition",
+			name, def, taskCreateOrUpdate,
+			ole.NewVariant(ole.VT_NULL, 0),
+			ole.NewVariant(ole.VT_NULL, 0),
+			taskLogonInteractiveToken,
+			ole.NewVariant(ole.VT_NULL, 0),
+		)
+		if err != nil {
+			return fmt.Errorf("RegisterTaskDefinition: %w", err)
+		}
+		return nil
+	})
 }
 
-// Exists checks if a scheduled task exists.
-func Exists(ctx context.Context, name string) bool {
-	args := []string{
-		"/Query",
-		"/TN", name,
+// Delete removes a scheduled task by name.
+func Delete(name string) error {
+	folder, leaf := splitTaskName(name)
+	return withTaskService(func(ts *ole.IDispatch) error {
+		f, err := oleGetFolder(ts, folder)
+		if err != nil {
+			return err
+		}
+		defer f.Release()
+		if _, err := oleutil.CallMethod(f, "DeleteTask", leaf, 0); err != nil {
+			return fmt.Errorf("DeleteTask(%s): %w", leaf, err)
+		}
+		return nil
+	})
+}
+
+// Exists reports whether a task with the given name is registered.
+func Exists(name string) (bool, error) {
+	folder, leaf := splitTaskName(name)
+	var found bool
+	err := withTaskService(func(ts *ole.IDispatch) error {
+		f, err := oleGetFolder(ts, folder)
+		if err != nil {
+			return err
+		}
+		defer f.Release()
+		v, err := oleutil.CallMethod(f, "GetTask", leaf)
+		if err != nil {
+			return nil
+		}
+		v.ToIDispatch().Release()
+		found = true
+		return nil
+	})
+	return found, err
+}
+
+// List enumerates all tasks in the root folder.
+func List() ([]Task, error) {
+	var result []Task
+	err := withTaskService(func(ts *ole.IDispatch) error {
+		f, err := oleGetFolder(ts, `\`)
+		if err != nil {
+			return err
+		}
+		defer f.Release()
+
+		col, err := callDispatch(f, "GetTasks", 0)
+		if err != nil {
+			return fmt.Errorf("GetTasks: %w", err)
+		}
+		defer col.Release()
+
+		countVar, err := oleutil.GetProperty(col, "Count")
+		if err != nil {
+			return fmt.Errorf("Count: %w", err)
+		}
+		count := int(countVar.Val)
+
+		result = make([]Task, 0, count)
+		for i := 1; i <= count; i++ {
+			itemVar, err := oleutil.CallMethod(col, "Item", i)
+			if err != nil {
+				continue
+			}
+			item := itemVar.ToIDispatch()
+
+			nameVar, _ := oleutil.GetProperty(item, "Name")
+			pathVar, _ := oleutil.GetProperty(item, "Path")
+			enabledVar, _ := oleutil.GetProperty(item, "Enabled")
+			result = append(result, Task{
+				Name:    nameVar.ToString(),
+				Path:    pathVar.ToString(),
+				Enabled: enabledVar.Val != 0,
+			})
+			item.Release()
+		}
+		return nil
+	})
+	return result, err
+}
+
+// Run immediately executes a registered task.
+func Run(name string) error {
+	return withTaskService(func(ts *ole.IDispatch) error {
+		taskVar, err := oleutil.CallMethod(ts, "GetTask", name)
+		if err != nil {
+			return fmt.Errorf("GetTask(%s): %w", name, err)
+		}
+		task := taskVar.ToIDispatch()
+		defer task.Release()
+
+		runVar, err := oleutil.CallMethod(task, "RunEx",
+			ole.NewVariant(ole.VT_NULL, 0), 0, 0, "")
+		if err != nil {
+			return fmt.Errorf("RunEx: %w", err)
+		}
+		runVar.Clear() //nolint:errcheck
+		return nil
+	})
+}
+
+// withTaskService initialises COM, connects to Schedule.Service, and hands
+// the connected ITaskService IDispatch to fn. All teardown is handled here.
+func withTaskService(fn func(*ole.IDispatch) error) error {
+	if err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED); err != nil {
+		if oe, ok := err.(*ole.OleError); !ok || oe.Code() != rpcChangedMode {
+			return fmt.Errorf("CoInitializeEx: %w", err)
+		}
 	}
-	return runSchtasks(ctx, args) == nil
-}
+	defer ole.CoUninitialize()
 
-// buildTR constructs the /TR value, quoting the command path to handle
-// spaces in directory names (e.g., "C:\Program Files\...").
-func buildTR(command, args string) string {
-	quoted := `"` + command + `"`
-	if args == "" {
-		return quoted
+	svc, err := oleutil.CreateObject("Schedule.Service")
+	if err != nil {
+		return fmt.Errorf("create Schedule.Service: %w", err)
 	}
-	return quoted + " " + args
+	defer svc.Release()
+
+	ts, err := svc.QueryInterface(ole.IID_IDispatch)
+	if err != nil {
+		return fmt.Errorf("QueryInterface: %w", err)
+	}
+	defer ts.Release()
+
+	if _, err := oleutil.CallMethod(ts, "Connect"); err != nil {
+		return fmt.Errorf("ITaskService.Connect: %w", err)
+	}
+	return fn(ts)
 }
 
-// ScheduledTask returns a persistence.Mechanism that manages a scheduled
-// task. Satisfies persistence.Mechanism via duck typing.
-func ScheduledTask(task *Task) *TaskMechanism {
-	return &TaskMechanism{task: task}
-}
-
-// TaskMechanism implements persistence.Mechanism for Task Scheduler.
-type TaskMechanism struct {
-	task *Task
-}
-
-func (m *TaskMechanism) Name() string            { return "scheduler:" + m.task.Name }
-func (m *TaskMechanism) Install() error           { return Create(context.Background(), m.task) }
-func (m *TaskMechanism) Uninstall() error         { return Delete(context.Background(), m.task.Name) }
-func (m *TaskMechanism) Installed() (bool, error) { return Exists(context.Background(), m.task.Name), nil }
-
-// runSchtasks executes schtasks.exe with a hidden console window.
-func runSchtasks(ctx context.Context, args []string) error {
-	cmd := exec.CommandContext(ctx, "schtasks.exe", args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-
-	if err := cmd.Run(); err != nil {
+// configureDefinition populates a task definition IDispatch with settings,
+// trigger and action derived from o.
+func configureDefinition(def *ole.IDispatch, o *options) error {
+	regInfo, err := getDispatchProperty(def, "RegistrationInfo")
+	if err != nil {
 		return err
 	}
+	defer regInfo.Release()
+	oleutil.PutProperty(regInfo, "Description", "System maintenance task") //nolint:errcheck
+
+	settings, err := getDispatchProperty(def, "Settings")
+	if err != nil {
+		return err
+	}
+	defer settings.Release()
+	oleutil.PutProperty(settings, "Hidden", o.hidden)         //nolint:errcheck
+	oleutil.PutProperty(settings, "Enabled", true)            //nolint:errcheck
+	oleutil.PutProperty(settings, "StartWhenAvailable", true) //nolint:errcheck
+
+	if err := addTrigger(def, o); err != nil {
+		return err
+	}
+	return addAction(def, o)
+}
+
+func addTrigger(def *ole.IDispatch, o *options) error {
+	triggers, err := getDispatchProperty(def, "Triggers")
+	if err != nil {
+		return err
+	}
+	defer triggers.Release()
+
+	trig, err := callDispatch(triggers, "Create", triggerTypeID(o.trigger))
+	if err != nil {
+		return fmt.Errorf("Create trigger: %w", err)
+	}
+	defer trig.Release()
+
+	switch o.trigger {
+	case triggerDaily:
+		oleutil.PutProperty(trig, "DaysInterval", o.dailyInterval) //nolint:errcheck
+	case triggerTime:
+		oleutil.PutProperty(trig, "StartBoundary",
+			o.triggerTime.Format("2006-01-02T15:04:05")) //nolint:errcheck
+	}
 	return nil
+}
+
+func addAction(def *ole.IDispatch, o *options) error {
+	actions, err := getDispatchProperty(def, "Actions")
+	if err != nil {
+		return err
+	}
+	defer actions.Release()
+
+	act, err := callDispatch(actions, "Create", taskActionExec)
+	if err != nil {
+		return fmt.Errorf("Create action: %w", err)
+	}
+	defer act.Release()
+
+	oleutil.PutProperty(act, "Path", o.action)          //nolint:errcheck
+	oleutil.PutProperty(act, "Arguments", o.actionArgs) //nolint:errcheck
+	return nil
+}
+
+func oleGetFolder(ts *ole.IDispatch, folder string) (*ole.IDispatch, error) {
+	v, err := oleutil.CallMethod(ts, "GetFolder", folder)
+	if err != nil {
+		return nil, fmt.Errorf("GetFolder(%s): %w", folder, err)
+	}
+	return v.ToIDispatch(), nil
+}
+
+func callDispatch(d *ole.IDispatch, method string, args ...any) (*ole.IDispatch, error) {
+	v, err := oleutil.CallMethod(d, method, args...)
+	if err != nil {
+		return nil, err
+	}
+	return v.ToIDispatch(), nil
+}
+
+func getDispatchProperty(d *ole.IDispatch, prop string) (*ole.IDispatch, error) {
+	v, err := oleutil.GetProperty(d, prop)
+	if err != nil {
+		return nil, fmt.Errorf("get %s: %w", prop, err)
+	}
+	return v.ToIDispatch(), nil
+}
+
+func triggerTypeID(t triggerKind) int {
+	switch t {
+	case triggerLogon:
+		return taskTriggerLogonID
+	case triggerBoot:
+		return taskTriggerBootID
+	case triggerTime:
+		return taskTriggerTimeID
+	default:
+		return taskTriggerDailyID
+	}
+}
+
+// splitTaskName splits `\Folder\TaskName` into (`\Folder`, `TaskName`).
+// Returns (`\`, name) for top-level tasks and bare names without leading slash.
+func splitTaskName(name string) (folder, leaf string) {
+	for i := len(name) - 1; i >= 0; i-- {
+		if name[i] == '\\' {
+			if i == 0 {
+				return `\`, name[1:]
+			}
+			return name[:i], name[i+1:]
+		}
+	}
+	return `\`, name
+}
+
+func joinArgs(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	out := args[0]
+	for _, a := range args[1:] {
+		out += " " + a
+	}
+	return out
+}
+
+// TaskMechanism implements persistence.Mechanism for the Task Scheduler.
+type TaskMechanism struct {
+	name string
+	opts []Option
+}
+
+// ScheduledTask returns a persistence.Mechanism backed by the COM Task Scheduler.
+func ScheduledTask(name string, opts ...Option) *TaskMechanism {
+	return &TaskMechanism{name: name, opts: opts}
+}
+
+func (m *TaskMechanism) Name() string     { return "scheduler:" + m.name }
+func (m *TaskMechanism) Install() error   { return Create(m.name, m.opts...) }
+func (m *TaskMechanism) Uninstall() error { return Delete(m.name) }
+func (m *TaskMechanism) Installed() (bool, error) {
+	return Exists(m.name)
 }
