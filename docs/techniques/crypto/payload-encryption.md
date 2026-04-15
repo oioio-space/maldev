@@ -271,6 +271,38 @@ func main() {
 
 ---
 
+## Lightweight Obfuscation
+
+When the goal is not confidentiality but **breaking signatures and static analysis**, cryptographic primitives are overkill. Five lightweight obfuscations ship alongside the full ciphers for layered shellcode packers and small-footprint stages.
+
+| Algorithm | Block / Keyspace | Roundtrip | When to use |
+|-----------|------------------|-----------|-------------|
+| **TEA**   | 8-byte block / 16-byte key / 64 rounds | `EncryptTEA` / `DecryptTEA` | Minimal footprint (~60 instructions), academic-weak — first obfuscation layer only |
+| **XTEA**  | 8-byte block / 16-byte key / 64 rounds | `EncryptXTEA` / `DecryptXTEA` | Drop-in TEA replacement — fixes TEA's equivalent-key weakness |
+| **ArithShift** | arbitrary / any key length | `ArithShift` / `ReverseArithShift` | Position-dependent byte shift — breaks frequency analysis unlike XOR |
+| **S-Box** | 256-byte permutation | `SubstituteBytes` / `ReverseSubstituteBytes` | Non-linear byte substitution layer |
+| **MatrixTransform** (Agent Smith) | n×n mod-256 Hill cipher, n∈{2,3,4} | `MatrixTransform` / `ReverseMatrixTransform` | Diffuses each byte across a block — destroys byte-granularity pattern matching |
+
+**None of these are cryptographically secure.** Use them as layers on top of AES/ChaCha20 to defeat signatures, not as the outer envelope.
+
+```go
+// Example: XTEA + S-Box layering for shellcode packing.
+var xteaKey [16]byte
+rand.Read(xteaKey[:])
+sbox, inv, _ := crypto.NewSBox()
+
+packed, _  := crypto.EncryptXTEA(xteaKey, shellcode)
+packed     = crypto.SubstituteBytes(packed, sbox)
+
+// At runtime (in-process):
+stage1 := crypto.ReverseSubstituteBytes(packed, inv)
+orig, _ := crypto.DecryptXTEA(xteaKey, stage1)
+```
+
+**MITRE ATT&CK:** T1027 — Obfuscated Files or Information
+
+---
+
 ## API Reference
 
 ### crypto/
@@ -291,6 +323,20 @@ func XORWithRepeatingKey(data, key []byte) ([]byte, error)
 
 // RC4 (WARNING: cryptographically broken)
 func EncryptRC4(key, data []byte) ([]byte, error)
+
+// Lightweight obfuscation (not cryptographic)
+func EncryptTEA(key [16]byte, data []byte) ([]byte, error)
+func DecryptTEA(key [16]byte, data []byte) ([]byte, error)
+func EncryptXTEA(key [16]byte, data []byte) ([]byte, error)
+func DecryptXTEA(key [16]byte, data []byte) ([]byte, error)
+func ArithShift(data, key []byte) ([]byte, error)
+func ReverseArithShift(data, key []byte) ([]byte, error)
+func NewSBox() (sbox [256]byte, inverse [256]byte, err error)
+func SubstituteBytes(data []byte, sbox [256]byte) []byte
+func ReverseSubstituteBytes(data []byte, inverse [256]byte) []byte
+func NewMatrixKey(n int) (key [][]byte, inverse [][]byte, err error)
+func MatrixTransform(data []byte, key [][]byte) ([]byte, error)
+func ReverseMatrixTransform(data []byte, inverse [][]byte) ([]byte, error)
 ```
 
 ### encode/
