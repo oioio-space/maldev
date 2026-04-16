@@ -46,6 +46,7 @@
 | T1553.002 | Subvert Trust Controls: Code Signing | `pe/cert` | D3-SEA (Static Executable Analysis) |
 | T1562.001 | Disable or Modify Tools | `evasion/amsi`, `evasion/etw`, `evasion/unhook`, `evasion/acg`, `evasion/blockdlls` | D3-AIPA (Application Integrity Analysis) |
 | T1562.002 | Disable Windows Event Logging | `evasion/phant0m` | D3-EAL (Execution Activity Logging) |
+| T1574.012 | Hijack Execution Flow: Inline Hooking | `evasion/hook` | D3-AIPA (Application Integrity Analysis) |
 | T1564 | Hide Artifacts | `cleanup/service` | D3-FRA |
 | T1564.001 | Hide Artifacts: Hidden Process | `evasion/hideprocess` | D3-PLA (Process Listing Analysis) |
 | T1564.004 | Hide Artifacts: NTFS File Attributes | `system/ads` | D3-FRA (File Removal Analysis) |

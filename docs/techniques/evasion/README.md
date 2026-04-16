@@ -61,6 +61,7 @@ flowchart TB
 | [Sandbox Detection](sandbox.md) | `evasion/sandbox` | T1497 | Low | N/A (detection only) | No |
 | [Timing Evasion](timing.md) | `evasion/timing` | T1497.003 | Low | N/A (detection only) | No |
 | [Evasion Presets](preset.md) | `evasion/preset` | Multiple | Varies | Varies | Yes |
+| [Inline Hook](inline-hook.md) | `evasion/hook` | T1574.012 | High | Yes (Remove) | No |
 
 ## Presets
 

@@ -119,7 +119,7 @@ maldev/
 ├── crypto/  encode/  hash/  random/  useragent/         # Layer 0: Pure utilities
 ├── win/api/  win/syscall/  win/ntapi/  win/token/        # Layer 1: OS primitives
 ├── win/privilege/  win/impersonate/  win/user/  win/domain/  win/version/
-├── evasion/amsi/  evasion/etw/  evasion/unhook/          # Layer 2: Evasion
+├── evasion/amsi/  evasion/etw/  evasion/unhook/  evasion/hook/  # Layer 2: Evasion
 ├── evasion/sleepmask/  evasion/hwbp/  evasion/acg/  evasion/blockdlls/
 ├── evasion/antidebug/  evasion/antivm/  evasion/sandbox/  evasion/timing/
 ├── evasion/herpaderping/  evasion/phant0m/  evasion/fakecmd/  evasion/hideprocess/  evasion/stealthopen/
