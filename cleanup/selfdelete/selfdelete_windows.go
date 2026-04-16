@@ -72,35 +72,26 @@ func dsOpenHandleShared(pwPath *uint16) (windows.Handle, error) {
 	)
 }
 
-func dsRenameHandle(hHandle windows.Handle) error {
-	dsStreamRename, err := windows.UTF16FromString(":deadbeef")
-	if err != nil {
-		return err
-	}
-
-	// UTF-16 byte length of the stream name (excluding null terminator).
-	nameByteLen := uint32(len(dsStreamRename)-1) * 2
-
-	// Allocate a buffer large enough for the struct header + full filename.
+// Pre-computed rename info buffer — the stream name is a compile-time constant.
+var dsRenameInfoBuf = func() []byte {
+	streamName, _ := windows.UTF16FromString(":deadbeef")
+	nameByteLen := uint32(len(streamName)-1) * 2
 	headerSize := unsafe.Offsetof(_FILE_RENAME_INFO{}.FileName)
 	buf := make([]byte, uintptr(headerSize)+uintptr(nameByteLen))
-
-	// Fill the header fields at the start of the buffer.
-	// Flags = 0 (offset 0), RootDirectory = 0 (offset 8),
-	// FileNameLength at offset 16.
 	*(*uint32)(unsafe.Pointer(&buf[unsafe.Offsetof(_FILE_RENAME_INFO{}.FileNameLength)])) = nameByteLen
-
-	// Copy the UTF-16 stream name into the FileName field.
 	fnOffset := headerSize
-	for i := 0; i < len(dsStreamRename)-1; i++ {
-		*(*uint16)(unsafe.Pointer(&buf[fnOffset+uintptr(i)*2])) = dsStreamRename[i]
+	for i := 0; i < len(streamName)-1; i++ {
+		*(*uint16)(unsafe.Pointer(&buf[fnOffset+uintptr(i)*2])) = streamName[i]
 	}
+	return buf
+}()
 
+func dsRenameHandle(hHandle windows.Handle) error {
 	return windows.SetFileInformationByHandle(
 		hHandle,
 		windows.FileRenameInfo,
-		&buf[0],
-		uint32(len(buf)),
+		&dsRenameInfoBuf[0],
+		uint32(len(dsRenameInfoBuf)),
 	)
 }
 
@@ -143,7 +134,7 @@ func Run() error {
 		return err
 	}
 
-	hCurrent, err = dsOpenHandle(&wcPath[0])
+	hCurrent, err = dsOpenHandleShared(&wcPath[0])
 	if err != nil {
 		return err
 	}
@@ -160,22 +151,16 @@ func Run() error {
 // Useful when a backup system (e.g., OneDrive) holds a lock on the file.
 func RunForce(retry int, duration time.Duration) error {
 	var err error
-
-loop:
 	for i := 0; i < retry; i++ {
 		err = Run()
 		if err == nil {
-			break loop
+			return nil
 		}
-		if errno, ok := err.(syscall.Errno); ok {
-			if errno == syscall.ERROR_ALREADY_EXISTS {
-				err = nil
-				break loop
-			}
+		if errno, ok := err.(syscall.Errno); ok && errno == syscall.ERROR_ALREADY_EXISTS {
+			return nil
 		}
 		time.Sleep(duration)
 	}
-
 	return err
 }
 

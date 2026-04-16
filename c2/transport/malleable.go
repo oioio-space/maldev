@@ -90,12 +90,13 @@ type Malleable struct {
 	profile    *Profile
 	httpClient *http.Client
 
-	mu       sync.Mutex
-	recvBuf  bytes.Buffer
-	getIdx   int
-	postIdx  int
-	closed   bool
-	conn     net.Conn // underlying connection for RemoteAddr
+	mu         sync.Mutex
+	recvBuf    bytes.Buffer
+	getIdx     int
+	postIdx    int
+	closed     bool
+	conn       net.Conn // underlying connection for RemoteAddr
+	remoteAddr net.Addr
 }
 
 // NewMalleable creates a Malleable that shapes C2 traffic according
@@ -228,9 +229,12 @@ func (m *Malleable) Close() error {
 	return nil
 }
 
-// RemoteAddr returns the remote address. Handles both full URLs
-// (https://host:port) and bare host:port addresses.
+// RemoteAddr returns the remote address. Uses a cached resolution to avoid
+// DNS lookups on every call.
 func (m *Malleable) RemoteAddr() net.Addr {
+	if m.remoteAddr != nil {
+		return m.remoteAddr
+	}
 	host := m.address
 	if u, parseErr := url.Parse(m.address); parseErr == nil && u.Host != "" {
 		host = u.Host
@@ -239,6 +243,7 @@ func (m *Malleable) RemoteAddr() net.Addr {
 	if err != nil {
 		return nil
 	}
+	m.remoteAddr = addr
 	return addr
 }
 
