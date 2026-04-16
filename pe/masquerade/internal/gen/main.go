@@ -33,15 +33,22 @@ import (
 )
 
 type variant struct {
-	name    string
-	subdir  string // "" means base-level (identity root dir)
-	level   masquerade.ExecLevel
-	descStr string
+	name   string
+	subdir string // "" means base-level (identity root dir)
+	level  masquerade.ExecLevel
 }
 
 var variants = []variant{
-	{"base", "", masquerade.AsInvoker, "requestedExecutionLevel=asInvoker"},
-	{"admin", "admin", masquerade.RequireAdministrator, "requestedExecutionLevel=requireAdministrator (prompts UAC)"},
+	{"base", "", masquerade.AsInvoker},
+	{"admin", "admin", masquerade.RequireAdministrator},
+}
+
+func (v variant) desc() string {
+	s := "requestedExecutionLevel=" + v.level.String()
+	if v.level == masquerade.RequireAdministrator {
+		s += " (prompts UAC)"
+	}
+	return s
 }
 
 // identities lists every System32 reference binary we masquerade as.
@@ -80,8 +87,12 @@ func main() {
 	log.Println("done")
 }
 
-// generateIdentity loads one reference exe and emits all variants.
 func generateIdentity(outRoot, id, exePath string) error {
+	res, err := masquerade.Extract(exePath)
+	if err != nil {
+		return fmt.Errorf("extract %s: %w", exePath, err)
+	}
+
 	for _, v := range variants {
 		dir := filepath.Join(outRoot, "preset", id)
 		if v.subdir != "" {
@@ -92,8 +103,8 @@ func generateIdentity(outRoot, id, exePath string) error {
 		}
 
 		sysoPath := filepath.Join(dir, "resource_windows_amd64.syso")
-		if err := masquerade.Clone(exePath, sysoPath, masquerade.AMD64, v.level); err != nil {
-			return fmt.Errorf("clone %s: %w", sysoPath, err)
+		if err := res.GenerateSyso(sysoPath, masquerade.AMD64, v.level); err != nil {
+			return fmt.Errorf("generate %s: %w", sysoPath, err)
 		}
 
 		if err := writePackageFiles(dir, id, v); err != nil {
@@ -130,7 +141,7 @@ func writePackageFiles(dir, id string, v variant) error {
 // MITRE ATT&CK: T1036.005
 package %s
 `,
-		pkg, id, v.descStr, id,
+		pkg, id, v.desc(), id,
 		packageImportPath(id, v),
 		pkg,
 	)

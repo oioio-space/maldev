@@ -2,7 +2,6 @@ package masquerade
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 
@@ -33,7 +32,6 @@ func (l ExecLevel) String() string {
 	}
 }
 
-// toWinres converts to the winres library's execution level type.
 func (l ExecLevel) toWinres() winres.ExecutionLevel {
 	switch l {
 	case HighestAvailable:
@@ -53,7 +51,6 @@ const (
 	I386
 )
 
-// toWinres converts to the winres library's architecture type.
 func (a Arch) toWinres() winres.Arch {
 	if a == I386 {
 		return winres.ArchI386
@@ -83,7 +80,6 @@ type Resources struct {
 
 	rs       *winres.ResourceSet
 	manifest winres.AppManifest
-	rawVI    *version.Info
 }
 
 // Extract opens a PE file and extracts its manifest, icons, version info,
@@ -102,7 +98,6 @@ func Extract(pePath string) (*Resources, error) {
 
 	res := &Resources{rs: rs}
 
-	// Manifest: take the first RT_MANIFEST entry regardless of language.
 	rs.WalkType(winres.RT_MANIFEST, func(resID winres.Identifier, langID uint16, data []byte) bool {
 		if len(data) > 0 && res.Manifest == nil {
 			res.Manifest = data
@@ -113,7 +108,6 @@ func Extract(pePath string) (*Resources, error) {
 		return res.Manifest == nil
 	})
 
-	// Icons: walk all RT_GROUP_ICON entries.
 	rs.WalkType(winres.RT_GROUP_ICON, func(resID winres.Identifier, langID uint16, _ []byte) bool {
 		ico, iErr := rs.GetIconTranslation(resID, langID)
 		if iErr == nil {
@@ -122,22 +116,21 @@ func Extract(pePath string) (*Resources, error) {
 		return true
 	})
 
-	// Version info: take the first RT_VERSION entry regardless of language.
+	var viDone bool
 	rs.WalkType(winres.RT_VERSION, func(_ winres.Identifier, _ uint16, data []byte) bool {
-		if len(data) > 0 && res.rawVI == nil {
+		if len(data) > 0 && !viDone {
 			if vi, vErr := version.FromBytes(data); vErr == nil {
-				res.rawVI = vi
+				viDone = true
 				res.VersionInfo = extractVersionStrings(vi)
 			}
 		}
-		return res.rawVI == nil
+		return !viDone
 	})
 
-	// Certificate: optional, ignore ErrNoCertificate.
-	if c, cErr := cert.Read(pePath); cErr == nil {
-		res.Certificate = c
-	} else if !errors.Is(cErr, cert.ErrNoCertificate) {
-		return nil, fmt.Errorf("read certificate: %w", cErr)
+	if hasCert, _ := cert.Has(pePath); hasCert {
+		if c, cErr := cert.Read(pePath); cErr == nil {
+			res.Certificate = c
+		}
 	}
 
 	return res, nil
@@ -164,7 +157,6 @@ func extractVersionStrings(vi *version.Info) *VersionInfo {
 		}
 	}
 
-	// Take the first available translation.
 	for _, strings := range raw.Info {
 		return &VersionInfo{
 			FileDescription:  strings[version.FileDescription],
@@ -218,10 +210,8 @@ func (res *Resources) GenerateSyso(output string, arch Arch, level ExecLevel) er
 
 func (res *Resources) buildVersionInfo() *version.Info {
 	vi := &version.Info{}
-	if res.rawVI != nil {
-		vi.FileVersion = res.rawVI.FileVersion
-		vi.ProductVersion = res.rawVI.ProductVersion
-	}
+	vi.FileVersion = parseVersion(res.VersionInfo.FileVersion)
+	vi.ProductVersion = parseVersion(res.VersionInfo.ProductVersion)
 	vi.Set(0, version.FileDescription, res.VersionInfo.FileDescription)
 	vi.Set(0, version.ProductName, res.VersionInfo.ProductName)
 	vi.Set(0, version.CompanyName, res.VersionInfo.CompanyName)
@@ -231,6 +221,12 @@ func (res *Resources) buildVersionInfo() *version.Info {
 	vi.Set(0, version.ProductVersion, res.VersionInfo.ProductVersion)
 	vi.Set(0, version.LegalCopyright, res.VersionInfo.LegalCopyright)
 	return vi
+}
+
+func parseVersion(s string) [4]uint16 {
+	var v [4]uint16
+	fmt.Sscanf(s, "%d.%d.%d.%d", &v[0], &v[1], &v[2], &v[3])
+	return v
 }
 
 // Option configures a Build call.
