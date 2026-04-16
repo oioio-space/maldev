@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/png"
 	"os"
 
 	"github.com/oioio-space/maldev/pe/cert"
@@ -289,6 +291,56 @@ func WithVersionInfo(vi *VersionInfo) Option {
 // (obtained from a previous Extract or from the winres library directly).
 func WithIcons(icons []*winres.Icon) Option {
 	return func(c *buildConfig) { c.icons = icons }
+}
+
+// WithIconFile loads an icon from a .png, .ico, or any image file
+// supported by Go's image package and sets it as the application icon.
+func WithIconFile(path string) Option {
+	return func(c *buildConfig) {
+		ico, err := IconFromFile(path)
+		if err == nil {
+			c.icons = []*winres.Icon{ico}
+		}
+	}
+}
+
+// WithIconImage creates an icon from a Go image.Image and sets it as
+// the application icon.
+func WithIconImage(img image.Image) Option {
+	return func(c *buildConfig) {
+		ico, err := IconFromImage(img)
+		if err == nil {
+			c.icons = []*winres.Icon{ico}
+		}
+	}
+}
+
+// IconFromFile loads an image file (PNG, ICO, BMP, JPEG, etc.) and
+// converts it to an icon suitable for PE embedding. The winres library
+// automatically generates all standard icon sizes (256, 128, 64, 48,
+// 32, 16 px).
+func IconFromFile(path string) (*winres.Icon, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open icon: %w", err)
+	}
+	defer f.Close()
+
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return nil, fmt.Errorf("decode icon: %w", err)
+	}
+	return IconFromImage(img)
+}
+
+// IconFromImage converts a Go image.Image to an icon suitable for PE
+// embedding. All standard sizes are generated automatically.
+func IconFromImage(img image.Image) (*winres.Icon, error) {
+	ico, err := winres.NewIconFromResizedImage(img, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create icon: %w", err)
+	}
+	return ico, nil
 }
 
 // WithCertificate stores a certificate for post-build application.

@@ -225,23 +225,11 @@ err := masquerade.Build("resource.syso", masquerade.AMD64,
 ### Build from Scratch (no source PE)
 
 ```go
-import (
-    "image"
-    _ "image/png"
-    "os"
-
-    "github.com/oioio-space/maldev/pe/masquerade"
-    "github.com/tc-hib/winres"
-)
-
-// Load a custom icon from a .png or .ico file.
-f, _ := os.Open("app_icon.png")
-img, _, _ := image.Decode(f)
-f.Close()
-icon, _ := winres.NewIconFromResizedImage(img, nil)
+import "github.com/oioio-space/maldev/pe/masquerade"
 
 err := masquerade.Build("resource_windows_amd64.syso", masquerade.AMD64,
     masquerade.WithExecLevel(masquerade.RequireAdministrator),
+    masquerade.WithIconFile("app_icon.png"),
     masquerade.WithVersionInfo(&masquerade.VersionInfo{
         FileDescription:  "Host Process for Windows Services",
         CompanyName:      "Microsoft Corporation",
@@ -250,14 +238,28 @@ err := masquerade.Build("resource_windows_amd64.syso", masquerade.AMD64,
         FileVersion:      "10.0.19041.1",
         ProductVersion:   "10.0.19041.1",
     }),
-    masquerade.WithIcons([]*winres.Icon{icon}),
 )
 ```
 
-Without `WithSourcePE`, a minimal manifest (Win10 compatibility) and no
-icons are used. `WithIcons` accepts `[]*winres.Icon` — use
-`winres.NewIconFromResizedImage` to create one from any Go `image.Image`,
-or `winres.LoadICO` to load a `.ico` file directly.
+### Icon Helpers
+
+The package provides convenience functions for loading icons without
+importing the `winres` library directly:
+
+```go
+// From an image file (PNG, ICO, BMP, JPEG, etc.)
+masquerade.WithIconFile("icon.png")
+
+// From a Go image.Image (e.g. generated at runtime)
+masquerade.WithIconImage(myImage)
+
+// Standalone helpers (return *winres.Icon for use with WithIcons)
+ico, _ := masquerade.IconFromFile("icon.png")
+ico, _ := masquerade.IconFromImage(myImage)
+```
+
+All standard icon sizes (256, 128, 64, 48, 32, 16 px) are generated
+automatically from the source image.
 
 ### Build from Any PE + Certificate
 
@@ -308,7 +310,11 @@ appended to the final PE after linking, using `cert.Write`.
 | `WithExecLevel(level ExecLevel) Option` | option | Override the manifest's `requestedExecutionLevel`. |
 | `WithManifest(xml []byte) Option` | option | Replace the entire manifest with raw XML. |
 | `WithVersionInfo(vi *VersionInfo) Option` | option | Override all version resource strings. |
-| `WithIcons(icons []*winres.Icon) Option` | option | Override icon resources (requires importing `github.com/tc-hib/winres` directly). |
+| `WithIconFile(path string) Option` | option | Load icon from image file (PNG, ICO, BMP, etc.) — no winres import needed. |
+| `WithIconImage(img image.Image) Option` | option | Create icon from Go `image.Image` — no winres import needed. |
+| `IconFromFile(path string) (*winres.Icon, error)` | func | Load image file and convert to icon. |
+| `IconFromImage(img image.Image) (*winres.Icon, error)` | func | Convert Go image to icon. |
+| `WithIcons(icons []*winres.Icon) Option` | option | Override icon resources (advanced — requires importing `winres`). |
 | `WithCertificate(c *cert.Certificate) Option` | option | Store a certificate for post-build application (not embedded in `.syso`). |
 | `ErrEmptySourcePE` | error | Returned when `WithSourcePE` is called with an empty path. |
 | `AMD64`, `I386` | `Arch` | Target CPU architecture for the emitted `.syso`. |
