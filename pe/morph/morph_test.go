@@ -2,6 +2,9 @@ package morph
 
 import (
 	"encoding/binary"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -122,4 +125,56 @@ func TestUPXMorph_RoundTrip(t *testing.T) {
 		got := fixed[off : off+8]
 		assert.Equal(t, nameBuf[:], got, "section %d after round-trip", i)
 	}
+}
+
+func TestUPXMorphRealBinary(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping UPX real binary test in short mode")
+	}
+
+	upxPath, err := exec.LookPath("upx")
+	if err != nil {
+		t.Skip("upx not found in PATH")
+	}
+
+	// Build a simple test binary.
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "hello.go")
+	os.WriteFile(srcPath, []byte(`package main
+import "fmt"
+func main() { fmt.Println("HELLO_UPX_TEST") }
+`), 0644)
+
+	binPath := filepath.Join(tmpDir, "hello.exe")
+	build := exec.Command("go", "build", "-o", binPath, srcPath)
+	build.Env = append(os.Environ(), "CGO_ENABLED=0")
+	require.NoError(t, build.Run(), "go build failed")
+
+	// Pack with UPX.
+	pack := exec.Command(upxPath, "--best", binPath)
+	require.NoError(t, pack.Run(), "upx pack failed")
+
+	// Read packed binary.
+	packed, err := os.ReadFile(binPath)
+	require.NoError(t, err)
+
+	// Morph it.
+	morphed, err := UPXMorph(packed)
+	require.NoError(t, err)
+
+	morphedPath := filepath.Join(tmpDir, "hello_morphed.exe")
+	require.NoError(t, os.WriteFile(morphedPath, morphed, 0755))
+
+	// Verify morphed binary still runs correctly.
+	out, err := exec.Command(morphedPath).Output()
+	require.NoError(t, err)
+	require.Contains(t, string(out), "HELLO_UPX_TEST")
+
+	// Verify UPX cannot unpack the morphed binary.
+	unpack := exec.Command(upxPath, "-d", morphedPath)
+	err = unpack.Run()
+	require.Error(t, err, "upx -d should fail on morphed binary")
+
+	// Verify hashes differ.
+	require.NotEqual(t, packed, morphed, "morphed binary should differ from original")
 }
