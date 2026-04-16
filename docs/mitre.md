@@ -27,7 +27,7 @@
 | T1071.001 | Web Protocols | `c2/transport/malleable`, `c2/transport/namedpipe` | D3-NTA (Network Traffic Analysis) |
 | T1082 | System Information Discovery | `win/domain`, `win/version` | D3-SYSIP (System Information Profiling) |
 | T1083 | File and Directory Discovery | `system/folder` | D3-FDA (File Discovery Analysis) |
-| T1106 | Native API | `win/api` (PEB walk, API hashing), `win/syscall`, `win/ntapi` | D3-SCA (System Call Analysis) |
+| T1106 | Native API | `win/api` (PEB walk, API hashing), `win/syscall`, `win/ntapi`, `pe/imports` (import table enumeration) | D3-SCA (System Call Analysis) |
 | T1113 | Screen Capture | `collection/screenshot` | D3-DA (Dynamic Analysis) |
 | T1115 | Clipboard Data | `collection/clipboard` | D3-DA (Dynamic Analysis) |
 | T1120 | Peripheral Device Discovery | `system/drive` | D3-PDD (Peripheral Device Discovery) |

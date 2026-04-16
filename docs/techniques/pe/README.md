@@ -63,6 +63,7 @@ graph TD
 | [Certificate Theft](certificate-theft.md) | Read, copy, strip, and write Authenticode certificates |
 | [CLR Hosting](clr.md) | In-process .NET assembly execution via ICorRuntimeHost — T1620 |
 | [Resource Masquerade](masquerade.md) | Compile-time manifest/icon/VERSIONINFO embedding via blank import (`pe/masquerade/preset/`) **or** programmatic `.syso` generation (`pe/masquerade`) — T1036.005 |
+| [Import Table Analysis](imports.md) | Enumerate DLL dependencies and imported function names from PE bytes — T1106 |
 
 ## MITRE ATT&CK
 

@@ -45,9 +45,9 @@ injector.Inject(shellcode)
 |----------|----------|------------|
 | **Crypto & Encoding** | `crypto/` `encode/` `hash/` `random/` `useragent/` | AES-GCM, ChaCha20, XOR, RC4, TEA, XTEA, ArithShift, S-Box, Agent Smith matrix, Base64, UTF-16LE, ROR13, ssdeep, TLSH |
 | **Windows Primitives** | `win/api/` `win/syscall/` `win/ntapi/` `win/token/` `win/privilege/` `win/impersonate/` `win/user/` `win/domain/` `win/version/` | PEB walk, 4 syscall methods (WinAPI/NativeAPI/Direct/Indirect), 5 SSN resolvers (Hell's/Halo's/Tartarus/Hash Gate, Chain), token theft, privilege escalation |
-| **Evasion** | `evasion/amsi/` `etw/` `unhook/` `sleepmask/` `hwbp/` `acg/` `blockdlls/` `antidebug/` `antivm/` `sandbox/` `timing/` `herpaderping/` `phant0m/` `fakecmd/` `hideprocess/` `stealthopen/` `cet/` | AMSI/ETW patching, ntdll unhooking (Classic/Full/Perun), sleep encryption, HW breakpoint detection, Herpaderping, PEB CommandLine spoofing (self + remote via SpoofPID), target NtQSI patching, NTFS Object ID file access, Intel CET shadow-stack opt-out + ENDBR64 marker |
+| **Evasion** | `evasion/amsi/` `etw/` `unhook/` `sleepmask/` `hwbp/` `acg/` `blockdlls/` `antidebug/` `antivm/` `sandbox/` `timing/` `herpaderping/` `phant0m/` `fakecmd/` `hideprocess/` `stealthopen/` `cet/` `evasion/hook/bridge/` | AMSI/ETW patching, ntdll unhooking (Classic/Full/Perun), sleep encryption, HW breakpoint detection, Herpaderping, PEB CommandLine spoofing (self + remote via SpoofPID), target NtQSI patching, NTFS Object ID file access, Intel CET shadow-stack opt-out + ENDBR64 marker, hook bridge IPC (wire protocol, ArgBlock, Allow/Block/Modify decisions) |
 | **Injection** | `inject/` | 15+ methods: CreateThread, EarlyBird APC, ThreadHijack, NtQueueApcThreadEx, EtwpCreateEtwThread, SectionMap, PhantomDLL, Callback, ThreadPool, KernelCallbackTable, Fiber, DirectSyscall + Linux (Ptrace, MemFD, ProcMem) |
-| **PE Operations** | `pe/srdi/` `pe/parse/` `pe/strip/` `pe/bof/` `pe/morph/` `pe/cert/` `pe/clr/` `pe/masquerade/` | PE-to-shellcode via [Donut](https://github.com/Binject/go-donut) (EXE/DLL/.NET/VBS/JS), BOF COFF loader, PE sanitization, Authenticode cert manipulation, in-process .NET CLR hosting, compile-time manifest/icon/VERSIONINFO embedding (blank-import `pe/masquerade/preset/`), programmatic `.syso` generation from any source PE (`pe/masquerade`) |
+| **PE Operations** | `pe/srdi/` `pe/parse/` `pe/strip/` `pe/bof/` `pe/morph/` `pe/cert/` `pe/clr/` `pe/masquerade/` `pe/imports/` | PE-to-shellcode via [Donut](https://github.com/Binject/go-donut) (EXE/DLL/.NET/VBS/JS), BOF COFF loader, PE sanitization, Authenticode cert manipulation, in-process .NET CLR hosting, compile-time manifest/icon/VERSIONINFO embedding (blank-import `pe/masquerade/preset/`), programmatic `.syso` generation from any source PE (`pe/masquerade`), import table enumeration (`pe/imports`) |
 | **C2** | `c2/shell/` `c2/transport/` `c2/transport/namedpipe/` `c2/multicat/` `c2/meterpreter/` `c2/cert/` | Reverse shell with PTY (Linux) + reconnect, multi-session listener (operator-side), Meterpreter staging (TCP/HTTP/HTTPS), TLS with JA3 fingerprinting, malleable C2, named pipe transport (Windows), PPID spoofing |
 | **System** | `system/ads/` `system/drive/` `system/folder/` `system/network/` `system/lnk/` `system/bsod/` `system/ui/` | NTFS Alternate Data Streams CRUD + hidden files, drive monitoring, special folder paths, LNK creation |
 | **Process** | `process/enum/` `process/session/` | Cross-platform process enumeration (Windows + Linux), Terminal Services session listing, cross-session process creation, thread impersonation |
@@ -119,12 +119,12 @@ maldev/
 ├── crypto/  encode/  hash/  random/  useragent/         # Layer 0: Pure utilities
 ├── win/api/  win/syscall/  win/ntapi/  win/token/        # Layer 1: OS primitives
 ├── win/privilege/  win/impersonate/  win/user/  win/domain/  win/version/
-├── evasion/amsi/  evasion/etw/  evasion/unhook/  evasion/hook/  # Layer 2: Evasion
+├── evasion/amsi/  evasion/etw/  evasion/unhook/  evasion/hook/  evasion/hook/bridge/  # Layer 2: Evasion
 ├── evasion/sleepmask/  evasion/hwbp/  evasion/acg/  evasion/blockdlls/
 ├── evasion/antidebug/  evasion/antivm/  evasion/sandbox/  evasion/timing/
 ├── evasion/herpaderping/  evasion/phant0m/  evasion/fakecmd/  evasion/hideprocess/  evasion/stealthopen/
 ├── inject/                                                # Layer 2: Injection (15+ methods)
-├── pe/parse/  pe/srdi/  pe/strip/  pe/bof/  pe/morph/  pe/cert/  pe/clr/  pe/masquerade/
+├── pe/parse/  pe/srdi/  pe/strip/  pe/bof/  pe/morph/  pe/cert/  pe/clr/  pe/masquerade/  pe/imports/
 ├── process/enum/  process/session/
 ├── system/ads/  system/drive/  system/folder/  system/network/  system/lnk/  system/bsod/  system/ui/
 ├── c2/shell/  c2/transport/  c2/meterpreter/  c2/cert/   # Layer 3: C2
