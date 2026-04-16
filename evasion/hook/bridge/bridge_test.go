@@ -69,14 +69,11 @@ func TestSplitTagDataNoNull(t *testing.T) {
 }
 
 func TestControllerListenerRoundTrip(t *testing.T) {
-	sr, cw := io.Pipe() // server reads what controller writes
-	cr, sw := io.Pipe() // controller reads what server writes
+	sr, cw := io.Pipe()
+	cr, sw := io.Pipe()
 
-	ctrlConn := readWriteCloser{Reader: cr, Writer: cw, Closer: cw}
-	lisConn := readWriteCloser{Reader: sr, Writer: sw, Closer: sw}
-
-	ctrl := Connect(&ctrlConn)
-	lis := NewListener(&lisConn)
+	ctrl := Connect(&readWriteCloser{Reader: cr, Writer: cw, Closer: cw})
+	lis := NewListener(&readWriteCloser{Reader: sr, Writer: sw, Closer: sw})
 
 	var receivedTag string
 	var receivedData []byte
@@ -89,6 +86,7 @@ func TestControllerListenerRoundTrip(t *testing.T) {
 	var logMsg string
 	lis.OnLog(func(msg string) { logMsg = msg })
 
+	go ctrl.Serve()
 	go lis.Serve()
 
 	ctrl.Log("test message")
@@ -100,7 +98,7 @@ func TestControllerListenerRoundTrip(t *testing.T) {
 	require.Equal(t, "delete_file", receivedTag)
 	require.Equal(t, []byte(`C:\secret.txt`), receivedData)
 
-	require.NoError(t, ctrl.Close())
+	require.NoError(t, lis.Close())
 }
 
 func TestControllerHeartbeat(t *testing.T) {
@@ -109,10 +107,11 @@ func TestControllerHeartbeat(t *testing.T) {
 
 	ctrl := Connect(&readWriteCloser{Reader: cr, Writer: cw, Closer: cw})
 	lis := NewListener(&readWriteCloser{Reader: sr, Writer: sw, Closer: sw})
+	go ctrl.Serve()
 	go lis.Serve()
 
 	require.NoError(t, ctrl.Heartbeat())
-	require.NoError(t, ctrl.Close())
+	require.NoError(t, lis.Close())
 }
 
 func TestControllerExfil(t *testing.T) {
@@ -128,6 +127,7 @@ func TestControllerExfil(t *testing.T) {
 		gotTag = tag
 		gotData = data
 	})
+	go ctrl.Serve()
 	go lis.Serve()
 
 	ctrl.Exfil("lsass", []byte("dumpdata"))
@@ -135,7 +135,7 @@ func TestControllerExfil(t *testing.T) {
 	require.Equal(t, "lsass", gotTag)
 	require.Equal(t, []byte("dumpdata"), gotData)
 
-	require.NoError(t, ctrl.Close())
+	require.NoError(t, lis.Close())
 }
 
 func TestStandalone(t *testing.T) {
@@ -147,6 +147,108 @@ func TestStandalone(t *testing.T) {
 	require.NoError(t, ctrl.Heartbeat())
 	require.NoError(t, ctrl.Close())
 	require.NotNil(t, ctrl.Args())
+}
+
+func TestRPCCall(t *testing.T) {
+	sr, cw := io.Pipe()
+	cr, sw := io.Pipe()
+
+	ctrl := Connect(&readWriteCloser{Reader: cr, Writer: cw, Closer: cw})
+	lis := NewListener(&readWriteCloser{Reader: sr, Writer: sw, Closer: sw})
+
+	ctrl.Register("echo", func(data []byte) ([]byte, error) {
+		return append([]byte("ECHO:"), data...), nil
+	})
+
+	ctrl.Register("add", func(data []byte) ([]byte, error) {
+		a := int(data[0])
+		b := int(data[1])
+		return []byte{byte(a + b)}, nil
+	})
+
+	go ctrl.Serve()
+	go lis.Serve()
+
+	resp, err := lis.Call("echo", []byte("hello"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("ECHO:hello"), resp)
+
+	resp, err = lis.Call("add", []byte{3, 7})
+	require.NoError(t, err)
+	require.Equal(t, []byte{10}, resp)
+
+	require.NoError(t, lis.Close())
+}
+
+func TestRPCUnknownCommand(t *testing.T) {
+	sr, cw := io.Pipe()
+	cr, sw := io.Pipe()
+
+	ctrl := Connect(&readWriteCloser{Reader: cr, Writer: cw, Closer: cw})
+	lis := NewListener(&readWriteCloser{Reader: sr, Writer: sw, Closer: sw})
+
+	go ctrl.Serve()
+	go lis.Serve()
+
+	_, err := lis.Call("nonexistent", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown command")
+
+	require.NoError(t, lis.Close())
+}
+
+func TestRPCAndHookConcurrent(t *testing.T) {
+	sr, cw := io.Pipe()
+	cr, sw := io.Pipe()
+
+	ctrl := Connect(&readWriteCloser{Reader: cr, Writer: cw, Closer: cw})
+	lis := NewListener(&readWriteCloser{Reader: sr, Writer: sw, Closer: sw})
+
+	ctrl.Register("ping", func(_ []byte) ([]byte, error) {
+		return []byte("pong"), nil
+	})
+
+	var hookTag string
+	lis.OnCall(func(c Call) Decision {
+		hookTag = c.Tag
+		return Block
+	})
+
+	go ctrl.Serve()
+	go lis.Serve()
+
+	// RPC call (implant → handler)
+	resp, err := lis.Call("ping", nil)
+	require.NoError(t, err)
+	require.Equal(t, []byte("pong"), resp)
+
+	// Hook call (handler → implant) — concurrent with RPC
+	decision := ctrl.Ask("delete_file", []byte("test"))
+	require.Equal(t, Block, decision)
+	require.Equal(t, "delete_file", hookTag)
+
+	require.NoError(t, lis.Close())
+}
+
+func TestRPCReadMemory(t *testing.T) {
+	sr, cw := io.Pipe()
+	cr, sw := io.Pipe()
+
+	ctrl := Connect(&readWriteCloser{Reader: cr, Writer: cw, Closer: cw})
+	lis := NewListener(&readWriteCloser{Reader: sr, Writer: sw, Closer: sw})
+
+	ctrl.Register("read_memory", func(data []byte) ([]byte, error) {
+		return []byte("MEMDATA"), nil
+	})
+
+	go ctrl.Serve()
+	go lis.Serve()
+
+	resp, err := lis.ReadMemory(0x1234, 256)
+	require.NoError(t, err)
+	require.Equal(t, []byte("MEMDATA"), resp)
+
+	require.NoError(t, lis.Close())
 }
 
 type readWriteCloser struct {
