@@ -8,13 +8,14 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sys/windows"
 
+	"github.com/oioio-space/maldev/process/enum"
 	"github.com/oioio-space/maldev/win/api"
 	"github.com/oioio-space/maldev/win/token"
 )
@@ -31,6 +32,7 @@ const (
 	scManagerConnect    = 0x0001
 	serviceQueryStatus  = 0x0004
 	serviceStart        = 0x0010
+	serviceStartPending = 0x00000002
 	serviceRunning      = 0x00000004
 	scStatusProcessInfo = 0
 )
@@ -232,26 +234,15 @@ func GetTrustedInstaller(fn func() error) error {
 	})
 }
 
-// findProcessByName returns the PID of the first process matching name
-// (case-insensitive).
 func findProcessByName(name string) (uint32, error) {
-	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	procs, err := enum.FindByName(name)
 	if err != nil {
-		return 0, fmt.Errorf("CreateToolhelp32Snapshot: %w", err)
+		return 0, err
 	}
-	defer windows.CloseHandle(snapshot)
-
-	var pe windows.ProcessEntry32
-	pe.Size = uint32(unsafe.Sizeof(pe))
-	err = windows.Process32First(snapshot, &pe)
-	for err == nil {
-		exeName := windows.UTF16ToString(pe.ExeFile[:])
-		if strings.EqualFold(exeName, name) {
-			return pe.ProcessID, nil
-		}
-		err = windows.Process32Next(snapshot, &pe)
+	if len(procs) == 0 {
+		return 0, fmt.Errorf("process %q not found", name)
 	}
-	return 0, fmt.Errorf("process %q not found", name)
+	return procs[0].PID, nil
 }
 
 // startAndFindTI ensures the TrustedInstaller service is running and returns its PID.
@@ -279,23 +270,29 @@ func startAndFindTI() (uint32, error) {
 	}
 	defer procCloseServiceHandle.Call(hSvc) //nolint:errcheck
 
-	// Start the service — idempotent if already running.
 	procStartServiceW.Call(hSvc, 0, 0) //nolint:errcheck
 
+	// Poll until SERVICE_RUNNING — StartServiceW is async.
 	var ssp serviceStatusProcess
 	needed := uint32(unsafe.Sizeof(ssp))
-	r, _, err := procQueryServiceStatusEx.Call(
-		hSvc,
-		uintptr(scStatusProcessInfo),
-		uintptr(unsafe.Pointer(&ssp)),
-		uintptr(needed),
-		uintptr(unsafe.Pointer(&needed)),
-	)
-	if r == 0 {
-		return 0, fmt.Errorf("QueryServiceStatusEx: %w", err)
+	for i := 0; i < 20; i++ {
+		r, _, err := procQueryServiceStatusEx.Call(
+			hSvc,
+			uintptr(scStatusProcessInfo),
+			uintptr(unsafe.Pointer(&ssp)),
+			uintptr(needed),
+			uintptr(unsafe.Pointer(&needed)),
+		)
+		if r == 0 {
+			return 0, fmt.Errorf("QueryServiceStatusEx: %w", err)
+		}
+		if ssp.CurrentState == serviceRunning {
+			return ssp.ProcessID, nil
+		}
+		if ssp.CurrentState != serviceStartPending {
+			return 0, fmt.Errorf("TrustedInstaller service in unexpected state %d", ssp.CurrentState)
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
-	if ssp.CurrentState != serviceRunning {
-		return 0, fmt.Errorf("TrustedInstaller service not running (state=%d)", ssp.CurrentState)
-	}
-	return ssp.ProcessID, nil
+	return 0, fmt.Errorf("TrustedInstaller service did not start within 10s")
 }

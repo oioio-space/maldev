@@ -124,7 +124,6 @@ func (p *Pipe) Connect(ctx context.Context) error {
 		return fmt.Errorf("pipe name: %w", err)
 	}
 
-	// Wait for the pipe to be available.
 	timeoutMs := uint32(p.timeout.Milliseconds())
 	if timeoutMs == 0 {
 		timeoutMs = 5000
@@ -137,7 +136,6 @@ func (p *Pipe) Connect(ctx context.Context) error {
 		return fmt.Errorf("WaitNamedPipe %s: %w", p.name, waitErr)
 	}
 
-	// Check context before opening.
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -205,7 +203,6 @@ type PipeListener struct {
 // NewListener creates a named pipe listener on the given pipe name
 // (e.g. `\\.\pipe\myc2`).
 func NewListener(name string) (*PipeListener, error) {
-	// Validate that the name can be converted to UTF-16.
 	if _, err := windows.UTF16PtrFromString(name); err != nil {
 		return nil, fmt.Errorf("pipe name: %w", err)
 	}

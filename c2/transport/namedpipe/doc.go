@@ -1,5 +1,3 @@
-//go:build windows
-
 // Package namedpipe provides a Windows named pipe transport implementing
 // the transport.Transport and transport.Listener interfaces.
 //
