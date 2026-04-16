@@ -133,6 +133,46 @@ func TestInstallWithCaller(t *testing.T) {
 	require.NotZero(t, r)
 }
 
+func TestInstallProbe(t *testing.T) {
+	proc := windows.NewLazySystemDLL("kernel32.dll").NewProc("GetTickCount")
+	require.NoError(t, proc.Find())
+	var called bool
+	var result ProbeResult
+	h, err := InstallProbe(proc.Addr(), func(r ProbeResult) {
+		called = true
+		result = r
+	})
+	require.NoError(t, err)
+	defer h.Remove()
+	syscall.SyscallN(proc.Addr())
+	require.True(t, called)
+	t.Logf("NonZeroCount: %d", result.NonZeroCount())
+}
+
+func TestInstallProbeByName(t *testing.T) {
+	var called bool
+	h, err := InstallProbeByName("kernel32.dll", "GetTickCount", func(r ProbeResult) {
+		called = true
+	})
+	require.NoError(t, err)
+	defer h.Remove()
+	syscall.SyscallN(h.Target())
+	require.True(t, called)
+}
+
+func TestProbeResultNonZeroArgs(t *testing.T) {
+	r := ProbeResult{Args: [18]uintptr{0, 1, 0, 2, 0}}
+	indices := r.NonZeroArgs()
+	require.Equal(t, []int{1, 3}, indices)
+	require.Equal(t, 2, r.NonZeroCount())
+}
+
+func TestProbeResultAllZero(t *testing.T) {
+	var r ProbeResult
+	require.Nil(t, r.NonZeroArgs())
+	require.Zero(t, r.NonZeroCount())
+}
+
 func TestTrampolineCallsOriginal(t *testing.T) {
 	proc := windows.NewLazySystemDLL("kernel32.dll").NewProc("GetTickCount")
 	require.NoError(t, proc.Find())
@@ -153,4 +193,26 @@ func TestTrampolineCallsOriginal(t *testing.T) {
 
 	tick, _, _ := syscall.SyscallN(proc.Addr())
 	require.GreaterOrEqual(t, tick, refTick, "trampoline should return valid tick count")
+}
+
+func TestInstallAll(t *testing.T) {
+	var called bool
+	g, err := InstallAll([]Target{
+		{"kernel32.dll", "GetTickCount", func() uintptr {
+			called = true
+			return 42
+		}},
+	})
+	require.NoError(t, err)
+	defer g.RemoveAll()
+	require.Len(t, g.Hooks(), 1)
+	syscall.SyscallN(g.Hooks()[0].Target())
+	require.True(t, called)
+}
+
+func TestInstallAllRollback(t *testing.T) {
+	_, err := InstallAll([]Target{
+		{"kernel32.dll", "NonExistent12345", func() uintptr { return 0 }},
+	})
+	require.Error(t, err)
 }
