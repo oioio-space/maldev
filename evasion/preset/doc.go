@@ -1,14 +1,20 @@
-// Package preset provides ready-to-use evasion technique combinations.
+// Package preset provides ready-to-use evasion technique combinations at
+// three risk levels: Minimal, Stealth, and Aggressive.
 //
-// Three presets are available:
+// Minimal patches AMSI ScanBuffer + ETW (script/ETW telemetry only).
+// Lowest detection surface — suitable for droppers and initial access.
 //
-//   - Minimal: patches AMSI + ETW (least detectable)
-//   - Stealth: Minimal + unhook commonly hooked NT functions
-//   - Aggressive: everything including full ntdll unhook + ACG + blockdlls
+// Stealth adds selective ntdll unhooking of ~10 commonly hooked NT functions
+// (NtAllocateVirtualMemory, NtCreateThreadEx, etc.). Suitable for
+// post-exploitation tools that need injection without inline hook interference.
+//
+// Aggressive applies full ntdll unhook + ACG + BlockDLLs. Maximum evasion
+// but irreversible: ACG blocks subsequent RWX allocation, so apply AFTER
+// injection. Suitable for red team finals and assumed-breach scenarios.
+//
+// Each preset returns []evasion.Technique for use with evasion.ApplyAll().
 //
 // Example:
 //
-//	cfg := &shell.Config{
-//	    Evasion: preset.Stealth(),
-//	}
+//	errs := evasion.ApplyAll(preset.Stealth(), nil)
 package preset
