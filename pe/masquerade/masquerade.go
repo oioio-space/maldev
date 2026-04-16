@@ -233,6 +233,92 @@ func (res *Resources) buildVersionInfo() *version.Info {
 	return vi
 }
 
+// Option configures a Build call.
+type Option func(*buildConfig)
+
+type buildConfig struct {
+	sourcePE    string
+	execLevel   ExecLevel
+	manifest    []byte
+	versionInfo *VersionInfo
+	icons       []*winres.Icon
+	certificate *cert.Certificate
+}
+
+// WithSourcePE extracts resources from an existing PE as a starting point.
+func WithSourcePE(pePath string) Option {
+	return func(c *buildConfig) { c.sourcePE = pePath }
+}
+
+// WithExecLevel sets the requested execution level in the manifest.
+func WithExecLevel(level ExecLevel) Option {
+	return func(c *buildConfig) { c.execLevel = level }
+}
+
+// WithManifest overrides the manifest with raw XML.
+func WithManifest(xml []byte) Option {
+	return func(c *buildConfig) { c.manifest = xml }
+}
+
+// WithVersionInfo overrides the version resource strings.
+func WithVersionInfo(vi *VersionInfo) Option {
+	return func(c *buildConfig) { c.versionInfo = vi }
+}
+
+// WithIcons overrides the icon resources.
+func WithIcons(icons []*winres.Icon) Option {
+	return func(c *buildConfig) { c.icons = icons }
+}
+
+// WithCertificate stores a certificate for post-build application.
+// The cert is NOT embedded in the .syso — it must be applied after go build
+// via cert.Write on the final executable.
+func WithCertificate(c *cert.Certificate) Option {
+	return func(cfg *buildConfig) { cfg.certificate = c }
+}
+
+// Build generates a .syso COFF object from options, optionally starting from
+// an existing PE. Without WithSourcePE, resources are created from scratch.
+func Build(output string, arch Arch, opts ...Option) error {
+	cfg := &buildConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	var res *Resources
+
+	if cfg.sourcePE != "" {
+		var err error
+		res, err = Extract(cfg.sourcePE)
+		if err != nil {
+			return fmt.Errorf("extract source PE: %w", err)
+		}
+	} else {
+		res = &Resources{
+			rs:       &winres.ResourceSet{},
+			manifest: winres.AppManifest{Compatibility: winres.Win10AndAbove},
+		}
+	}
+
+	if cfg.versionInfo != nil {
+		res.VersionInfo = cfg.versionInfo
+	}
+	if cfg.manifest != nil {
+		res.Manifest = cfg.manifest
+		if parsed, err := winres.AppManifestFromXML(cfg.manifest); err == nil {
+			res.manifest = parsed
+		}
+	}
+	if cfg.icons != nil {
+		res.Icons = cfg.icons
+	}
+	if cfg.certificate != nil {
+		res.Certificate = cfg.certificate
+	}
+
+	return res.GenerateSyso(output, arch, cfg.execLevel)
+}
+
 // Clone extracts resources from srcPE and generates a .syso in one step.
 func Clone(srcPE, outputSyso string, arch Arch, level ExecLevel) error {
 	res, err := Extract(srcPE)

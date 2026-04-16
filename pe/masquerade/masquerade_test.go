@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/oioio-space/maldev/pe/cert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -89,6 +90,56 @@ func TestClone(t *testing.T) {
 	info, err := os.Stat(out)
 	require.NoError(t, err)
 	require.Greater(t, info.Size(), int64(0))
+}
+
+func TestBuildCustom(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "resource_windows_amd64.syso")
+	err := Build(out, AMD64,
+		WithExecLevel(RequireAdministrator),
+		WithVersionInfo(&VersionInfo{
+			FileDescription:  "Windows Service Host",
+			CompanyName:      "Microsoft Corporation",
+			ProductName:      "Microsoft Windows",
+			OriginalFilename: "svchost.exe",
+			FileVersion:      "10.0.19041.1",
+			ProductVersion:   "10.0.19041.1",
+		}),
+	)
+	require.NoError(t, err)
+
+	info, err := os.Stat(out)
+	require.NoError(t, err)
+	require.Greater(t, info.Size(), int64(0))
+}
+
+func TestBuildFromSource(t *testing.T) {
+	pe := testPEPath(t)
+	out := filepath.Join(t.TempDir(), "resource_windows_amd64.syso")
+	err := Build(out, AMD64,
+		WithSourcePE(pe),
+		WithExecLevel(HighestAvailable),
+	)
+	require.NoError(t, err)
+
+	info, err := os.Stat(out)
+	require.NoError(t, err)
+	require.Greater(t, info.Size(), int64(0))
+}
+
+func TestBuildWithCertificate(t *testing.T) {
+	pe := testPEPath(t)
+
+	c, err := cert.Read(pe)
+	if err != nil {
+		t.Skip("notepad.exe has no certificate on this system")
+	}
+
+	out := filepath.Join(t.TempDir(), "resource_windows_amd64.syso")
+	err = Build(out, AMD64,
+		WithSourcePE(pe),
+		WithCertificate(c),
+	)
+	require.NoError(t, err)
 }
 
 func TestModifyVersionBeforeSyso(t *testing.T) {
