@@ -57,6 +57,10 @@ flowchart TB
 | [FakeCmdLine](fakecmd.md) | `evasion/fakecmd` | T1036.005 | Low | Yes (Restore) | Yes |
 | [HideProcess](hideprocess.md) | `evasion/hideprocess` | T1564.001 | Medium | No (target patch) | Yes |
 | [StealthOpen](stealthopen.md) | `evasion/stealthopen` | T1036 | Low | N/A (file access) | No |
+| [Phant0m](phant0m.md) | `evasion/phant0m` | T1562.002 | High | No (thread kill) | Yes |
+| [Sandbox Detection](sandbox.md) | `evasion/sandbox` | T1497 | Low | N/A (detection only) | No |
+| [Timing Evasion](timing.md) | `evasion/timing` | T1497.003 | Low | N/A (detection only) | No |
+| [Evasion Presets](preset.md) | `evasion/preset` | Multiple | Varies | Varies | Yes |
 
 ## Presets
 

@@ -54,6 +54,8 @@ graph TD
 | [Meterpreter Stager](meterpreter.md) | TCP/HTTP/HTTPS staging for Metasploit |
 | [Transport Layer](transport.md) | TCP, TLS, uTLS with JA3 spoofing, cert pinning |
 | [Malleable Profiles](malleable-profiles.md) | HTTP traffic disguise with JQueryCDN and GoogleAPI profiles |
+| [Multicat (multi-session listener)](multicat.md) | Operator-side multi-handler — accepts many shells on one port, tracks sessions |
+| [Named Pipe Transport](namedpipe.md) | Windows named pipe transport for local/lateral C2 communication |
 
 ## MITRE ATT&CK
 
@@ -63,6 +65,7 @@ graph TD
 | Command and Scripting Interpreter | [T1059](https://attack.mitre.org/techniques/T1059/) | Meterpreter staging |
 | Encrypted Channel: Asymmetric Cryptography | [T1573.002](https://attack.mitre.org/techniques/T1573/002/) | TLS/uTLS transport |
 | Application Layer Protocol: Web Protocols | [T1071.001](https://attack.mitre.org/techniques/T1071/001/) | Malleable HTTP profiles |
+| Non-Standard Port | [T1571](https://attack.mitre.org/techniques/T1571/) | Multi-session reverse shell listener (operator-side) |
 
 ## D3FEND Countermeasures
 
