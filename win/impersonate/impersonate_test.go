@@ -12,7 +12,6 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/oioio-space/maldev/testutil"
-	"github.com/oioio-space/maldev/win/privilege"
 	"github.com/oioio-space/maldev/win/token"
 )
 
@@ -188,8 +187,8 @@ func TestRunAsTrustedInstallerNotElevated(t *testing.T) {
 //	No persistent changes; RevertToSelf is deferred.
 func TestImpersonateByPID(t *testing.T) {
 	testutil.RequireIntrusive(t)
-	if !privilege.IsAdmin() {
-		t.Skip("requires admin privileges")
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("requires elevated process")
 	}
 
 	pid, err := findProcessByName("winlogon.exe")
@@ -218,8 +217,8 @@ func TestImpersonateByPID(t *testing.T) {
 //	No persistent changes; RevertToSelf is deferred.
 func TestGetSystem(t *testing.T) {
 	testutil.RequireIntrusive(t)
-	if !privilege.IsAdmin() {
-		t.Skip("requires admin privileges")
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("requires elevated process")
 	}
 
 	var impUser, impDomain string
@@ -247,8 +246,8 @@ func TestGetSystem(t *testing.T) {
 //	No persistent changes; RevertToSelf is deferred.
 func TestGetTrustedInstaller(t *testing.T) {
 	testutil.RequireIntrusive(t)
-	if !privilege.IsAdmin() {
-		t.Skip("requires admin privileges")
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("requires elevated process")
 	}
 
 	var impUser string
