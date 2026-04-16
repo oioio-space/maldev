@@ -9,7 +9,13 @@
 // Platform: Cross-platform (operates on PE bytes).
 // Detection: Low — VERSIONINFO/manifest can be inspected but rarely are.
 //
-// Quick clone:
+// Two approaches:
+//
+// 1. Pre-built presets (zero-effort, no source PE needed at build time):
+//
+//	import _ "github.com/oioio-space/maldev/pe/masquerade/preset/svchost"
+//
+// 2. Programmatic API (clone any PE):
 //
 //	masquerade.Clone(`C:\Windows\System32\svchost.exe`, "resource.syso", masquerade.AMD64, masquerade.AsInvoker)
 //

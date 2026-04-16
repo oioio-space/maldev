@@ -21,7 +21,7 @@ flowchart LR
     B --> C[AppManifest + RT_ICON + RT_VERSION]
     C --> D[manifest patched per UAC variant]
     D --> E[WriteObject -> resource_windows_amd64.syso]
-    E --> F[committed in pe/winres/masquerade/id/variant/]
+    E --> F[committed in pe/masquerade/preset/id/variant/]
     F --> G[blank import in user's main]
     G --> H[go build links .syso automatically]
     H --> I[output .exe carries embedded resources]
@@ -31,7 +31,7 @@ At build time, `go build` finds every `*_windows_amd64.syso` in an imported
 package directory and merges its COFF `.rsrc` section into the final binary.
 No external tool is invoked during build.
 
-The `.syso` generator lives at `pe/winres/internal/gen/main.go` — a pure-Go
+The `.syso` generator lives at `pe/masquerade/internal/gen/main.go` — a pure-Go
 program that reads the reference executable read-only from
 `%SystemRoot%\System32`, extracts its resource set, patches the manifest
 `requestedExecutionLevel`, and re-emits the `.syso` per variant.
@@ -40,11 +40,11 @@ program that reads the reference executable read-only from
 
 | Identity | Source EXE | Base variant (invoker) | Admin variant (requireAdministrator) |
 |----------|-----------|---|---|
-| `cmd`      | `System32\cmd.exe`      | `pe/winres/masquerade/cmd`      | `pe/winres/masquerade/cmd/admin`      |
-| `svchost`  | `System32\svchost.exe`  | `pe/winres/masquerade/svchost`  | `pe/winres/masquerade/svchost/admin`  |
-| `taskmgr`  | `System32\taskmgr.exe`  | `pe/winres/masquerade/taskmgr`  | `pe/winres/masquerade/taskmgr/admin`  |
-| `explorer` | `Windows\explorer.exe`  | `pe/winres/masquerade/explorer` | `pe/winres/masquerade/explorer/admin` |
-| `notepad`  | `System32\notepad.exe`  | `pe/winres/masquerade/notepad`  | `pe/winres/masquerade/notepad/admin`  |
+| `cmd`      | `System32\cmd.exe`      | `pe/masquerade/preset/cmd`      | `pe/masquerade/preset/cmd/admin`      |
+| `svchost`  | `System32\svchost.exe`  | `pe/masquerade/preset/svchost`  | `pe/masquerade/preset/svchost/admin`  |
+| `taskmgr`  | `System32\taskmgr.exe`  | `pe/masquerade/preset/taskmgr`  | `pe/masquerade/preset/taskmgr/admin`  |
+| `explorer` | `Windows\explorer.exe`  | `pe/masquerade/preset/explorer` | `pe/masquerade/preset/explorer/admin` |
+| `notepad`  | `System32\notepad.exe`  | `pe/masquerade/preset/notepad`  | `pe/masquerade/preset/notepad/admin`  |
 
 **5 identities × 2 UAC variants = 10 packages.** Each is ~34 KB
 (`resource_windows_amd64.syso`) plus a 3-line package stub.
@@ -55,7 +55,7 @@ program that reads the reference executable read-only from
 package main
 
 import (
-    _ "github.com/oioio-space/maldev/pe/winres/masquerade/svchost"
+    _ "github.com/oioio-space/maldev/pe/masquerade/preset/svchost"
 )
 
 func main() {
@@ -75,7 +75,7 @@ ProductName      : Microsoft® Windows® Operating System
 
 ## Rules
 
-1. **At most one** blank-import from `pe/winres/masquerade/*` per final
+1. **At most one** blank-import from `pe/masquerade/preset/*` per final
    binary. Windows PEs carry exactly one `RT_MANIFEST` (ID=1); two
    imports would produce a duplicate-symbol linker error.
 2. Choose the UAC variant that matches operational need:
@@ -100,7 +100,7 @@ ProductName      : Microsoft® Windows® Operating System
 
 ```bash
 # On a Windows host (read-only access to System32 is enough):
-go run ./pe/winres/internal/gen
+go run ./pe/masquerade/internal/gen
 ```
 
 The generator is pure Go (uses `github.com/tc-hib/winres` as a library)
@@ -109,7 +109,7 @@ and does not modify the host filesystem outside this repository.
 Regenerate when:
 - A Windows update refreshes icons/metadata of a reference exe.
 - You want to add a new identity (extend the `identities` slice in
-  `pe/winres/internal/gen/main.go`).
+  `pe/masquerade/internal/gen/main.go`).
 - You want to add a new variant (e.g. `highestAvailable` UAC level).
 
 ## MITRE ATT&CK

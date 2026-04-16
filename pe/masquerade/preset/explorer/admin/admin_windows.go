@@ -5,7 +5,7 @@
 //
 // Blank-import this package to take on the explorer.exe identity:
 //
-//	import _ "github.com/oioio-space/maldev/pe/winres/masquerade/explorer/admin"
+//	import _ "github.com/oioio-space/maldev/pe/masquerade/preset/explorer/admin"
 //
 // MITRE ATT&CK: T1036.005
 package admin

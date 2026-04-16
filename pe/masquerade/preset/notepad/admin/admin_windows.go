@@ -5,7 +5,7 @@
 //
 // Blank-import this package to take on the notepad.exe identity:
 //
-//	import _ "github.com/oioio-space/maldev/pe/winres/masquerade/notepad/admin"
+//	import _ "github.com/oioio-space/maldev/pe/masquerade/preset/notepad/admin"
 //
 // MITRE ATT&CK: T1036.005
 package admin

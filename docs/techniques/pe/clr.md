@@ -95,7 +95,7 @@ pure-native host (any Go binary without a .NET manifest). You need **both**:
 `useLegacyV2RuntimeActivationPolicy` is read from an external
 `<exe>.config` by `mscoree.dll`, not from `RT_MANIFEST`. There is no
 equivalent `<trustInfo>`/`<compatibility>` block in the PE manifest schema
-that carries this directive. The `pe/winres` package can masquerade the
+that carries this directive. The `pe/masquerade` package can masquerade the
 binary's VERSIONINFO + icon + UAC level, but it cannot activate legacy
 CLR policy.
 
@@ -182,7 +182,7 @@ mandatory on-disk writeback for `pe/clr`.
   (`Microsoft-Windows-DotNETRuntime`). Disable via `evasion/etw.All()` if
   needed.
 - **VERSIONINFO mismatch** — a Go binary claiming to be a .NET host is
-  unusual. Pair with `pe/winres/masquerade/<identity>` for a
+  unusual. Pair with `pe/masquerade/preset/<identity>` for a
   legitimate-looking host (e.g. `masquerade/svchost` — svchost.exe is a
   common legitimate CLR host).
 
@@ -208,7 +208,7 @@ than the current one, prefer `pe/srdi`:
 **Medium** — ICorRuntimeHost use is detectable at multiple layers (module
 load, ETW, filesystem), but each layer can be addressed: AMSI patched,
 ETW disabled, `.config` removed post-init, host masqueraded via
-`pe/winres`. A determined SOC with behavioural telemetry will still
+`pe/masquerade`. A determined SOC with behavioural telemetry will still
 spot it; a signature-only stack typically won't.
 
 ## Credits

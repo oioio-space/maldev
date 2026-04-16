@@ -372,9 +372,9 @@ Runtime helpers for operational use:
 unit-asserted — verified manually on the Win10 VM (returns false; no CET
 enforcement on this CPU/image combo). Unit-testable on a Win11+CET host.
 
-### pe/winres — compile-time PE resource embedding (T1036.005)
+### pe/masquerade — compile-time PE resource embedding (T1036.005)
 
-End-to-end validation via `pe/winres/internal/e2e_cmd_test`:
+End-to-end validation via `pe/masquerade/internal/e2e_cmd_test`:
 
 | Step                                | Result                                                        |
 |-------------------------------------|---------------------------------------------------------------|

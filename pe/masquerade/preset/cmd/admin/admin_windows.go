@@ -5,7 +5,7 @@
 //
 // Blank-import this package to take on the cmd.exe identity:
 //
-//	import _ "github.com/oioio-space/maldev/pe/winres/masquerade/cmd/admin"
+//	import _ "github.com/oioio-space/maldev/pe/masquerade/preset/cmd/admin"
 //
 // MITRE ATT&CK: T1036.005
 package admin

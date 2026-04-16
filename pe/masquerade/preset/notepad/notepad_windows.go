@@ -5,7 +5,7 @@
 //
 // Blank-import this package to take on the notepad.exe identity:
 //
-//	import _ "github.com/oioio-space/maldev/pe/winres/masquerade/notepad"
+//	import _ "github.com/oioio-space/maldev/pe/masquerade/preset/notepad"
 //
 // MITRE ATT&CK: T1036.005
 package notepad

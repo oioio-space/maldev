@@ -4,7 +4,7 @@
 package main
 
 import (
-	_ "github.com/oioio-space/maldev/pe/winres/masquerade/cmd"
+	_ "github.com/oioio-space/maldev/pe/masquerade/preset/cmd"
 )
 
 func main() {}

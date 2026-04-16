@@ -10,7 +10,7 @@
 | T1027.013 | Encrypted/Encoded File | `crypto`, `encode` | D3-FCA (File Content Analysis) |
 | T1027.002 | Software Packing | `pe/morph` | D3-SEA (Static Executable Analysis) |
 | T1036 | Masquerading | `evasion/stealthopen` | D3-FHA (File Hash Analysis) |
-| T1036.005 | Masquerading: Match Legitimate Name or Location | `evasion/fakecmd` (self + remote via `SpoofPID`), `pe/winres/masquerade` | D3-PLA (Process Listing Analysis) |
+| T1036.005 | Masquerading: Match Legitimate Name or Location | `evasion/fakecmd` (self + remote via `SpoofPID`), `pe/masquerade` | D3-PLA (Process Listing Analysis) |
 | T1047.001 | Boot or Logon Autostart Execution: Registry Run Keys | `persistence/registry` | D3-SBV (Service Binary Verification) |
 | T1053.005 | Scheduled Task/Job: Scheduled Task | `persistence/scheduler` | D3-SBV (Service Binary Verification) |
 | T1055 | Process Injection | `inject` (15 methods), `evasion/herpaderping` | D3-PSA (Process Spawn Analysis) |
