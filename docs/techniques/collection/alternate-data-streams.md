@@ -139,6 +139,16 @@ func main() {
 }
 ```
 
+## Cleanup — Deleting Undeletable Files
+
+```go
+ads.DeleteUndeletable(path)
+```
+
+Since these files use trailing-dot filenames that bypass Win32 normalization,
+only the `\\?\` prefix (used internally by DeleteUndeletable) or NT-level
+deletion can remove them.
+
 ## Advantages & Limitations
 
 | Aspect | Detail |
@@ -194,4 +204,8 @@ func CreateUndeletable(dir string, data []byte) (string, error)
 // ReadUndeletable reads a file created by CreateUndeletable.
 // Prepends \\?\ internally to bypass Win32 name normalisation.
 func ReadUndeletable(path string) ([]byte, error)
+
+// DeleteUndeletable removes a file created by CreateUndeletable.
+// Uses the \\?\ prefix to bypass Win32 name normalization.
+func DeleteUndeletable(path string) error
 ```

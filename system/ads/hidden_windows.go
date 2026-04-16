@@ -55,3 +55,10 @@ func ReadUndeletable(path string) ([]byte, error) {
 	ntPath := `\\?\` + path
 	return os.ReadFile(ntPath)
 }
+
+// DeleteUndeletable removes a file created by CreateUndeletable.
+// Uses the \\?\ prefix to bypass Win32 name normalization.
+func DeleteUndeletable(path string) error {
+	ntPath := `\\?\` + path
+	return os.Remove(ntPath)
+}

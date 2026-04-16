@@ -136,3 +136,20 @@ func TestCreateUndeletableEmpty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, data)
 }
+
+func TestDeleteUndeletable(t *testing.T) {
+	dir := t.TempDir()
+
+	path, err := CreateUndeletable(dir, []byte("secret data"))
+	require.NoError(t, err)
+
+	data, err := ReadUndeletable(path)
+	require.NoError(t, err)
+	require.Equal(t, []byte("secret data"), data)
+
+	err = DeleteUndeletable(path)
+	require.NoError(t, err)
+
+	_, err = ReadUndeletable(path)
+	require.Error(t, err)
+}
