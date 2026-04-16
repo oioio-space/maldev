@@ -4,10 +4,11 @@ package memory
 
 import (
 	"fmt"
-	"runtime"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/oioio-space/maldev/internal/compat/memclear"
 )
 
 // WipeAndFree zeros a memory region and releases it. The region must have
@@ -40,15 +41,7 @@ func WipeAndFree(addr, size uintptr) error {
 }
 
 // SecureZero overwrites a byte slice with zeros in a way that the compiler
-// cannot optimize away. It writes through a volatile-like pointer and calls
-// runtime.KeepAlive to prevent dead-store elimination.
+// cannot optimize away. On Go 1.21+, delegates to the clear builtin intrinsic.
 func SecureZero(buf []byte) {
-	if len(buf) == 0 {
-		return
-	}
-	p := (*byte)(unsafe.Pointer(&buf[0]))
-	for i := range buf {
-		*(*byte)(unsafe.Pointer(uintptr(unsafe.Pointer(p)) + uintptr(i))) = 0
-	}
-	runtime.KeepAlive(p)
+	memclear.Clear(buf)
 }
