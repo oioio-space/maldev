@@ -143,6 +143,125 @@ VERSIONINFO claim Microsoft authorship, but:
 - **`pe/clr`** — CLR-host detection blends with `masquerade/svchost`
   (svchost legitimately hosts managed services).
 
+## Programmatic API — `pe/masquerade`
+
+The `pe/masquerade` package provides a runtime/build-time-scriptable alternative
+to the pre-generated `.syso` packages. Instead of committing a `.syso` to the
+repo, a generator script (or `go generate` step) extracts resources from any
+source PE and emits a fresh `.syso` each build.
+
+Import path: `github.com/oioio-space/maldev/pe/masquerade`
+
+### Quick Clone (one-liner)
+
+```go
+package main
+
+import "github.com/oioio-space/maldev/pe/masquerade"
+
+func main() {
+    err := masquerade.Clone(
+        `C:\Windows\System32\svchost.exe`,
+        "resource_windows_amd64.syso",
+        masquerade.AMD64,
+        masquerade.AsInvoker,
+    )
+    if err != nil {
+        panic(err)
+    }
+    // Run: go build ./... — the emitted .syso is picked up automatically.
+}
+```
+
+### Extract, Modify, Generate (composable)
+
+```go
+res, err := masquerade.Extract(`C:\Windows\System32\notepad.exe`)
+if err != nil {
+    panic(err)
+}
+
+// Patch individual fields before generating — everything else is kept verbatim.
+res.VersionInfo.OriginalFilename = "updater.exe"
+res.VersionInfo.FileDescription  = "Windows Update Service"
+
+if err := res.GenerateSyso("resource_windows_amd64.syso", masquerade.AMD64, masquerade.AsInvoker); err != nil {
+    panic(err)
+}
+```
+
+### Build from Scratch (no source PE)
+
+```go
+err := masquerade.Build("resource_windows_amd64.syso", masquerade.AMD64,
+    masquerade.WithExecLevel(masquerade.RequireAdministrator),
+    masquerade.WithVersionInfo(&masquerade.VersionInfo{
+        FileDescription:  "Host Process for Windows Services",
+        CompanyName:      "Microsoft Corporation",
+        ProductName:      "Microsoft® Windows® Operating System",
+        OriginalFilename: "svchost.exe",
+        FileVersion:      "10.0.19041.1",
+        ProductVersion:   "10.0.19041.1",
+    }),
+)
+```
+
+Without `WithSourcePE`, a minimal manifest (Win10 compatibility) and empty icon
+set are used. Add `WithIcons` if you need a specific icon.
+
+### Build from Any PE + Certificate
+
+```go
+import (
+    "github.com/oioio-space/maldev/pe/cert"
+    "github.com/oioio-space/maldev/pe/masquerade"
+)
+
+// Steal the Authenticode cert from the reference PE.
+c, err := cert.Read(`C:\Windows\System32\svchost.exe`)
+if err != nil {
+    panic(err)
+}
+
+err = masquerade.Build("resource_windows_amd64.syso", masquerade.AMD64,
+    masquerade.WithSourcePE(`C:\Windows\System32\svchost.exe`),
+    masquerade.WithExecLevel(masquerade.HighestAvailable),
+    masquerade.WithCertificate(c),
+)
+
+// After go build, apply the stolen cert to the final binary:
+// cert.Write("mybinary.exe", c)
+```
+
+**Note:** The certificate is stored in `Resources.Certificate` for reference
+but is **not** embedded in the `.syso` — Authenticode certificates must be
+appended to the final PE after linking, using `cert.Write`.
+
+### Execution Levels
+
+| Constant | Manifest value | Use case |
+|---|---|---|
+| `AsInvoker` | `asInvoker` | Runs with the invoking shell's token — no UAC prompt. Default, most stealthy. |
+| `HighestAvailable` | `highestAvailable` | Requests the highest privilege the current user can obtain. UAC prompt only if the user is an admin. |
+| `RequireAdministrator` | `requireAdministrator` | Always forces the UAC consent UI. Pick only for identities where elevation is expected (e.g. `taskmgr`). |
+
+### API Reference
+
+| Symbol | Kind | Description |
+|--------|------|-------------|
+| `Extract(pePath string) (*Resources, error)` | func | Open a PE and extract manifest, icons, version info, and Authenticode certificate. |
+| `(*Resources).GenerateSyso(output string, arch Arch, level ExecLevel) error` | method | Write a `.syso` COFF object from the current `Resources` state. |
+| `Clone(srcPE, outputSyso string, arch Arch, level ExecLevel) error` | func | One-step Extract + GenerateSyso. |
+| `Build(output string, arch Arch, opts ...Option) error` | func | Generate `.syso` from options; optionally starts from a source PE. |
+| `WithSourcePE(pePath string) Option` | option | Seed `Build` with resources extracted from an existing PE. |
+| `WithExecLevel(level ExecLevel) Option` | option | Override the manifest's `requestedExecutionLevel`. |
+| `WithManifest(xml []byte) Option` | option | Replace the entire manifest with raw XML. |
+| `WithVersionInfo(vi *VersionInfo) Option` | option | Override all version resource strings. |
+| `WithIcons(icons []*winres.Icon) Option` | option | Override icon resources. |
+| `WithCertificate(c *cert.Certificate) Option` | option | Store a certificate for post-build application (not embedded in `.syso`). |
+| `AMD64`, `I386` | `Arch` | Target CPU architecture for the emitted `.syso`. |
+| `AsInvoker`, `HighestAvailable`, `RequireAdministrator` | `ExecLevel` | Requested execution level values. |
+
 ## Credits
 
 - [tc-hib/winres](https://github.com/tc-hib/winres) — pure-Go COFF `.rsrc`

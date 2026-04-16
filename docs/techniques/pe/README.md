@@ -62,7 +62,7 @@ graph TD
 | [PE-to-Shellcode](pe-to-shellcode.md) | Convert EXE/DLL/.NET/scripts to injectable shellcode via Donut |
 | [Certificate Theft](certificate-theft.md) | Read, copy, strip, and write Authenticode certificates |
 | [CLR Hosting](clr.md) | In-process .NET assembly execution via ICorRuntimeHost — T1620 |
-| [Resource Masquerade](masquerade.md) | Compile-time manifest/icon/VERSIONINFO embedding via blank import — T1036.005 |
+| [Resource Masquerade](masquerade.md) | Compile-time manifest/icon/VERSIONINFO embedding via blank import (`pe/winres/masquerade/`) **or** programmatic `.syso` generation (`pe/masquerade`) — T1036.005 |
 
 ## MITRE ATT&CK
 
