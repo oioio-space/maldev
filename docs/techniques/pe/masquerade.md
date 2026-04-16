@@ -225,6 +225,21 @@ err := masquerade.Build("resource.syso", masquerade.AMD64,
 ### Build from Scratch (no source PE)
 
 ```go
+import (
+    "image"
+    _ "image/png"
+    "os"
+
+    "github.com/oioio-space/maldev/pe/masquerade"
+    "github.com/tc-hib/winres"
+)
+
+// Load a custom icon from a .png or .ico file.
+f, _ := os.Open("app_icon.png")
+img, _, _ := image.Decode(f)
+f.Close()
+icon, _ := winres.NewIconFromResizedImage(img, nil)
+
 err := masquerade.Build("resource_windows_amd64.syso", masquerade.AMD64,
     masquerade.WithExecLevel(masquerade.RequireAdministrator),
     masquerade.WithVersionInfo(&masquerade.VersionInfo{
@@ -235,11 +250,14 @@ err := masquerade.Build("resource_windows_amd64.syso", masquerade.AMD64,
         FileVersion:      "10.0.19041.1",
         ProductVersion:   "10.0.19041.1",
     }),
+    masquerade.WithIcons([]*winres.Icon{icon}),
 )
 ```
 
 Without `WithSourcePE`, a minimal manifest (Win10 compatibility) and no
-icons are used. Use `WithSourcePE` to include icons from a reference PE.
+icons are used. `WithIcons` accepts `[]*winres.Icon` — use
+`winres.NewIconFromResizedImage` to create one from any Go `image.Image`,
+or `winres.LoadICO` to load a `.ico` file directly.
 
 ### Build from Any PE + Certificate
 
