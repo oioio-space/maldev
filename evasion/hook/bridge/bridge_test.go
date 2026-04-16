@@ -2,7 +2,6 @@ package bridge
 
 import (
 	"bytes"
-	"encoding/gob"
 	"io"
 	"testing"
 	"time"
@@ -252,7 +251,7 @@ func TestRPCReadMemory(t *testing.T) {
 	require.NoError(t, lis.Close())
 }
 
-func TestCallGob(t *testing.T) {
+func TestRPCTyped(t *testing.T) {
 	sr, cw := io.Pipe()
 	cr, sw := io.Pipe()
 
@@ -264,11 +263,8 @@ func TestCallGob(t *testing.T) {
 		Count   int
 	}
 
-	ctrl.RegisterGob("search", func(dec *gob.Decoder) (interface{}, error) {
-		var query string
-		if err := dec.Decode(&query); err != nil {
-			return nil, err
-		}
+	rpcHandler := NewRPCHandler(ctrl)
+	rpcHandler.Handle("search", func(query string) (SearchResult, error) {
 		return SearchResult{
 			Matches: []string{"file1_" + query, "file2_" + query},
 			Count:   2,
@@ -278,8 +274,9 @@ func TestCallGob(t *testing.T) {
 	go ctrl.Serve()
 	go lis.Serve()
 
+	rpc := NewRPC(lis)
 	var result SearchResult
-	err := lis.CallGob("search", "secret", &result)
+	err := rpc.Call("search", "secret", &result)
 	require.NoError(t, err)
 	require.Equal(t, 2, result.Count)
 	require.Equal(t, []string{"file1_secret", "file2_secret"}, result.Matches)
@@ -287,29 +284,31 @@ func TestCallGob(t *testing.T) {
 	require.NoError(t, lis.Close())
 }
 
-func TestCallGobNilArgs(t *testing.T) {
+func TestRPCNoArgs(t *testing.T) {
 	sr, cw := io.Pipe()
 	cr, sw := io.Pipe()
 
 	ctrl := Connect(&readWriteCloser{Reader: cr, Writer: cw, Closer: cw})
 	lis := NewListener(&readWriteCloser{Reader: sr, Writer: sw, Closer: sw})
 
-	ctrl.RegisterGob("ping", func(_ *gob.Decoder) (interface{}, error) {
+	rpcHandler := NewRPCHandler(ctrl)
+	rpcHandler.Handle("ping", func() (interface{}, error) {
 		return "pong", nil
 	})
 
 	go ctrl.Serve()
 	go lis.Serve()
 
+	rpc := NewRPC(lis)
 	var result string
-	err := lis.CallGob("ping", nil, &result)
+	err := rpc.Call("ping", nil, &result)
 	require.NoError(t, err)
 	require.Equal(t, "pong", result)
 
 	require.NoError(t, lis.Close())
 }
 
-func TestCallGobNilResult(t *testing.T) {
+func TestRPCFireAndForget(t *testing.T) {
 	sr, cw := io.Pipe()
 	cr, sw := io.Pipe()
 
@@ -317,15 +316,17 @@ func TestCallGobNilResult(t *testing.T) {
 	lis := NewListener(&readWriteCloser{Reader: sr, Writer: sw, Closer: sw})
 
 	var received string
-	ctrl.RegisterGob("log_event", func(dec *gob.Decoder) (interface{}, error) {
-		dec.Decode(&received)
-		return nil, nil
+	rpcHandler := NewRPCHandler(ctrl)
+	rpcHandler.Handle("log_event", func(msg string) (string, error) {
+		received = msg
+		return "", nil
 	})
 
 	go ctrl.Serve()
 	go lis.Serve()
 
-	err := lis.CallGob("log_event", "something happened", nil)
+	rpc := NewRPC(lis)
+	err := rpc.Call("log_event", "something happened", nil)
 	require.NoError(t, err)
 	require.Equal(t, "something happened", received)
 
