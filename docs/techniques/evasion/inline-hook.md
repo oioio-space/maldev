@@ -131,6 +131,138 @@ h, _ = hook.InstallByName("ntdll.dll", "NtCreateFile",
 defer h.Remove()
 ```
 
+## How to Find the Right Function to Hook
+
+You don't need x64dbg. Windows API functions are exported by name from
+system DLLs — `InstallByName` resolves them automatically.
+
+### Step 1: Identify the API
+
+Ask: "What Windows API does the operation I want to intercept call?"
+
+| I want to intercept... | Hook this function | In this DLL |
+|------------------------|-------------------|-------------|
+| File deletion | `DeleteFileW` | `kernel32.dll` |
+| File creation/opening | `NtCreateFile` | `ntdll.dll` |
+| Process creation | `CreateProcessW` | `kernel32.dll` |
+| Registry writes | `RegSetValueExW` | `advapi32.dll` |
+| Network connections | `connect` | `ws2_32.dll` |
+| DNS resolution | `DnsQuery_W` | `dnsapi.dll` |
+| MessageBox | `MessageBoxW` | `user32.dll` |
+| Memory allocation | `NtAllocateVirtualMemory` | `ntdll.dll` |
+| DLL loading | `LdrLoadDll` | `ntdll.dll` |
+| Screenshot | `BitBlt` | `gdi32.dll` |
+
+**Tip:** Hook the `Nt*` (ntdll) version to catch all callers — kernel32
+functions like `CreateFileW` internally call `NtCreateFile`, so hooking
+at the ntdll level catches both direct and indirect calls.
+
+### Step 2: Find the Signature
+
+Look up the function signature on [Microsoft Learn](https://learn.microsoft.com/en-us/windows/win32/api/).
+Convert each parameter to `uintptr` in your Go handler:
+
+```
+// MSDN signature:
+// BOOL DeleteFileW(LPCWSTR lpFileName)
+//
+// Go handler:
+func(lpFileName uintptr) uintptr
+
+// MSDN signature:
+// NTSTATUS NtCreateFile(
+//   PHANDLE FileHandle,
+//   ACCESS_MASK DesiredAccess,
+//   POBJECT_ATTRIBUTES ObjectAttributes,
+//   PIO_STATUS_BLOCK IoStatusBlock,
+//   PLARGE_INTEGER AllocationSize,
+//   ULONG FileAttributes,
+//   ULONG ShareAccess,
+//   ULONG CreateDisposition,
+//   ULONG CreateOptions,
+//   PVOID EaBuffer,
+//   ULONG EaLength
+// )
+//
+// Go handler: all pointers and integers become uintptr
+func(fileHandle, desiredAccess, objAttrs, ioStatus, allocSize,
+     fileAttrs, shareAccess, createDisp, createOpts, eaBuffer,
+     eaLength uintptr) uintptr
+```
+
+### Step 3: Write the Hook
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "os"
+    "syscall"
+    "unsafe"
+
+    "github.com/oioio-space/maldev/evasion/hook"
+    "golang.org/x/sys/windows"
+)
+
+var hDeleteFile *hook.Hook
+
+func main() {
+    var err error
+
+    // Hook DeleteFileW — intercept all file deletions in this process.
+    hDeleteFile, err = hook.InstallByName("kernel32.dll", "DeleteFileW",
+        func(lpFileName uintptr) uintptr {
+            name := windows.UTF16PtrToString((*uint16)(unsafe.Pointer(lpFileName)))
+
+            // Decide: block or allow?
+            if name == `C:\important.txt` {
+                log.Printf("BLOCKED deletion of %s", name)
+                // Set last error and return FALSE
+                windows.SetLastError(windows.ERROR_ACCESS_DENIED)
+                return 0
+            }
+
+            // Allow — call original via trampoline.
+            log.Printf("ALLOWED deletion of %s", name)
+            r, _, _ := syscall.SyscallN(hDeleteFile.Trampoline(), lpFileName)
+            return r
+        },
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer hDeleteFile.Remove()
+
+    // Test it — try to delete a file.
+    err = os.Remove(`C:\important.txt`)
+    fmt.Printf("Remove result: %v\n", err) // Access denied — hook blocked it
+
+    err = os.Remove(`C:\temp\disposable.txt`)
+    fmt.Printf("Remove result: %v\n", err) // Allowed — hook called original
+}
+```
+
+### Step 4: List All Exports (Advanced)
+
+To discover what functions a DLL exports (without x64dbg), use `debug/pe`:
+
+```go
+import "debug/pe"
+
+f, _ := pe.Open(`C:\Windows\System32\kernel32.dll`)
+defer f.Close()
+
+exports, _ := f.Exports()
+for _, e := range exports {
+    fmt.Println(e.Name)
+}
+// Output: AcquireSRWLockExclusive, AddAtomA, AddAtomW, ...
+```
+
+This lists every hookable function in the DLL.
+
 ## Advantages & Limitations
 
 | Aspect | Detail |
