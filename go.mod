@@ -1,6 +1,6 @@
 module github.com/oioio-space/maldev
 
-go 1.24
+go 1.25.0
 
 require (
 	github.com/Binject/go-donut v0.0.0-20220908180326-fcdcc35d591c
@@ -13,6 +13,7 @@ require (
 	github.com/saferwall/pe v1.5.6
 	github.com/stretchr/testify v1.11.1
 	github.com/tc-hib/winres v0.2.1
+	golang.org/x/arch v0.26.0
 	golang.org/x/crypto v0.36.0
 	golang.org/x/sync v0.12.0
 	golang.org/x/sys v0.31.0
