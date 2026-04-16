@@ -90,6 +90,49 @@ func TestInstallByNameNotFound(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestInstallWithCleanFirst(t *testing.T) {
+	proc := windows.NewLazySystemDLL("kernel32.dll").NewProc("GetTickCount")
+	require.NoError(t, proc.Find())
+
+	var h *Hook
+	handler := func() uintptr {
+		r, _, _ := syscall.SyscallN(h.Trampoline())
+		return r
+	}
+
+	var err error
+	h, err = InstallByName("kernel32.dll", "GetTickCount", handler, WithCleanFirst())
+	require.NoError(t, err)
+	defer h.Remove()
+
+	r, _, _ := syscall.SyscallN(proc.Addr())
+	require.NotZero(t, r)
+}
+
+func TestInstallWithCaller(t *testing.T) {
+	proc := windows.NewLazySystemDLL("kernel32.dll").NewProc("GetTickCount")
+	require.NoError(t, proc.Find())
+
+	// WithCaller(nil) falls back to WinAPI — exercises the option plumbing
+	// without requiring a fully-configured indirect-syscall Caller in unit tests.
+	var hookCalled bool
+	var h *Hook
+	handler := func() uintptr {
+		hookCalled = true
+		r, _, _ := syscall.SyscallN(h.Trampoline())
+		return r
+	}
+
+	var err error
+	h, err = Install(proc.Addr(), handler, WithCaller(nil))
+	require.NoError(t, err)
+	defer h.Remove()
+
+	r, _, _ := syscall.SyscallN(proc.Addr())
+	require.True(t, hookCalled)
+	require.NotZero(t, r)
+}
+
 func TestTrampolineCallsOriginal(t *testing.T) {
 	proc := windows.NewLazySystemDLL("kernel32.dll").NewProc("GetTickCount")
 	require.NoError(t, proc.Find())

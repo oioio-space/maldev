@@ -12,7 +12,9 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/oioio-space/maldev/evasion/unhook"
 	"github.com/oioio-space/maldev/win/api"
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
 const (
@@ -30,8 +32,29 @@ type Hook struct {
 	origBytes  []byte
 	relay      uintptr
 	trampoline uintptr
+	caller     *wsyscall.Caller
 	mu         sync.Mutex
 	installed  bool
+}
+
+// HookOption configures hook installation behaviour.
+type HookOption func(*hookConfig)
+
+type hookConfig struct {
+	caller     *wsyscall.Caller
+	cleanFirst bool
+}
+
+// WithCaller routes the memory-patch syscall through the given Caller,
+// enabling indirect or direct syscall dispatch for EDR evasion.
+func WithCaller(c *wsyscall.Caller) HookOption {
+	return func(cfg *hookConfig) { cfg.caller = c }
+}
+
+// WithCleanFirst re-reads the target function from disk before installing
+// the hook, removing any EDR hooks that may already be present.
+func WithCleanFirst() HookOption {
+	return func(cfg *hookConfig) { cfg.cleanFirst = true }
 }
 
 // Target returns the address of the hooked function.
@@ -43,23 +66,34 @@ func (h *Hook) Trampoline() uintptr { return h.trampoline }
 // Install hooks the function at targetAddr, redirecting calls to handler.
 // handler must be a Go function whose parameters match the target's
 // Windows x64 ABI signature (all uintptr).
-func Install(targetAddr uintptr, handler interface{}) (*Hook, error) {
+func Install(targetAddr uintptr, handler interface{}, opts ...HookOption) (*Hook, error) {
 	if reflect.TypeOf(handler).Kind() != reflect.Func {
 		return nil, fmt.Errorf("handler must be a func, got %T", handler)
 	}
-	return install(targetAddr, syscall.NewCallback(handler))
+	cfg := &hookConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	return install(targetAddr, syscall.NewCallback(handler), cfg)
 }
 
 // InstallByName resolves a function by DLL and export name, then hooks it.
-func InstallByName(dllName, funcName string, handler interface{}) (*Hook, error) {
+func InstallByName(dllName, funcName string, handler interface{}, opts ...HookOption) (*Hook, error) {
 	proc := windows.NewLazySystemDLL(dllName).NewProc(funcName)
 	if err := proc.Find(); err != nil {
 		return nil, fmt.Errorf("resolve %s!%s: %w", dllName, funcName, err)
 	}
-	return Install(proc.Addr(), handler)
+	cfg := &hookConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	if cfg.cleanFirst {
+		unhook.ClassicUnhook(funcName, cfg.caller)
+	}
+	return install(proc.Addr(), syscall.NewCallback(handler), cfg)
 }
 
-func install(targetAddr, payloadAddr uintptr) (*Hook, error) {
+func install(targetAddr, payloadAddr uintptr, cfg *hookConfig) (*Hook, error) {
 	var prologueBuf [maxStealSize]byte
 	copy(prologueBuf[:], unsafe.Slice((*byte)(unsafe.Pointer(targetAddr)), maxStealSize))
 
@@ -125,7 +159,12 @@ func install(targetAddr, payloadAddr uintptr) (*Hook, error) {
 		hookPatch[i] = 0x90
 	}
 
-	if err := api.PatchMemory(targetAddr, hookPatch); err != nil {
+	if cfg.caller != nil {
+		err = api.PatchMemoryWithCaller(targetAddr, hookPatch, cfg.caller)
+	} else {
+		err = api.PatchMemory(targetAddr, hookPatch)
+	}
+	if err != nil {
 		windows.VirtualFree(relay, 0, windows.MEM_RELEASE)
 		windows.VirtualFree(trampoline, 0, windows.MEM_RELEASE)
 		return nil, fmt.Errorf("patch target: %w", err)
@@ -139,6 +178,7 @@ func install(targetAddr, payloadAddr uintptr) (*Hook, error) {
 		origBytes:  origBytes,
 		relay:      relay,
 		trampoline: trampoline,
+		caller:     cfg.caller,
 		installed:  true,
 	}, nil
 }
@@ -153,7 +193,13 @@ func (h *Hook) Remove() error {
 		return nil
 	}
 
-	if err := api.PatchMemory(h.target, h.origBytes); err != nil {
+	var err error
+	if h.caller != nil {
+		err = api.PatchMemoryWithCaller(h.target, h.origBytes, h.caller)
+	} else {
+		err = api.PatchMemory(h.target, h.origBytes)
+	}
+	if err != nil {
 		return fmt.Errorf("restore original bytes: %w", err)
 	}
 	flushICache(h.target, uintptr(h.stealLen))
