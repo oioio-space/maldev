@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -192,6 +193,65 @@ func RunAsTrustedInstaller(cmd string, args ...string) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("start command: %w", err)
 	}
 	return c, nil
+}
+
+// ImpersonateByPID impersonates the given process and runs fn under its
+// identity. The thread reverts to self after fn returns.
+// Requires SeDebugPrivilege for cross-session processes.
+func ImpersonateByPID(pid uint32, fn func() error) error {
+	tok, err := token.Steal(int(pid))
+	if err != nil {
+		return fmt.Errorf("steal token from PID %d: %w", pid, err)
+	}
+	defer tok.Close()
+
+	return runImpersonated(tok.Token(), fn)
+}
+
+// GetSystem runs fn under NT AUTHORITY\SYSTEM context by stealing the
+// winlogon.exe token. Requires admin + SeDebugPrivilege.
+func GetSystem(fn func() error) error {
+	pid, err := findProcessByName("winlogon.exe")
+	if err != nil {
+		return fmt.Errorf("find winlogon: %w", err)
+	}
+	return ImpersonateByPID(pid, fn)
+}
+
+// GetTrustedInstaller runs fn under NT SERVICE\TrustedInstaller context.
+// First elevates to SYSTEM (required to open the TI process), starts the
+// TrustedInstaller service, then impersonates its token.
+// Requires admin + SeDebugPrivilege.
+func GetTrustedInstaller(fn func() error) error {
+	return GetSystem(func() error {
+		tiPID, err := startAndFindTI()
+		if err != nil {
+			return fmt.Errorf("start TrustedInstaller: %w", err)
+		}
+		return ImpersonateByPID(tiPID, fn)
+	})
+}
+
+// findProcessByName returns the PID of the first process matching name
+// (case-insensitive).
+func findProcessByName(name string) (uint32, error) {
+	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return 0, fmt.Errorf("CreateToolhelp32Snapshot: %w", err)
+	}
+	defer windows.CloseHandle(snapshot)
+
+	var pe windows.ProcessEntry32
+	pe.Size = uint32(unsafe.Sizeof(pe))
+	err = windows.Process32First(snapshot, &pe)
+	for err == nil {
+		exeName := windows.UTF16ToString(pe.ExeFile[:])
+		if strings.EqualFold(exeName, name) {
+			return pe.ProcessID, nil
+		}
+		err = windows.Process32Next(snapshot, &pe)
+	}
+	return 0, fmt.Errorf("process %q not found", name)
 }
 
 // startAndFindTI ensures the TrustedInstaller service is running and returns its PID.

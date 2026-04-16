@@ -4,6 +4,7 @@ package impersonate
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,6 +12,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/oioio-space/maldev/testutil"
+	"github.com/oioio-space/maldev/win/privilege"
 	"github.com/oioio-space/maldev/win/token"
 )
 
@@ -172,4 +174,92 @@ func TestRunAsTrustedInstallerNotElevated(t *testing.T) {
 	// Without elevation, starting TI service should fail with a useful error.
 	_, err := RunAsTrustedInstaller("cmd.exe")
 	require.Error(t, err)
+}
+
+// TestImpersonateByPID steals the winlogon.exe token and impersonates it,
+// verifying the thread identity becomes SYSTEM.
+//
+// PREREQUISITES:
+//   - Admin + SeDebugPrivilege (elevated process)
+//   - Run in a VM
+//
+// CLEANUP:
+//
+//	No persistent changes; RevertToSelf is deferred.
+func TestImpersonateByPID(t *testing.T) {
+	testutil.RequireIntrusive(t)
+	if !privilege.IsAdmin() {
+		t.Skip("requires admin privileges")
+	}
+
+	pid, err := findProcessByName("winlogon.exe")
+	require.NoError(t, err, "winlogon.exe must be running")
+
+	var impUser, impDomain string
+	err = ImpersonateByPID(pid, func() error {
+		var cbErr error
+		impUser, impDomain, cbErr = ThreadEffectiveTokenOwner()
+		return cbErr
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "SYSTEM", impUser, "should be impersonating SYSTEM")
+	t.Logf("ImpersonateByPID(winlogon): %s\\%s", impDomain, impUser)
+}
+
+// TestGetSystem verifies that GetSystem elevates the thread to SYSTEM context.
+//
+// PREREQUISITES:
+//   - Admin + SeDebugPrivilege
+//   - Run in a VM
+//
+// CLEANUP:
+//
+//	No persistent changes; RevertToSelf is deferred.
+func TestGetSystem(t *testing.T) {
+	testutil.RequireIntrusive(t)
+	if !privilege.IsAdmin() {
+		t.Skip("requires admin privileges")
+	}
+
+	var impUser, impDomain string
+	err := GetSystem(func() error {
+		var cbErr error
+		impUser, impDomain, cbErr = ThreadEffectiveTokenOwner()
+		return cbErr
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "SYSTEM", impUser, "should be impersonating SYSTEM")
+	assert.Equal(t, "NT AUTHORITY", impDomain, "domain should be NT AUTHORITY")
+	t.Logf("GetSystem: %s\\%s", impDomain, impUser)
+}
+
+// TestGetTrustedInstaller verifies that GetTrustedInstaller elevates to the
+// TrustedInstaller service identity.
+//
+// PREREQUISITES:
+//   - Admin + SeDebugPrivilege
+//   - Run in a VM
+//
+// CLEANUP:
+//
+//	No persistent changes; RevertToSelf is deferred.
+func TestGetTrustedInstaller(t *testing.T) {
+	testutil.RequireIntrusive(t)
+	if !privilege.IsAdmin() {
+		t.Skip("requires admin privileges")
+	}
+
+	var impUser string
+	err := GetTrustedInstaller(func() error {
+		var cbErr error
+		impUser, _, cbErr = ThreadEffectiveTokenOwner()
+		return cbErr
+	})
+	require.NoError(t, err)
+
+	assert.True(t, strings.Contains(impUser, "TrustedInstaller"),
+		"expected user to contain TrustedInstaller, got: %s", impUser)
+	t.Logf("GetTrustedInstaller: user=%s", impUser)
 }

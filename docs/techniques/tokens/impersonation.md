@@ -232,6 +232,77 @@ func main() {
 
 ---
 
+## Composable Elevation
+
+The `impersonate` package provides composable elevation primitives that chain
+together: `ImpersonateByPID` is the building block, `GetSystem` uses it to
+reach SYSTEM via winlogon.exe, and `GetTrustedInstaller` composes `GetSystem`
+with the TrustedInstaller service to reach the highest privilege level.
+
+All three follow the callback pattern -- the elevated identity is scoped to the
+callback and automatically reverted when it returns.
+
+### ImpersonateByPID
+
+Steal and impersonate the token of any process by PID. Requires
+SeDebugPrivilege for cross-session processes.
+
+```go
+import "github.com/oioio-space/maldev/win/impersonate"
+
+// Impersonate the token of PID 1234
+err := impersonate.ImpersonateByPID(1234, func() error {
+    user, domain, _ := impersonate.ThreadEffectiveTokenOwner()
+    fmt.Printf("Running as: %s\\%s\n", domain, user)
+    return nil
+})
+```
+
+### GetSystem
+
+Elevate to NT AUTHORITY\SYSTEM by stealing the winlogon.exe token.
+Requires admin + SeDebugPrivilege.
+
+```go
+err := impersonate.GetSystem(func() error {
+    user, domain, _ := impersonate.ThreadEffectiveTokenOwner()
+    fmt.Printf("Running as: %s\\%s\n", domain, user)
+    // NT AUTHORITY\SYSTEM — full kernel-level access
+    return nil
+})
+```
+
+### GetTrustedInstaller
+
+Elevate to NT SERVICE\TrustedInstaller -- the highest privilege level on
+Windows. Internally composes `GetSystem` (to open the TI service process)
+with `ImpersonateByPID` (to steal the TI token). Requires admin +
+SeDebugPrivilege.
+
+```go
+err := impersonate.GetTrustedInstaller(func() error {
+    user, _, _ := impersonate.ThreadEffectiveTokenOwner()
+    fmt.Printf("Running as: %s\n", user) // TrustedInstaller
+
+    // Modify protected system files, registry keys, etc.
+    return nil
+})
+```
+
+### Composition Example
+
+```go
+// Chain: admin -> SYSTEM -> TrustedInstaller -> back to admin
+// All within a single function call
+err := impersonate.GetTrustedInstaller(func() error {
+    // Delete a protected system file
+    return os.Remove(`C:\Windows\System32\protected.dll`)
+})
+// Thread has reverted to original identity here
+```
+
+---
+
 ## API Reference
 
 ### Functions
@@ -239,6 +310,15 @@ func main() {
 ```go
 // ImpersonateThread runs callbackFunc under alternate credentials on a locked OS thread.
 func ImpersonateThread(isInDomain bool, domain, username, password string, callbackFunc func() error) error
+
+// ImpersonateByPID impersonates the given process and runs fn under its identity.
+func ImpersonateByPID(pid uint32, fn func() error) error
+
+// GetSystem runs fn under NT AUTHORITY\SYSTEM context (via winlogon.exe token).
+func GetSystem(fn func() error) error
+
+// GetTrustedInstaller runs fn under NT SERVICE\TrustedInstaller context.
+func GetTrustedInstaller(fn func() error) error
 
 // LogonUserW logs in a user and returns a token handle.
 func LogonUserW(username, domain, password string, logonType LogonType, logonProvider LogonProvider) (windows.Token, error)
