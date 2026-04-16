@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"bytes"
+	"encoding/gob"
 	"io"
 	"testing"
 	"time"
@@ -247,6 +248,86 @@ func TestRPCReadMemory(t *testing.T) {
 	resp, err := lis.ReadMemory(0x1234, 256)
 	require.NoError(t, err)
 	require.Equal(t, []byte("MEMDATA"), resp)
+
+	require.NoError(t, lis.Close())
+}
+
+func TestCallGob(t *testing.T) {
+	sr, cw := io.Pipe()
+	cr, sw := io.Pipe()
+
+	ctrl := Connect(&readWriteCloser{Reader: cr, Writer: cw, Closer: cw})
+	lis := NewListener(&readWriteCloser{Reader: sr, Writer: sw, Closer: sw})
+
+	type SearchResult struct {
+		Matches []string
+		Count   int
+	}
+
+	ctrl.RegisterGob("search", func(dec *gob.Decoder) (interface{}, error) {
+		var query string
+		if err := dec.Decode(&query); err != nil {
+			return nil, err
+		}
+		return SearchResult{
+			Matches: []string{"file1_" + query, "file2_" + query},
+			Count:   2,
+		}, nil
+	})
+
+	go ctrl.Serve()
+	go lis.Serve()
+
+	var result SearchResult
+	err := lis.CallGob("search", "secret", &result)
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Count)
+	require.Equal(t, []string{"file1_secret", "file2_secret"}, result.Matches)
+
+	require.NoError(t, lis.Close())
+}
+
+func TestCallGobNilArgs(t *testing.T) {
+	sr, cw := io.Pipe()
+	cr, sw := io.Pipe()
+
+	ctrl := Connect(&readWriteCloser{Reader: cr, Writer: cw, Closer: cw})
+	lis := NewListener(&readWriteCloser{Reader: sr, Writer: sw, Closer: sw})
+
+	ctrl.RegisterGob("ping", func(_ *gob.Decoder) (interface{}, error) {
+		return "pong", nil
+	})
+
+	go ctrl.Serve()
+	go lis.Serve()
+
+	var result string
+	err := lis.CallGob("ping", nil, &result)
+	require.NoError(t, err)
+	require.Equal(t, "pong", result)
+
+	require.NoError(t, lis.Close())
+}
+
+func TestCallGobNilResult(t *testing.T) {
+	sr, cw := io.Pipe()
+	cr, sw := io.Pipe()
+
+	ctrl := Connect(&readWriteCloser{Reader: cr, Writer: cw, Closer: cw})
+	lis := NewListener(&readWriteCloser{Reader: sr, Writer: sw, Closer: sw})
+
+	var received string
+	ctrl.RegisterGob("log_event", func(dec *gob.Decoder) (interface{}, error) {
+		dec.Decode(&received)
+		return nil, nil
+	})
+
+	go ctrl.Serve()
+	go lis.Serve()
+
+	err := lis.CallGob("log_event", "something happened", nil)
+	require.NoError(t, err)
+	require.Equal(t, "something happened", received)
 
 	require.NoError(t, lis.Close())
 }
