@@ -184,6 +184,64 @@ func extractVersionStrings(vi *version.Info) *VersionInfo {
 	}
 }
 
+// GenerateSyso builds a .syso COFF object from the extracted resources.
+func (res *Resources) GenerateSyso(output string, arch Arch, level ExecLevel) error {
+	rs := &winres.ResourceSet{}
+
+	for i, ico := range res.Icons {
+		if err := rs.SetIcon(winres.ID(uint16(i+1)), ico); err != nil {
+			return fmt.Errorf("set icon %d: %w", i, err)
+		}
+	}
+
+	if res.VersionInfo != nil {
+		vi := res.buildVersionInfo()
+		rs.SetVersionInfo(*vi)
+	}
+
+	m := res.manifest
+	m.ExecutionLevel = level.toWinres()
+	m.UIAccess = false
+	rs.SetManifest(m)
+
+	f, err := os.Create(output)
+	if err != nil {
+		return fmt.Errorf("create output: %w", err)
+	}
+	defer f.Close()
+
+	if err := rs.WriteObject(f, arch.toWinres()); err != nil {
+		return fmt.Errorf("write object: %w", err)
+	}
+	return nil
+}
+
+func (res *Resources) buildVersionInfo() *version.Info {
+	vi := &version.Info{}
+	if res.rawVI != nil {
+		vi.FileVersion = res.rawVI.FileVersion
+		vi.ProductVersion = res.rawVI.ProductVersion
+	}
+	vi.Set(0, version.FileDescription, res.VersionInfo.FileDescription)
+	vi.Set(0, version.ProductName, res.VersionInfo.ProductName)
+	vi.Set(0, version.CompanyName, res.VersionInfo.CompanyName)
+	vi.Set(0, version.OriginalFilename, res.VersionInfo.OriginalFilename)
+	vi.Set(0, version.InternalName, res.VersionInfo.InternalName)
+	vi.Set(0, version.FileVersion, res.VersionInfo.FileVersion)
+	vi.Set(0, version.ProductVersion, res.VersionInfo.ProductVersion)
+	vi.Set(0, version.LegalCopyright, res.VersionInfo.LegalCopyright)
+	return vi
+}
+
+// Clone extracts resources from srcPE and generates a .syso in one step.
+func Clone(srcPE, outputSyso string, arch Arch, level ExecLevel) error {
+	res, err := Extract(srcPE)
+	if err != nil {
+		return err
+	}
+	return res.GenerateSyso(outputSyso, arch, level)
+}
+
 // fmtVersion formats a 4-part version array as "major.minor.patch.build".
 func fmtVersion(v [4]uint16) string {
 	return fmt.Sprintf("%d.%d.%d.%d", v[0], v[1], v[2], v[3])

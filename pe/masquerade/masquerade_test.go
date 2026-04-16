@@ -51,3 +51,59 @@ func TestExecLevelString(t *testing.T) {
 	require.Equal(t, "highestAvailable", HighestAvailable.String())
 	require.Equal(t, "requireAdministrator", RequireAdministrator.String())
 }
+
+func TestGenerateSyso(t *testing.T) {
+	pe := testPEPath(t)
+	res, err := Extract(pe)
+	require.NoError(t, err)
+
+	out := filepath.Join(t.TempDir(), "resource_windows_amd64.syso")
+	err = res.GenerateSyso(out, AMD64, AsInvoker)
+	require.NoError(t, err)
+
+	info, err := os.Stat(out)
+	require.NoError(t, err)
+	require.Greater(t, info.Size(), int64(0))
+}
+
+func TestGenerateSysoRequireAdmin(t *testing.T) {
+	pe := testPEPath(t)
+	res, err := Extract(pe)
+	require.NoError(t, err)
+
+	out := filepath.Join(t.TempDir(), "resource_windows_amd64.syso")
+	err = res.GenerateSyso(out, AMD64, RequireAdministrator)
+	require.NoError(t, err)
+
+	info, err := os.Stat(out)
+	require.NoError(t, err)
+	require.Greater(t, info.Size(), int64(0))
+}
+
+func TestClone(t *testing.T) {
+	pe := testPEPath(t)
+	out := filepath.Join(t.TempDir(), "resource_windows_amd64.syso")
+	err := Clone(pe, out, AMD64, AsInvoker)
+	require.NoError(t, err)
+
+	info, err := os.Stat(out)
+	require.NoError(t, err)
+	require.Greater(t, info.Size(), int64(0))
+}
+
+func TestModifyVersionBeforeSyso(t *testing.T) {
+	pe := testPEPath(t)
+	res, err := Extract(pe)
+	require.NoError(t, err)
+
+	res.VersionInfo.OriginalFilename = "custom.exe"
+	res.VersionInfo.FileDescription = "Custom App"
+
+	out := filepath.Join(t.TempDir(), "resource_windows_amd64.syso")
+	err = res.GenerateSyso(out, AMD64, AsInvoker)
+	require.NoError(t, err)
+
+	info, err := os.Stat(out)
+	require.NoError(t, err)
+	require.Greater(t, info.Size(), int64(0))
+}
