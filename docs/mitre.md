@@ -24,7 +24,7 @@
 | T1070 | Indicator Removal on Host | `cleanup/memory` | D3-SMRA |
 | T1070.004 | File Deletion | `cleanup/selfdelete`, `cleanup/wipe` | D3-FRA (File Removal Analysis) |
 | T1070.006 | Timestomp | `cleanup/timestomp` | D3-FHA (File Hash Analysis) |
-| T1071.001 | Web Protocols | `c2/transport/malleable` | D3-NTA (Network Traffic Analysis) |
+| T1071.001 | Web Protocols | `c2/transport/malleable`, `c2/transport/namedpipe` | D3-NTA (Network Traffic Analysis) |
 | T1082 | System Information Discovery | `win/domain`, `win/version` | D3-SYSIP (System Information Profiling) |
 | T1083 | File and Directory Discovery | `system/folder` | D3-FDA (File Discovery Analysis) |
 | T1106 | Native API | `win/api` (PEB walk, API hashing), `win/syscall`, `win/ntapi` | D3-SCA (System Call Analysis) |
