@@ -244,7 +244,7 @@ func main() {
 }
 ```
 
-### Step 4: List All Exports (Advanced)
+### Step 4: List All Exports
 
 To discover what functions a DLL exports (without x64dbg), use `debug/pe`:
 
@@ -261,7 +261,68 @@ for _, e := range exports {
 // Output: AcquireSRWLockExclusive, AddAtomA, AddAtomW, ...
 ```
 
-This lists every hookable function in the DLL.
+### Finding Signatures Without MSDN
+
+The PE export table only stores `name → address` — **no parameter types or
+count**. This is a fundamental limitation of the PE format. Several
+approaches exist depending on the context:
+
+#### For Windows APIs: just use MSDN
+
+Microsoft documents every public function. Search
+`site:learn.microsoft.com <function name>` and translate to `uintptr`.
+
+#### For unknown/third-party functions: estimate parameter count
+
+Since Go handlers use `uintptr` for all parameters, you only need to know
+**how many** params — not their types. The x64 ABI is predictable:
+
+- First 4 args: `RCX`, `RDX`, `R8`, `R9`
+- Additional args: pushed on stack after 32-byte shadow space
+- `sub rsp, 0xNN` in the prologue hints at the frame size
+
+**Practical shortcut:** declare more parameters than the function actually
+takes. Extra `uintptr` args are harmless — the Go callback ignores them:
+
+```go
+// Don't know exact param count? Declare the maximum (up to 18).
+// Unused params are simply zero.
+h, _ = hook.Install(funcAddr, func(
+    a1, a2, a3, a4, a5, a6, a7, a8 uintptr,
+) uintptr {
+    log.Printf("called with: %x %x %x %x", a1, a2, a3, a4)
+    r, _, _ := syscall.SyscallN(h.Trampoline(), a1, a2, a3, a4, a5, a6, a7, a8)
+    return r
+})
+```
+
+#### For programs with debug symbols (.pdb)
+
+Microsoft publishes PDB files for system binaries on the
+[Symbol Server](https://msdl.microsoft.com/download/symbols). Third-party
+programs sometimes ship with `.pdb` files next to the `.exe`. PDB files
+contain full type information including parameter names and types. Parsing
+requires a PDB reader (not yet in maldev).
+
+#### Discovering imports of a target program
+
+To see which DLL functions a program calls (and thus which are hookable
+via IAT), parse its import table:
+
+```go
+import "debug/pe"
+
+f, _ := pe.Open(`C:\path\to\target.exe`)
+defer f.Close()
+
+imports, _ := f.ImportedSymbols()
+for _, sym := range imports {
+    fmt.Println(sym) // "kernel32.dll:CreateFileW", "ntdll.dll:NtClose", etc.
+}
+```
+
+This tells you exactly which functions the target uses — you can then look
+up each one's signature by name.
 
 ## Advantages & Limitations
 
