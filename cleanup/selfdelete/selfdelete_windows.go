@@ -56,6 +56,22 @@ func dsOpenHandle(pwPath *uint16) (windows.Handle, error) {
 	)
 }
 
+// dsOpenHandleShared opens a file with DELETE access and FILE_SHARE_DELETE.
+// Required for the second open in DeleteFile: after the default :$DATA stream
+// is renamed, Windows records an internal reference that prevents exclusive
+// disposition unless the caller allows FILE_SHARE_DELETE on reopen.
+func dsOpenHandleShared(pwPath *uint16) (windows.Handle, error) {
+	return windows.CreateFile(
+		pwPath,
+		windows.DELETE,
+		windows.FILE_SHARE_DELETE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+}
+
 func dsRenameHandle(hHandle windows.Handle) error {
 	dsStreamRename, err := windows.UTF16FromString(":deadbeef")
 	if err != nil {
@@ -215,6 +231,64 @@ func RunWithScript(wait time.Duration) error {
 
 	time.Sleep(wait)
 	return nil
+}
+
+// DeleteFile deletes an arbitrary file using the ADS rename technique.
+// Unlike Run(), this targets any path rather than the running executable.
+func DeleteFile(path string) error {
+	pathPtr, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+
+	hFile, err := dsOpenHandle(pathPtr)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	if hFile == windows.InvalidHandle {
+		return ErrInvalidHandle
+	}
+
+	err = dsRenameHandle(hFile)
+	windows.CloseHandle(hFile)
+	if err != nil {
+		return fmt.Errorf("rename stream: %w", err)
+	}
+
+	// Reopen with FILE_SHARE_DELETE: after the :$DATA stream is renamed,
+	// Windows records an internal reference that blocks exclusive disposition.
+	hFile, err = dsOpenHandleShared(pathPtr)
+	if err != nil {
+		return fmt.Errorf("reopen %s: %w", path, err)
+	}
+	if hFile == windows.InvalidHandle {
+		return ErrInvalidHandle
+	}
+
+	err = dsDisposeHandle(hFile)
+	windows.CloseHandle(hFile)
+	if err != nil {
+		return fmt.Errorf("dispose: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteFileForce retries DeleteFile with delays between attempts.
+// Useful when a lock holder (e.g., antivirus, cloud sync) temporarily blocks deletion.
+func DeleteFileForce(path string, retry int, duration time.Duration) error {
+	var err error
+	for i := 0; i < retry; i++ {
+		err = DeleteFile(path)
+		if err == nil {
+			return nil
+		}
+		if errno, ok := err.(syscall.Errno); ok && errno == syscall.ERROR_ALREADY_EXISTS {
+			return nil
+		}
+		time.Sleep(duration)
+	}
+	return err
 }
 
 // MarkForDeletion marks the executable for deletion at next reboot.

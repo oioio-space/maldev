@@ -209,4 +209,23 @@ func RunWithScript(wait time.Duration) error
 
 // MarkForDeletion marks the executable for deletion at next reboot (admin required).
 func MarkForDeletion() error
+
+// DeleteFile deletes an arbitrary file using the ADS rename technique.
+func DeleteFile(path string) error
+
+// DeleteFileForce retries DeleteFile with delays between attempts.
+func DeleteFileForce(path string, retry int, duration time.Duration) error
+```
+
+---
+
+## Arbitrary File Deletion
+
+The ADS rename technique also works on any file, not just the running executable:
+
+```go
+selfdelete.DeleteFile(`C:\Temp\payload.exe`)
+
+// With retries (useful when file is locked)
+selfdelete.DeleteFileForce(`C:\Temp\payload.exe`, 5, time.Second)
 ```
