@@ -190,6 +190,38 @@ if err := res.GenerateSyso("resource_windows_amd64.syso", masquerade.AMD64, masq
 }
 ```
 
+### Inspecting Extracted Icons
+
+Icons are stored internally to avoid leaking the `winres` dependency. Use
+`IconCount()` to check how many icon groups were extracted:
+
+```go
+res, _ := masquerade.Extract(`C:\Windows\System32\notepad.exe`)
+fmt.Printf("Extracted %d icon group(s)\n", res.IconCount())
+
+// Icons are automatically included in GenerateSyso — no manual handling needed.
+res.GenerateSyso("resource.syso", masquerade.AMD64, masquerade.AsInvoker)
+```
+
+### Swapping Icons Between PEs
+
+To use icons from one PE with version info from another, extract both and
+use `Build` with `WithSourcePE` for the icon donor:
+
+```go
+// Use svchost icons but custom version info
+err := masquerade.Build("resource.syso", masquerade.AMD64,
+    masquerade.WithSourcePE(`C:\Windows\System32\svchost.exe`),
+    masquerade.WithVersionInfo(&masquerade.VersionInfo{
+        FileDescription:  "My Custom Service",
+        CompanyName:      "Microsoft Corporation",
+        OriginalFilename: "myservice.exe",
+        FileVersion:      "10.0.19041.1",
+        ProductVersion:   "10.0.19041.1",
+    }),
+)
+```
+
 ### Build from Scratch (no source PE)
 
 ```go
@@ -206,8 +238,8 @@ err := masquerade.Build("resource_windows_amd64.syso", masquerade.AMD64,
 )
 ```
 
-Without `WithSourcePE`, a minimal manifest (Win10 compatibility) and empty icon
-set are used. Add `WithIcons` if you need a specific icon.
+Without `WithSourcePE`, a minimal manifest (Win10 compatibility) and no
+icons are used. Use `WithSourcePE` to include icons from a reference PE.
 
 ### Build from Any PE + Certificate
 
@@ -250,15 +282,17 @@ appended to the final PE after linking, using `cert.Write`.
 | Symbol | Kind | Description |
 |--------|------|-------------|
 | `Extract(pePath string) (*Resources, error)` | func | Open a PE and extract manifest, icons, version info, and Authenticode certificate. |
-| `(*Resources).GenerateSyso(output string, arch Arch, level ExecLevel) error` | method | Write a `.syso` COFF object from the current `Resources` state. |
+| `(*Resources).GenerateSyso(output string, arch Arch, level ExecLevel) error` | method | Write a `.syso` COFF object from the current `Resources` state. Reuses original resources when no fields are overridden. |
+| `(*Resources).IconCount() int` | method | Returns the number of icon groups extracted from the PE. |
 | `Clone(srcPE, outputSyso string, arch Arch, level ExecLevel) error` | func | One-step Extract + GenerateSyso. |
-| `Build(output string, arch Arch, opts ...Option) error` | func | Generate `.syso` from options; optionally starts from a source PE. |
-| `WithSourcePE(pePath string) Option` | option | Seed `Build` with resources extracted from an existing PE. |
+| `Build(output string, arch Arch, opts ...Option) error` | func | Generate `.syso` from options; optionally starts from a source PE. Returns `ErrEmptySourcePE` if `WithSourcePE("")` is used. |
+| `WithSourcePE(pePath string) Option` | option | Seed `Build` with resources extracted from an existing PE (icons, manifest, version info). |
 | `WithExecLevel(level ExecLevel) Option` | option | Override the manifest's `requestedExecutionLevel`. |
 | `WithManifest(xml []byte) Option` | option | Replace the entire manifest with raw XML. |
 | `WithVersionInfo(vi *VersionInfo) Option` | option | Override all version resource strings. |
-| `WithIcons(icons []*winres.Icon) Option` | option | Override icon resources. |
+| `WithIcons(icons []*winres.Icon) Option` | option | Override icon resources (requires importing `github.com/tc-hib/winres` directly). |
 | `WithCertificate(c *cert.Certificate) Option` | option | Store a certificate for post-build application (not embedded in `.syso`). |
+| `ErrEmptySourcePE` | error | Returned when `WithSourcePE` is called with an empty path. |
 | `AMD64`, `I386` | `Arch` | Target CPU architecture for the emitted `.syso`. |
 | `AsInvoker`, `HighestAvailable`, `RequireAdministrator` | `ExecLevel` | Requested execution level values. |
 
