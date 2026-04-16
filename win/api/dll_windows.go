@@ -60,6 +60,7 @@ var (
 	ProcCreateTimerQueueTimer      = Kernel32.NewProc("CreateTimerQueueTimer")
 	ProcDeleteTimerQueue           = Kernel32.NewProc("DeleteTimerQueue")
 	ProcReadDirectoryChangesW      = Kernel32.NewProc("ReadDirectoryChangesW")
+	ProcFlushInstructionCache      = Kernel32.NewProc("FlushInstructionCache")
 )
 
 // ntdll.dll procs

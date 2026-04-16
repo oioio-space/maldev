@@ -5,6 +5,7 @@ package hook
 import (
 	"encoding/binary"
 	"fmt"
+	"reflect"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -19,6 +20,7 @@ const (
 	absJmp64Size = 13 // 49 BA imm64 (10) + 41 FF E2 (3)
 	maxStealSize = 32
 	pageSize     = 4096
+	memFree      = 0x10000
 )
 
 // Hook represents an installed inline hook on a single function.
@@ -42,6 +44,9 @@ func (h *Hook) Trampoline() uintptr { return h.trampoline }
 // handler must be a Go function whose parameters match the target's
 // Windows x64 ABI signature (all uintptr).
 func Install(targetAddr uintptr, handler interface{}) (*Hook, error) {
+	if reflect.TypeOf(handler).Kind() != reflect.Func {
+		return nil, fmt.Errorf("handler must be a func, got %T", handler)
+	}
 	return install(targetAddr, syscall.NewCallback(handler))
 }
 
@@ -58,18 +63,13 @@ func install(targetAddr, payloadAddr uintptr) (*Hook, error) {
 	var prologueBuf [maxStealSize]byte
 	copy(prologueBuf[:], unsafe.Slice((*byte)(unsafe.Pointer(targetAddr)), maxStealSize))
 
-	stealLen, err := calcStealLength(prologueBuf[:], jmpRel32Size)
+	stealLen, relocs, err := analyzePrologue(prologueBuf[:], jmpRel32Size)
 	if err != nil {
 		return nil, fmt.Errorf("analyze prologue: %w", err)
 	}
 
 	origBytes := make([]byte, stealLen)
 	copy(origBytes, prologueBuf[:stealLen])
-
-	relocs, err := detectRIPRelative(origBytes, stealLen)
-	if err != nil {
-		return nil, fmt.Errorf("detect RIP-relative: %w", err)
-	}
 
 	relay, err := allocateNear(targetAddr, pageSize)
 	if err != nil {
@@ -83,9 +83,9 @@ func install(targetAddr, payloadAddr uintptr) (*Hook, error) {
 		return nil, fmt.Errorf("allocate trampoline: %w", err)
 	}
 
-	// Build trampoline: stolen bytes (with RIP fixups) + absolute JMP back.
-	trampolineCode := make([]byte, stealLen+absJmp64Size)
-	copy(trampolineCode, origBytes)
+	// Write trampoline directly into mapped page: stolen bytes + JMP back.
+	trampolineDst := unsafe.Slice((*byte)(unsafe.Pointer(trampoline)), stealLen+absJmp64Size)
+	copy(trampolineDst, origBytes)
 
 	for _, r := range relocs {
 		origInstrAddr := targetAddr + uintptr(r.instrOffset)
@@ -93,28 +93,32 @@ func install(targetAddr, payloadAddr uintptr) (*Hook, error) {
 		newInstrAddr := trampoline + uintptr(r.instrOffset)
 		newDisp := int32(int64(origTarget) - int64(newInstrAddr) - int64(r.instrLen))
 		binary.LittleEndian.PutUint32(
-			trampolineCode[r.instrOffset+r.dispOffset:],
+			trampolineDst[r.instrOffset+r.dispOffset:],
 			uint32(newDisp),
 		)
 	}
 
-	writeAbsJmp64(trampolineCode[stealLen:], targetAddr+uintptr(stealLen))
+	writeAbsJmp64(trampolineDst[stealLen:], targetAddr+uintptr(stealLen))
 
-	dst := unsafe.Slice((*byte)(unsafe.Pointer(trampoline)), len(trampolineCode))
-	copy(dst, trampolineCode)
 	var oldProt uint32
-	windows.VirtualProtect(trampoline, uintptr(len(trampolineCode)),
-		windows.PAGE_EXECUTE_READ, &oldProt)
+	if err := windows.VirtualProtect(trampoline, uintptr(len(trampolineDst)),
+		windows.PAGE_EXECUTE_READ, &oldProt); err != nil {
+		windows.VirtualFree(relay, 0, windows.MEM_RELEASE)
+		windows.VirtualFree(trampoline, 0, windows.MEM_RELEASE)
+		return nil, fmt.Errorf("protect trampoline: %w", err)
+	}
 
-	// Build relay: absolute JMP to Go callback.
-	relayCode := make([]byte, absJmp64Size)
-	writeAbsJmp64(relayCode, payloadAddr)
+	// Write relay directly into mapped page: absolute JMP to Go callback.
 	relayDst := unsafe.Slice((*byte)(unsafe.Pointer(relay)), absJmp64Size)
-	copy(relayDst, relayCode)
-	windows.VirtualProtect(relay, uintptr(absJmp64Size),
-		windows.PAGE_EXECUTE_READ, &oldProt)
+	writeAbsJmp64(relayDst, payloadAddr)
 
-	// Patch target: JMP rel32 to relay + NOP padding.
+	if err := windows.VirtualProtect(relay, uintptr(absJmp64Size),
+		windows.PAGE_EXECUTE_READ, &oldProt); err != nil {
+		windows.VirtualFree(relay, 0, windows.MEM_RELEASE)
+		windows.VirtualFree(trampoline, 0, windows.MEM_RELEASE)
+		return nil, fmt.Errorf("protect relay: %w", err)
+	}
+
 	hookPatch := make([]byte, stealLen)
 	writeRelJmp32(hookPatch, targetAddr, relay)
 	for i := jmpRel32Size; i < stealLen; i++ {
@@ -183,28 +187,51 @@ func allocateNear(target uintptr, size uintptr) (uintptr, error) {
 		low = 0x10000
 	}
 	high := target + maxRange
+	if high < target {
+		high = ^uintptr(0)
+	}
 
-	for addr := target &^ (size - 1); addr >= low; addr -= size {
-		p, err := windows.VirtualAlloc(addr, size,
-			windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_READWRITE)
-		if err == nil {
-			return p, nil
+	var mbi windows.MemoryBasicInformation
+	mbiSize := unsafe.Sizeof(mbi)
+
+	// Scan downward.
+	for addr := target &^ (size - 1); addr >= low; {
+		if err := windows.VirtualQuery(addr, &mbi, mbiSize); err != nil {
+			break
 		}
-	}
-	for addr := (target + size) &^ (size - 1); addr < high; addr += size {
-		p, err := windows.VirtualAlloc(addr, size,
-			windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_READWRITE)
-		if err == nil {
-			return p, nil
+		if mbi.State == memFree && mbi.RegionSize >= size {
+			p, err := windows.VirtualAlloc(addr, size,
+				windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_READWRITE)
+			if err == nil {
+				return p, nil
+			}
 		}
+		if mbi.AllocationBase == 0 || uintptr(mbi.AllocationBase) >= addr {
+			break
+		}
+		addr = uintptr(mbi.AllocationBase) - size
 	}
+
+	// Scan upward.
+	for addr := (target + size) &^ (size - 1); addr < high; {
+		if err := windows.VirtualQuery(addr, &mbi, mbiSize); err != nil {
+			break
+		}
+		if mbi.State == memFree && mbi.RegionSize >= size {
+			p, err := windows.VirtualAlloc(addr, size,
+				windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_READWRITE)
+			if err == nil {
+				return p, nil
+			}
+		}
+		addr = mbi.BaseAddress + mbi.RegionSize
+	}
+
 	return 0, fmt.Errorf("no free page within ±2GB of 0x%X", target)
 }
 
-var procFlushInstructionCache = api.Kernel32.NewProc("FlushInstructionCache")
-
 func flushICache(addr, size uintptr) {
-	procFlushInstructionCache.Call(
+	api.ProcFlushInstructionCache.Call(
 		uintptr(windows.CurrentProcess()),
 		addr,
 		size,
