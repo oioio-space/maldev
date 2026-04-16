@@ -29,7 +29,7 @@ func TestExtract(t *testing.T) {
 	require.NotNil(t, res)
 	require.NotEmpty(t, res.Manifest)
 	require.NotNil(t, res.VersionInfo)
-	require.NotEmpty(t, res.Icons)
+	require.Greater(t, res.IconCount(), 0, "expected icons")
 }
 
 func TestExtractVersionInfo(t *testing.T) {
@@ -140,6 +140,12 @@ func TestBuildWithCertificate(t *testing.T) {
 		WithCertificate(c),
 	)
 	require.NoError(t, err)
+}
+
+func TestBuildEmptySourcePE(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "resource.syso")
+	err := Build(out, AMD64, WithSourcePE(""))
+	require.ErrorIs(t, err, ErrEmptySourcePE)
 }
 
 func TestModifyVersionBeforeSyso(t *testing.T) {

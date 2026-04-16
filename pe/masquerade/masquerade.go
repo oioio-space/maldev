@@ -2,6 +2,7 @@ package masquerade
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -74,12 +75,18 @@ type VersionInfo struct {
 // .syso generation.
 type Resources struct {
 	Manifest    []byte
-	Icons       []*winres.Icon
 	VersionInfo *VersionInfo
 	Certificate *cert.Certificate
 
 	rs       *winres.ResourceSet
 	manifest winres.AppManifest
+	icons    []*winres.Icon
+	modified bool // set when caller overrides fields via Build options
+}
+
+// IconCount returns the number of icon groups extracted from the PE.
+func (res *Resources) IconCount() int {
+	return len(res.icons)
 }
 
 // Extract opens a PE file and extracts its manifest, icons, version info,
@@ -111,7 +118,7 @@ func Extract(pePath string) (*Resources, error) {
 	rs.WalkType(winres.RT_GROUP_ICON, func(resID winres.Identifier, langID uint16, _ []byte) bool {
 		ico, iErr := rs.GetIconTranslation(resID, langID)
 		if iErr == nil {
-			res.Icons = append(res.Icons, ico)
+			res.icons = append(res.icons, ico)
 		}
 		return true
 	})
@@ -177,18 +184,17 @@ func extractVersionStrings(vi *version.Info) *VersionInfo {
 }
 
 // GenerateSyso builds a .syso COFF object from the extracted resources.
+// When no fields have been overridden, reuses the original resource set
+// directly — only patching the manifest execution level.
 func (res *Resources) GenerateSyso(output string, arch Arch, level ExecLevel) error {
-	rs := &winres.ResourceSet{}
+	var rs *winres.ResourceSet
 
-	for i, ico := range res.Icons {
-		if err := rs.SetIcon(winres.ID(uint16(i+1)), ico); err != nil {
-			return fmt.Errorf("set icon %d: %w", i, err)
-		}
-	}
-
-	if res.VersionInfo != nil {
-		vi := res.buildVersionInfo()
-		rs.SetVersionInfo(*vi)
+	if res.modified || res.rs == nil {
+		rs = res.rebuildResourceSet()
+	} else {
+		// Reuse the original resource set from Extract — avoids
+		// re-encoding icons and version info through a lossy round-trip.
+		rs = res.rs
 	}
 
 	m := res.manifest
@@ -206,6 +212,21 @@ func (res *Resources) GenerateSyso(output string, arch Arch, level ExecLevel) er
 		return fmt.Errorf("write object: %w", err)
 	}
 	return nil
+}
+
+func (res *Resources) rebuildResourceSet() *winres.ResourceSet {
+	rs := &winres.ResourceSet{}
+
+	for i, ico := range res.icons {
+		rs.SetIcon(winres.ID(uint16(i+1)), ico)
+	}
+
+	if res.VersionInfo != nil {
+		vi := res.buildVersionInfo()
+		rs.SetVersionInfo(*vi)
+	}
+
+	return rs
 }
 
 func (res *Resources) buildVersionInfo() *version.Info {
@@ -228,6 +249,9 @@ func parseVersion(s string) [4]uint16 {
 	fmt.Sscanf(s, "%d.%d.%d.%d", &v[0], &v[1], &v[2], &v[3])
 	return v
 }
+
+// ErrEmptySourcePE is returned when WithSourcePE is called with an empty path.
+var ErrEmptySourcePE = errors.New("masquerade: source PE path cannot be empty")
 
 // Option configures a Build call.
 type Option func(*buildConfig)
@@ -261,7 +285,8 @@ func WithVersionInfo(vi *VersionInfo) Option {
 	return func(c *buildConfig) { c.versionInfo = vi }
 }
 
-// WithIcons overrides the icon resources.
+// WithIcons overrides the icon resources using winres.Icon values
+// (obtained from a previous Extract or from the winres library directly).
 func WithIcons(icons []*winres.Icon) Option {
 	return func(c *buildConfig) { c.icons = icons }
 }
@@ -281,6 +306,10 @@ func Build(output string, arch Arch, opts ...Option) error {
 		opt(cfg)
 	}
 
+	if cfg.sourcePE == "" && hasSourcePEOption(opts) {
+		return ErrEmptySourcePE
+	}
+
 	var res *Resources
 
 	if cfg.sourcePE != "" {
@@ -291,28 +320,40 @@ func Build(output string, arch Arch, opts ...Option) error {
 		}
 	} else {
 		res = &Resources{
-			rs:       &winres.ResourceSet{},
 			manifest: winres.AppManifest{Compatibility: winres.Win10AndAbove},
 		}
 	}
 
 	if cfg.versionInfo != nil {
 		res.VersionInfo = cfg.versionInfo
+		res.modified = true
 	}
 	if cfg.manifest != nil {
 		res.Manifest = cfg.manifest
 		if parsed, err := winres.AppManifestFromXML(cfg.manifest); err == nil {
 			res.manifest = parsed
 		}
+		res.modified = true
 	}
 	if cfg.icons != nil {
-		res.Icons = cfg.icons
+		res.icons = cfg.icons
+		res.modified = true
 	}
 	if cfg.certificate != nil {
 		res.Certificate = cfg.certificate
 	}
 
 	return res.GenerateSyso(output, arch, cfg.execLevel)
+}
+
+// hasSourcePEOption checks whether WithSourcePE was explicitly called
+// (distinguishes "not provided" from "provided with empty string").
+func hasSourcePEOption(opts []Option) bool {
+	cfg := &buildConfig{sourcePE: "\x00sentinel"}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	return cfg.sourcePE != "\x00sentinel"
 }
 
 // Clone extracts resources from srcPE and generates a .syso in one step.
