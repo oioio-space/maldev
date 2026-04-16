@@ -171,9 +171,9 @@ func main() {
 
 - **x64 only**: Machine type 0x8664 enforced -- no x86 or ARM support
 - **RWX memory**: VirtualAlloc with PAGE_EXECUTE_READWRITE is detectable
-- **No BOF API**: Does not implement Cobalt Strike's internal BOF API (BeaconPrintf, etc.)
+- **Partial BOF API**: BeaconOutput/BeaconPrintf output is captured; process-manipulation Beacon APIs (BeaconSpawnTemporaryProcess, etc.) are not supported
 - **Single .text section**: Relocations only applied to .text -- multi-section BOFs may not fully work
-- **No output capture**: Return value is `nil` -- BOF output goes to stdout/process memory
+- **No output capture from native BOF writes**: Return value is `nil` for BOFs that write directly to stdout rather than through Beacon APIs
 
 ---
 
@@ -183,10 +183,32 @@ func main() {
 |---------|-----------------|-----------|-------|------------------------|
 | Language | Go | C | Rust | C# |
 | Relocation types | 3 (ADDR64, ADDR32NB, REL32) | Full | Full | N/A |
-| BOF API support | No | Yes | Yes | N/A (.NET) |
-| Output capture | No | Yes | Yes | Yes |
+| BOF API support | Partial (Args + output) | Yes | Yes | N/A (.NET) |
+| Output capture | Partial (BeaconOutput/Printf) | Yes | Yes | Yes |
 | x86 support | No | Yes | No | N/A |
 | In-process | Yes | Yes | Yes | Yes |
+
+---
+
+## Beacon API Shim
+
+Our BOF loader includes a Go-native Beacon API shim for argument packing.
+
+### Packing Arguments
+
+```go
+args := bof.NewArgs()
+args.AddInt(42)
+args.AddString("hello")
+args.AddBytes(shellcode)
+
+b, _ := bof.Load(coffData)
+output, _ := b.Execute(args.Pack())
+```
+
+**Note:** This is a partial implementation. BOFs that call BeaconOutput or
+BeaconPrintf will have output captured. BOFs calling BeaconSpawnTemporaryProcess
+or other process-manipulation Beacon APIs are not yet supported.
 
 ---
 
@@ -205,4 +227,17 @@ func Load(data []byte) (*BOF, error)
 
 // Execute runs the BOF's entry point with arguments.
 func (b *BOF) Execute(args []byte) ([]byte, error)
+```
+
+### Args
+
+```go
+// NewArgs allocates an empty argument packer.
+func NewArgs() *Args
+
+func (a *Args) AddInt(v int32)       // 4-byte big-endian integer
+func (a *Args) AddShort(v int16)     // 2-byte big-endian integer
+func (a *Args) AddString(s string)   // 4-byte length prefix + string + null terminator
+func (a *Args) AddBytes(data []byte) // 4-byte length prefix + raw bytes
+func (a *Args) Pack() []byte         // returns the packed buffer (copy)
 ```
