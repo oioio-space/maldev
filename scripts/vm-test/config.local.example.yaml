@@ -1,0 +1,32 @@
+# Copy to config.local.yaml (gitignored) and fill for your host.
+# Only include the fields you want to override — deep-merged over config.yaml.
+#
+# Examples below are what a typical Fedora/libvirt setup might look like.
+# Delete what you don't need.
+
+# Force a driver if auto-detect picks the wrong one:
+# driver: libvirt
+
+vms:
+  windows:
+    # Real libvirt domain name on this host:
+    libvirt_name: win10
+    # The snapshot that "machine" / GNOME Boxes creates is datestamped — rename
+    # it to INIT once, or point to the datestamp directly:
+    snapshot: 2026-04-17-17-41-25
+    ssh_key: /home/mathieu/.ssh/vm_win_key
+    # ssh_host: 192.168.122.10        # optional; auto-discovered via virsh domifaddr
+
+  linux:
+    libvirt_name: ubuntu20.04-        # trailing dash if that's what "machine" created
+    snapshot: 2026-04-17-17-41-48
+    ssh_key: /home/mathieu/.ssh/vm_linux_key
+
+# Kali is orchestrated separately (testutil/kali.go). For libvirt setups set:
+#   MALDEV_KALI_SSH_HOST=192.168.122.XX   (virsh domifaddr kali)
+#   MALDEV_KALI_SSH_PORT=22
+#   MALDEV_KALI_SSH_KEY=/home/mathieu/.ssh/vm_kali_key
+# in your shell profile — not stored here.
+
+libvirt:
+  connect_uri: qemu:///system          # qemu:///session for user-mode

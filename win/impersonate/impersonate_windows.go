@@ -99,7 +99,10 @@ func ImpersonateLoggedOnUser(t windows.Token) error {
 }
 
 // ThreadEffectiveTokenOwner returns the user and domain of the effective token
-// on the current thread. Requires administrator privileges.
+// on the current thread. Requires administrator privileges. The returned
+// strings are localized (e.g. "Système"/"AUTORITE NT" on fr-FR) — for
+// tests or comparisons that must stay locale-independent, use
+// ThreadEffectiveTokenSID instead.
 func ThreadEffectiveTokenOwner() (user string, domain string, err error) {
 	t := windows.GetCurrentThreadEffectiveToken()
 	tokenUser, err := t.GetTokenUser()
@@ -113,6 +116,49 @@ func ThreadEffectiveTokenOwner() (user string, domain string, err error) {
 	}
 
 	return user, domain, nil
+}
+
+// ThreadEffectiveTokenSID returns the string representation of the user SID
+// on the current thread's effective token (e.g. "S-1-5-18" for SYSTEM).
+// Locale-independent; prefer this over ThreadEffectiveTokenOwner when
+// identifying well-known principals.
+func ThreadEffectiveTokenSID() (string, error) {
+	t := windows.GetCurrentThreadEffectiveToken()
+	tokenUser, err := t.GetTokenUser()
+	if err != nil {
+		return "", err
+	}
+	return tokenUser.User.Sid.String(), nil
+}
+
+// ThreadEffectiveTokenHasGroup reports whether the current thread's effective
+// token includes the given SID in its group list. Needed to distinguish
+// service-impersonation contexts where TokenUser remains NT AUTHORITY\SYSTEM
+// (S-1-5-18) but the token has picked up an additional service SID in its
+// Groups — e.g. TrustedInstaller (S-1-5-80-...) after ImpersonateByPID on
+// the TrustedInstaller service process.
+func ThreadEffectiveTokenHasGroup(sid string) (bool, error) {
+	target, err := windows.StringToSid(sid)
+	if err != nil {
+		return false, fmt.Errorf("parse sid %q: %w", sid, err)
+	}
+	// No LocalFree here: golang.org/x/sys/windows StringToSid wraps the
+	// SID in a Go-owned allocation with a finalizer, and explicit
+	// LocalFree has been observed to crash the test binary on some
+	// Win10/11 builds (likely double-free). The tiny leak is harmless for
+	// a short-lived process.
+
+	t := windows.GetCurrentThreadEffectiveToken()
+	groups, err := t.GetTokenGroups()
+	if err != nil {
+		return false, err
+	}
+	for _, g := range groups.AllGroups() {
+		if windows.EqualSid(g.Sid, target) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // runImpersonated executes fn on a locked OS thread impersonated as the given

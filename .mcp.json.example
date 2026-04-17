@@ -1,0 +1,14 @@
+{
+  "_comment": "Copy to .mcp.json (gitignored) and adapt the server URL. Claude Code spawns cmd/memscan-mcp locally, which relays JSON-RPC tool calls to memscan-server running inside the Windows VM at the given URL. Start the server first: go run scripts/vm-test-memscan.go -skip-build (or start it manually with schtasks).",
+  "mcpServers": {
+    "memscan": {
+      "command": "go",
+      "args": [
+        "run",
+        "./cmd/memscan-mcp",
+        "--server",
+        "http://192.168.122.122:50300"
+      ]
+    }
+  }
+}

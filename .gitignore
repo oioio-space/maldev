@@ -36,6 +36,17 @@ testutil/results/
 scripts/x64dbg-harness/
 scripts/vm-install-x64dbg-mcp.ps1
 scripts/vm-test-x64dbg-mcp.go
+scripts/vm-test/config.local.yaml
+scripts/vm-test/kali-env.sh
+
+# Stray binaries from `go build ./cmd/...` without -o (Linux names, no
+# extension — *.exe already covers the Windows case above).
+/memscan-harness
+/memscan-harness-ssn
+/memscan-mcp
+/memscan-server
+/test-report
+/vmtest
 vendor/
 workspace.xml
 .mcp.json

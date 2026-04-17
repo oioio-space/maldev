@@ -346,6 +346,9 @@ func (t *Token) EnableAllPrivileges() error {
 			toBeEnabled = append(toBeEnabled, p.Name)
 		}
 	}
+	if len(toBeEnabled) == 0 {
+		return nil // every eligible privilege is already enabled — no-op.
+	}
 	return t.modifyTokenPrivileges(toBeEnabled, PrivEnable)
 }
 
@@ -365,6 +368,9 @@ func (t *Token) DisableAllPrivileges() error {
 		if !p.Removed && p.Enabled {
 			toBeDisabled = append(toBeDisabled, p.Name)
 		}
+	}
+	if len(toBeDisabled) == 0 {
+		return nil // nothing enabled — no-op.
 	}
 	return t.modifyTokenPrivileges(toBeDisabled, PrivDisable)
 }

@@ -4,6 +4,7 @@ package meterpreter
 
 import (
 	"context"
+	"net"
 	"os"
 	"testing"
 	"time"
@@ -42,6 +43,15 @@ func TestMeterpreterRealSessionLinux(t *testing.T) {
 	if port == "" {
 		port = "4444"
 	}
+
+	// Probe the MSF handler. Skip (don't fail) if no one is listening — this
+	// test requires an externally-started handler (see doc above).
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(kaliHost, port), 3*time.Second)
+	if err != nil {
+		t.Skipf("no MSF handler on %s:%s (%v). Start one with "+
+			"testutil.KaliStartListener before re-running.", kaliHost, port, err)
+	}
+	_ = conn.Close()
 
 	stager := NewStager(&Config{
 		Transport: TCP,

@@ -3,22 +3,60 @@ package testutil
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
 )
 
-// Kali VM network and credentials.
+// Kali VM network and credentials. The exported constants keep the
+// VirtualBox NAT setup (localhost:2223, host-only 192.168.56.200) as the
+// baseline; every value is overridable via MALDEV_KALI_* environment
+// variables so the same tests run unchanged on a libvirt host where Kali
+// sits behind a different IP/port.
 const (
-	KaliHost    = "192.168.56.200"
+	KaliHost    = "192.168.56.200" // LHOST for reverse-payloads — override via MALDEV_KALI_HOST
 	KaliUser    = "kali"
 	KaliSSHPort = "2223"
 	KaliSSHKey  = "/tmp/vm_kali_key"
 )
 
+// kaliSSHHost returns the SSH connect target. VBox uses the host-side NAT
+// port (localhost:2223); libvirt setups should set MALDEV_KALI_SSH_HOST to
+// the guest IP discovered via `virsh domifaddr kali`.
+func kaliSSHHost() string {
+	if v := os.Getenv("MALDEV_KALI_SSH_HOST"); v != "" {
+		return v
+	}
+	return "localhost"
+}
+
+func kaliSSHPort() string {
+	if v := os.Getenv("MALDEV_KALI_SSH_PORT"); v != "" {
+		return v
+	}
+	return KaliSSHPort
+}
+
+func kaliSSHKey() string {
+	if v := os.Getenv("MALDEV_KALI_SSH_KEY"); v != "" {
+		return v
+	}
+	return KaliSSHKey
+}
+
+func kaliUser() string {
+	if v := os.Getenv("MALDEV_KALI_USER"); v != "" {
+		return v
+	}
+	return KaliUser
+}
+
 // KaliSSH runs a command on the Kali VM via SSH and returns stdout.
-// Uses key-based auth through NAT port forwarding (host:2223 → guest:22).
+// Connection target is kaliSSHHost():kaliSSHPort(), key kaliSSHKey() —
+// all three resolve to the VBox NAT defaults unless MALDEV_KALI_SSH_*
+// environment variables override them (libvirt hosts).
 func KaliSSH(t *testing.T, cmd string, timeout time.Duration) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -27,9 +65,9 @@ func KaliSSH(t *testing.T, cmd string, timeout time.Duration) string {
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "ConnectTimeout=5",
-		"-i", KaliSSHKey,
-		"-p", KaliSSHPort,
-		fmt.Sprintf("%s@localhost", KaliUser),
+		"-i", kaliSSHKey(),
+		"-p", kaliSSHPort(),
+		fmt.Sprintf("%s@%s", kaliUser(), kaliSSHHost()),
 		cmd,
 	)
 	out, err := c.CombinedOutput()
@@ -49,9 +87,9 @@ func KaliGenerateShellcode(t *testing.T, payload, lhost, lport string) []byte {
 	c := exec.CommandContext(ctx, "ssh",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
-		"-i", KaliSSHKey,
-		"-p", KaliSSHPort,
-		fmt.Sprintf("%s@localhost", KaliUser),
+		"-i", kaliSSHKey(),
+		"-p", kaliSSHPort(),
+		fmt.Sprintf("%s@%s", kaliUser(), kaliSSHHost()),
 		cmd,
 	)
 	out, err := c.Output()

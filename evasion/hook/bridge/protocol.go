@@ -17,6 +17,15 @@ const (
 	msgResponse  byte = 0x08
 )
 
+// rpcResponse is the in-process envelope used by Controller and Listener to
+// route a wire response (msgResponse) back to the goroutine that issued the
+// corresponding Call. Lives here (untagged) because both the Windows-only
+// Controller and the cross-platform Listener depend on it.
+type rpcResponse struct {
+	data []byte
+	err  error
+}
+
 // writeFrameWithID writes a multiplexed frame: [length][msgType][reqID][payload].
 // reqID = 0 is reserved for fire-and-forget messages (backward compat).
 func writeFrameWithID(w io.Writer, msgType byte, reqID uint32, payload []byte) error {

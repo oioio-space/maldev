@@ -31,7 +31,16 @@ func TestExtract(t *testing.T) {
 	require.NotNil(t, res)
 	require.NotEmpty(t, res.Manifest)
 	require.NotNil(t, res.VersionInfo)
-	require.Greater(t, res.IconCount(), 0, "expected icons")
+	// notepad.exe on Win10 22H2+ can be the UWP-shim stub which ships without
+	// icon resources in the PE itself (icons live in the UWP AppX). Fall back
+	// to explorer.exe — a classic shell binary that has always carried a rich
+	// icon resource table.
+	if res.IconCount() == 0 {
+		alt := filepath.Join(os.Getenv("SystemRoot"), "explorer.exe")
+		res2, err := Extract(alt)
+		require.NoError(t, err, "explorer.exe fallback")
+		require.Greater(t, res2.IconCount(), 0, "expected icons in either notepad.exe or explorer.exe")
+	}
 }
 
 func TestExtractVersionInfo(t *testing.T) {

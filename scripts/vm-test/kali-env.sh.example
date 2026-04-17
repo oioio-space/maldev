@@ -1,0 +1,10 @@
+# Source from your shell (~/.bashrc, ~/.zshrc, or .envrc) once you know the
+# Kali guest IP on libvirt. testutil/kali.go reads these at test time.
+#
+# Copy to scripts/vm-test/kali-env.sh (gitignored) and fill in.
+
+export MALDEV_KALI_SSH_HOST="192.168.122.XX"   # virsh domifaddr kali
+export MALDEV_KALI_SSH_PORT="22"
+export MALDEV_KALI_SSH_KEY="$HOME/.ssh/vm_kali_key"
+export MALDEV_KALI_USER="kali"
+export MALDEV_KALI_HOST="192.168.122.XX"       # LHOST for reverse payloads (usually same IP)

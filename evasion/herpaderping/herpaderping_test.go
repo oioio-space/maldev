@@ -4,6 +4,7 @@ package herpaderping
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -69,13 +70,22 @@ func TestRunWithDecoy(t *testing.T) {
 	testutil.RequireManual(t)
 	testutil.RequireIntrusive(t)
 
-	dir := t.TempDir()
-	// Use cmd.exe as a benign "payload" that exits quickly
+	// Use a manual temp dir instead of t.TempDir(): the spawned cmd.exe keeps
+	// the image (herp.exe) open, so the automatic cleanup races with the live
+	// process and emits "unlinkat ... Accès refusé" as a test failure. Best-
+	// effort RemoveAll after taskkill closes the picture cleanly.
+	dir, err := os.MkdirTemp("", "herp-*")
+	require.NoError(t, err)
+	defer func() {
+		_ = exec.Command("taskkill", "/F", "/IM", "herp.exe").Run()
+		_ = os.RemoveAll(dir) // best-effort; image may still be held briefly
+	}()
+
 	payloadPath := `C:\Windows\System32\cmd.exe`
 	targetPath := filepath.Join(dir, "herp.exe")
 	decoyPath := `C:\Windows\System32\svchost.exe`
 
-	err := Run(Config{
+	err = Run(Config{
 		PayloadPath: payloadPath,
 		TargetPath:  targetPath,
 		DecoyPath:   decoyPath,
@@ -107,11 +117,20 @@ func TestRunVerifyProcessCreated(t *testing.T) {
 	testutil.RequireManual(t)
 	testutil.RequireIntrusive(t)
 
-	dir := t.TempDir()
+	// Manual temp dir (not t.TempDir) to sidestep the image-lock race:
+	// the spawned cmd.exe keeps herp_verify.exe open, which deadlocks
+	// t.TempDir's RemoveAll cleanup with "Accès refusé".
+	dir, err := os.MkdirTemp("", "herp-verify-*")
+	require.NoError(t, err)
+	defer func() {
+		_ = exec.Command("taskkill", "/F", "/IM", "herp_verify.exe").Run()
+		_ = os.RemoveAll(dir)
+	}()
+
 	payloadPath := `C:\Windows\System32\cmd.exe`
 	targetPath := filepath.Join(dir, "herp_verify.exe")
 
-	err := Run(Config{
+	err = Run(Config{
 		PayloadPath: payloadPath,
 		TargetPath:  targetPath,
 	})

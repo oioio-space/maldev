@@ -3,11 +3,13 @@
 package scheduler
 
 import (
+	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/windows"
 
 	"github.com/oioio-space/maldev/testutil"
 )
@@ -79,6 +81,18 @@ func TestScheduledTaskMechanism(t *testing.T) {
 
 func TestList(t *testing.T) {
 	testutil.RequireAdmin(t)
+
+	// Skip under non-interactive sessions (SSH = session 0). Task Scheduler
+	// on Win10 22H2+ returns inconsistent results from that context:
+	// CoInitializeEx occasionally fails with "Fonction incorrecte", and
+	// ITaskFolder::GetTasks on the root folder can be empty despite
+	// successful RegisterTaskDefinition. Run this test from an interactive
+	// session (console / RDP) instead.
+	var sid uint32
+	_ = windows.ProcessIdToSessionId(uint32(os.Getpid()), &sid)
+	if sid == 0 {
+		t.Skip("TestList requires an interactive user session (running in service session 0 — e.g. OpenSSH)")
+	}
 
 	require.NoError(t, Create(testTaskName,
 		WithAction(`C:\Windows\System32\notepad.exe`),

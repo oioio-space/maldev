@@ -28,11 +28,6 @@ type Controller struct {
 	writeMu  sync.Mutex
 }
 
-type rpcResponse struct {
-	data []byte
-	err  error
-}
-
 // Standalone returns a Controller without communication. Ask returns Allow,
 // Log/Exfil are no-ops, Register works but commands are never received.
 func Standalone() *Controller {

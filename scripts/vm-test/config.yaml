@@ -1,0 +1,53 @@
+# vmtest config — committed defaults, no secrets.
+#
+# Per-host overrides live in scripts/vm-test/config.local.yaml (gitignored) or
+# environment variables. Envs win over YAML:
+#
+#   MALDEV_VM_DRIVER              — force driver (vbox|libvirt)
+#   MALDEV_VBOX_EXE               — path to VBoxManage
+#   MALDEV_VM_<NAME>_SSH_KEY      — SSH private key path (libvirt)
+#   MALDEV_VM_<NAME>_SSH_HOST     — override auto-discovered IP
+#   MALDEV_VM_<NAME>_USER         — override VM user
+#   MALDEV_VM_<NAME>_PASSWORD     — override VM password (VBox guestcontrol)
+#   MALDEV_VM_<NAME>_SNAPSHOT     — override snapshot name
+#   MALDEV_VM_<NAME>_LIBVIRT_NAME — override libvirt domain name
+#
+# <NAME> is one of: WINDOWS, LINUX (kali is orchestrated by testutil/kali.go,
+# not by vmtest — see MALDEV_KALI_SSH_* in testutil/kali.go).
+
+driver: ""  # empty → auto-detect (VBoxManage in PATH wins, else virsh)
+
+vms:
+  windows:
+    platform: windows
+    vbox_name: Windows10
+    libvirt_name: win10
+    snapshot: INIT
+    user: test
+    password: test
+    ssh_port: 22
+    shared_folder: maldev
+    shared_mountpoint: "Z:"
+    guest_runner: "Z:\\scripts\\vm-test.ps1"
+    project_copy_path: "C:\\maldev"
+    wait_ready_seconds: 60
+
+  linux:
+    platform: linux
+    vbox_name: Ubuntu25.10
+    libvirt_name: ubuntu20.04
+    snapshot: INIT
+    user: test
+    password: test
+    ssh_port: 22
+    shared_folder: maldev
+    project_copy_path: /tmp/maldev
+    wait_ready_seconds: 45
+
+vbox:
+  exe_path: ""  # empty → $PATH; Windows fallback C:/Program Files/Oracle/VirtualBox/VBoxManage.exe
+
+libvirt:
+  # qemu:///session for user-mode (GNOME Boxes / "Machines" default) —
+  # qemu:///system for host-wide (virt-manager as root, libvirt group).
+  connect_uri: "qemu:///session"

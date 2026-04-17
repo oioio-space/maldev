@@ -3,11 +3,21 @@ package bridge
 import (
 	"bytes"
 	"io"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+// skipIfNonWindowsController skips tests that exercise the real (Windows-only)
+// Controller implementation. The non-Windows stub returns no-ops so the
+// pipe-based round-trip assertions can never succeed.
+func skipIfNonWindowsController(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Controller round-trip needs the Windows implementation (controller_stub on other OSes is no-op)")
+	}
+}
 
 func TestFrameRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
@@ -69,6 +79,7 @@ func TestSplitTagDataNoNull(t *testing.T) {
 }
 
 func TestControllerListenerRoundTrip(t *testing.T) {
+	skipIfNonWindowsController(t)
 	sr, cw := io.Pipe()
 	cr, sw := io.Pipe()
 
@@ -102,6 +113,7 @@ func TestControllerListenerRoundTrip(t *testing.T) {
 }
 
 func TestControllerHeartbeat(t *testing.T) {
+	skipIfNonWindowsController(t)
 	sr, cw := io.Pipe()
 	cr, sw := io.Pipe()
 
@@ -115,6 +127,7 @@ func TestControllerHeartbeat(t *testing.T) {
 }
 
 func TestControllerExfil(t *testing.T) {
+	skipIfNonWindowsController(t)
 	sr, cw := io.Pipe()
 	cr, sw := io.Pipe()
 
@@ -150,6 +163,7 @@ func TestStandalone(t *testing.T) {
 }
 
 func TestRPCCall(t *testing.T) {
+	skipIfNonWindowsController(t)
 	sr, cw := io.Pipe()
 	cr, sw := io.Pipe()
 
@@ -181,6 +195,7 @@ func TestRPCCall(t *testing.T) {
 }
 
 func TestRPCUnknownCommand(t *testing.T) {
+	skipIfNonWindowsController(t)
 	sr, cw := io.Pipe()
 	cr, sw := io.Pipe()
 
@@ -198,6 +213,7 @@ func TestRPCUnknownCommand(t *testing.T) {
 }
 
 func TestRPCAndHookConcurrent(t *testing.T) {
+	skipIfNonWindowsController(t)
 	sr, cw := io.Pipe()
 	cr, sw := io.Pipe()
 
@@ -231,6 +247,7 @@ func TestRPCAndHookConcurrent(t *testing.T) {
 }
 
 func TestRPCReadMemory(t *testing.T) {
+	skipIfNonWindowsController(t)
 	sr, cw := io.Pipe()
 	cr, sw := io.Pipe()
 
@@ -252,6 +269,7 @@ func TestRPCReadMemory(t *testing.T) {
 }
 
 func TestRPCTyped(t *testing.T) {
+	skipIfNonWindowsController(t)
 	sr, cw := io.Pipe()
 	cr, sw := io.Pipe()
 
@@ -285,6 +303,7 @@ func TestRPCTyped(t *testing.T) {
 }
 
 func TestRPCNoArgs(t *testing.T) {
+	skipIfNonWindowsController(t)
 	sr, cw := io.Pipe()
 	cr, sw := io.Pipe()
 
@@ -309,6 +328,7 @@ func TestRPCNoArgs(t *testing.T) {
 }
 
 func TestRPCFireAndForget(t *testing.T) {
+	skipIfNonWindowsController(t)
 	sr, cw := io.Pipe()
 	cr, sw := io.Pipe()
 
