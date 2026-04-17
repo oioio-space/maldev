@@ -265,16 +265,12 @@ func runMatrix(vm *vmEntry, base string, matrix []verif) error {
 				fatals++
 				continue
 			}
-			all := true
+			mark := "✓"
 			for _, s := range r.subs {
 				if !s.ok {
-					all = false
+					mark = "✗"
 					break
 				}
-			}
-			mark := "✓"
-			if !all {
-				mark = "✗"
 			}
 			fmt.Printf("  %s %s\n", mark, r.v.name)
 			for _, s := range r.subs {
@@ -286,11 +282,9 @@ func runMatrix(vm *vmEntry, base string, matrix []verif) error {
 			}
 		}
 	}
-	total := passSubs + failSubs
 	fmt.Println("\n" + strings.Repeat("-", 72))
 	fmt.Printf("total sub-checks: %d passed / %d failed (%d fatal row(s))\n", passSubs, failSubs, fatals)
 	fmt.Println(strings.Repeat("-", 72))
-	_ = total
 	if failSubs > 0 || fatals > 0 {
 		return fmt.Errorf("%d failed sub-check(s), %d fatal row(s)", failSubs, fatals)
 	}
@@ -309,43 +303,39 @@ func buildMatrix() []verif {
 	}
 	for _, r := range resolvers {
 		for _, fn := range ssnFns {
-			rc, fnc := r, fn // capture
 			out = append(out, verif{
 				group:   "SSN",
-				name:    fmt.Sprintf("%s/%s", rc, fnc),
-				harness: []string{"-group", "ssn", "-resolver", rc, "-fn", fnc},
+				name:    fmt.Sprintf("%s/%s", r, fn),
+				harness: []string{"-group", "ssn", "-resolver", r, "-fn", fn},
 				check:   checkSSN,
 			})
 		}
 	}
 
 	for _, c := range callers {
-		cc := c
 		out = append(out, verif{
 			group:   "AMSI",
-			name:    cc,
-			harness: []string{"-group", "amsi", "-caller", cc},
+			name:    c,
+			harness: []string{"-group", "amsi", "-caller", c},
 			check:   checkAMSI,
 		})
 	}
 
 	for _, c := range callers {
-		cc := c
 		out = append(out, verif{
 			group:   "ETW",
-			name:    cc,
-			harness: []string{"-group", "etw", "-caller", cc},
+			name:    c,
+			harness: []string{"-group", "etw", "-caller", c},
 			check:   checkETW,
 		})
 	}
 
 	for _, variant := range []string{"classic", "full"} {
 		for _, c := range callers {
-			vv, cc := variant, c
 			out = append(out, verif{
 				group:   "Unhook",
-				name:    fmt.Sprintf("%s/%s", vv, cc),
-				harness: []string{"-group", "unhook", "-variant", vv, "-caller", cc},
+				name:    fmt.Sprintf("%s/%s", variant, c),
+				harness: []string{"-group", "unhook", "-variant", variant, "-caller", c},
 				check:   checkUnhook,
 			})
 		}
@@ -359,11 +349,10 @@ func buildMatrix() []verif {
 	injectMethods := []string{"ct", "etwthr", "apcex", "sectionmap"}
 	for _, m := range injectMethods {
 		for _, c := range callers {
-			mm, cc := m, c
 			out = append(out, verif{
 				group:   "Inject",
-				name:    fmt.Sprintf("%s/%s", mm, cc),
-				harness: []string{"-group", "inject", "-method", mm, "-caller", cc},
+				name:    fmt.Sprintf("%s/%s", m, c),
+				harness: []string{"-group", "inject", "-method", m, "-caller", c},
 				check:   checkInject,
 			})
 		}
@@ -448,6 +437,7 @@ func checkAMSI(ctx *checkCtx, r map[string]string) ([]subResult, error) {
 	for _, s := range subs {
 		if !s.ok {
 			all = false
+			break
 		}
 	}
 	subs = append(subs, subResult{

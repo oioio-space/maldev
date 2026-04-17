@@ -100,8 +100,8 @@ func (p *platform) ingest(r io.Reader) error {
 			}
 		case "run":
 			// Test starts: reserve a slot.
-			if ev.Test != "" && !findTest(pr.Tests, ev.Test) {
-				pr.Tests = append(pr.Tests, &testResult{Pkg: ev.Package, Name: ev.Test})
+			if ev.Test != "" {
+				findOrAppendTest(pr, ev.Test)
 			}
 		case "pass", "fail", "skip":
 			status := strings.ToUpper(ev.Action)
@@ -136,35 +136,17 @@ func (p *platform) ingest(r io.Reader) error {
 			pr.Status = "no-tests"
 			continue
 		}
-		anyFail := false
-		anyPass := false
-		for _, tr := range pr.Tests {
-			switch tr.Status {
-			case "FAIL":
-				anyFail = true
-			case "PASS":
-				anyPass = true
-			}
-		}
+		pass, fail, _ := countStatus(pr)
 		switch {
-		case anyFail:
+		case fail > 0:
 			pr.Status = "FAIL"
-		case anyPass:
+		case pass > 0:
 			pr.Status = "ok"
 		default:
 			pr.Status = "build-error"
 		}
 	}
 	return sc.Err()
-}
-
-func findTest(ts []*testResult, name string) bool {
-	for _, t := range ts {
-		if t.Name == name {
-			return true
-		}
-	}
-	return false
 }
 
 func findOrAppendTest(pr *pkgResult, name string) *testResult {
@@ -228,25 +210,16 @@ func renderText(w io.Writer, plats []*platform, failOnly bool) {
 			p.Label, t.pkgs, t.tests, t.passed, t.failed, t.skipped, t.buildErr)
 		fmt.Fprintln(w, strings.Repeat("-", 78))
 		for _, pr := range sortedPkgs(p) {
-			pass, fail, skip := 0, 0, 0
-			for _, tr := range pr.Tests {
-				switch tr.Status {
-				case "PASS":
-					pass++
-				case "FAIL":
-					fail++
-				case "SKIP":
-					skip++
-				}
-			}
+			pass, fail, skip := countStatus(pr)
 			mark := "✓"
-			if pr.Status == "FAIL" || fail > 0 {
+			switch {
+			case pr.Status == "FAIL" || fail > 0:
 				mark = "✗"
-			} else if pr.Status == "build-error" {
+			case pr.Status == "build-error":
 				mark = "⚠"
-			} else if pr.Status == "no-tests" {
+			case pr.Status == "no-tests":
 				mark = "·"
-			} else if pr.Status == "skip" {
+			case pr.Status == "skip":
 				mark = "-"
 			}
 			fmt.Fprintf(w, "  %s %-60s  %3dP %2dF %2dS  (%s)\n",
@@ -307,20 +280,22 @@ func renderText(w io.Writer, plats []*platform, failOnly bool) {
 			row := fmt.Sprintf("  %-62s", shorten(k, 62))
 			for _, p := range plats {
 				pr, ok := p.Pkgs[k]
-				if !ok {
-					row += fmt.Sprintf("  %-10s", "—")
-					continue
+				cell := "—"
+				switch {
+				case !ok:
+					// leave as —
+				case pr.Status == "build-error":
+					cell = "buildErr"
+				default:
+					pass, fail, _ := countStatus(pr)
+					switch {
+					case fail > 0:
+						cell = fmt.Sprintf("%dF/%dP", fail, pass)
+					case pass > 0:
+						cell = fmt.Sprintf("%dP", pass)
+					}
 				}
-				pass, fail, _ := countStatus(pr)
-				if pr.Status == "build-error" {
-					row += fmt.Sprintf("  %-10s", "buildErr")
-				} else if fail > 0 {
-					row += fmt.Sprintf("  %-10s", fmt.Sprintf("%dF/%dP", fail, pass))
-				} else if pass > 0 {
-					row += fmt.Sprintf("  %-10s", fmt.Sprintf("%dP", pass))
-				} else {
-					row += fmt.Sprintf("  %-10s", "—")
-				}
+				row += fmt.Sprintf("  %-10s", cell)
 			}
 			fmt.Fprintln(w, row)
 		}
@@ -419,7 +394,7 @@ func main() {
 		defer f.Close()
 		out = f
 	}
-	_ = *format
+	_ = format // reserved for future md/json formats
 	renderText(out, plats, *failOnly)
 
 	anyFail := false

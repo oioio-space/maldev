@@ -20,6 +20,12 @@ set -euo pipefail
 # below and the French translations break substring matches.
 export LC_ALL=C
 
+# Match the rest of the tooling: target the user-mode libvirt instance
+# (GNOME Boxes / "Machines" default). Override with VIRSH_URI=qemu:///system
+# for virt-manager-as-root setups.
+VIRSH_URI="${VIRSH_URI:-qemu:///session}"
+virsh() { command virsh -c "$VIRSH_URI" "$@"; }
+
 declare -A VM_MAP=(
   [linux]="ubuntu20.04-"
   [kali]="debian13"   # the Kali VM is registered under libvirt name 'debian13'

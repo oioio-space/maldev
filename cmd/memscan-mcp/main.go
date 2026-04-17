@@ -225,8 +225,8 @@ func toolDefs() []map[string]any {
 // calls look atomic: attach → op → detach on every tool invocation.
 func callTool(req *rpcRequest) *rpcResponse {
 	var p struct {
-		Name      string                 `json:"name"`
-		Arguments map[string]any         `json:"arguments"`
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
 	}
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		return fail(req.ID, -32602, "parse params: "+err.Error())
@@ -236,14 +236,9 @@ func callTool(req *rpcRequest) *rpcResponse {
 	if p.Name == "run_tests" {
 		text, callErr := opRunTests(p.Arguments)
 		if callErr != nil {
-			return ok(req.ID, map[string]any{
-				"content": []map[string]any{{"type": "text", "text": callErr.Error() + "\n\n" + text}},
-				"isError": true,
-			})
+			return toolError(req.ID, callErr.Error()+"\n\n"+text)
 		}
-		return ok(req.ID, map[string]any{
-			"content": []map[string]any{{"type": "text", "text": text}},
-		})
+		return toolText(req.ID, text)
 	}
 
 	pid, err := asUint32(p.Arguments["pid"])
@@ -271,14 +266,22 @@ func callTool(req *rpcRequest) *rpcResponse {
 		return fail(req.ID, -32601, "unknown tool: "+p.Name)
 	}
 	if callErr != nil {
-		// Return as a tool-level error: per MCP, `isError: true` in content.
-		return ok(req.ID, map[string]any{
-			"content": []map[string]any{{"type": "text", "text": callErr.Error()}},
-			"isError": true,
-		})
+		return toolError(req.ID, callErr.Error())
 	}
-	return ok(req.ID, map[string]any{
+	return toolText(req.ID, text)
+}
+
+func toolText(id json.RawMessage, text string) *rpcResponse {
+	return ok(id, map[string]any{
 		"content": []map[string]any{{"type": "text", "text": text}},
+	})
+}
+
+// toolError emits a tool-level error: per MCP, `isError: true` in content.
+func toolError(id json.RawMessage, text string) *rpcResponse {
+	return ok(id, map[string]any{
+		"content": []map[string]any{{"type": "text", "text": text}},
+		"isError": true,
 	})
 }
 
@@ -360,8 +363,15 @@ func opGetModule(session string, a map[string]any) (string, error) {
 func opGetExport(session string, a map[string]any) (string, error) {
 	module, _ := a["module"].(string)
 	name, _ := a["name"].(string)
+	// /export takes a HEX base address, not a name. Resolve via /module first
+	// so callers can pass "ntdll.dll" naturally.
+	mod, err := httpRaw("/module", map[string]any{"session": session, "name": module})
+	if err != nil {
+		return "", fmt.Errorf("resolve module %q: %w", module, err)
+	}
+	base, _ := mod["base"].(string)
 	raw, err := httpRaw("/export", map[string]any{
-		"session": session, "module": module, "name": name,
+		"session": session, "module": base, "name": name,
 	})
 	if err != nil {
 		return "", err
@@ -452,11 +462,14 @@ func formatJSON(m map[string]any) string {
 			if n > 32 {
 				n = 32
 			}
-			preview := ""
+			var b strings.Builder
 			for i := 0; i < n; i++ {
-				preview += fmt.Sprintf("%02X ", raw[i])
+				if i > 0 {
+					b.WriteByte(' ')
+				}
+				fmt.Fprintf(&b, "%02X", raw[i])
 			}
-			m["data_preview"] = strings.TrimSpace(preview)
+			m["data_preview"] = b.String()
 		}
 	}
 	buf, _ := json.MarshalIndent(m, "", "  ")

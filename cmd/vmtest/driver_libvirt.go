@@ -35,33 +35,30 @@ func NewLibvirtDriver(cfg *Config) (Driver, error) {
 
 func (d *libvirtDriver) Name() string { return "libvirt" }
 
-// virshEnv runs virsh with LC_ALL=C so output strings (domstate, domifaddr)
-// stay in English — parsing them against literal "running" / "ipv4" fails
-// otherwise on a French-locale host.
-func (d *libvirtDriver) virshEnv() []string {
-	return append(os.Environ(), "LC_ALL=C", "LANG=C")
+// virshCmd builds a virsh command with LC_ALL=C so output strings (domstate,
+// domifaddr) stay in English — parsing against literal "running" / "ipv4"
+// fails otherwise on a French-locale host.
+func (d *libvirtDriver) virshCmd(ctx context.Context, args ...string) *exec.Cmd {
+	full := append([]string{"-c", d.uri}, args...)
+	cmd := exec.CommandContext(ctx, "virsh", full...)
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	return cmd
 }
 
 func (d *libvirtDriver) virsh(ctx context.Context, args ...string) error {
-	full := append([]string{"-c", d.uri}, args...)
-	cmd := exec.CommandContext(ctx, "virsh", full...)
-	cmd.Env = d.virshEnv()
+	cmd := d.virshCmd(ctx, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
 func (d *libvirtDriver) virshCapture(ctx context.Context, args ...string) ([]byte, error) {
-	full := append([]string{"-c", d.uri}, args...)
-	cmd := exec.CommandContext(ctx, "virsh", full...)
-	cmd.Env = d.virshEnv()
+	cmd := d.virshCmd(ctx, args...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	if err := cmd.Run(); err != nil {
-		return out.Bytes(), err
-	}
-	return out.Bytes(), nil
+	err := cmd.Run()
+	return out.Bytes(), err
 }
 
 func (d *libvirtDriver) Start(ctx context.Context, vm *VMConfig) error {
@@ -178,12 +175,9 @@ func tryDial(host string, port int, timeout time.Duration) bool {
 }
 
 func (d *libvirtDriver) Stop(ctx context.Context, vm *VMConfig) error {
-	name := vm.LibvirtName
-	fmt.Printf("Stopping libvirt VM %s...\n", name)
-	cmd := exec.CommandContext(ctx, "virsh", "-c", d.uri, "destroy", name)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	_ = cmd.Run()
+	fmt.Printf("Stopping libvirt VM %s...\n", vm.LibvirtName)
+	// destroy can fail if already stopped — swallow.
+	_ = d.virsh(ctx, "destroy", vm.LibvirtName)
 	time.Sleep(2 * time.Second)
 	return nil
 }
@@ -328,10 +322,9 @@ func (d *libvirtDriver) Exec(ctx context.Context, vm *VMConfig, packages, flags 
 	return runCapturingExit(ctx, "ssh", args)
 }
 
-// collectMaldevEnv scans the host environment for MALDEV_* variables and
-// returns them as "KEY=VALUE" strings ready to prefix a go test command.
-// Lets operators set `MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1 ./scripts/vm-run-tests.sh ...`
-// and have the gates propagate into the guest.
+// collectMaldevEnv returns host MALDEV_* vars as "KEY=VALUE" so
+// `MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1 ./scripts/vm-run-tests.sh ...`
+// propagates the gates into the guest.
 func collectMaldevEnv() []string {
 	var out []string
 	for _, kv := range os.Environ() {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"unsafe"
@@ -302,14 +304,19 @@ func scanProcess(h windows.Handle, pat []byte, filter string, maxHits int) ([]ui
 				if err := windows.ReadProcessMemory(h, base+off, &buf[0], remaining, &n); err != nil {
 					continue // unreadable page (guard, no-access) — skip
 				}
-				// Naive scan; pattern is typically a 16-byte ASCII marker.
-				for i := 0; i+len(pat) <= int(n); i++ {
-					if bytesEqualAt(buf, i, pat) {
-						out = append(out, base+off+uintptr(i))
-						if len(out) >= maxHits {
-							break
-						}
+				// Pattern is typically a 16-byte ASCII marker.
+				region := buf[:n]
+				searchStart := 0
+				for {
+					i := bytes.Index(region[searchStart:], pat)
+					if i < 0 {
+						break
 					}
+					out = append(out, base+off+uintptr(searchStart+i))
+					if len(out) >= maxHits {
+						break
+					}
+					searchStart += i + 1
 				}
 			}
 		}
@@ -338,15 +345,6 @@ func protectionMatches(protect uint32, filter string) bool {
 	}
 }
 
-func bytesEqualAt(buf []byte, i int, pat []byte) bool {
-	for j := 0; j < len(pat); j++ {
-		if buf[i+j] != pat[j] {
-			return false
-		}
-	}
-	return true
-}
-
 func (s *srv) getSession(id string) (*session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -357,29 +355,44 @@ func (s *srv) getSession(id string) (*session, error) {
 	return sess, nil
 }
 
-// findModule walks EnumProcessModulesEx (LIST_MODULES_ALL) on the target
-// and returns base+size for the first module whose filename matches `name`
-// (case-insensitive, basename only — "ntdll.dll" matches "C:\...\ntdll.dll").
-func findModule(h windows.Handle, name string) (base uintptr, size uint32, err error) {
+// enumModules returns every module handle in the target via EnumProcessModulesEx
+// (LIST_MODULES_ALL). Two calls: probe for needed bytes, then fetch.
+func enumModules(h windows.Handle) ([]windows.Handle, error) {
 	var needed uint32
-	err = windows.EnumProcessModulesEx(h, nil, 0, &needed, windows.LIST_MODULES_ALL)
-	if err != nil {
-		return 0, 0, fmt.Errorf("EnumProcessModulesEx probe: %w", err)
+	if err := windows.EnumProcessModulesEx(h, nil, 0, &needed, windows.LIST_MODULES_ALL); err != nil {
+		return nil, fmt.Errorf("EnumProcessModulesEx probe: %w", err)
 	}
 	count := int(needed) / int(unsafe.Sizeof(windows.Handle(0)))
 	mods := make([]windows.Handle, count)
-	err = windows.EnumProcessModulesEx(h, &mods[0], needed, &needed, windows.LIST_MODULES_ALL)
+	if err := windows.EnumProcessModulesEx(h, &mods[0], needed, &needed, windows.LIST_MODULES_ALL); err != nil {
+		return nil, fmt.Errorf("EnumProcessModulesEx fetch: %w", err)
+	}
+	return mods, nil
+}
+
+// moduleBasename returns the lowercase basename of module m loaded in h.
+func moduleBasename(h, m windows.Handle) (string, error) {
+	var path [windows.MAX_PATH]uint16
+	if err := windows.GetModuleFileNameEx(h, m, &path[0], windows.MAX_PATH); err != nil {
+		return "", err
+	}
+	return basename(strings.ToLower(windows.UTF16ToString(path[:]))), nil
+}
+
+// findModule returns base+size for the first module whose basename matches
+// `name` (case-insensitive — "ntdll.dll" matches "C:\...\ntdll.dll").
+func findModule(h windows.Handle, name string) (base uintptr, size uint32, err error) {
+	mods, err := enumModules(h)
 	if err != nil {
-		return 0, 0, fmt.Errorf("EnumProcessModulesEx fetch: %w", err)
+		return 0, 0, err
 	}
 	want := strings.ToLower(name)
 	for _, m := range mods {
-		var path [windows.MAX_PATH]uint16
-		if err := windows.GetModuleFileNameEx(h, m, &path[0], windows.MAX_PATH); err != nil {
+		got, err := moduleBasename(h, m)
+		if err != nil {
 			continue
 		}
-		full := strings.ToLower(windows.UTF16ToString(path[:]))
-		if basename(full) == want {
+		if got == want {
 			var info windows.ModuleInfo
 			if err := windows.GetModuleInformation(h, m, &info, uint32(unsafe.Sizeof(info))); err != nil {
 				return 0, 0, fmt.Errorf("GetModuleInformation: %w", err)
@@ -390,28 +403,22 @@ func findModule(h windows.Handle, name string) (base uintptr, size uint32, err e
 	return 0, 0, fmt.Errorf("module %q not loaded in target", name)
 }
 
-// moduleNameAt reverse-looks-up a remote base address to a module filename
-// (basename, lowercase) by scanning the module list. Used by /export to
-// decide which local DLL to resolve exports against.
+// moduleNameAt reverse-looks-up a remote base address to a module basename.
+// Used by /export to decide which local DLL to resolve exports against.
 func moduleNameAt(h windows.Handle, base uintptr) (string, error) {
-	var needed uint32
-	if err := windows.EnumProcessModulesEx(h, nil, 0, &needed, windows.LIST_MODULES_ALL); err != nil {
-		return "", err
-	}
-	count := int(needed) / int(unsafe.Sizeof(windows.Handle(0)))
-	mods := make([]windows.Handle, count)
-	if err := windows.EnumProcessModulesEx(h, &mods[0], needed, &needed, windows.LIST_MODULES_ALL); err != nil {
+	mods, err := enumModules(h)
+	if err != nil {
 		return "", err
 	}
 	for _, m := range mods {
 		if uintptr(m) != base {
 			continue
 		}
-		var path [windows.MAX_PATH]uint16
-		if err := windows.GetModuleFileNameEx(h, m, &path[0], windows.MAX_PATH); err != nil {
+		name, err := moduleBasename(h, m)
+		if err != nil {
 			continue
 		}
-		return basename(strings.ToLower(windows.UTF16ToString(path[:]))), nil
+		return name, nil
 	}
 	return "", fmt.Errorf("no module at base 0x%x", base)
 }
@@ -441,22 +448,11 @@ func basename(p string) string {
 
 func parseHex(s string) (uintptr, error) {
 	s = strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")
-	b, err := hex.DecodeString(padOdd(s))
+	n, err := strconv.ParseUint(s, 16, 64)
 	if err != nil {
 		return 0, err
 	}
-	var v uintptr
-	for _, x := range b {
-		v = v<<8 | uintptr(x)
-	}
-	return v, nil
-}
-
-func padOdd(s string) string {
-	if len(s)%2 == 1 {
-		return "0" + s
-	}
-	return s
+	return uintptr(n), nil
 }
 
 func newSessionID() string {

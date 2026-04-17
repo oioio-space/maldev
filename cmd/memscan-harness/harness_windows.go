@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 	"unsafe"
@@ -60,8 +61,8 @@ func run(group, callerName, resolverName, fn, variant, method string) error {
 	}
 }
 
-// readyLine serializes fields as "READY k1=v1 k2=v2 ...". Keys are sorted by
-// explicit ordering so pid/group/caller come first, rest alphabetical.
+// readyLine serializes fields as "READY k1=v1 k2=v2 ...". pid/group/caller/
+// resolver/variant/fn come first in that order, remaining keys sorted.
 func readyLine(f map[string]string) string {
 	first := []string{"pid", "group", "caller", "resolver", "variant", "fn"}
 	var parts []string
@@ -72,26 +73,17 @@ func readyLine(f map[string]string) string {
 			seen[k] = true
 		}
 	}
-	// Collect remaining keys sorted for deterministic output.
 	var rest []string
 	for k := range f {
 		if !seen[k] {
 			rest = append(rest, k)
 		}
 	}
-	sortStrings(rest)
+	sort.Strings(rest)
 	for _, k := range rest {
 		parts = append(parts, k+"="+f[k])
 	}
 	return "READY " + strings.Join(parts, " ")
-}
-
-func sortStrings(s []string) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j-1] > s[j]; j-- {
-			s[j-1], s[j] = s[j], s[j-1]
-		}
-	}
 }
 
 // -------------------------------------------------------------------
@@ -308,18 +300,9 @@ func pickWSyscallMethod(name string) (wsyscall.Method, error) {
 // the default SSN resolver (needed for Direct/Indirect methods; ignored by
 // WinAPI/NativeAPI).
 func pickCaller(name string) (*wsyscall.Caller, error) {
-	var m wsyscall.Method
-	switch name {
-	case "winapi":
-		m = wsyscall.MethodWinAPI
-	case "nativeapi":
-		m = wsyscall.MethodNativeAPI
-	case "direct":
-		m = wsyscall.MethodDirect
-	case "indirect":
-		m = wsyscall.MethodIndirect
-	default:
-		return nil, fmt.Errorf("unknown caller %q", name)
+	m, err := pickWSyscallMethod(name)
+	if err != nil {
+		return nil, err
 	}
 	return wsyscall.New(m, wsyscall.NewHellsGate()), nil
 }
