@@ -1,6 +1,13 @@
 // Package preset provides ready-to-use evasion technique combinations at
 // three risk levels: Minimal, Stealth, and Aggressive.
 //
+// Technique: Composer -- bundles evasion.Technique primitives into
+// pre-validated presets. Not an evasion technique in itself.
+// MITRE ATT&CK: T1562.001 (Impair Defenses, via composed techniques)
+// Platform: Windows
+// Detection: Varies -- equals the loudest composed technique. Minimal is
+// Low; Aggressive is High (full ntdll unhook is visible to integrity scans).
+//
 // Minimal patches AMSI ScanBuffer + ETW (script/ETW telemetry only).
 // Lowest detection surface — suitable for droppers and initial access.
 //

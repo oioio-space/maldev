@@ -3,6 +3,7 @@
 // NtCreateFile / CreateFile.
 //
 // MITRE ATT&CK: T1036 — Masquerading
+// Platform: Windows
 // Detection: Low (Object ID access not logged by most EDR path filters)
 //
 // Example:

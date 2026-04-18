@@ -30,6 +30,19 @@ const (
 	ArchX84             // dual-mode (32+64)
 )
 
+func (a Arch) String() string {
+	switch a {
+	case ArchX32:
+		return "x32"
+	case ArchX64:
+		return "x64"
+	case ArchX84:
+		return "x84"
+	default:
+		return fmt.Sprintf("Arch(%d)", int(a))
+	}
+}
+
 // ModuleType represents the type of input binary.
 type ModuleType int
 
@@ -42,6 +55,27 @@ const (
 	ModuleJS     ModuleType = 6 // JScript
 	ModuleXSL    ModuleType = 7 // XSL
 )
+
+func (m ModuleType) String() string {
+	switch m {
+	case ModuleNetDLL:
+		return "NetDLL"
+	case ModuleNetEXE:
+		return "NetEXE"
+	case ModuleDLL:
+		return "DLL"
+	case ModuleEXE:
+		return "EXE"
+	case ModuleVBS:
+		return "VBS"
+	case ModuleJS:
+		return "JS"
+	case ModuleXSL:
+		return "XSL"
+	default:
+		return fmt.Sprintf("ModuleType(%d)", int(m))
+	}
+}
 
 // Config controls the shellcode generation.
 type Config struct {

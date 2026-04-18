@@ -3,6 +3,7 @@
 // fake command line rather than the real one.
 //
 // MITRE ATT&CK: T1036.005 — Masquerading: Match Legitimate Name or Location
+// Platform: Windows
 // Detection: Low (in-memory only; kernel EPROCESS retains original)
 //
 // Example:

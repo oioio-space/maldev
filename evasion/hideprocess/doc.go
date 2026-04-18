@@ -3,6 +3,7 @@
 // enumerate running processes. Typically applied to taskmgr.exe or procexp.exe.
 //
 // MITRE ATT&CK: T1564.001 — Hide Artifacts: Hidden Process
+// Platform: Windows
 // Detection: Medium (memory write to ntdll detectable via integrity checks)
 //
 // Example:

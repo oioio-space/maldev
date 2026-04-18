@@ -20,14 +20,6 @@ import (
 	"github.com/oioio-space/maldev/win/token"
 )
 
-var (
-	procOpenSCManagerW       = api.Advapi32.NewProc("OpenSCManagerW")
-	procOpenServiceW         = api.Advapi32.NewProc("OpenServiceW")
-	procStartServiceW        = api.Advapi32.NewProc("StartServiceW")
-	procQueryServiceStatusEx = api.Advapi32.NewProc("QueryServiceStatusEx")
-	procCloseServiceHandle   = api.Advapi32.NewProc("CloseServiceHandle")
-)
-
 const (
 	scManagerConnect    = 0x0001
 	serviceQueryStatus  = 0x0004
@@ -296,7 +288,7 @@ func startAndFindTI() (uint32, error) {
 	scName, _ := windows.UTF16PtrFromString("TrustedInstaller")
 	emptyStr, _ := windows.UTF16PtrFromString("")
 
-	hSCM, _, err := procOpenSCManagerW.Call(
+	hSCM, _, err := api.ProcOpenSCManagerW.Call(
 		uintptr(unsafe.Pointer(emptyStr)),
 		0,
 		uintptr(scManagerConnect),
@@ -304,9 +296,9 @@ func startAndFindTI() (uint32, error) {
 	if hSCM == 0 {
 		return 0, fmt.Errorf("OpenSCManager: %w", err)
 	}
-	defer procCloseServiceHandle.Call(hSCM) //nolint:errcheck
+	defer api.ProcCloseServiceHandle.Call(hSCM) //nolint:errcheck
 
-	hSvc, _, err := procOpenServiceW.Call(
+	hSvc, _, err := api.ProcOpenServiceW.Call(
 		hSCM,
 		uintptr(unsafe.Pointer(scName)),
 		uintptr(serviceQueryStatus|serviceStart),
@@ -314,15 +306,15 @@ func startAndFindTI() (uint32, error) {
 	if hSvc == 0 {
 		return 0, fmt.Errorf("OpenService(TrustedInstaller): %w", err)
 	}
-	defer procCloseServiceHandle.Call(hSvc) //nolint:errcheck
+	defer api.ProcCloseServiceHandle.Call(hSvc) //nolint:errcheck
 
-	procStartServiceW.Call(hSvc, 0, 0) //nolint:errcheck
+	api.ProcStartServiceW.Call(hSvc, 0, 0) //nolint:errcheck
 
 	// Poll until SERVICE_RUNNING — StartServiceW is async.
 	var ssp serviceStatusProcess
 	needed := uint32(unsafe.Sizeof(ssp))
 	for i := 0; i < 20; i++ {
-		r, _, err := procQueryServiceStatusEx.Call(
+		r, _, err := api.ProcQueryServiceStatusEx.Call(
 			hSvc,
 			uintptr(scStatusProcessInfo),
 			uintptr(unsafe.Pointer(&ssp)),

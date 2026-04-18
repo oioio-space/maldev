@@ -106,6 +106,11 @@ var (
 	ProcSetServiceObjectSecurity            = Advapi32.NewProc("SetServiceObjectSecurity")
 	ProcCreateProcessWithLogonW             = Advapi32.NewProc("CreateProcessWithLogonW")
 	ProcI_QueryTagInformation               = Advapi32.NewProc("I_QueryTagInformation")
+	ProcOpenSCManagerW                      = Advapi32.NewProc("OpenSCManagerW")
+	ProcOpenServiceW                        = Advapi32.NewProc("OpenServiceW")
+	ProcStartServiceW                       = Advapi32.NewProc("StartServiceW")
+	ProcQueryServiceStatusEx                = Advapi32.NewProc("QueryServiceStatusEx")
+	ProcCloseServiceHandle                  = Advapi32.NewProc("CloseServiceHandle")
 )
 
 // user32.dll procs
