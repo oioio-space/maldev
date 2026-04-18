@@ -9,6 +9,57 @@ introduce breaking API changes.
 
 —
 
+## [v0.10.1] — 2026-04-18
+
+Patch release: unlocks 116 previously-skipped tests + post-review fixes.
+
+### Added
+
+- `scripts/test-all.sh` auto-provisions per-layer MSF handler on Kali
+  (`exploit/multi/handler` with sleep-3600 trick) and pushes the host-side
+  Kali SSH key into each guest with strict ACLs. `MALDEV_KALI_SSH_KEY` is
+  overridden per-layer so `testutil.KaliSSH` reaches Kali from inside the
+  guest. `resolve_vm_ip` (arp/lease/agent fallback), `restore_init_silent`
+  helpers. `set -Euo pipefail`.
+
+### Fixed
+
+- `cmd/memscan-mcp` `get_export` MCP tool: resolves `module` by name via
+  `/module` first, then forwards the hex base to `/export`. Was always
+  erroring because the server expects hex, not a DLL name.
+- `scripts/vm-test/install-keys.sh`: now uses `qemu:///session` URI
+  consistently (was defaulting to `qemu:///system` and silently skipping
+  every domain on developer machines).
+- `pe/morph TestUPXMorphRealBinary`: skip cleanly on non-Windows
+  (UPXMorph is PE-only, the test execs the morphed binary); on Windows,
+  skip under UPX 4.x because UPXMorph was written for 3.x signatures.
+
+### Changed
+
+- `cmd/vmtest/driver_libvirt.go`: collapsed three virsh helpers into a
+  single `virshCmd` factory.
+- `cmd/memscan-server/server_windows.go`: extracted `enumModules` +
+  `moduleBasename` (deduped between `findModule` and `moduleNameAt`);
+  `bytes.Index` instead of hand-rolled scan loop; `strconv.ParseUint`
+  for hex parsing.
+- `cmd/memscan-harness/harness_windows.go`: stdlib `sort.Strings`,
+  `pickCaller` delegates to `pickWSyscallMethod`.
+- `cmd/memscan-mcp/main.go`: extracted `toolText`/`toolError` helpers,
+  `strings.Builder` in `formatJSON`.
+- `cmd/test-report/main.go`: `countStatus` consolidated, dead
+  `findTest` removed.
+
+### Final test matrix (from INIT snapshots)
+
+```
+memscan  77 / 77
+linux   302 / 302   (40 legitimate skips)
+windows 754 / 754   (21 legitimate skips)
+TOTAL   1133 passed / 0 failed / 61 skipped
+```
+
++116 tests now running vs v0.10.0; 0 failures maintained.
+
 ## [v0.10.0] — 2026-04-17
 
 139 commits since [v0.9.0]. Highlights:
@@ -71,6 +122,7 @@ Remote-inject harness (CRT/RTL/EarlyBird/QueueUserAPC/ThreadHijack/KernelCallbac
 
 ---
 
-[Unreleased]: https://github.com/oioio-space/maldev/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/oioio-space/maldev/compare/v0.10.1...HEAD
+[v0.10.1]: https://github.com/oioio-space/maldev/compare/v0.10.0...v0.10.1
 [v0.10.0]: https://github.com/oioio-space/maldev/compare/v0.9.0...v0.10.0
 [v0.9.0]: https://github.com/oioio-space/maldev/releases/tag/v0.9.0
