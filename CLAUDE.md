@@ -40,6 +40,11 @@ GOOS=linux GOARCH=amd64 go build $(go list ./...)
 ./scripts/vm-run-tests.sh linux "./..." "-count=1"
 ./scripts/vm-run-tests.sh all "./..." "-count=1"
 
+# End-to-end coverage collection (host + Linux VM + Windows VM + Kali,
+# all gates open, merged report). See docs/coverage-workflow.md.
+bash scripts/vm-provision.sh                    # one-time, installs NetFx3 + MSF db, snapshots TOOLS
+bash scripts/full-coverage.sh --snapshot=TOOLS  # each run; produces ignore/coverage/report-full.md
+
 # x64dbg binary verification (75 tests, from host)
 go run scripts/vm-test-x64dbg-mcp.go
 
@@ -49,6 +54,11 @@ go run scripts/vm-test-bsod.go
 # Meterpreter matrix (20 injection techniques × MSF sessions)
 # Requires: Kali VM with MSF, see docs/testing.md
 ```
+
+## Test Harness
+- **Bootstrap VMs from scratch**: `docs/vm-test-setup.md`
+- **Test types, gating, Meterpreter details**: `docs/testing.md`
+- **Coverage workflow + VM snapshots + known flaky tests**: `docs/coverage-workflow.md`
 
 ## Test Helpers (testutil/)
 - `CallerMethods(t)` — returns WinAPI/NativeAPI/Direct/Indirect for matrix testing

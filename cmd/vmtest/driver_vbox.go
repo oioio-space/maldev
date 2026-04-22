@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -99,18 +101,36 @@ func (d *vboxDriver) Push(ctx context.Context, vm *VMConfig, hostRoot string) er
 	return nil
 }
 
-func (d *vboxDriver) Exec(ctx context.Context, vm *VMConfig, packages, flags string) (int, error) {
+func (d *vboxDriver) Exec(ctx context.Context, vm *VMConfig, packages, flags string, logWriter io.Writer) (int, error) {
 	switch vm.Platform {
 	case "windows":
-		return d.execWindows(ctx, vm, packages, flags)
+		return d.execWindows(ctx, vm, packages, flags, logWriter)
 	case "linux":
-		return d.execLinux(ctx, vm, packages, flags)
+		return d.execLinux(ctx, vm, packages, flags, logWriter)
 	default:
 		return 1, fmt.Errorf("vbox: unsupported platform %q", vm.Platform)
 	}
 }
 
-func (d *vboxDriver) execWindows(ctx context.Context, vm *VMConfig, packages, flags string) (int, error) {
+// Fetch pulls a single file from the guest via VBoxManage guestcontrol copyfrom.
+func (d *vboxDriver) Fetch(ctx context.Context, vm *VMConfig, guestPath, hostPath string) error {
+	if err := os.MkdirAll(filepath.Dir(hostPath), 0o755); err != nil {
+		return fmt.Errorf("mkdir host dir: %w", err)
+	}
+	args := []string{
+		"guestcontrol", vm.VBoxName, "copyfrom",
+		"--username", vm.User,
+		"--password", vm.Password,
+		"--target-directory", filepath.Dir(hostPath),
+		guestPath,
+	}
+	cmd := exec.CommandContext(ctx, d.exe, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func (d *vboxDriver) execWindows(ctx context.Context, vm *VMConfig, packages, flags string, logWriter io.Writer) (int, error) {
 	runner := vm.GuestRunner
 	if runner == "" {
 		runner = `Z:\scripts\vm-test.ps1`
@@ -134,10 +154,10 @@ func (d *vboxDriver) execWindows(ctx context.Context, vm *VMConfig, packages, fl
 		"-Packages", packages,
 		"-Flags", flags,
 	)
-	return runCapturingExit(ctx, d.exe, args)
+	return runCapturingExit(ctx, d.exe, args, logWriter)
 }
 
-func (d *vboxDriver) execLinux(ctx context.Context, vm *VMConfig, packages, flags string) (int, error) {
+func (d *vboxDriver) execLinux(ctx context.Context, vm *VMConfig, packages, flags string, logWriter io.Writer) (int, error) {
 	dst := vm.ProjectCopyPath
 	if dst == "" {
 		dst = "/tmp/maldev"
@@ -168,16 +188,23 @@ func (d *vboxDriver) execLinux(ctx context.Context, vm *VMConfig, packages, flag
 		"--wait-stdout", "--wait-stderr",
 		"--", "bash", "-c", script,
 	}
-	return runCapturingExit(ctx, d.exe, args)
+	return runCapturingExit(ctx, d.exe, args, logWriter)
 }
 
 // runCapturingExit executes a command with stdout/stderr passthrough and
 // returns the exit code separately from the error: a non-zero exit is not an
-// orchestration failure — we want to keep running teardown.
-func runCapturingExit(ctx context.Context, exe string, args []string) (int, error) {
+// orchestration failure — we want to keep running teardown. When logWriter is
+// non-nil it receives the same bytes as os.Stdout/os.Stderr so callers can
+// persist a test.log file alongside the live console stream.
+func runCapturingExit(ctx context.Context, exe string, args []string, logWriter io.Writer) (int, error) {
 	cmd := exec.CommandContext(ctx, exe, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	if logWriter != nil {
+		cmd.Stdout = io.MultiWriter(os.Stdout, logWriter)
+		cmd.Stderr = io.MultiWriter(os.Stderr, logWriter)
+	} else {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
 	err := cmd.Run()
 	if err == nil {
 		return 0, nil

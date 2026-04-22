@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 )
 
 // Driver abstracts a hypervisor. Two implementations ship:
@@ -27,8 +28,15 @@ type Driver interface {
 	// Exec runs go test inside the guest and returns the test exit code.
 	// The error is only non-nil when the orchestration itself failed
 	// (SSH dropped, guestcontrol crashed); a failing test returns exit≠0
-	// with err=nil.
-	Exec(ctx context.Context, vm *VMConfig, packages, flags string) (int, error)
+	// with err=nil. When logWriter is non-nil the driver writes the
+	// combined stdout/stderr of the test process to it in addition to
+	// the parent's os.Stdout/os.Stderr (used to persist a test.log).
+	Exec(ctx context.Context, vm *VMConfig, packages, flags string, logWriter io.Writer) (int, error)
+
+	// Fetch copies a single file from the guest back to the host. Used
+	// after Exec to pull the coverage profile and any auxiliary reports
+	// before the VM is stopped and the snapshot restored.
+	Fetch(ctx context.Context, vm *VMConfig, guestPath, hostPath string) error
 }
 
 // SelectDriver constructs the configured driver.

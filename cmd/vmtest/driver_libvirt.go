@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -277,7 +278,7 @@ func sshRun(ctx context.Context, vm *VMConfig, key string, port int, remoteCmd s
 	return cmd.Run()
 }
 
-func (d *libvirtDriver) Exec(ctx context.Context, vm *VMConfig, packages, flags string) (int, error) {
+func (d *libvirtDriver) Exec(ctx context.Context, vm *VMConfig, packages, flags string, logWriter io.Writer) (int, error) {
 	key, err := resolveSSHKey(vm)
 	if err != nil {
 		return 1, err
@@ -319,7 +320,38 @@ func (d *libvirtDriver) Exec(ctx context.Context, vm *VMConfig, packages, flags 
 		fmt.Sprintf("%s@%s", vm.User, vm.SSHHost),
 		remote,
 	}
-	return runCapturingExit(ctx, "ssh", args)
+	return runCapturingExit(ctx, "ssh", args, logWriter)
+}
+
+// Fetch pulls a single file from the guest back to the host via scp. The
+// destination directory is created if missing. Non-existent source files are
+// reported as orchestration errors so callers can degrade gracefully.
+func (d *libvirtDriver) Fetch(ctx context.Context, vm *VMConfig, guestPath, hostPath string) error {
+	key, err := resolveSSHKey(vm)
+	if err != nil {
+		return err
+	}
+	if vm.SSHHost == "" {
+		return errors.New("libvirt Fetch: no ssh_host (WaitReady must run first)")
+	}
+	if err := os.MkdirAll(filepath.Dir(hostPath), 0o755); err != nil {
+		return fmt.Errorf("mkdir host dir: %w", err)
+	}
+	port := sshPort(vm)
+	// Windows scp: OpenSSH on Windows accepts forward-slash paths; the caller
+	// is responsible for passing a POSIX-style guestPath.
+	src := fmt.Sprintf("%s@%s:%s", vm.User, vm.SSHHost, guestPath)
+	args := []string{
+		"-i", key, "-P", strconv.Itoa(port),
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "BatchMode=yes",
+		src, hostPath,
+	}
+	cmd := exec.CommandContext(ctx, "scp", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 // collectMaldevEnv returns host MALDEV_* vars as "KEY=VALUE" so

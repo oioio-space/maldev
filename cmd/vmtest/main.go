@@ -39,6 +39,7 @@ func main() {
 		driverFlag = flag.String("driver", "", "driver: vbox, libvirt (auto-detected if empty)")
 		configPath = flag.String("config", defaultConfigPath, "path to config YAML")
 		localPath  = flag.String("local", defaultLocalPath, "path to local-override YAML (optional)")
+		reportDir  = flag.String("report-dir", "", "host directory to collect test.log + cover.out per VM (empty = no artifacts)")
 	)
 	flag.Usage = usage
 	flag.Parse()
@@ -108,7 +109,7 @@ func main() {
 		if !ok {
 			die("vm %q not in config", name)
 		}
-		code := RunVM(ctx, drv, &vm, projectRoot, packages, testFlags)
+		code := RunVM(ctx, drv, &vm, projectRoot, packages, testFlags, RunOpts{ReportDir: *reportDir})
 		if code != 0 {
 			rc = code
 		}
