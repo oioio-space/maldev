@@ -81,3 +81,11 @@ func TestInstallAndRemoveRuntimeActivationPolicy(t *testing.T) {
 func TestExecuteDLLValidation(t *testing.T) {
 	require.NoError(t, testutil.RunCLROperation(t, "exec-dll-validation"))
 }
+
+// TestExecuteDLLReal exercises the happy path with a real 3 KB .NET 2.0
+// assembly (Maldev.TestClass.Run(string)) embedded in clrhost. Hits
+// loadAssembly, defaultDomainDispatch, newBstrSafeArray, and
+// newVariantSafeArrayWithOne — paths the validation test can't reach.
+func TestExecuteDLLReal(t *testing.T) {
+	require.NoError(t, testutil.RunCLROperation(t, "exec-dll-real"))
+}

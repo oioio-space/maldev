@@ -22,8 +22,23 @@ import (
 )
 
 func main() {
-	op := flag.String("op", "", "operation: load | exec-empty | exec-dll-validation")
+	op := flag.String("op", "", "operation: load | exec-empty | exec-dll-validation | exec-dll-real")
+	dllPath := flag.String("dll-path", "", "path to a .NET DLL for --op=exec-dll-real (reads at runtime, not embedded)")
+	dllType := flag.String("dll-type", "Maldev.TestClass", "type name (Namespace.Type) for --op=exec-dll-real")
+	dllMethod := flag.String("dll-method", "Run", "method name for --op=exec-dll-real")
+	dllArg := flag.String("dll-arg", "hello", "string arg for --op=exec-dll-real")
 	flag.Parse()
+
+	// Force-write <exe>.config with useLegacyV2RuntimeActivationPolicy=true
+	// on every invocation. The committed clrhost.exe.config that buildClrhost
+	// copies next to the binary has sometimes failed to be honoured by
+	// mscoree after a snapshot revert (observed: ICorRuntimeHost unavailable
+	// even when .NET 3.5 is enabled). Writing again just before Load is
+	// idempotent and removes the flakiness.
+	if err := clr.InstallRuntimeActivationPolicy(); err != nil {
+		fmt.Fprintf(os.Stderr, "InstallRuntimeActivationPolicy: %v\n", err)
+		// Don't exit — Load may still succeed if the committed config holds.
+	}
 
 	rt, err := clr.Load(nil)
 	if err != nil {
@@ -60,6 +75,28 @@ func main() {
 			}
 		}
 		fmt.Println("EXEC_DLL_VALIDATION_OK")
+	case "exec-dll-real":
+		// Real assembly path: exercises SafeArray+method-dispatch code in
+		// pe/clr/clr_windows.go (ExecuteDLL → loadAssembly → newBstrSafeArray
+		// → defaultDomainDispatch → newByteSafeArray / newVariantSafeArrayWithOne).
+		// The DLL is passed by path rather than embedded: an embedded blob
+		// significantly changes the PE layout, and on some Win10 builds
+		// mscoree then refuses to honour <exe>.config legacy-v2 activation
+		// (observed: exit-2 "ICorRuntimeHost unavailable" regression).
+		if *dllPath == "" {
+			fmt.Fprintln(os.Stderr, "exec-dll-real: --dll-path is required")
+			os.Exit(4)
+		}
+		dll, rerr := os.ReadFile(*dllPath)
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "read %s: %v\n", *dllPath, rerr)
+			os.Exit(4)
+		}
+		if err := rt.ExecuteDLL(dll, *dllType, *dllMethod, *dllArg); err != nil {
+			fmt.Fprintf(os.Stderr, "ExecuteDLL failed: %v\n", err)
+			os.Exit(3)
+		}
+		fmt.Println("EXEC_DLL_REAL_OK")
 	default:
 		fmt.Fprintf(os.Stderr, "unknown --op: %q\n", *op)
 		os.Exit(4)
