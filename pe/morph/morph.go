@@ -2,6 +2,7 @@
 package morph
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"strings"
@@ -26,33 +27,55 @@ func sectionHeaderOffset(peData []byte, index int) uint32 {
 	return sectionTableStart + uint32(index)*40
 }
 
+// numSectionsAndTableStart reads the COFF header to find how many section
+// headers follow and where the section table begins. Reading the raw bytes
+// avoids saferwall/pe's Fast-mode quirk that occasionally leaves
+// pefile.Sections empty on UPX 4.x binaries (where the library's
+// overlay detection heuristic short-circuits before section parsing).
+func numSectionsAndTableStart(peData []byte) (num uint16, tableStart uint32, err error) {
+	if len(peData) < 0x40 {
+		return 0, 0, fmt.Errorf("PE too small: %d bytes", len(peData))
+	}
+	peOffset := binary.LittleEndian.Uint32(peData[0x3C:])
+	if int(peOffset)+24 > len(peData) {
+		return 0, 0, fmt.Errorf("invalid PE offset: %#x", peOffset)
+	}
+	coffStart := peOffset + 4
+	num = binary.LittleEndian.Uint16(peData[coffStart+2:])
+	sizeOfOptHdr := binary.LittleEndian.Uint16(peData[coffStart+16:])
+	tableStart = coffStart + 20 + uint32(sizeOfOptHdr)
+	return num, tableStart, nil
+}
+
 // UPXMorph replaces UPX section names in a packed PE with random bytes
 // to prevent automatic unpacking and change the file hash.
 // If the file is not UPX-packed, the data is returned unchanged.
+//
+// Implementation note: we parse section headers from raw bytes rather than
+// via saferwall/pe. The library's Fast-mode Sections slice is empty on
+// UPX 4.x binaries (its overlay-detection heuristic short-circuits before
+// section parsing), which silently turned the previous implementation
+// into a no-op. A direct COFF walk is also faster and keeps the function
+// dependency-free.
 func UPXMorph(peData []byte) ([]byte, error) {
-	pefile, err := pe.NewBytes(peData, &pe.Options{Fast: true})
+	nSec, tableStart, err := numSectionsAndTableStart(peData)
 	if err != nil {
 		return peData, err
 	}
-	defer pefile.Close()
-
-	err = pefile.Parse()
-	if err != nil {
-		return peData, err
-	}
-
-	for i, section := range pefile.Sections {
-		name := section.String()
+	for i := 0; i < int(nSec); i++ {
+		off := int(tableStart) + i*40
+		if off+8 > len(peData) {
+			break
+		}
+		name := string(bytes.TrimRight(peData[off:off+8], "\x00"))
 		if strings.Contains(name, "UPX") {
-			offset := sectionHeaderOffset(peData, i)
-			s, err := random.String(8)
-			if err != nil {
-				return peData, fmt.Errorf("generate random name: %w", err)
+			s, rerr := random.String(8)
+			if rerr != nil {
+				return peData, fmt.Errorf("generate random name: %w", rerr)
 			}
-			copy(peData[offset:offset+8], []byte(s))
+			copy(peData[off:off+8], []byte(s))
 		}
 	}
-
 	return peData, nil
 }
 

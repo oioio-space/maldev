@@ -143,15 +143,8 @@ func TestUPXMorphRealBinary(t *testing.T) {
 	if err != nil {
 		t.Skip("upx not found in PATH")
 	}
-	// UPXMorph was written against UPX 3.x signatures — on 4.x installs
-	// (current Fedora / Windows builds) the morph produces a file that
-	// either equals the packed original or is still unpackable by `upx -d`.
-	// Detect the installed version and skip rather than fail.
 	verOut, _ := exec.Command(upxPath, "--version").Output()
-	if strings.HasPrefix(string(verOut), "upx 4") || strings.HasPrefix(string(verOut), "upx-ucl 4") {
-		t.Skipf("UPXMorph is UPX 3.x-only; installed: %s — see pe/morph TODO",
-			strings.SplitN(string(verOut), "\n", 2)[0])
-	}
+	isV4 := strings.HasPrefix(string(verOut), "upx 4") || strings.HasPrefix(string(verOut), "upx-ucl 4")
 
 	// Build a simple test binary.
 	tmpDir := t.TempDir()
@@ -170,9 +163,12 @@ func main() { fmt.Println("HELLO_UPX_TEST") }
 	pack := exec.Command(upxPath, "--best", binPath)
 	require.NoError(t, pack.Run(), "upx pack failed")
 
-	// Read packed binary.
+	// Read packed binary. Keep an immutable copy — UPXMorph mutates peData
+	// in place AND returns the same slice, so `packed` after the call would
+	// equal `morphed` by aliasing even if the morph did something.
 	packed, err := os.ReadFile(binPath)
 	require.NoError(t, err)
+	original := append([]byte(nil), packed...)
 
 	// Morph it.
 	morphed, err := UPXMorph(packed)
@@ -181,16 +177,24 @@ func main() { fmt.Println("HELLO_UPX_TEST") }
 	morphedPath := filepath.Join(tmpDir, "hello_morphed.exe")
 	require.NoError(t, os.WriteFile(morphedPath, morphed, 0755))
 
-	// Verify morphed binary still runs correctly.
+	// Universal invariants — the morph must change the bytes AND the binary
+	// must still execute afterward on every UPX version we support.
+	require.NotEqual(t, original, morphed, "morphed binary should differ from original")
 	out, err := exec.Command(morphedPath).Output()
 	require.NoError(t, err)
 	require.Contains(t, string(out), "HELLO_UPX_TEST")
 
-	// Verify UPX cannot unpack the morphed binary.
+	// Version-specific: UPX 3.x keys its own unpacker off the section names,
+	// so UPXMorph defeats `upx -d` outright. UPX 4.x moved detection to the
+	// overlay `UPX!` magic, so `upx -d` still succeeds even after section
+	// renaming — the morph changes the file hash and defeats static signatures
+	// keyed on UPX section names, which is still useful, but we can't assert
+	// the stronger invariant. Log the actual behaviour for operator awareness.
 	unpack := exec.Command(upxPath, "-d", morphedPath)
-	err = unpack.Run()
-	require.Error(t, err, "upx -d should fail on morphed binary")
-
-	// Verify hashes differ.
-	require.NotEqual(t, packed, morphed, "morphed binary should differ from original")
+	unpackErr := unpack.Run()
+	if isV4 {
+		t.Logf("UPX 4.x: section-name morph no longer blocks `upx -d` (detection uses overlay magic); upx -d err=%v", unpackErr)
+	} else {
+		require.Error(t, unpackErr, "upx 3.x -d should fail on morphed binary")
+	}
 }
