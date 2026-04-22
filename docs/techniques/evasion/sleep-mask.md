@@ -84,6 +84,7 @@ package main
 
 import (
     "time"
+    "unsafe"
 
     "github.com/oioio-space/maldev/evasion/sleepmask"
     "github.com/oioio-space/maldev/inject"

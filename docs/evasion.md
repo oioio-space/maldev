@@ -25,10 +25,13 @@ The `evasion/` module provides composable defense evasion techniques for Windows
 | `evasion/hideprocess` | Patch `NtQuerySystemInformation` in a target process | T1564.001 -- Hidden Process | Medium | Windows |
 | `evasion/stealthopen` | Open files by NTFS Object ID (bypass path-based EDR hooks) | T1036 -- Masquerading | Low | Windows |
 | `evasion/cet` | Detect / relax Intel CET shadow-stack + emit ENDBR64 marker | T1562.001 -- Impair Defenses | High | Windows 11 |
+| `evasion/hook` | x64 inline hooking with trampoline (Go callbacks) | T1574.012 -- Hijack Execution Flow: Inline Hooking | High | Windows (x64) |
+| `evasion/hook/bridge` | IPC control channel for remote hook handlers | T1574.012 -- Hijack Execution Flow | Medium | Windows |
+| `evasion/hook/shellcode` | Pre-fabricated x64 handler shellcode templates | T1574.012 -- Hijack Execution Flow | High | Windows (x64) |
 | `evasion/preset` | Composable technique presets | -- | -- | Windows |
 
 Full technique walk-throughs:
-[fakecmd](techniques/evasion/fakecmd.md) · [hideprocess](techniques/evasion/hideprocess.md) · [stealthopen](techniques/evasion/stealthopen.md)
+[fakecmd](techniques/evasion/fakecmd.md) · [hideprocess](techniques/evasion/hideprocess.md) · [stealthopen](techniques/evasion/stealthopen.md) · [inline-hook](techniques/evasion/inline-hook.md) · [ntdll-unhooking](techniques/evasion/ntdll-unhooking.md) · [amsi-bypass](techniques/evasion/amsi-bypass.md) · [etw-patching](techniques/evasion/etw-patching.md)
 
 ## Core Interface (`evasion`)
 

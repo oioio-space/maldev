@@ -89,9 +89,10 @@ func main() {
         os.Exit(0) // abort in VM
     }
 
-    // Check sandbox indicators
+    // Check sandbox indicators. IsSandboxed takes a context (so heavy probes
+    // like artifact scans can be cancelled) and returns (hit, reason, err).
     checker := sandbox.New(sandbox.DefaultConfig())
-    if sandboxed, _ := checker.IsSandboxed(); sandboxed {
+    if sandboxed, _, _ := checker.IsSandboxed(context.Background()); sandboxed {
         os.Exit(0) // abort in sandbox
     }
 

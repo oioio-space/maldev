@@ -283,7 +283,7 @@ for _, s := range sessions {
 
 Typical output on a single-user Windows 10 box:
 
-```
+```text
 id=0 name=Services state=Disconnected user= domain=
 id=1 name=Console  state=Active       user=m.bachmann domain=LAPTOP-A1IU4LCG
 id=65537 name=RDP-Tcp state=Listen    user= domain=

@@ -57,7 +57,7 @@ graph TD
 
 ### Before and After
 
-```
+```text
 Before morphing:
   Section 0: UPX0     (virtual, decompression target)
   Section 1: UPX1     (compressed data)

@@ -1,11 +1,23 @@
 # VM Test Setup — Reproducible Bootstrap
 
+> **Scope.** This document covers **bootstrap from zero**: host tools,
+> guest OS install, SSH keys, `INIT` snapshot. For per-test-type details
+> (injection matrix, Meterpreter, evasion byte-pattern verification, BSOD)
+> see [`docs/testing.md`](testing.md). For the cross-platform coverage
+> collection workflow (merged report) see
+> [`docs/coverage-workflow.md`](coverage-workflow.md).
+
 This guide brings a fresh host (Fedora/libvirt **or** Windows/VirtualBox)
-to the state where `./scripts/test-all.sh` runs the full coverage:
+to the state where `./scripts/test-all.sh` runs the full pass/fail matrix:
 
 - **memscan static verification matrix** — 77+ byte-pattern checks
 - **Linux VM go test** — intrusive + manual tests enabled
 - **Windows VM go test** — intrusive + manual tests enabled
+
+For the merged coverage workflow (same VMs, additionally captures
+`cover.out` from each guest and unions profiles into a single report),
+run `scripts/full-coverage.sh` after provisioning a `TOOLS` snapshot with
+`scripts/vm-provision.sh` — see `docs/coverage-workflow.md`.
 
 The Kali VM (Meterpreter handler) is provisioned similarly but orchestrated
 separately via `testutil/kali.go`.
@@ -157,7 +169,7 @@ echo '. ~/GolandProjects/maldev/scripts/vm-test/kali-env.sh' >> ~/.bashrc
 ```
 
 Expected final summary:
-```
+```text
   memscan    PASS  total sub-checks: 77 passed / 0 failed (0 fatal row(s))
   linux      PASS  packages: N ok / 0 FAIL (exit=0)
   windows    PASS  packages: N ok / 0 FAIL (exit=0)

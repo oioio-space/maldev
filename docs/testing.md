@@ -1,14 +1,21 @@
 # Testing Guide — maldev
 
+> **Scope.** This document covers **per-test-type details**: the injection
+> matrix, Meterpreter end-to-end, evasion byte-pattern verification, BSOD,
+> collection and token tests. For bootstrap (VM creation, SSH keys, INIT
+> snapshot) see [`docs/vm-test-setup.md`](vm-test-setup.md). For the
+> reproducible coverage collection workflow (merged host + Linux VM +
+> Windows VM + Kali) see [`docs/coverage-workflow.md`](coverage-workflow.md).
+
 ## Overview
 
 The maldev project uses a multi-layered testing strategy:
 
 1. **Unit tests** (`go test ./...`) — 64 packages, 500+ tests
-2. **VM integration tests** (MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1) — privileged operations in isolated VMs
-3. **x64dbg binary verification** (scripts/vm-test-x64dbg-mcp.go) — 75 tests reading actual memory bytes via debugger
-4. **Meterpreter end-to-end** (scripts/x64dbg-harness/meterpreter_matrix/) — real shellcode → real MSF sessions on Kali
-5. **BSOD verification** (scripts/vm-test-bsod.go) — crashes VM, restores snapshot
+2. **VM integration tests** (`MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1`) — privileged operations in isolated VMs
+3. **memscan binary verification** (`scripts/vm-test-memscan.go`) — 77 byte-pattern sub-checks read via the memscan HTTP API
+4. **Meterpreter end-to-end** — real shellcode → real MSF sessions on Kali
+5. **BSOD verification** — crashes the VM, restores the snapshot (uses the `cmd/vmtest` driver; see `scripts/vm-test.ps1`)
 
 ## Running Tests
 
@@ -23,11 +30,8 @@ go test $(go list ./... | grep -v scripts) -count=1 -short
 # VM — with manual/dangerous tests
 MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1 go test ./... -count=1 -timeout 300s
 
-# x64dbg binary verification (from host)
-go run scripts/vm-test-x64dbg-mcp.go
-
-# BSOD test (from host — crashes VM!)
-go run scripts/vm-test-bsod.go
+# memscan binary verification (77-row matrix, from host)
+go run scripts/vm-test-memscan.go
 
 # Meterpreter matrix (from host, needs Kali)
 # See Meterpreter section below
@@ -150,13 +154,17 @@ ClassicUnhook safelist: NtClose, NtCreateFile, NtReadFile, NtWriteFile, NtQueryV
 
 ## BSOD
 
-Tested via `scripts/vm-test-bsod.go`:
-1. Launches harness via scheduled task (interactive session)
-2. Harness calls `bsod.Trigger(nil)`
-3. First tries `NtRaiseHardError` (intercepted on Win 10 22H2)
-4. Falls back to `RtlSetProcessIsCritical(TRUE)` + `os.Exit(1)`
-5. VM crashes with CRITICAL_PROCESS_DIED
-6. Orchestrator restores INIT snapshot
+Driven by `cmd/vmtest` + a target-side PowerShell harness (see
+`scripts/vm-test.ps1`). The standalone `scripts/vm-test-bsod.go` runner
+listed in `docs/vm-test-setup.md` § Phase 5 is still TODO — reproduction
+today is manual:
+
+1. Launch the harness via scheduled task (interactive session, `schtasks /Run`).
+2. The harness calls `system/bsod.Trigger(nil)`.
+3. First tries `NtRaiseHardError` (intercepted on Win 10 22H2).
+4. Falls back to `RtlSetProcessIsCritical(TRUE)` + `os.Exit(1)`.
+5. VM crashes with `CRITICAL_PROCESS_DIED`.
+6. Operator restores the `INIT` snapshot: `virsh snapshot-revert <vm> --snapshotname INIT --force` or `VBoxManage snapshot <vm> restore INIT`.
 
 ## SSN Resolver Verification
 

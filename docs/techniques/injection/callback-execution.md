@@ -51,6 +51,7 @@ package main
 
 import (
     "log"
+    "unsafe"
 
     "github.com/oioio-space/maldev/inject"
     "golang.org/x/sys/windows"

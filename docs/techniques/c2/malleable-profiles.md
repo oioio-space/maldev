@@ -72,7 +72,7 @@ graph TD
 
 The transport cycles through URIs to avoid repeated requests to the same path:
 
-```
+```text
 Request 1: GET /jquery-3.7.1.min.js
 Request 2: GET /jquery-3.7.1.slim.min.js
 Request 3: GET /jquery-3.7.1.min.js      (wraps around)

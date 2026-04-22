@@ -73,7 +73,6 @@ import (
     "log"
 
     "github.com/oioio-space/maldev/inject"
-    "github.com/oioio-space/maldev/testutil"
 )
 
 func main() {
@@ -82,7 +81,7 @@ func main() {
     // Inject into a target process by PID.
     injector, err := inject.Build().
         Method(inject.MethodNtQueueApcThreadEx).
-        PID(1234).
+        TargetPID(1234).
         Create()
     if err != nil {
         log.Fatal(err)
@@ -124,7 +123,7 @@ func main() {
     // 3. Inject via NtQueueApcThreadEx with indirect syscalls.
     injector, err := inject.Build().
         Method(inject.MethodNtQueueApcThreadEx).
-        PID(int(procs[0].PID)).
+        TargetPID(int(procs[0].PID)).
         IndirectSyscalls().
         WithFallback().
         Create()
@@ -168,13 +167,13 @@ const MethodNtQueueApcThreadEx Method = "apcex"
 // Builder pattern
 injector, err := inject.Build().
     Method(inject.MethodNtQueueApcThreadEx).
-    PID(targetPID).
+    TargetPID(targetPID).
     Create()
 
 // With indirect syscalls
 injector, err := inject.Build().
     Method(inject.MethodNtQueueApcThreadEx).
-    PID(targetPID).
+    TargetPID(targetPID).
     IndirectSyscalls().
     Create()
 

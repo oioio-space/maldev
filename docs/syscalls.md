@@ -82,7 +82,7 @@ Builds a tiny assembly stub in RWX memory that contains the `syscall` instructio
 1. Allocates RWX memory via `VirtualAlloc`.
 2. Writes this 12-byte stub into it:
 
-```
+```text
 Offset  Bytes             Instruction          Purpose
 ------  -----             -----------          -------
 0x00    4C 8B D1          mov r10, rcx         Copy first arg to r10 (kernel expects it there)
@@ -107,7 +107,7 @@ Like Direct, but instead of executing `syscall` in private memory, it JMPs to a 
 1. Scans ntdll's `.text` section for the byte sequence `0F 05 C3` (`syscall; ret`). This gadget exists in every unhooked NT function's epilogue.
 2. Allocates RWX memory and writes this ~21-byte stub:
 
-```
+```text
 Offset  Bytes                          Instruction            Purpose
 ------  -----                          -----------            -------
 0x00    4C 8B D1                       mov r10, rcx           Copy first arg
@@ -146,7 +146,7 @@ resolver := wsyscall.NewHellsGate()
 
 **How it works:** Reads the first 8 bytes of the target function's prologue in ntdll:
 
-```
+```text
 Expected:  4C 8B D1 B8 XX XX 00 00
            -------- -- --------
            mov r10  mov eax, SSN
@@ -343,7 +343,7 @@ err = amsi.PatchScanBuffer(wsyscall.New(wsyscall.MethodWinAPI, nil))      // exp
 
 ## Choosing a Method -- Decision Tree
 
-```
+```text
 Is there an EDR?
   No  --> MethodWinAPI (simplest, most compatible)
   Yes --> Does the EDR hook kernel32?

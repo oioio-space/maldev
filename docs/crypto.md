@@ -285,7 +285,7 @@ func ROR13(name string) uint32
 
 **How the algorithm works:**
 
-```
+```text
 h = 0
 for each byte b in name:
     h = (h >> 13) | (h << 19)   // rotate right by 13 bits (32-bit)

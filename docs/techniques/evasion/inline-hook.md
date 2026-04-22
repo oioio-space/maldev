@@ -162,7 +162,7 @@ at the ntdll level catches both direct and indirect calls.
 Look up the function signature on [Microsoft Learn](https://learn.microsoft.com/en-us/windows/win32/api/).
 Convert each parameter to `uintptr` in your Go handler:
 
-```
+```go
 // MSDN signature:
 // BOOL DeleteFileW(LPCWSTR lpFileName)
 //

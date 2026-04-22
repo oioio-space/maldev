@@ -74,7 +74,7 @@ sequenceDiagram
 
 The backoff formula:
 
-```
+```text
 waitTime = currentWait + random(-jitter, +jitter)
 currentWait = min(currentWait * 2, MaxBackoff)
 ```

@@ -93,10 +93,14 @@ if name != "" {
 ### Sandbox Detection
 
 ```go
-import "github.com/oioio-space/maldev/evasion/sandbox"
+import (
+    "context"
+
+    "github.com/oioio-space/maldev/evasion/sandbox"
+)
 
 checker := sandbox.New(sandbox.DefaultConfig())
-if sandboxed, _ := checker.IsSandboxed(); sandboxed {
+if sandboxed, _, _ := checker.IsSandboxed(context.Background()); sandboxed {
     os.Exit(0)
 }
 ```
@@ -114,6 +118,7 @@ timing.BusyWaitTrig(200 * time.Millisecond)
 
 ```go
 import (
+    "context"
     "os"
     "time"
 
@@ -139,7 +144,7 @@ func checkEnvironment() bool {
 
     // 4. Sandbox check
     checker := sandbox.New(sandbox.DefaultConfig())
-    if sandboxed, _ := checker.IsSandboxed(); sandboxed {
+    if sandboxed, _, _ := checker.IsSandboxed(context.Background()); sandboxed {
         return false
     }
 
@@ -181,5 +186,5 @@ func main() {
 
 - [`evasion/antidebug`](../../evasion.md) — `IsDebuggerPresent() bool`
 - [`evasion/antivm`](../../evasion.md) — `Detect(Config) (string, error)`, `DetectAll(Config) ([]string, error)`
-- [`evasion/sandbox`](../../evasion.md) — `New(Config) *Checker`, `IsSandboxed() (bool, error)`, `CheckAll() ([]string, error)`
+- [`evasion/sandbox`](../../evasion.md) — `New(Config) *Checker`, `IsSandboxed(ctx) (bool, string, error)`, `CheckAll(ctx) []Result`
 - [`evasion/timing`](../../evasion.md) — `BusyWait(d)`, `BusyWaitPrimality()`, `BusyWaitPrimalityN(n)`, `BusyWaitTrig(d)`

@@ -34,8 +34,7 @@ go test $(go list ./...)
 # Linux cross-compile
 GOOS=linux GOARCH=amd64 go build $(go list ./...)
 
-# VM tests (admin/risky tests in isolated VMs)
-# Use /vm-test skill or:
+# VM tests — thin wrapper around cmd/vmtest (see docs/testing.md).
 ./scripts/vm-run-tests.sh windows "./..." "-v -count=1"
 ./scripts/vm-run-tests.sh linux "./..." "-count=1"
 ./scripts/vm-run-tests.sh all "./..." "-count=1"
@@ -45,14 +44,11 @@ GOOS=linux GOARCH=amd64 go build $(go list ./...)
 bash scripts/vm-provision.sh                    # one-time, installs NetFx3 + MSF db, snapshots TOOLS
 bash scripts/full-coverage.sh --snapshot=TOOLS  # each run; produces ignore/coverage/report-full.md
 
-# x64dbg binary verification (75 tests, from host)
-go run scripts/vm-test-x64dbg-mcp.go
-
-# BSOD test (crashes VM, restores snapshot)
-go run scripts/vm-test-bsod.go
+# memscan binary-pattern verification (77-row matrix, from host).
+go run scripts/vm-test-memscan.go
 
 # Meterpreter matrix (20 injection techniques × MSF sessions)
-# Requires: Kali VM with MSF, see docs/testing.md
+# Requires: Kali VM with MSF, see docs/testing.md.
 ```
 
 ## Test Harness
@@ -71,7 +67,7 @@ go run scripts/vm-test-bsod.go
 ## Package Structure
 Single module `github.com/oioio-space/maldev`. Dependencies flow bottom-up:
 
-```
+```text
 Layer 0 (pure):  crypto/  encode/  hash/  random/  useragent/
 Layer 1 (OS):    win/api  win/syscall  win/ntapi  win/token  win/privilege  win/version
                  win/domain  win/impersonate  win/user

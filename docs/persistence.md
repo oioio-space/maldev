@@ -8,7 +8,7 @@ The `persistence/` module provides composable persistence mechanisms for Windows
 
 | Package | Technique | MITRE ATT&CK | Platform |
 |---------|-----------|---------------|----------|
-| `persistence/registry` | Registry Run/RunOnce keys | T1047.001 -- Boot or Logon Autostart Execution | Windows |
+| `persistence/registry` | Registry Run/RunOnce keys | T1547.001 -- Boot or Logon Autostart Execution: Registry Run Keys | Windows |
 | `persistence/startup` | StartUp folder LNK shortcuts | T1547.009 -- Shortcut Modification | Windows |
 | `persistence/scheduler` | Task Scheduler via COM ITaskService | T1053.005 -- Scheduled Task | Windows |
 | `persistence/service` | Windows Service via SCM | T1543.003 -- Windows Service | Windows |
@@ -85,7 +85,7 @@ if errs != nil {
 
 Package `registry` manages persistence via the Windows registry Run and RunOnce keys. Values written to these keys are executed automatically when the user logs on (HKCU) or when the system starts (HKLM).
 
-**MITRE ATT&CK:** T1047.001 (Boot or Logon Autostart Execution: Registry Run Keys)
+**MITRE ATT&CK:** T1547.001 (Boot or Logon Autostart Execution: Registry Run Keys)
 **Platform:** Windows
 **Detection:** Medium -- Run keys are well-known persistence locations monitored by most EDR products.
 

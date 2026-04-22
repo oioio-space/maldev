@@ -21,7 +21,7 @@ Every Windows kernel function has a secret number called the SSN (Syscall Servic
 
 Every unhooked NT function in ntdll starts with the same byte pattern:
 
-```
+```asm
 4C 8B D1          mov r10, rcx       ; save first argument
 B8 XX XX 00 00    mov eax, <SSN>     ; load syscall number
 ...

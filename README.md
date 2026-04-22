@@ -65,7 +65,9 @@ injector.Inject(shellcode)
 | **[Getting Started](docs/getting-started.md)** | First steps -- concepts, terminology, your first implant |
 | **[Architecture](docs/architecture.md)** | Layered design, dependency flow, Mermaid diagrams |
 | **[OPSEC Build Pipeline](docs/opsec-build.md)** | garble, pe/strip, CallByHash -- building for operations |
-| **[Testing](docs/testing.md)** | Battle-tested: 22+ meterpreter sessions, 35 injection combos, x64dbg binary verification |
+| **[Testing](docs/testing.md)** | Per-test-type details: injection matrix, meterpreter sessions, BSOD, evasion verification |
+| **[VM Test Setup](docs/vm-test-setup.md)** | Bootstrap a fresh host (VMs, SSH keys, INIT snapshot) from zero |
+| **[Coverage Workflow](docs/coverage-workflow.md)** | Reproducible cross-platform coverage collection (host + Linux + Windows + Kali) |
 | **[MITRE ATT&CK + D3FEND](docs/mitre.md)** | Full technique mapping with defensive countermeasures |
 
 ### Technique Reference
@@ -114,7 +116,7 @@ Each technique has a dedicated page with beginner explanation, technical details
 
 ## Project Structure
 
-```
+```text
 maldev/
 ├── crypto/  encode/  hash/  random/  useragent/         # Layer 0: Pure utilities
 ├── win/api/  win/syscall/  win/ntapi/  win/token/        # Layer 1: OS primitives

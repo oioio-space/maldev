@@ -7,7 +7,62 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
-—
+Reproducible cross-platform coverage workflow + gap-filling tests.
+
+### Added
+
+- `cmd/vmtest`: new `-report-dir` flag with `Fetch()` method (scp for
+  libvirt, `VBoxManage copyfrom` for VBox). Auto-injects
+  `-coverprofile=<guest-path>` into forwarded `go test` invocations, tees
+  `test.log`, and repatriates `cover.out` plus `clrhost-cover.out` when
+  the guest produced one. (8aac278)
+- `scripts/coverage-merge.go`: merges N Go cover profiles (union with
+  per-block max hit count) and renders a Markdown gap report sorted by
+  ascending coverage. (8aac278)
+- `scripts/full-coverage.sh`: orchestrates host + Linux VM + Windows VM +
+  Kali end-to-end, exports every `MALDEV_*` gate, restores to
+  `--snapshot=NAME` (default `INIT`). Tolerant of test-level non-zero
+  exits so gated failures don't abort subsequent phases. (8aac278)
+- `scripts/vm-provision.sh`: idempotent per-VM tool install (NetFx3 via
+  DISM SYSTEM scheduled task, postgresql + msfdb init on Kali). Takes a
+  `TOOLS` snapshot when it's done. (8aac278)
+- `docs/coverage-workflow.md`: canonical reference for the coverage
+  workflow — snapshots, gates, layout, known blockers (QEMU pause race,
+  CLR v2 COM activation on TOOLS snapshot), reproduction recipe. (8aac278)
+- 16 gap-filling tests covering non-Windows stubs (c2/transport/namedpipe,
+  evasion/{fakecmd,hideprocess,preset,stealthopen,hook,hook/probe,
+  hook/remote,hook/bridge/controller}, system/ads, process/session,
+  pe/clr, cet) plus Windows-only factory tests (evasion/unhook,
+  evasion/hwbp) and `internal/compat/{cmp,slices}` polyfill smoke tests.
+  (914aab4)
+- `testutil/kali_test.go`: env-var resolvers (`kaliSSHHost/Port/Key/User`)
+  with both override and fallback paths. (914aab4)
+- `pe/clr` subprocess coverage: `testutil/clrhost` now builds with
+  `go build -cover -covermode=atomic`, `GOCOVERDIR` points at a stable
+  temp dir, `go tool covdata textfmt` converts to `clrhost-cover.out`
+  which `cmd/vmtest` fetches and `coverage-merge` unions with the main
+  profile. Ships with `testutil/clrhost/maldev_clr_test.dll` (3 KB .NET
+  2.0 assembly) for `TestExecuteDLLReal`. (d0b9e0f)
+- 8 deeper tests for `evasion/hook/bridge` Controller (`CallOriginal`,
+  `ArgsDefault`, `SetReturnNoPanic`, `LogViaTransport`,
+  `LogStandaloneNoop`, `ExfilStandaloneNoop`, `AskStandaloneAlwaysAllows`)
+  and 2 hook lifecycle tests (`TestReinstallAfterRemove`,
+  `TestInstallOnPristineTargetAfterGroupRollback`). (94a57cf)
+
+### Fixed
+
+- `evasion/timing`: `TestBusyWaitPrimality` upper bound 10s → 60s. VM
+  CPU is shared and non-deterministic; the fixed-workload check still
+  guards against infinite loops. (914aab4)
+- `inject/linux_test.go`: `TestProcMemSelfInject` now retries 3× and
+  matches `PROCMEM_OK` in stdout instead of requiring exit 0. The
+  child's Go runtime can SIGSEGV during exit cleanup after injection
+  succeeded — the marker is the real success signal. (914aab4)
+
+### Coverage
+
+Baseline 39.4% (Linux host only, no gates) → **51.9% merged** across 6
+run contexts. See `docs/coverage-workflow.md` for the full breakdown.
 
 ## [v0.10.1] — 2026-04-18
 
@@ -51,7 +106,7 @@ Patch release: unlocks 116 previously-skipped tests + post-review fixes.
 
 ### Final test matrix (from INIT snapshots)
 
-```
+```text
 memscan  77 / 77
 linux   302 / 302   (40 legitimate skips)
 windows 754 / 754   (21 legitimate skips)
@@ -109,7 +164,7 @@ TOTAL   1133 passed / 0 failed / 61 skipped
 
 ### Final test run (from INIT snapshots, 2026-04-17)
 
-```
+```text
 memscan  PASS  77 / 77
 linux    PASS  282 / 282  (41 skip)
 windows  PASS  735 / 735  (21 skip)

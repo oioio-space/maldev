@@ -127,7 +127,7 @@ func HideService(mode Mode, hostname string, svc any) (string, error)
 
 **The SDDL string explained:**
 
-```
+```text
 D:(D;;DCWPDTSD;;;IU)(D;;DCWPDTSD;;;SU)(D;;DCWPDTSD;;;BA)(A;;CCSWLOCRRC;;;IU)(A;;CCSWLOCRRC;;;SU)(A;;CCSWRPWPDTLOCRRC;;;SY)(A;;CCDCSWRPWPDTLOCRSDRCWDWO;;;BA)
 ```
 

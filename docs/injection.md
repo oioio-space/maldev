@@ -63,7 +63,7 @@ optional EDR bypass via direct/indirect syscalls on Windows.
 
 ## Architecture Overview
 
-```
+```text
                      ┌─────────────┐
                      │   Config    │   Method, PID, ProcessPath, Fallback
                      └──────┬──────┘

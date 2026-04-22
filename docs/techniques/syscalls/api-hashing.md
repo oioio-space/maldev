@@ -65,7 +65,7 @@ Each entry in the list is an `LDR_DATA_TABLE_ENTRY` containing:
 
 ROR13 (Rotate Right by 13 bits) is the de facto standard for shellcode API hashing:
 
-```
+```text
 For each character c in the name:
     hash = (hash >> 13) | (hash << 19)   // rotate right 13 bits
     hash = hash + c                       // add character value
