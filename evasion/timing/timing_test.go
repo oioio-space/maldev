@@ -30,11 +30,16 @@ func TestBusyWaitPrimality(t *testing.T) {
 	start := time.Now()
 	BusyWaitPrimality()
 	elapsed := time.Since(start)
-	// Should take at least a few ms and not more than 10 seconds
+	// BusyWaitPrimality's workload is fixed — the upper bound is a sanity
+	// check against an infinite loop, not a performance SLA. VMs with
+	// shared-CPU allocation and no host pinning can take 20-30s for work
+	// that finishes in 5s on bare metal, so the bound is intentionally
+	// generous to stay green on the test matrix (Windows VM 20 vCPUs /
+	// 4GB RAM has been observed >10s).
 	if elapsed < time.Millisecond {
 		t.Fatal("BusyWaitPrimality returned too fast")
 	}
-	if elapsed > 10*time.Second {
+	if elapsed > 60*time.Second {
 		t.Fatalf("BusyWaitPrimality took too long: %v", elapsed)
 	}
 }

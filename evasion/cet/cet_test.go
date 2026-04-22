@@ -1,6 +1,7 @@
 package cet
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -30,4 +31,28 @@ func TestWrapAlreadyCompliant(t *testing.T) {
 	out := Wrap(sc)
 	// Not reallocated, same content.
 	assert.Equal(t, sc, out)
+}
+
+// TestEnforcedNonWindowsStub asserts the stub reports no enforcement on
+// non-Windows so callers can safely branch on Enforced() without a GOOS check.
+func TestEnforcedNonWindowsStub(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// On Windows the real implementation queries the current process;
+		// skipping here keeps the test meaningful on the stub platform only.
+		t.Skip("stub-only test; Windows has a separate implementation")
+	}
+	if Enforced() {
+		t.Errorf("Enforced() on non-Windows stub must be false, got true")
+	}
+}
+
+// TestDisableNonWindowsStub asserts Disable returns an error on non-Windows.
+// Documenting this via a test makes the stub's intentional no-op explicit.
+func TestDisableNonWindowsStub(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("stub-only test; Windows has a separate implementation")
+	}
+	if err := Disable(); err == nil {
+		t.Error("Disable() on non-Windows stub must return an error, got nil")
+	}
 }
