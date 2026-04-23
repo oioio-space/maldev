@@ -11,6 +11,7 @@
 package sleepmask
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -114,7 +115,7 @@ func TestSleepMaskE2E_DefeatsExecutablePageScanner(t *testing.T) {
 		}
 	}()
 
-	mask.Sleep(300 * time.Millisecond)
+	mask.Sleep(context.Background(), 300 * time.Millisecond)
 	close(stopScan)
 	<-scanDone
 
@@ -150,7 +151,7 @@ func TestSleepMaskE2E_RestoresOriginalRXProtection(t *testing.T) {
 		close(sampled)
 	}()
 
-	mask.Sleep(200 * time.Millisecond)
+	mask.Sleep(context.Background(), 200 * time.Millisecond)
 	<-sampled
 
 	assert.Equal(t, uint32(windows.PAGE_READWRITE), midProtect,
@@ -171,7 +172,7 @@ func TestSleepMaskE2E_RestoresOriginalRWXProtection(t *testing.T) {
 	require.Equal(t, uint32(windows.PAGE_EXECUTE_READWRITE), queryProtect(t, addr))
 
 	mask := New(Region{Addr: addr, Size: size})
-	mask.Sleep(20 * time.Millisecond)
+	mask.Sleep(context.Background(), 20 * time.Millisecond)
 
 	assert.Equal(t, uint32(windows.PAGE_EXECUTE_READWRITE), queryProtect(t, addr),
 		"RWX region must stay RWX after sleep (not collapsed to RX)")
@@ -204,7 +205,7 @@ func TestSleepMaskE2E_MultiRegionIndependentEncryption(t *testing.T) {
 		hitB.Store(b)
 	}()
 
-	mask.Sleep(200 * time.Millisecond)
+	mask.Sleep(context.Background(), 200 * time.Millisecond)
 
 	assert.False(t, hitA.Load(), "region A marker must be hidden mid-sleep")
 	assert.False(t, hitB.Load(), "region B marker must be hidden mid-sleep")
@@ -230,7 +231,7 @@ func TestSleepMaskE2E_BeaconLoopStableAcrossCycles(t *testing.T) {
 	mask := New(Region{Addr: addr, Size: uintptr(len(payload))})
 
 	for i := 0; i < cycles; i++ {
-		mask.Sleep(15 * time.Millisecond)
+		mask.Sleep(context.Background(), 15 * time.Millisecond)
 
 		got := unsafe.Slice((*byte)(unsafe.Pointer(addr)), len(payload))
 		assert.Equal(t, payload, []byte(got), "cycle %d: payload bytes drifted", i)
@@ -252,7 +253,7 @@ func TestSleepMaskE2E_BusyTrigAlsoDefeatsScanner(t *testing.T) {
 	_, ok := testutil.ScanProcessMemory(marker)
 	require.True(t, ok, "baseline scan must find canary before masking")
 
-	mask := New(Region{Addr: addr, Size: uintptr(len(payload))}).WithMethod(MethodBusyTrig)
+	mask := New(Region{Addr: addr, Size: uintptr(len(payload))}).WithStrategy(&InlineStrategy{UseBusyTrig: true})
 
 	var midHit atomic.Bool
 	go func() {
@@ -261,7 +262,7 @@ func TestSleepMaskE2E_BusyTrigAlsoDefeatsScanner(t *testing.T) {
 		midHit.Store(hit)
 	}()
 
-	mask.Sleep(150 * time.Millisecond)
+	mask.Sleep(context.Background(), 150 * time.Millisecond)
 
 	assert.False(t, midHit.Load(), "BusyTrig sleep must also hide canary during the wait")
 
