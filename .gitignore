@@ -53,3 +53,4 @@ scripts/vm-test/kali-env.sh
 vendor/
 workspace.xml
 .mcp.json
+.worktrees/
