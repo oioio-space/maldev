@@ -15,6 +15,30 @@ Every Windows kernel function has a secret number called the SSN (Syscall Servic
 
 ---
 
+## How It Works
+
+Every resolver answers the same question — "what SSN does `NtXxx` map to on this host?" — but with different assumptions about how tampered the in-process ntdll is.
+
+```mermaid
+flowchart LR
+    A["Need SSN for NtXxx"] --> B[Resolver.Resolve]
+    B --> C[ntdll base via<br/>GetProcAddress or PEB walk]
+    C --> D[Read function prologue]
+    D --> E{Intact?<br/>4C 8B D1 B8}
+    E -->|Yes| F[SSN = bytes 4-5]
+    E -->|No| G[Strategy fallback:<br/>neighbors / JMP follow / hash]
+    G --> F
+    F --> H[caller.Call builds<br/>syscall stub]
+```
+
+- **Hell's Gate** — read `mov eax, imm32` directly from the unhooked prologue. Fastest, fails on any hooked function.
+- **Halo's Gate** — target hooked? scan neighbours (±500 stubs × 32 bytes). Since SSNs are sequential in ntdll, an unhooked neighbour N stubs away implies `target_SSN = neighbour_SSN ± N`.
+- **Tartarus' Gate** — target patched with `E9 xx xx xx xx` or `EB xx`? follow the JMP into the EDR trampoline; most trampolines restore `mov eax, imm32` before the real `syscall` instruction.
+- **Hash-based (HashGate)** — resolve the function address itself via PEB walk + ROR13 export hashing. No `"NtAllocateVirtualMemory"` string anywhere in the binary. Falls back to Hell's Gate for SSN extraction once the address is found.
+- **Chain** — compose resolvers (e.g. Tartarus → HashGate → Halo's); first success wins, giving layered resilience without reimplementing the strategies individually.
+
+---
+
 ## How Each Resolver Works
 
 ### The ntdll Prologue

