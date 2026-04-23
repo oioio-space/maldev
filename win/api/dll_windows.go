@@ -59,6 +59,7 @@ var (
 	ProcTerminateThread            = Kernel32.NewProc("TerminateThread")
 	ProcCreateTimerQueueTimer      = Kernel32.NewProc("CreateTimerQueueTimer")
 	ProcDeleteTimerQueue           = Kernel32.NewProc("DeleteTimerQueue")
+	ProcDeleteTimerQueueTimer      = Kernel32.NewProc("DeleteTimerQueueTimer")
 	ProcReadDirectoryChangesW      = Kernel32.NewProc("ReadDirectoryChangesW")
 	ProcFlushInstructionCache      = Kernel32.NewProc("FlushInstructionCache")
 )

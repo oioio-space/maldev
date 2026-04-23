@@ -24,6 +24,22 @@ import (
 	"github.com/oioio-space/maldev/testutil"
 )
 
+// e2eStrategies lists every strategy the e2e suite asserts the
+// "masked window is opaque" invariant against. Extended as new
+// strategies are shipped.
+func e2eStrategies() []struct {
+	name string
+	ctor func() Strategy
+} {
+	return []struct {
+		name string
+		ctor func() Strategy
+	}{
+		{"inline", func() Strategy { return &InlineStrategy{} }},
+		{"timerqueue", func() Strategy { return &TimerQueueStrategy{} }},
+	}
+}
+
 // allocAndWriteRX allocates a region, writes payload, flips it to
 // PAGE_EXECUTE_READ (the usual "post-inject" state), and returns the base
 // address plus a cleanup func.
@@ -60,6 +76,15 @@ func queryProtect(t *testing.T, addr uintptr) uint32 {
 // both XOR-scrambled the bytes AND dropped the executable bit. After the
 // sleep returns, the canary must be findable again.
 func TestSleepMaskE2E_DefeatsExecutablePageScanner(t *testing.T) {
+	for _, strat := range e2eStrategies() {
+		strat := strat
+		t.Run(strat.name, func(t *testing.T) {
+			testDefeatsExecutablePageScanner(t, strat.ctor())
+		})
+	}
+}
+
+func testDefeatsExecutablePageScanner(t *testing.T, strategy Strategy) {
 	payload := testutil.WindowsSearchableCanary
 	addr, cleanup := allocAndWriteRX(t, payload)
 	defer cleanup()
@@ -70,7 +95,7 @@ func TestSleepMaskE2E_DefeatsExecutablePageScanner(t *testing.T) {
 	require.True(t, ok, "baseline scan must find canary before masking")
 	require.Equal(t, addr+3, found, "canary marker should sit 3 bytes after base (past xor eax/ret)")
 
-	mask := New(Region{Addr: addr, Size: uintptr(len(payload))})
+	mask := New(Region{Addr: addr, Size: uintptr(len(payload))}).WithStrategy(strategy)
 
 	// The scanner counts a hit only when the mask was engaged for the
 	// ENTIRE scan pass. Three windows exist during mask.Sleep:
