@@ -1,6 +1,9 @@
 package stealthopen
 
-import "os"
+import (
+	"io"
+	"os"
+)
 
 // Opener abstracts the "open a file for reading" step used across the
 // library. It mirrors how *wsyscall.Caller is passed as an optional
@@ -40,4 +43,17 @@ func Use(opener Opener) Opener {
 		return opener
 	}
 	return &Standard{}
+}
+
+// OpenRead opens path through Use(opener) and returns the full contents.
+// Shared helper for callers that want the old os.ReadFile shape while
+// still benefiting from a stealth strategy when opener is non-nil. The
+// file is always closed before returning.
+func OpenRead(opener Opener, path string) ([]byte, error) {
+	f, err := Use(opener).Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
 }

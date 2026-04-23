@@ -11,18 +11,8 @@ import (
 )
 
 type linuxInjector struct {
-	config     *Config
-	lastRegion Region
-	hasRegion  bool
-}
-
-// InjectedRegion returns the base address and size of the region allocated
-// by the most recent successful self-process Inject (currently only
-// MethodProcMem, which mmaps into the current process). Other methods
-// (Ptrace, MemFD, Purego variants) do not expose a local region and
-// return (Region{}, false).
-func (l *linuxInjector) InjectedRegion() (Region, bool) {
-	return l.lastRegion, l.hasRegion
+	config *Config
+	regionRecorder
 }
 
 func newPlatformInjector(cfg *Config) (Injector, error) {
@@ -105,8 +95,7 @@ func (l *linuxInjector) injectProcMem(shellcode []byte) error {
 
 	// Publish the region before the goroutine runs so the caller can pull
 	// it out of InjectedRegion() right after Inject returns.
-	l.lastRegion = Region{Addr: shellcodeAddr, Size: uintptr(len(shellcode))}
-	l.hasRegion = true
+	l.record(shellcodeAddr, uintptr(len(shellcode)))
 
 	go func() {
 		runtime.LockOSThread()

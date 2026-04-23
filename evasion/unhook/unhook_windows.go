@@ -17,7 +17,6 @@ import (
 	"debug/pe"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"path/filepath"
 	"unsafe"
 
@@ -36,12 +35,11 @@ import (
 func readNtdllBytes(opener stealthopen.Opener) ([]byte, error) {
 	sysDir, _ := windows.GetSystemDirectory()
 	ntdllPath := filepath.Join(sysDir, "ntdll.dll")
-	f, err := stealthopen.Use(opener).Open(ntdllPath)
+	raw, err := stealthopen.OpenRead(opener, ntdllPath)
 	if err != nil {
-		return nil, fmt.Errorf("open ntdll.dll: %w", err)
+		return nil, fmt.Errorf("read ntdll.dll: %w", err)
 	}
-	defer f.Close()
-	return io.ReadAll(f)
+	return raw, nil
 }
 
 // runtimeCriticalFuncs are ntdll functions called internally by the Go runtime

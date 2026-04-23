@@ -30,10 +30,14 @@ type Executor interface {
 //	)
 //	err := p.Inject(shellcode)
 type Pipeline struct {
-	memory     MemorySetup
-	executor   Executor
-	lastRegion Region
-	hasRegion  bool
+	memory   MemorySetup
+	executor Executor
+	// regionRecorder is embedded so Pipeline satisfies SelfInjector.
+	// NOTE: the MemorySetup decides whether the address is local or
+	// remote; Pipeline itself cannot tell. Callers that plan to feed
+	// the region into sleepmask or cleanup must know their MemorySetup
+	// is a self-process one.
+	regionRecorder
 }
 
 // NewPipeline creates an injection pipeline from a memory setup and executor.
@@ -54,16 +58,6 @@ func (p *Pipeline) Inject(shellcode []byte) error {
 	if err := p.executor.Execute(addr); err != nil {
 		return fmt.Errorf("execute: %w", err)
 	}
-	p.lastRegion = Region{Addr: addr, Size: uintptr(len(shellcode))}
-	p.hasRegion = true
+	p.record(addr, uintptr(len(shellcode)))
 	return nil
-}
-
-// InjectedRegion reports the region that the last successful Inject placed
-// the shellcode in. The MemorySetup implementation decides whether that is
-// local or remote memory — Pipeline itself cannot tell, so callers must
-// know their MemorySetup's semantics before using the returned region for
-// sleepmask or cleanup.
-func (p *Pipeline) InjectedRegion() (Region, bool) {
-	return p.lastRegion, p.hasRegion
 }

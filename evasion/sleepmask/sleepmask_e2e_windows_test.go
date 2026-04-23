@@ -71,41 +71,43 @@ func TestSleepMaskE2E_DefeatsExecutablePageScanner(t *testing.T) {
 
 	mask := New(Region{Addr: addr, Size: uintptr(len(payload))})
 
-	// The scanner goroutine must NOT start counting hits until the mask
-	// has actually downgraded the region to PAGE_READWRITE + XOR-scrambled
-	// the bytes. Before that — in the microseconds between `go func()` and
-	// mask.Sleep's first VirtualProtect — the canary is legitimately still
-	// on an executable page, and a scan would correctly find it. That
-	// window is wider under coverage instrumentation. We spin on
-	// VirtualQuery until we see RW protection, then start the real scan
-	// loop. This pins the property "once masked, scanner is blind".
+	// The scanner counts a hit only when the mask was engaged for the
+	// ENTIRE scan pass. Three windows exist during mask.Sleep:
+	//   1. Pre-mask: page is still RX, canary legitimately findable.
+	//   2. Masked window: page is RW, canary scrambled. This is the
+	//      only window we care about.
+	//   3. Post-mask (decrypt): page flips RW → RX while bytes are
+	//      decrypted; on the transition the scanner could race the
+	//      protection flip and match the restored canary on a newly-RX
+	//      page.
+	// Sampling protection only at the TOP of the pass is not enough
+	// because the scan itself takes time and the protection can change
+	// during the walk. We sample before AND after and count the pass
+	// only if protection is RW at both edges. This pins the property
+	// "once masked and for as long as masked, the scanner is blind".
 	var scanHits int32
 	var scanAttempts int32
 	stopScan := make(chan struct{})
 	scanDone := make(chan struct{})
 	go func() {
 		defer close(scanDone)
-		// Barrier: wait until the mask has engaged (region is RW).
 		for {
 			select {
 			case <-stopScan:
 				return
 			default:
 			}
-			if queryProtect(t, addr) == windows.PAGE_READWRITE {
-				break
+			if queryProtect(t, addr) != windows.PAGE_READWRITE {
+				time.Sleep(500 * time.Microsecond)
+				continue
 			}
-			time.Sleep(500 * time.Microsecond)
-		}
-		// Masked window.
-		for {
-			select {
-			case <-stopScan:
-				return
-			default:
+			_, hit := testutil.ScanProcessMemory(marker)
+			if queryProtect(t, addr) != windows.PAGE_READWRITE {
+				// Protection flipped during the scan — discard this pass.
+				continue
 			}
 			atomic.AddInt32(&scanAttempts, 1)
-			if _, hit := testutil.ScanProcessMemory(marker); hit {
+			if hit {
 				atomic.AddInt32(&scanHits, 1)
 			}
 			time.Sleep(5 * time.Millisecond)

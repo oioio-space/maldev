@@ -63,17 +63,6 @@ func ntCall(caller *wsyscall.Caller, name string, proc *windows.LazyProc, args .
 	return 0, nil
 }
 
-// readAll opens path through opener and reads it to completion. Replaces
-// os.ReadFile so the Opener strategy (Standard = os.Open, Stealth =
-// OpenFileById) is honored transparently.
-func readAll(opener stealthopen.Opener, path string) ([]byte, error) {
-	f, err := opener.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return io.ReadAll(f)
-}
 
 // processBasicInfo mirrors PROCESS_BASIC_INFORMATION.
 type processBasicInfo struct {
@@ -131,10 +120,8 @@ type rtlUserProcessParameters struct {
 // The running process executes the original payload from kernel cache,
 // while any file inspection shows the decoy content.
 func Run(cfg Config) error {
-	opener := stealthopen.Use(cfg.Opener)
-
 	// Read payload (via Opener — stealth or standard)
-	payload, err := readAll(opener, cfg.PayloadPath)
+	payload, err := stealthopen.OpenRead(cfg.Opener, cfg.PayloadPath)
 	if err != nil {
 		return fmt.Errorf("read payload: %w", err)
 	}
@@ -222,7 +209,7 @@ func Run(cfg Config) error {
 
 	var decoyData []byte
 	if cfg.DecoyPath != "" {
-		decoyData, err = readAll(opener, cfg.DecoyPath)
+		decoyData, err = stealthopen.OpenRead(cfg.Opener, cfg.DecoyPath)
 		if err != nil {
 			return fmt.Errorf("read decoy: %w", err)
 		}

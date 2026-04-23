@@ -45,6 +45,45 @@ func TestUse_NonNilReturnsAsIs(t *testing.T) {
 	assert.Same(t, in, op, "Use(x) must return x unchanged when x != nil")
 }
 
+func TestOpenRead_NilOpenerUsesStandard(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "blob.bin")
+	want := []byte{0xCA, 0xFE, 0xBA, 0xBE}
+	require.NoError(t, os.WriteFile(path, want, 0o600))
+
+	got, err := OpenRead(nil, path)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
+func TestOpenRead_DelegatesToOpener(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "blob.bin")
+	want := []byte("delegated-via-opener")
+	require.NoError(t, os.WriteFile(path, want, 0o600))
+
+	spy := &fakeOpener{}
+	spy.file = openForRead(t, path)
+	defer spy.file.Close()
+
+	got, err := OpenRead(spy, path)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+	assert.Equal(t, []string{path}, spy.calls, "OpenRead must consult opener.Open once with the path")
+}
+
+func TestOpenRead_PropagatesOpenError(t *testing.T) {
+	_, err := OpenRead(&Standard{}, filepath.Join(t.TempDir(), "nope.bin"))
+	require.Error(t, err)
+}
+
+func openForRead(t *testing.T, path string) *os.File {
+	t.Helper()
+	f, err := os.Open(path)
+	require.NoError(t, err)
+	return f
+}
+
 // fakeOpener lets tests confirm Use() does not wrap non-nil values and
 // lets consumer packages be exercised without hitting the filesystem.
 type fakeOpener struct {

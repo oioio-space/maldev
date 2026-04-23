@@ -36,9 +36,12 @@ type Stealth struct {
 }
 
 // Open implements Opener by calling OpenByID with the pre-captured
-// volume path and Object ID. Path-based file hooks never observe the
-// target file path.
-func (s *Stealth) Open(path string) (*os.File, error) {
+// volume path and Object ID. The path argument is intentionally ignored
+// — the open targets the Object ID captured at NewStealth time, not the
+// caller's path — which is the whole point (path-based file hooks never
+// observe the target file path). Callers upstream still pass a path
+// because they also support *Standard, which does consult it.
+func (s *Stealth) Open(_ string) (*os.File, error) {
 	if s == nil {
 		return nil, fmt.Errorf("stealthopen: nil Stealth opener")
 	}

