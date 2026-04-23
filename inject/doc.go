@@ -42,4 +42,15 @@
 // mechanisms like CreateRemoteThread or queuing an APC to an existing thread.
 // APC-based methods like EarlyBird are stealthier because they piggyback on
 // normal thread scheduling rather than creating a conspicuous new thread.
+//
+// SelfInjector:
+//
+// Self-process injectors (CreateThread, CreateFiber, EtwpCreateEtwThread on
+// Windows; ProcMem on Linux) also implement the optional SelfInjector
+// interface, exposing the base address and size of the injected region via
+// InjectedRegion(). This lets callers wire the region into
+// evasion/sleepmask.Mask or cleanup/memory.WipeAndFree without re-deriving
+// the allocation. The decorators (WithValidation, WithCPUDelay, WithXOR) and
+// Pipeline transparently forward the region, so the pattern works across
+// chains. Cross-process methods report (Region{}, false).
 package inject

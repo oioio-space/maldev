@@ -23,6 +23,12 @@ func (v *validatingInjector) Inject(shellcode []byte) error {
 	return v.inner.Inject(shellcode)
 }
 
+// InjectedRegion forwards to the wrapped injector when it implements
+// SelfInjector; otherwise reports no region.
+func (v *validatingInjector) InjectedRegion() (Region, bool) {
+	return forwardRegion(v.inner)
+}
+
 // CPUDelayConfig controls CPU-based delay evasion.
 type CPUDelayConfig struct {
 	// MaxIterations is the upper bound for random iteration count.
@@ -79,6 +85,12 @@ func (d *cpuDelayInjector) Inject(shellcode []byte) error {
 	return d.inner.Inject(shellcode)
 }
 
+// InjectedRegion forwards to the wrapped injector when it implements
+// SelfInjector; otherwise reports no region.
+func (d *cpuDelayInjector) InjectedRegion() (Region, bool) {
+	return forwardRegion(d.inner)
+}
+
 // XORConfig controls XOR encoding behavior.
 type XORConfig struct {
 	// Key is the XOR key byte. If zero, a random key is generated.
@@ -128,6 +140,22 @@ func (x *xorInjector) Inject(shellcode []byte) error {
 		encoded[i] ^= key
 	}
 	return x.inner.Inject(encoded)
+}
+
+// InjectedRegion forwards to the wrapped injector when it implements
+// SelfInjector; otherwise reports no region.
+func (x *xorInjector) InjectedRegion() (Region, bool) {
+	return forwardRegion(x.inner)
+}
+
+// forwardRegion is the common helper used by decorators to expose the
+// wrapped injector's self-process region without imposing that the inner
+// injector be a SelfInjector.
+func forwardRegion(inner Injector) (Region, bool) {
+	if si, ok := inner.(SelfInjector); ok {
+		return si.InjectedRegion()
+	}
+	return Region{}, false
 }
 
 // MiddlewareFunc is a function that wraps an Injector.

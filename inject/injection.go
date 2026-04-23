@@ -49,6 +49,43 @@ type Injector interface {
 	Inject(shellcode []byte) error
 }
 
+// Region identifies a memory range in the current process that a
+// self-injection method allocated for shellcode. Callers receive one from
+// SelfInjector.InjectedRegion after a successful self-process Inject and
+// can pass it to evasion/sleepmask.Mask or cleanup/memory.WipeAndFree
+// without having to re-derive the address and size.
+type Region struct {
+	Addr uintptr
+	Size uintptr
+}
+
+// SelfInjector is optionally implemented by injectors whose target is the
+// current process. Callers may type-assert an Injector to SelfInjector to
+// learn where the last Inject call placed the shellcode:
+//
+//	inj, _ := inject.NewWindowsInjector(cfg) // e.g. MethodCreateThread
+//	if err := inj.Inject(shellcode); err != nil { return err }
+//	if self, ok := inj.(inject.SelfInjector); ok {
+//	    if r, ok := self.InjectedRegion(); ok {
+//	        mask := sleepmask.New(sleepmask.Region{Addr: r.Addr, Size: r.Size})
+//	        mask.Sleep(30 * time.Second)
+//	    }
+//	}
+//
+// Cross-process methods (CreateRemoteThread, QueueUserAPC, EarlyBird APC,
+// ThreadHijack, RtlCreateUserThread, NtQueueApcThreadEx) allocate in the
+// target process, so on those paths InjectedRegion returns (Region{}, false).
+// Before the first successful Inject, or after a failed Inject, it also
+// returns (Region{}, false).
+//
+// The decorators (WithValidation, WithCPUDelay, WithXOR) transparently
+// forward InjectedRegion to the wrapped injector, so the pattern works
+// across chains.
+type SelfInjector interface {
+	Injector
+	InjectedRegion() (Region, bool)
+}
+
 // Config configures an injection.
 type Config struct {
 	Method      Method

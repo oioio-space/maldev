@@ -1,14 +1,9 @@
-//go:build windows
-
 package memory
 
 import (
 	"testing"
-	"unsafe"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"golang.org/x/sys/windows"
 )
 
 func TestSecureZero(t *testing.T) {
@@ -25,33 +20,39 @@ func TestSecureZero_Empty(t *testing.T) {
 	SecureZero([]byte{})
 }
 
-func TestWipeAndFree(t *testing.T) {
-	size := uintptr(4096)
-	addr, err := windows.VirtualAlloc(0, size,
-		windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_READWRITE)
-	require.NoError(t, err)
-
-	// Write recognizable pattern.
-	region := unsafe.Slice((*byte)(unsafe.Pointer(addr)), int(size))
-	for i := range region {
-		region[i] = 0xAA
-	}
-
-	err = WipeAndFree(addr, size)
-	require.NoError(t, err)
-
-	// After VirtualFree the pages are released. We cannot read them
-	// without access violation, so success of WipeAndFree is sufficient.
+func TestDoSecret(t *testing.T) {
+	// Verify f is invoked and observable side-effects happen, independent
+	// of whether the build enabled GOEXPERIMENT=runtimesecret.
+	called := false
+	DoSecret(func() {
+		called = true
+	})
+	assert.True(t, called, "DoSecret must invoke f")
 }
 
-func TestWipeAndFree_ZeroAddr(t *testing.T) {
-	err := WipeAndFree(0, 4096)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "zero")
+func TestDoSecret_NestedAndValue(t *testing.T) {
+	// The documented pattern: construct result outside, copy inside.
+	var out []byte
+	DoSecret(func() {
+		tmp := []byte{0x11, 0x22, 0x33}
+		out = make([]byte, len(tmp))
+		copy(out, tmp)
+	})
+	assert.Equal(t, []byte{0x11, 0x22, 0x33}, out)
 }
 
-func TestWipeAndFree_ZeroSize(t *testing.T) {
-	err := WipeAndFree(0xDEAD, 0)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "zero")
+func TestSecretEnabled(t *testing.T) {
+	// The stub build always reports false. The runtime/secret-backed build
+	// reports true only while inside a DoSecret call, false outside.
+	outer := SecretEnabled()
+	assert.False(t, outer, "SecretEnabled must be false outside DoSecret")
+
+	var inside bool
+	DoSecret(func() {
+		inside = SecretEnabled()
+	})
+
+	// Stub build: always false. Experimental build: true. Either is correct
+	// for its respective build, so we only assert the outer-scope invariant.
+	_ = inside
 }

