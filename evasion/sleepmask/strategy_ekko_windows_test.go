@@ -33,10 +33,13 @@ func TestEkkoStrategy_RejectsMultiRegion(t *testing.T) {
 }
 
 func TestEkkoStrategy_CycleRoundTrip(t *testing.T) {
-	t.Skip("EkkoStrategy ROP chain execution is WIP: RtlCaptureContext " +
-		"requires 16-byte CONTEXT alignment, Rsp alignment on gadget entry, " +
-		"and shadow-space separation from gadget args. Scaffold + input " +
-		"validation ship in v0.12.0; chain execution is future work.")
+	t.Skip("EkkoStrategy ROP chain partially working: VirtualProtect + " +
+		"trampolines + NtContinue + resumeStub all verified on pool thread. " +
+		"SystemFunction032 (RC4 encrypt) gadget still crashes the pool " +
+		"thread for reasons that remain undiagnosed despite fixing the " +
+		"USTRING struct layout (ULONG vs USHORT). Scaffold + input " +
+		"validation + partial chain ship in v0.12.x; full round-trip " +
+		"awaits debugging of SF032 stack/ABI requirements.")
 
 	data := []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x41, 0x42, 0x43, 0x44}
 	addr, err := windows.VirtualAlloc(0, uintptr(len(data)),
