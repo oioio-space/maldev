@@ -7,7 +7,175 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
-Reproducible cross-platform coverage workflow + gap-filling tests.
+## [v0.11.0] — 2026-04-23
+
+Go 1.21 baseline (Windows 7 binary support), Opener composition analog to
+wsyscall.Caller, SelfInjector interface, DoSecret runtime/secret
+integration, sleepmask bug fix + e2e tests, reproducible cross-platform
+coverage workflow.
+
+### Breaking (pre-1.0 minor bump)
+
+- `evasion/unhook.ClassicUnhook(funcName, caller)` →
+  `ClassicUnhook(funcName, caller, opener stealthopen.Opener)`. Pass `nil`
+  for opener to keep the historic path-based ntdll.dll read. (e674462)
+- `evasion/unhook.FullUnhook(caller)` →
+  `FullUnhook(caller, opener stealthopen.Opener)`. Same nil fallback. (e674462)
+- `inject.PhantomDLLInject(pid, dll, shellcode)` →
+  `PhantomDLLInject(pid, dll, shellcode, opener stealthopen.Opener)`. The
+  opener is consulted twice: PE-parse read + NtCreateSection HANDLE.
+  (e674462)
+- `go.mod` directive: `go 1.25.0` → `go 1.21`. Requires downgrade of
+  `github.com/refraction-networking/utls` to v1.6.7,
+  `golang.org/x/{arch,crypto,sync,sys,text}` to their last Go-1.21-compatible
+  versions. No regression in used APIs (audited call-site by call-site).
+  Unlocks Go 1.21 compilation, which is the last Go release producing
+  binaries compatible with Windows 7 / Server 2008 R2. (5b0689e)
+
+### Added
+
+- `evasion/stealthopen.Opener` interface + `Standard`, `Stealth`,
+  `NewStealth`, `VolumeFromPath`, `Use` helpers. Mirrors how
+  `*wsyscall.Caller` is threaded through the library: optional, nil-safe,
+  swaps a path-based `os.Open` for `OpenFileById` via NTFS Object ID so
+  path-keyed EDR file hooks never observe the open. Wired into
+  `evasion/unhook`, `inject.PhantomDLLInject`, and
+  `evasion/herpaderping.Config.Opener` (new field). (e674462)
+- `cleanup/memory.DoSecret(func())` and `SecretEnabled()` — opt-in wrapper
+  around Go 1.26's experimental `runtime/secret.Do` for erasing registers,
+  stack locals, and heap temporaries of a sensitive computation. Selected
+  via build tags `go1.26 && goexperiment.runtimesecret`; stub fallback
+  everywhere else keeps the same API so callers can wrap unconditionally.
+  (5b0689e)
+- `cleanup/memory.SecureZero` is now cross-platform (moved out of
+  `memory_windows.go` into `memory.go`). `WipeAndFree` remains Windows-only.
+  (5b0689e)
+- `inject.Region` + `inject.SelfInjector` optional interface. Self-process
+  injectors (`MethodCreateThread`, `MethodCreateFiber`,
+  `MethodEtwpCreateEtwThread` on Windows, `MethodProcMem` on Linux) publish
+  the local allocation via `InjectedRegion() (Region, bool)` after a
+  successful Inject, so callers can feed it straight into `sleepmask.Mask`
+  or `cleanup/memory.WipeAndFree` without re-deriving addr/size.
+  Decorators (`WithValidation`, `WithCPUDelay`, `WithXOR`) and `Pipeline`
+  forward the region transparently. Cross-process methods return
+  `(Region{}, false)`. (5b0689e)
+- 6 e2e tests for `evasion/sleepmask` (`sleepmask_e2e_windows_test.go`):
+  concurrent `testutil.ScanProcessMemory` loop during `Mask.Sleep()`,
+  protection round-trip checks, multi-region, 10-cycle beacon stability,
+  `MethodBusyTrig` variant. Run via `./scripts/vm-run-tests.sh windows`.
+  (5b0689e, 82a9ab7)
+- Opener-wiring tests: `evasion/stealthopen/opener{_,_windows_}test.go`,
+  `evasion/unhook/opener_windows_test.go`,
+  `inject/phantomdll_opener_test.go`,
+  `evasion/herpaderping/opener_windows_test.go`. Cover both the
+  `Standard`/`Use(nil)` fallback and the real `NewStealth` round-trip
+  through `OpenFileById`, plus spy-opener assertions that each consumer
+  consults the Opener the expected number of times. (e674462)
+- `cmd/vmtest`: new `-report-dir` flag with `Fetch()` method (scp for
+  libvirt, `VBoxManage copyfrom` for VBox). Auto-injects
+  `-coverprofile=<guest-path>` into forwarded `go test` invocations, tees
+  `test.log`, and repatriates `cover.out` plus `clrhost-cover.out` when
+  the guest produced one. (8aac278)
+- `scripts/coverage-merge.go`: merges N Go cover profiles (union with
+  per-block max hit count) and renders a Markdown gap report sorted by
+  ascending coverage. (8aac278)
+- `scripts/full-coverage.sh`: orchestrates host + Linux VM + Windows VM +
+  Kali end-to-end, exports every `MALDEV_*` gate, restores to
+  `--snapshot=NAME` (default `INIT`). Tolerant of test-level non-zero
+  exits so gated failures don't abort subsequent phases. (8aac278)
+- `scripts/vm-provision.sh`: idempotent per-VM tool install (NetFx3 via
+  DISM SYSTEM scheduled task, postgresql + msfdb init on Kali). Takes a
+  `TOOLS` snapshot when it's done. (8aac278)
+- `docs/coverage-workflow.md`: canonical reference for the coverage
+  workflow — snapshots, gates, layout, known blockers (QEMU pause race,
+  CLR v2 COM activation on TOOLS snapshot), reproduction recipe. (8aac278)
+- 16 gap-filling tests covering non-Windows stubs (c2/transport/namedpipe,
+  evasion/{fakecmd,hideprocess,preset,stealthopen,hook,hook/probe,
+  hook/remote,hook/bridge/controller}, system/ads, process/session,
+  pe/clr, cet) plus Windows-only factory tests (evasion/unhook,
+  evasion/hwbp) and `internal/compat/{cmp,slices}` polyfill smoke tests.
+  (914aab4)
+- `testutil/kali_test.go`: env-var resolvers (`kaliSSHHost/Port/Key/User`)
+  with both override and fallback paths. (914aab4)
+- `pe/clr` subprocess coverage: `testutil/clrhost` now builds with
+  `go build -cover -covermode=atomic`, `GOCOVERDIR` points at a stable
+  temp dir, `go tool covdata textfmt` converts to `clrhost-cover.out`
+  which `cmd/vmtest` fetches and `coverage-merge` unions with the main
+  profile. Ships with `testutil/clrhost/maldev_clr_test.dll` (3 KB .NET
+  2.0 assembly) for `TestExecuteDLLReal`. (d0b9e0f)
+- 8 deeper tests for `evasion/hook/bridge` Controller (`CallOriginal`,
+  `ArgsDefault`, `SetReturnNoPanic`, `LogViaTransport`,
+  `LogStandaloneNoop`, `ExfilStandaloneNoop`, `AskStandaloneAlwaysAllows`)
+  and 2 hook lifecycle tests (`TestReinstallAfterRemove`,
+  `TestInstallOnPristineTargetAfterGroupRollback`). (94a57cf)
+
+### Fixed
+
+- `evasion/sleepmask.Mask.Sleep`: crash (`STATUS_ACCESS_VIOLATION`) on the
+  standard post-inject `PAGE_EXECUTE_READ` region. The encrypt phase did
+  XOR *before* the `VirtualProtect(PAGE_READWRITE)` downgrade, so the
+  first XOR byte faulted on a read-only executable page. Reordered to
+  VirtualProtect-then-XOR. Existing tests allocated `PAGE_EXECUTE_READWRITE`
+  so never hit the bug; the new e2e test suite pins the correct order.
+  (5b0689e)
+- `evasion/sleepmask_e2e_test.TestSleepMaskE2E_DefeatsExecutablePageScanner`:
+  timing race under coverage instrumentation — the scanner goroutine could
+  fire its first pass before `mask.Sleep` completed the encrypt phase,
+  triggering a legitimate hit against still-unmasked memory. Gated behind
+  a busy-wait barrier on `VirtualQuery(addr).Protect == PAGE_READWRITE`
+  so the scanner only starts counting once the mask is provably engaged.
+  (82a9ab7)
+- `evasion/hook.TestReinstallAfterRemove`: overspecified assertion
+  `require.NotEqual(h1.Trampoline(), h2.Trampoline())`. Windows's
+  `VirtualFree(MEM_RELEASE)` + `VirtualAlloc(0)` of the same size may
+  reuse the address (and does so reliably under coverage). Replaced with
+  a byte-equality check against the captured pristine prologue — the
+  actual correctness property the test's docstring claims ("no residual
+  bytes"). (9bdf43f)
+- `evasion/sleepmask/doc.go`: corrected description — `MethodNtDelay`
+  uses Go's `time.Sleep` (which goes through `NtWaitForSingleObject` on a
+  timer), not an explicit `NtDelayExecution` via Caller. The docstring
+  now also tells the reader that the XOR key lives on the Go stack during
+  sleep. (5b0689e)
+- `evasion/timing.TestBusyWaitPrimality`: upper bound 10s → 60s. VM CPU
+  is shared and non-deterministic; the fixed-workload check still guards
+  against infinite loops. (914aab4)
+- `inject/linux_test.TestProcMemSelfInject`: now retries 3× and matches
+  `PROCMEM_OK` in stdout instead of requiring exit 0. The child's Go
+  runtime can SIGSEGV during exit cleanup after injection succeeded — the
+  marker is the real success signal. (914aab4)
+
+### Docs
+
+- `docs/techniques/cleanup/memory-wipe.md`: honest implementation section
+  (`SecureZero` delegates to Go's `clear` builtin — Go 1.21+ intrinsic;
+  legacy `unsafe.Pointer` fallback is dead code at the module's `go 1.21`
+  baseline). New section on `DoSecret` and the build-tag matrix.
+- `docs/techniques/evasion/sleep-mask.md`: rewritten. Mermaid diagram
+  fixed for the order-of-operations. New "Verifying It Works" section
+  with extracts from the e2e tests. "Common Pitfalls" section covering
+  the RX-page crash, XOR key on stack, short-sleep overhead, and
+  `MethodNtDelay` still going through the kernel scheduler. New
+  "Integrating with inject.SelfInjector" section showing the canonical
+  beacon-loop pattern.
+- `docs/techniques/evasion/stealthopen.md`: new "Composing with Other
+  Packages — the Opener Pattern" section with wiring table pointing at
+  every consumer and their test files.
+- `docs/techniques/injection/README.md`: new "SelfInjector — Getting the
+  Region Back" section with contract details and sample code.
+- `docs/techniques/evasion/ntdll-unhooking.md`,
+  `docs/techniques/injection/phantom-dll.md`: signatures + examples
+  updated for the new opener parameter.
+- `docs/testing.md`: new Opener coverage table pointing at every new
+  test file and the commands to run each VM-side suite.
+
+### Coverage
+
+Baseline 39.4% (Linux host only, no gates) → **52.40% merged** across
+the host + ubuntu20.04 VM + Windows VM + Kali (full gates open). Full
+report at `ignore/coverage/report-full.md`.
+
+
 
 ### Added
 
