@@ -3,9 +3,11 @@
 package hook
 
 import (
-	"syscall"
+	"bytes"
 	"sync/atomic"
+	"syscall"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/windows"
@@ -60,9 +62,23 @@ func TestReinstallAfterRemove(t *testing.T) {
 	require.Equal(t, int32(1), secondCalls.Load(), "re-install handler did not fire")
 	require.Equal(t, int32(1), firstCalls.Load(), "first handler fired after remove")
 
-	// Trampoline addresses must differ — they're freshly allocated per Install.
-	require.NotEqual(t, h1.Trampoline(), h2.Trampoline(),
-		"re-installed hook reused the stale trampoline")
+	// The h2 trampoline must contain a freshly copied prologue of the real
+	// GetTickCount64 (we can read its current first bytes directly from the
+	// loaded module — the target is now JMP-patched again, but we captured
+	// what the prologue SHOULD be via h1.origBytes while the function was
+	// still pristine). If the allocator happened to reuse h1's address for
+	// h2 (common under coverage instrumentation: VirtualFree then
+	// VirtualAlloc of the same size often reuses the page) the test must
+	// still pass — same address is fine as long as the bytes were re-copied
+	// cleanly, not residual from h1. Asserting address-inequality would
+	// overspecify the Windows allocator; asserting prologue-equality pins
+	// the actual correctness property (no residual state).
+	stealLen := len(h1.origBytes)
+	h2Bytes := unsafe.Slice((*byte)(unsafe.Pointer(h2.Trampoline())), stealLen)
+	require.True(t, bytes.Equal(h1.origBytes, h2Bytes),
+		"h2 trampoline prologue %x does not match the pristine prologue %x "+
+			"— residual state from h1 or stale copy",
+		h2Bytes, h1.origBytes)
 }
 
 // TestInstallOnPristineTargetAfterGroupRollback covers a subtle corruption
