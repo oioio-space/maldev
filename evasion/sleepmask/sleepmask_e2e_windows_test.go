@@ -71,12 +71,33 @@ func TestSleepMaskE2E_DefeatsExecutablePageScanner(t *testing.T) {
 
 	mask := New(Region{Addr: addr, Size: uintptr(len(payload))})
 
-	var scanHits int32 // how many concurrent scans found the marker
+	// The scanner goroutine must NOT start counting hits until the mask
+	// has actually downgraded the region to PAGE_READWRITE + XOR-scrambled
+	// the bytes. Before that — in the microseconds between `go func()` and
+	// mask.Sleep's first VirtualProtect — the canary is legitimately still
+	// on an executable page, and a scan would correctly find it. That
+	// window is wider under coverage instrumentation. We spin on
+	// VirtualQuery until we see RW protection, then start the real scan
+	// loop. This pins the property "once masked, scanner is blind".
+	var scanHits int32
 	var scanAttempts int32
 	stopScan := make(chan struct{})
 	scanDone := make(chan struct{})
 	go func() {
 		defer close(scanDone)
+		// Barrier: wait until the mask has engaged (region is RW).
+		for {
+			select {
+			case <-stopScan:
+				return
+			default:
+			}
+			if queryProtect(t, addr) == windows.PAGE_READWRITE {
+				break
+			}
+			time.Sleep(500 * time.Microsecond)
+		}
+		// Masked window.
 		for {
 			select {
 			case <-stopScan:
@@ -100,7 +121,7 @@ func TestSleepMaskE2E_DefeatsExecutablePageScanner(t *testing.T) {
 	assert.Zero(t, hits,
 		"concurrent scanner must NOT find canary on executable pages during masked sleep (hits=%d / attempts=%d)",
 		hits, attempts)
-	assert.Greater(t, attempts, int32(5), "scanner must have run several passes during the 300ms sleep (got %d)", attempts)
+	assert.Greater(t, attempts, int32(5), "scanner must have run several passes during the masked window (got %d)", attempts)
 
 	// After sleep: canary is back on an executable page.
 	_, ok = testutil.ScanProcessMemory(marker)
