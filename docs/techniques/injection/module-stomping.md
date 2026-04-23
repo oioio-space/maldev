@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1055.001 -- Process Injection: DLL Injection | **D3FEND:** D3-SICA -- System Image Change Analysis | **Detection:** Medium
 
-## For Beginners
+## Primer
 
 Picture a library with hundreds of books. Each book is trusted by the librarian because it was placed there by the publisher. Now imagine you open one of those books -- say, a rarely-read reference manual -- carefully remove a page, and replace it with your own content. Anyone who checks the spine sees a legitimate book from a trusted publisher. They would have to read the actual page to notice the swap.
 

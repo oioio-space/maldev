@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1055.004 -- Process Injection: Asynchronous Procedure Call | **D3FEND:** D3-PSA -- Process Spawn Analysis | **Detection:** Medium
 
-## For Beginners
+## Primer
 
 Imagine you are starting a new restaurant. Before the chef even arrives for their first day, you slip your recipe into their to-do queue. When the chef shows up and starts working, the first thing they do is check their queue and cook your dish -- they never even question it because it was there before they began.
 

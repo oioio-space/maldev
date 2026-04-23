@@ -9,7 +9,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Every Windows EXE or DLL carries a list of the functions it calls from other DLLs — the import table. Reading it tells you exactly which kernel or user-mode APIs the binary relies on, without running it. Defenders use this for triage; offensive tooling uses it to scope unhooking and reduce noise.
 

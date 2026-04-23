@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Go binaries are uniquely identifiable. They contain a timestamp showing when they were compiled, a `pclntab` structure that tools like IDA's go_parser and GoReSym use to reconstruct function names, and section names like `.gopclntab` that immediately identify the binary as Go.
 

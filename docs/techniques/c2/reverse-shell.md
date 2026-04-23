@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 A reverse shell flips the normal connection direction. Instead of you connecting to a remote computer, the remote computer connects to you. This is essential in post-exploitation because firewalls typically block inbound connections but allow outbound ones.
 

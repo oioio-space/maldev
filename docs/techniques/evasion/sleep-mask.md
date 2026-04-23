@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1027 -- Obfuscated Files or Information | **D3FEND:** D3-SMRA -- System Memory Range Analysis | **Detection:** Low
 
-## For Beginners
+## Primer
 
 When you go to sleep at night, you are vulnerable -- anyone could search your house and read your diary. But what if, every night before bed, you lock your diary in a safe with a random combination, and when you wake up, you unlock it and continue writing? Anyone who searches your house while you sleep finds only an unreadable locked safe.
 

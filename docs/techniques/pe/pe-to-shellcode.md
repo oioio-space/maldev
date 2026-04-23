@@ -6,7 +6,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 When you want to run a program inside another process, the operating system normally insists the program live on disk as a `.exe` or `.dll` file. What if you could turn that program into raw bytes -- shellcode -- and inject it anywhere you like, with no file on disk?
 

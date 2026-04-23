@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1055.001 -- Process Injection: DLL Injection | **D3FEND:** D3-PSA -- Process Spawn Analysis | **Detection:** Low-Medium
 
-## For Beginners
+## Primer
 
 Imagine a company has a shared inbox where employees pick up work assignments. Instead of hiring a new employee to do your task (which would be noticed by HR), you drop your task into the shared inbox. One of the existing workers picks it up during their normal workflow and completes it. Nobody was hired, nobody was fired, and the task got done by a regular employee.
 

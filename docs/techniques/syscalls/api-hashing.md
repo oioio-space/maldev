@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 When your program calls `VirtualAlloc`, the string `"VirtualAlloc"` appears in the binary. Any analyst running `strings` on your executable can see exactly which dangerous APIs you use.
 

@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1055.001 -- Process Injection: DLL Injection | **D3FEND:** D3-PSA -- Process Spawn Analysis | **Detection:** Medium
 
-## For Beginners
+## Primer
 
 Think of a shared whiteboard in an office building. You go to the supply room and request a new whiteboard (a "section"). You mount it on the wall in your own office and write your instructions on it. Then you ask building management to mount the same whiteboard in your colleague's office -- not a copy, the exact same board. Your colleague can now read and execute those instructions, and at no point did you walk into their office to write anything. You only wrote on the board in your own space.
 

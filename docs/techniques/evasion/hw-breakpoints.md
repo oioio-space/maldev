@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1622 -- Debugger Evasion | **D3FEND:** D3-DICA -- Debug Instruction/Command Analysis | **Detection:** Low
 
-## For Beginners
+## Primer
 
 Some security systems use invisible tripwires instead of visible ones. Whereas a software hook modifies the code itself (and can be detected by checking the code bytes), a hardware breakpoint uses the CPU's built-in debug registers to monitor specific memory addresses without modifying any code. When the CPU executes an instruction at a watched address, it triggers a debug exception that the security tool catches.
 

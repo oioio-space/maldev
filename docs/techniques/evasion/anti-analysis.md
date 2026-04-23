@@ -4,7 +4,7 @@
 
 [← Back to Evasion Overview](README.md)
 
-## For Beginners
+## Primer
 
 Before doing anything sensitive, a smart implant checks if it's being watched. Think of it as a spy looking for two-way mirrors, hidden cameras, and fake environments before opening their briefcase.
 

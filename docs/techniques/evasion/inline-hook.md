@@ -9,6 +9,34 @@
 
 ---
 
+## Primer
+
+Every Windows function — `MessageBoxW`, `CreateFileW`, `NtAllocateVirtualMemory`
+— lives at some address in memory and starts with a short sequence of
+instructions called its **prologue**. An *inline hook* rewrites the first
+bytes of that prologue so the CPU jumps to **your** code instead. Your
+callback inspects (or modifies) the arguments, then either lets the original
+function run by calling a small *trampoline* that re-executes the patched
+bytes and jumps back, or returns a synthetic result without ever running
+the real function.
+
+This single primitive underlies a huge fraction of both offensive and
+defensive tooling:
+- **EDR agents** hook `NtAllocateVirtualMemory` / `NtProtectVirtualMemory`
+  in userland to flag shellcode-like allocations before they run.
+- **Red-team tools** hook `AmsiScanBuffer` to make every scan return
+  "clean", or `EtwEventWrite` to suppress telemetry.
+- **Malware researchers** hook APIs they want to trace (args, return value)
+  without attaching a debugger.
+
+`evasion/hook` is a pure-Go, no-CGo, x64-only implementation: it allocates a
+**relay page within ±2 GB** of the target (so a 5-byte `JMP rel32` is
+enough), writes a JMP to the relay, and the relay hops to a Go callback via
+`syscall.NewCallback`. An `Install/Uninstall` pair restores the original
+bytes on demand.
+
+---
+
 ## What It Does
 
 Intercepts calls to any exported Windows function by patching its prologue

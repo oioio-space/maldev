@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Shellcode and payloads contain recognizable byte patterns that antivirus engines match with signatures. If your shellcode sits in the binary as plaintext, it will be detected before it ever runs.
 

@@ -7,7 +7,7 @@
 | Platform | Windows |
 | Detection | Medium |
 
-## For Beginners
+## Primer
 
 Most C2 traffic leaves the host over TCP or HTTP, which firewalls and network sensors inspect closely. Windows named pipes are an on-host IPC channel that Windows services use constantly, so traffic between two local processes over a pipe looks identical to normal OS activity.
 
@@ -18,6 +18,29 @@ An implant can beacon to a local relay (or to another session over SMB) through 
 Provides a C2 transport over Windows named pipes, implementing both client (`transport.Transport`) and server (`transport.Listener`) interfaces. Named pipes are a native IPC mechanism used extensively by Windows services, making pipe-based C2 traffic blend with legitimate OS activity.
 
 ## How It Works
+
+```mermaid
+sequenceDiagram
+    participant Server as namedpipe.PipeListener
+    participant NP as Named Pipe (\\.\pipe\c2agent)
+    participant Client as namedpipe.Pipe
+
+    Server->>NP: CreateNamedPipeW (duplex, byte mode)
+    Server->>NP: ConnectNamedPipe (blocks)
+
+    Client->>NP: WaitNamedPipeW (timeout)
+    Client->>NP: CreateFile(GENERIC_READ|GENERIC_WRITE)
+    NP-->>Server: ERROR_PIPE_CONNECTED (race) / signalled
+    NP-->>Client: handle wrapped as pipeConn
+
+    Note over Server,Client: Both endpoints now hold a net.Conn.<br/>Traffic stays on the local SMB/IPC subsystem —<br/>never touches the network stack, TCP, or HTTP.
+
+    Client->>NP: Write(beacon)
+    NP->>Server: Accept returns pipeConn
+    Server->>NP: Read → dispatch
+    Server->>NP: Write(response)
+    NP->>Client: Read
+```
 
 ### Server Flow
 
@@ -68,6 +91,59 @@ p := namedpipe.New(`\\.\pipe\c2agent`, 5*time.Second)
 p.Connect(ctx)
 defer p.Close()
 p.Write([]byte("beacon"))
+```
+
+### Advanced — concurrent server with cancellation
+
+One `PipeListener` can accept up to 255 concurrent pipe instances. The common
+pattern is a `for`-loop that calls `Accept` and hands each `net.Conn` to a
+dedicated goroutine, with the top-level `context.Context` plumbed through so
+`Close()` on the listener cleanly unblocks everything.
+
+```go
+package main
+
+import (
+    "context"
+    "io"
+    "log"
+    "net"
+    "os/signal"
+    "syscall"
+
+    "github.com/oioio-space/maldev/c2/transport/namedpipe"
+)
+
+func handle(conn net.Conn) {
+    defer conn.Close()
+    // Echo framing example — real C2 would dispatch a command.
+    io.Copy(conn, conn)
+}
+
+func main() {
+    ctx, stop := signal.NotifyContext(context.Background(),
+        syscall.SIGINT, syscall.SIGTERM)
+    defer stop()
+
+    ln, err := namedpipe.NewListener(`\\.\pipe\c2agent`)
+    if err != nil {
+        log.Fatal(err)
+    }
+    // Closing the listener on shutdown unblocks the outstanding Accept.
+    go func() { <-ctx.Done(); ln.Close() }()
+
+    for {
+        conn, err := ln.Accept(ctx)
+        if err != nil {
+            if ctx.Err() != nil {
+                return // clean shutdown
+            }
+            log.Printf("accept: %v", err)
+            continue
+        }
+        go handle(conn)
+    }
+}
 ```
 
 ### With multicat

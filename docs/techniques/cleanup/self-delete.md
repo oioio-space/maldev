@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 After an implant has done its job, you want it to disappear. The problem is that Windows locks the executable file while the process is running -- you cannot simply delete it.
 

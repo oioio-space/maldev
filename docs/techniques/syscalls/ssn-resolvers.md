@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Every Windows kernel function has a secret number called the SSN (Syscall Service Number). When you want to call the kernel directly (bypassing EDR hooks), you need to know this number. The problem is, these numbers are not documented and change between Windows versions.
 

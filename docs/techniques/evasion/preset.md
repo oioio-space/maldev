@@ -12,7 +12,7 @@ configurations keyed on risk tolerance. Each preset returns
 
 ---
 
-## For Beginners
+## Primer
 
 Evasion rarely works in isolation — AMSI alone misses ETW, ETW alone misses userland hooks. Presets are pre-composed bundles (`Minimal`, `Stealth`, `Aggressive`) that apply a coherent set of techniques in one call. Pick one, ship it, don't micromanage the pieces.
 

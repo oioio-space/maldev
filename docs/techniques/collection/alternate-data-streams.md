@@ -9,7 +9,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Imagine a filing cabinet where every folder has a visible main pocket, but also a row of thin hidden pockets along the back that most people don't know exist. You can stuff papers into those hidden pockets and they won't appear when someone looks inside the folder normally — only someone who specifically searches for the hidden pockets will find them.
 

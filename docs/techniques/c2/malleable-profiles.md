@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Even with TLS encryption, network monitors can see the URL patterns, HTTP headers, and request timing of your C2 traffic. If your malware makes POST requests to `/api/data` every 5 seconds, that is easy to spot.
 

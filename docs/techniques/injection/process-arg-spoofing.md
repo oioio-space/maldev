@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1055.012 -- Process Injection: Process Hollowing | **D3FEND:** D3-PSMD -- Process Spawn Monitoring and Detection | **Detection:** Medium
 
-## For Beginners
+## Primer
 
 Imagine walking up to a security guard and saying "I am going to the library to study." The guard logs your stated destination and waves you through. Once past the checkpoint, you take a sharp turn and head to the vault instead. The security log still says "library" -- nobody knows you went somewhere else unless they physically follow you.
 

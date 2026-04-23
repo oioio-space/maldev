@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1055.001 -- Process Injection: DLL Injection | **D3FEND:** D3-SICA -- System Image Change Analysis | **Detection:** Low-Medium
 
-## For Beginners
+## Primer
 
 Imagine a company issues official ID badges with photos and names. Each badge is linked to an entry in the security database showing the employee's identity and department. Now picture cloning a real badge -- it has the correct hologram, the correct barcode, and scans as a legitimate employee in the database. But the photo on the badge is yours. When the security guard checks the badge, it scans as valid. They would have to look very closely at the photo to notice anything wrong.
 

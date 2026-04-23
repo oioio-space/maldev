@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 When your program needs Windows to do something (allocate memory, create a thread), it normally goes through the official front desk -- `kernel32.dll` and `ntdll.dll`. EDR products stand at this front desk, logging every request.
 

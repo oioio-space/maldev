@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1055 -- Process Injection | **Detection:** Low -- internal ntdll function, rarely monitored by EDR
 
-## For Beginners
+## Primer
 
 Imagine a building has a main entrance guarded by security. Everyone who walks through the front door is checked and logged. But deep inside the building, there is a service elevator used only by maintenance staff. Security never watches it because it was never meant for visitors.
 

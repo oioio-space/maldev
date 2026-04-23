@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 UPX is the most popular executable packer -- it compresses binaries to reduce their size. The problem is that UPX-packed binaries have well-known section names (`UPX0`, `UPX1`, `UPX2`) that every antivirus and EDR recognizes instantly.
 
@@ -104,6 +104,68 @@ if err != nil {
 os.WriteFile("implant-restored.exe", restored, 0644)
 // Can now be unpacked with: upx -d implant-restored.exe
 ```
+
+---
+
+## Combined Example — Morph + Fuzzy Hash Fingerprint
+
+UPXMorph changes 24 bytes (three 8-byte section name fields). That is enough
+to break SHA-256-based blocklists entirely. But defenders using ssdeep or
+TLSH still detect the variant because 99.99 % of the binary is unchanged.
+This example makes the contrast concrete:
+
+```go
+package main
+
+import (
+    "fmt"
+    "os"
+
+    "github.com/oioio-space/maldev/hash"
+    "github.com/oioio-space/maldev/pe/morph"
+)
+
+func main() {
+    packed, _ := os.ReadFile("implant-upx.exe")
+
+    // Hash the original.
+    sha256Before := hash.SHA256(packed)
+    ssBefore, _  := hash.Ssdeep(packed)
+    tlBefore, _  := hash.TLSH(packed)
+
+    // Morph: only UPX section names change.
+    morphed, err := morph.UPXMorph(packed)
+    if err != nil {
+        fmt.Fprintln(os.Stderr, err)
+        os.Exit(1)
+    }
+
+    // Hash the morphed copy.
+    sha256After := hash.SHA256(morphed)
+    ssAfter, _  := hash.Ssdeep(morphed)
+    tlAfter, _  := hash.TLSH(morphed)
+
+    ssScore, _ := hash.SsdeepCompare(ssBefore, ssAfter)
+    tlDist, _  := hash.TLSHCompare(tlBefore, tlAfter)
+
+    fmt.Printf("SHA-256  before: %s\n", sha256Before)
+    fmt.Printf("SHA-256  after:  %s\n", sha256After)
+    fmt.Printf("same?    %v\n\n", sha256Before == sha256After) // false
+
+    fmt.Printf("ssdeep score:    %d / 100\n", ssScore)   // ~97
+    fmt.Printf("TLSH distance:   %d\n", tlDist)          // ~12
+
+    // SHA-256 blocklist → miss.
+    // ssdeep / TLSH similarity scan → hit (~97 score, ~12 distance).
+    _ = os.WriteFile("implant-morphed.exe", morphed, 0o644)
+}
+```
+
+**What this tells a defender:** a morphed UPX binary evades every hash-based
+IOC but is trivially flagged by a similarity scan against the pre-morph
+sample. Layering morph with `pe/strip` (section rename + pclntab wipe)
+closes part of that gap, but TLSH distance only grows to ~30–50 —
+still well within "same family" range for most tools.
 
 ---
 

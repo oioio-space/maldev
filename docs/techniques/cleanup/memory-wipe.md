@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 After your shellcode runs, its decrypted bytes, encryption keys, and C2 addresses all sit in memory. If the process is dumped (by an analyst or an EDR), all that sensitive data is exposed.
 

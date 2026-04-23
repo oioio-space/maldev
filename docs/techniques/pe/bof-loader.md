@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Cobalt Strike introduced Beacon Object Files (BOFs) -- small compiled C programs in COFF format that run inside the beacon process. They are powerful post-exploitation tools, but normally you need Cobalt Strike to use them.
 

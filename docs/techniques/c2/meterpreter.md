@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Metasploit's Meterpreter is a powerful post-exploitation toolkit, but it needs to be loaded onto the target somehow. The full Meterpreter payload is large (hundreds of KB), so it is split into two parts:
 

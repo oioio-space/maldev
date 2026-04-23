@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1055.003 -- Process Injection: Thread Execution Hijacking | **D3FEND:** D3-PSA -- Process Spawn Analysis | **Detection:** Medium
 
-## For Beginners
+## Primer
 
 Picture a runner in the middle of a race. You press a "freeze" button and the runner stops mid-stride. While they are frozen, you swap their destination card -- instead of running to the finish line, their card now says "run to the coffee shop." You press "unfreeze" and the runner continues running, but now they head to the coffee shop instead of the finish line, never realizing the switch happened.
 

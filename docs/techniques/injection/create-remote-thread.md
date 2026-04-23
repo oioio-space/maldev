@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1055.001 -- Process Injection: DLL Injection | **D3FEND:** D3-PSA -- Process Spawn Analysis | **Detection:** High
 
-## For Beginners
+## Primer
 
 Imagine you have a recipe you want someone else to cook. CreateRemoteThread injection is like copying that recipe into someone else's cookbook, then asking the kitchen manager to assign a chef to prepare it. The chef (thread) is new -- they did not exist before you asked -- which is why kitchen security (EDR) tends to notice.
 

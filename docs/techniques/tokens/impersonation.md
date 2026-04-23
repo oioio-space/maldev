@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Token theft gives you a copy of someone else's badge. Thread impersonation goes further -- it lets a specific thread in your process temporarily wear that badge to perform actions as that user, then revert back to your original identity.
 

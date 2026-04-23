@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1562.001 -- Impair Defenses: Disable or Modify Tools | **D3FEND:** D3-AIPA -- Application Integrity Protection Analysis | **Detection:** Low
 
-## For Beginners
+## Primer
 
 Imagine you are in a clean room doing sensitive work. You lock the door so nobody can enter, and you cover all the air vents so nothing can be blown in. That is what ACG and BlockDLLs do to your process.
 

@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Even if you have an administrator account on Windows, your processes run with limited privileges by default. User Account Control (UAC) prevents automatic elevation -- you need to explicitly "Run as administrator" for each program.
 

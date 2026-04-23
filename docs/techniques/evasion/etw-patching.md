@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1562.001 -- Impair Defenses: Disable or Modify Tools | **D3FEND:** D3-EAL -- Execution Activity Logging | **Detection:** Medium
 
-## For Beginners
+## Primer
 
 Think of security cameras in a building. They record everything that happens: who enters, who exits, what they carry. Even if you get past the front door, the cameras capture your movements. Now imagine you replace the live camera feed with a still image of an empty hallway. The security monitors show nothing happening. Guards watching the screens see an empty, quiet building while you move freely.
 

@@ -9,7 +9,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Lots of offensive tooling ships as .NET (Rubeus, SharpHound, Seatbelt). `pe/clr` loads the .NET runtime inside your Go process and executes that tooling from memory — no `powershell.exe`, no `InstallUtil.exe`, no child process for the defender to scope.
 

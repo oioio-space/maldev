@@ -9,6 +9,29 @@
 
 ---
 
+## Primer
+
+Before AV vendors write a signature for your payload, they usually detonate it
+in an automated **sandbox** — a throwaway VM that runs the sample, watches
+what it does, and decides "malware" or "benign" within a few minutes. These
+sandboxes leave fingerprints: small RAM, few CPU cores, artificial
+usernames (`sandbox`, `malware`, `John Doe`), analysis tools running
+(`procmon.exe`, `wireshark.exe`), fake DNS that answers every lookup with
+`127.0.0.1`, and no real internet.
+
+The `sandbox` package bundles a dozen of those indicators behind a single
+`Checker.IsSandboxed(ctx)` call. You wire it into your implant's startup
+path, and if enough indicators fire you exit cleanly (or sleep until the
+analysis window closes). Analysts then see a sample that "does nothing",
+the sandbox verdicts *benign*, and your real payload only runs on the
+operator's actual target.
+
+No single check is decisive — a developer laptop with 8 GB of RAM is not a
+sandbox. The package reports **how many** indicators fired so you can tune
+the threshold.
+
+---
+
 ## What It Does
 
 Aggregates multiple sandbox and analysis-environment indicators into a single

@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1562.001 -- Impair Defenses: Disable or Modify Tools | **D3FEND:** D3-AIPA -- Application Integrity Protection Analysis | **Detection:** Medium
 
-## For Beginners
+## Primer
 
 When you enter a building, there is a security scanner at the door that checks your bag for contraband. Everything you carry goes through the scanner. If something looks dangerous, the scanner flags it and security stops you. But what if you could tape over the scanner's lens? The scanner still runs, it still looks like it is working, but it cannot actually see anything. Everything passes through as "clean."
 

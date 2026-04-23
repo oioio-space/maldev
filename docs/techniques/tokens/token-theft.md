@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Every process on Windows runs under a security token that defines who it is and what it can do. A SYSTEM process has a powerful token; a regular user process has a limited one.
 

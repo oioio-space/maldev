@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1055.004 -- Process Injection: Asynchronous Procedure Call | **Detection:** Medium -- uses undocumented APC flag, but targets remote processes
 
-## For Beginners
+## Primer
 
 Standard APC injection (Early Bird, QueueUserAPC) has a fundamental limitation: the target thread must enter an "alertable wait" state before the APC fires. This means you either need to create a new suspended process (Early Bird) or hope an existing thread calls `SleepEx`, `WaitForSingleObjectEx`, or similar. If no thread ever enters an alertable wait, your shellcode never runs.
 

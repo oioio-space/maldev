@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1055.001 -- Process Injection: DLL Injection | **D3FEND:** D3-PSA -- Process Spawn Analysis | **Detection:** Medium
 
-## For Beginners
+## Primer
 
 Every employee in a company has a speed-dial list for routine tasks: press 1 for IT support, press 2 for HR, press 3 for facilities. Now imagine you sneak into the office and change the number for "facilities" to your own phone number. When the employee presses button 3 as part of their normal routine, they call you instead. After your conversation, you restore the original number so nobody suspects anything.
 

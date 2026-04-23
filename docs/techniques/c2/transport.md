@@ -7,7 +7,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 When a reverse shell or stager talks to the C2 server, the connection itself can give you away. Plain TCP is visible to any network monitor. TLS encrypts the traffic, but Go's default TLS has a unique fingerprint (JA3 hash) that screams "this is a Go program, not a browser."
 

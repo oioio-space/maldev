@@ -9,6 +9,27 @@
 
 ---
 
+## Primer
+
+Automated malware sandboxes have a budget: they can only run each sample for
+a few minutes before moving on to the next one. Malware authors exploit
+this by adding a long `Sleep(10 * time.Minute)` at startup — by the time
+the sleep ends, the sandbox has already given up.
+
+Sandbox engineers responded by **hooking `Sleep` / `NtDelayExecution`** so
+that calls either return immediately or fast-forward an internal clock.
+The sample thinks it slept 10 minutes; in reality the CPU only ran for a
+few seconds.
+
+The `evasion/timing` package defeats the fast-forward by **never calling
+`Sleep` at all**. Instead it spins on real CPU work — an arithmetic or
+primality loop — that still needs its full wall-clock duration to
+complete, because a sandbox that fast-forwards the clock does not speed up
+the CPU. The downside is obvious: a core pinned at 100%, visible in any
+process monitor. That's the trade.
+
+---
+
 ## What It Does
 
 Provides CPU-burning delay functions that defeat sandbox analysis systems which
@@ -18,6 +39,31 @@ computation — the sandbox cannot fast-forward the delay without also
 fast-forwarding the CPU work.
 
 ## How It Works
+
+```mermaid
+sequenceDiagram
+    participant Payload
+    participant Sleep as Sleep / NtDelayExecution
+    participant Hook as Sandbox hook
+    participant Clock as Virtual clock
+    participant Burn as timing.BusyWait*
+
+    Note over Payload,Clock: Naive approach (defeated)
+    Payload->>Sleep: Sleep(30s)
+    Sleep->>Hook: intercepted
+    Hook->>Clock: advance +30s (no real wait)
+    Hook-->>Payload: return immediately
+    Note over Payload: Sandbox keeps analysing
+
+    Note over Payload,Burn: timing.BusyWait approach
+    Payload->>Burn: BusyWait(30s)
+    loop until deadline
+        Burn->>Burn: trig / primality work
+        Burn->>Burn: time.Now() vs deadline
+    end
+    Burn-->>Payload: return after 30s wall-clock
+    Note over Payload: Sandbox budget exhausted ⇒ verdict:"benign"
+```
 
 Automated sandboxes hook `NtDelayExecution` (the kernel path for all
 `Sleep`-family calls) and either return immediately or advance a virtual clock.

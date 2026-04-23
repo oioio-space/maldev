@@ -9,7 +9,7 @@
 
 ---
 
-## For Beginners
+## Primer
 
 Windows checks certain registry keys every time a user logs on. Any program path written to these keys is automatically executed. This is one of the most common persistence techniques — and one of the most monitored.
 

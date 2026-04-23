@@ -2,7 +2,7 @@
 
 > **MITRE ATT&CK:** T1055.001 -- Process Injection: DLL Injection | **D3FEND:** D3-PSA -- Process Spawn Analysis | **Detection:** Low-Medium
 
-## For Beginners
+## Primer
 
 Instead of hiring a new worker to carry out your task, you find an existing worker who already checks a to-do list as part of their normal job. You slip your task into that to-do list, and the existing worker picks it up without anyone noticing that a new employee showed up.
 
