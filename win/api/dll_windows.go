@@ -60,6 +60,12 @@ var (
 	ProcCreateTimerQueueTimer      = Kernel32.NewProc("CreateTimerQueueTimer")
 	ProcDeleteTimerQueue           = Kernel32.NewProc("DeleteTimerQueue")
 	ProcDeleteTimerQueueTimer      = Kernel32.NewProc("DeleteTimerQueueTimer")
+	ProcDeleteTimerQueueEx         = Kernel32.NewProc("DeleteTimerQueueEx")
+	ProcCreateTimerQueue           = Kernel32.NewProc("CreateTimerQueue")
+	ProcSetEvent                   = Kernel32.NewProc("SetEvent")
+	ProcExitThread                 = Kernel32.NewProc("ExitThread")
+	ProcVirtualProtect             = Kernel32.NewProc("VirtualProtect")
+	ProcWaitForSingleObjectEx      = Kernel32.NewProc("WaitForSingleObjectEx")
 	ProcReadDirectoryChangesW      = Kernel32.NewProc("ReadDirectoryChangesW")
 	ProcFlushInstructionCache      = Kernel32.NewProc("FlushInstructionCache")
 )
@@ -96,6 +102,8 @@ var (
 	ProcNtNotifyChangeDirectoryFile      = Ntdll.NewProc("NtNotifyChangeDirectoryFile")
 	ProcRtlRegisterWait                  = Ntdll.NewProc("RtlRegisterWait")
 	ProcRtlDeregisterWaitEx              = Ntdll.NewProc("RtlDeregisterWaitEx")
+	ProcNtContinue                       = Ntdll.NewProc("NtContinue")
+	ProcRtlCaptureContext                = Ntdll.NewProc("RtlCaptureContext")
 )
 
 // advapi32.dll procs
@@ -112,6 +120,7 @@ var (
 	ProcStartServiceW                       = Advapi32.NewProc("StartServiceW")
 	ProcQueryServiceStatusEx                = Advapi32.NewProc("QueryServiceStatusEx")
 	ProcCloseServiceHandle                  = Advapi32.NewProc("CloseServiceHandle")
+	ProcSystemFunction032                   = Advapi32.NewProc("SystemFunction032")
 )
 
 // user32.dll procs
