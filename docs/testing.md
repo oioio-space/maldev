@@ -140,6 +140,31 @@ msfconsole exits when stdin closes (not a crash — EOF). `nohup`/`screen` don't
 
 ClassicUnhook safelist: NtClose, NtCreateFile, NtReadFile, NtWriteFile, NtQueryVolumeInformationFile, NtQueryInformationFile, NtSetInformationFile, NtFsControlFile — all rejected to prevent Go runtime deadlock.
 
+### stealthopen.Opener composition
+
+The unhook, phantomdll, and herpaderping functions accept an optional
+`stealthopen.Opener` that mirrors the `*wsyscall.Caller` pattern: nil
+keeps the historic path-based `os.Open` / `windows.CreateFile`, non-nil
+(typically `*stealthopen.Stealth`) routes reads through `OpenFileById`
+and makes path-based EDR file hooks blind to the operation.
+
+| Package | Test file | Coverage |
+|---------|-----------|----------|
+| `evasion/stealthopen` | `opener_test.go` (host) | Standard.Open, Use(nil)==Standard, fake opener pass-through |
+| `evasion/stealthopen` | `opener_windows_test.go` (VM) | VolumeFromPath (drive/UNC/Win32/relative/empty), NewStealth round-trip via OpenFileById, Stealth.Open state validation, Stealth ignores caller's path argument |
+| `evasion/unhook` | `opener_windows_test.go` (VM, intrusive) | spyOpener counts: ClassicUnhook/FullUnhook each call `Open` exactly once on `ntdll.dll`; real Stealth round-trip proves full unhook still succeeds |
+| `inject` | `phantomdll_opener_test.go` (Windows build, host-safe) | spyOpener asserts PhantomDLLInject makes 2 opens on the same System32 DLL path (PE parse + NtCreateSection HANDLE) |
+| `evasion/herpaderping` | `opener_windows_test.go` (Windows build, host-safe) | spyOpener asserts payload+decoy reads both go through the Opener; empty DecoyPath → single call |
+
+Run just the Opener paths:
+
+```bash
+./scripts/vm-run-tests.sh windows "./evasion/stealthopen/..." "-v -count=1"
+./scripts/vm-run-tests.sh windows "./evasion/unhook/..." "-v -count=1 -run Opener"
+./scripts/vm-run-tests.sh windows "./inject/..." "-v -count=1 -run PhantomDLLInject_UsesProvidedOpener"
+./scripts/vm-run-tests.sh windows "./evasion/herpaderping/..." "-v -count=1 -run Opener"
+```
+
 ### Other Evasion
 
 | Technique | Test | Verification |
@@ -149,6 +174,7 @@ ClassicUnhook safelist: NtClose, NtCreateFile, NtReadFile, NtWriteFile, NtQueryV
 | Phant0m Kill | TestKillEventLogThreads | EventLog service threads terminated (TEB tag resolution) |
 | Herpaderping Run | TestRunWithDecoy | Disk file = decoy content, not original payload |
 | SleepMask Sleep | TestSleepMask_EncryptedDuringSleep | Bytes XOR-encrypted during sleep, restored after |
+| SleepMask e2e | TestSleepMaskE2E_DefeatsExecutablePageScanner | Concurrent scanner cannot find canary during masked sleep; protection round-trips |
 | AntiVM DetectVM | TestDetectVMInVirtualBox | Returns "VirtualBox" in VirtualBox VM |
 | AntiVM DetectProcess | TestDetectVBoxProcess | Finds VBoxService.exe, VBoxTray.exe |
 

@@ -9,19 +9,19 @@ import (
 )
 
 func TestPhantomDLLInject_NoPID(t *testing.T) {
-	err := PhantomDLLInject(0, "ntdll.dll", []byte{0xCC})
+	err := PhantomDLLInject(0, "ntdll.dll", []byte{0xCC}, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "valid target process")
 }
 
 func TestPhantomDLLInject_EmptyShellcode(t *testing.T) {
-	err := PhantomDLLInject(1234, "ntdll.dll", nil)
+	err := PhantomDLLInject(1234, "ntdll.dll", nil, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "empty")
 }
 
 func TestPhantomDLLInject_NegativePID(t *testing.T) {
-	err := PhantomDLLInject(-1, "ntdll.dll", []byte{0xCC})
+	err := PhantomDLLInject(-1, "ntdll.dll", []byte{0xCC}, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "valid target process")
 }

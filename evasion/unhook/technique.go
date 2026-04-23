@@ -123,7 +123,7 @@ func (t classicTechnique) Name() string { return fmt.Sprintf("unhook:Classic(%s)
 // Apply routes through the Caller for NtProtectVirtualMemory when non-nil,
 // falling back to standard WinAPI when nil.
 func (t classicTechnique) Apply(caller evasion.Caller) error {
-	return ClassicUnhook(t.funcName, evasion.AsCaller(caller))
+	return ClassicUnhook(t.funcName, evasion.AsCaller(caller), nil)
 }
 
 // fullTechnique implements evasion.Technique for FullUnhook.
@@ -134,7 +134,7 @@ func (fullTechnique) Name() string { return "unhook:Full" }
 // Apply routes through the Caller for NtProtectVirtualMemory/NtWriteVirtualMemory
 // when non-nil, falling back to standard WinAPI when nil.
 func (fullTechnique) Apply(caller evasion.Caller) error {
-	return FullUnhook(evasion.AsCaller(caller))
+	return FullUnhook(evasion.AsCaller(caller), nil)
 }
 
 // perunTechnique implements evasion.Technique for PerunUnhook.

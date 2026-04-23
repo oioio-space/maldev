@@ -77,13 +77,15 @@ import (
 )
 
 func main() {
-    // Classic: unhook a single function.
-    if err := unhook.ClassicUnhook("NtAllocateVirtualMemory", nil); err != nil {
+    // Classic: unhook a single function. 3rd arg is an optional
+    // stealthopen.Opener — nil = path-based read of ntdll.dll; pass a
+    // *stealthopen.Stealth to bypass path-based EDR hooks on that open.
+    if err := unhook.ClassicUnhook("NtAllocateVirtualMemory", nil, nil); err != nil {
         log.Fatal(err)
     }
 
-    // Full: unhook ALL ntdll functions at once.
-    if err := unhook.FullUnhook(nil); err != nil {
+    // Full: unhook ALL ntdll functions at once. Same Opener semantics.
+    if err := unhook.FullUnhook(nil, nil); err != nil {
         log.Fatal(err)
     }
 
@@ -174,10 +176,14 @@ func main() {
 
 ```go
 // ClassicUnhook restores the first 5 bytes of a hooked ntdll function.
-func ClassicUnhook(funcName string, caller *wsyscall.Caller) error
+// opener is optional (nil = plain os.Open of ntdll.dll). Pass a
+// *stealthopen.Stealth built for ntdll.dll to bypass path-based EDR
+// hooks on the CreateFile for System32\ntdll.dll.
+func ClassicUnhook(funcName string, caller *wsyscall.Caller, opener stealthopen.Opener) error
 
-// FullUnhook replaces the entire .text section from disk.
-func FullUnhook(caller *wsyscall.Caller) error
+// FullUnhook replaces the entire .text section from disk. Same opener
+// semantics as ClassicUnhook.
+func FullUnhook(caller *wsyscall.Caller, opener stealthopen.Opener) error
 
 // PerunUnhook reads pristine ntdll from a suspended notepad.exe child.
 func PerunUnhook(caller *wsyscall.Caller) error

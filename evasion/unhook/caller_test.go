@@ -22,7 +22,7 @@ func TestClassicUnhookCallerMethods(t *testing.T) {
 	for _, c := range testutil.CallerMethods(t) {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
-			err := ClassicUnhook(target, c.Caller)
+			err := ClassicUnhook(target, c.Caller, nil)
 			if err != nil {
 				t.Logf("ClassicUnhook(%s, %s) error: %v", target, c.Name, err)
 				return
@@ -45,7 +45,7 @@ func TestFullUnhookCallerMethods(t *testing.T) {
 	for _, c := range testutil.CallerMethods(t) {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
-			err := FullUnhook(c.Caller)
+			err := FullUnhook(c.Caller, nil)
 			if err != nil {
 				t.Logf("FullUnhook(%s) error (may be expected in this environment): %v", c.Name, err)
 				return

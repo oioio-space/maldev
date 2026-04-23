@@ -88,7 +88,7 @@ func InstallByName(dllName, funcName string, handler interface{}, opts ...HookOp
 		opt(cfg)
 	}
 	if cfg.cleanFirst {
-		unhook.ClassicUnhook(funcName, cfg.caller)
+		unhook.ClassicUnhook(funcName, cfg.caller, nil)
 	}
 	return install(proc.Addr(), syscall.NewCallback(handler), cfg)
 }

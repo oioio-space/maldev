@@ -28,7 +28,7 @@ func assertCleanSyscallStub(t *testing.T, funcName string) {
 
 func TestClassicUnhookRejectsRuntimeCritical(t *testing.T) {
 	for _, fn := range []string{"NtClose", "NtCreateFile", "NtReadFile", "NtWriteFile"} {
-		err := ClassicUnhook(fn, nil)
+		err := ClassicUnhook(fn, nil, nil)
 		require.Error(t, err, "ClassicUnhook(%s) should be rejected", fn)
 		assert.Contains(t, err.Error(), "Go runtime depends on it")
 	}
@@ -38,7 +38,7 @@ func TestClassicUnhook(t *testing.T) {
 	testutil.RequireIntrusive(t)
 
 	const target = "NtAllocateVirtualMemory"
-	err := ClassicUnhook(target, nil)
+	err := ClassicUnhook(target, nil, nil)
 	if err != nil {
 		t.Logf("ClassicUnhook returned error (may be expected in this environment): %v", err)
 		return
@@ -49,7 +49,7 @@ func TestClassicUnhook(t *testing.T) {
 func TestFullUnhook(t *testing.T) {
 	testutil.RequireIntrusive(t)
 
-	err := FullUnhook(nil)
+	err := FullUnhook(nil, nil)
 	if err != nil {
 		t.Logf("FullUnhook returned error (may be expected in this environment): %v", err)
 		return

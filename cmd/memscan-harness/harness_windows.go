@@ -212,11 +212,11 @@ func doUnhook(callerName, variant string, out map[string]string) error {
 	out["target_addr"] = fmt.Sprintf("0x%x", addr)
 	switch variant {
 	case "classic":
-		if err := unhook.ClassicUnhook(target, caller); err != nil {
+		if err := unhook.ClassicUnhook(target, caller, nil); err != nil {
 			return fmt.Errorf("ClassicUnhook: %w", err)
 		}
 	case "full":
-		if err := unhook.FullUnhook(caller); err != nil {
+		if err := unhook.FullUnhook(caller, nil); err != nil {
 			return fmt.Errorf("FullUnhook: %w", err)
 		}
 	default:

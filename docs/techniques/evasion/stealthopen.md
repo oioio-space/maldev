@@ -143,6 +143,93 @@ path — only the 16-byte GUID. Any EDR matching on `*.bin` under
 
 ---
 
+## Composing with Other Packages — the `Opener` Pattern
+
+Reading a sensitive file directly (low-level `OpenByID` call) is fine for
+one-off access. For the packages inside maldev that **themselves** open
+sensitive files (unhook reading ntdll, phantomdll reading System32 DLLs,
+herpaderping reading the payload), stealthopen exposes an `Opener`
+abstraction that mirrors how `*wsyscall.Caller` is passed through the
+code: an optional, nil-safe handle that consuming packages accept as a
+plain parameter.
+
+```go
+type Opener interface {
+    Open(path string) (*os.File, error)
+}
+
+// Standard: plain os.Open. Default when the caller passes nil.
+type Standard struct{}
+
+// Stealth: captures (volume, ObjectID) once, then all Open() calls go
+// through OpenFileById — path-based file hooks never fire.
+type Stealth struct {
+    VolumePath string
+    ObjectID   [16]byte
+}
+
+// NewStealth derives both fields from a real path in one call, so the
+// caller just hands the result to the consuming package.
+func NewStealth(path string) (*Stealth, error)
+
+// Use normalizes the nil case to Standard.
+func Use(opener Opener) Opener
+```
+
+### The pattern in practice
+
+```go
+import (
+    "github.com/oioio-space/maldev/evasion/stealthopen"
+    "github.com/oioio-space/maldev/evasion/unhook"
+)
+
+sysDir, _ := windows.GetSystemDirectory()
+ntdllPath := filepath.Join(sysDir, "ntdll.dll")
+
+// One-time: capture ntdll's Object ID + volume root.
+stealth, err := stealthopen.NewStealth(ntdllPath)
+if err != nil { /* non-NTFS, or no ObjectID — fall back to nil */ }
+
+// Hand it to every unhook call; any path-based EDR hook on CreateFile
+// for ntdll.dll never fires. nil = same as before (path-based read).
+_ = unhook.ClassicUnhook("NtCreateSection", caller, stealth)
+_ = unhook.FullUnhook(caller, stealth)
+```
+
+### Where it's wired today
+
+| Consumer | Function / Config field | What gets stealth-opened |
+|---|---|---|
+| `evasion/unhook.ClassicUnhook` | 3rd arg | `System32\ntdll.dll` |
+| `evasion/unhook.FullUnhook` | 2nd arg | `System32\ntdll.dll` |
+| `inject.PhantomDLLInject` | 4th arg | `System32\<dllName>` (read **and** the HANDLE passed to `NtCreateSection`) |
+| `evasion/herpaderping.Config.Opener` | struct field | `PayloadPath` + `DecoyPath` |
+
+All four treat nil as "use the existing path-based open" — no behavior
+change for existing callers. Tests in `evasion/stealthopen/opener_test.go`,
+`evasion/stealthopen/opener_windows_test.go`, `evasion/unhook/opener_windows_test.go`,
+`inject/phantomdll_opener_test.go`, and `evasion/herpaderping/opener_windows_test.go`
+pin the contract (spy-opener call-counting + real end-to-end round-trip
+through OpenFileById).
+
+### Limitations to remember
+
+- **NTFS only.** ReFS / FAT32 / UNC shares without NTFS expose no Object ID.
+  Detect by checking `NewStealth`'s error.
+- **Object ID must preexist** on the target file. System32 DLLs generally
+  do have one; fresh payloads may need `GetObjectID` (creates on demand,
+  often works without admin) or `SetObjectID` (admin, lets you pin a
+  fixed GUID).
+- **Volume root required.** `VolumeFromPath` extracts it from drive-letter,
+  Win32-prefixed, and UNC paths — but a `\\?\Volume{GUID}\` root needs
+  `GetVolumePathName` under the hood; the helper does that for you.
+- **Not a magic bullet.** Minifilters that resolve the final `FILE_OBJECT`
+  to a path **after** the open still see the real path. This beats
+  name-keyed pre-open filters, not every defensive mechanism.
+
+---
+
 ## API Reference
 
 See [evasion.md](../../evasion.md) (table row: `evasion/stealthopen`)

