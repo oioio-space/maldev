@@ -7,6 +7,69 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+## [v0.12.0] — 2026-04-24
+
+3-strategy sleep-mask architecture, pluggable Cipher (XOR/RC4/AES-CTR),
+cross-process RemoteMask, EkkoStrategy scaffold, and a runnable
+`cmd/sleepmask-demo` that demonstrates both self-process and
+host-injection scenarios with a concurrent scanner.
+
+### Breaking (pre-1.0 minor bump)
+
+- `(*Mask).Sleep(d time.Duration)` → `Sleep(ctx context.Context, d time.Duration) error`.
+  Callers must pass a context and may inspect the returned error
+  (`ctx.Err()` on cancel, nil on success). Decrypt still always runs, even
+  on cancellation.
+- `SleepMethod`, `MethodNtDelay`, `MethodBusyTrig`, `(*Mask).WithMethod`
+  removed. Use `WithStrategy(&InlineStrategy{UseBusyTrig: true})` for the
+  old busy-wait path, or one of the new `TimerQueueStrategy` /
+  `EkkoStrategy` for a different thread model.
+
+### Added
+
+- `sleepmask.Cipher` interface + three implementations:
+  `NewXORCipher()`, `NewRC4Cipher()`, `NewAESCTRCipher()`. Self-inverse
+  `Apply(buf, key)` so encrypt and decrypt are the same call. Selected
+  via `Mask.WithCipher(...)`. Fresh random key per cycle is still drawn
+  from `crypto/rand` sized to `cipher.KeySize()` and scrubbed via
+  `cleanup/memory.SecureZero`.
+- `sleepmask.Strategy` interface + three implementations:
+  - `InlineStrategy{UseBusyTrig bool}` — historical L1 behavior; caller
+    goroutine runs the encrypt/wait/decrypt.
+  - `TimerQueueStrategy{}` — L2-light: cycle runs on a Windows
+    thread-pool worker via `CreateTimerQueueTimer`; caller blocks on an
+    auto-reset completion event.
+  - `EkkoStrategy{}` — L2-full scaffold: 6 CONTEXT ROP chain
+    (`VirtualProtect` → `SystemFunction032` → `WaitForSingleObjectEx` →
+    `SystemFunction032` → `VirtualProtect` → resumeStub) with a plan9
+    asm resume stub. Input validation (RC4 only, single region) ships;
+    chain execution itself is WIP (CONTEXT alignment, Rsp alignment,
+    shadow-space separation). `TestEkkoStrategy_CycleRoundTrip` is
+    skipped with a diagnostic message.
+- `sleepmask.RemoteMask` + `RemoteRegion` + `RemoteInlineStrategy` for
+  masking memory in another process via `VirtualProtectEx` +
+  `ReadProcessMemory` + `WriteProcessMemory`. Requires
+  `PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ`. Verified
+  against a spawned notepad in `TestRemoteInlineStrategy_RoundTrip`.
+- `cmd/sleepmask-demo` — flag-driven demo (`-scenario self|host`,
+  `-cipher xor|rc4|aes`, `-strategy inline|timerqueue|ekko`,
+  `-cycles`, `-sleep`, `-scanner`). Runs a concurrent scanner printing
+  HIT/MISS transitions as the mask cycles.
+- `win/api` procs added: (kernel32) `CreateTimerQueue`,
+  `DeleteTimerQueueTimer`, `DeleteTimerQueueEx`, `SetEvent`,
+  `ExitThread`, `VirtualProtect`, `WaitForSingleObjectEx`; (ntdll)
+  `NtContinue`, `RtlCaptureContext`; (advapi32) `SystemFunction032`.
+- `docs/techniques/evasion/sleep-mask.md` rewritten around the 4-level
+  taxonomy with strategy/cipher comparison tables and a demo walkthrough.
+
+### Deferred
+
+- EkkoStrategy ROP chain execution (scaffold ships, chain debug is future
+  work — see strategy_ekko_windows.go doc comment).
+- L3 (Foliage-style stack scrubbing), L4 (BOF-style in-memory loader
+  isolation).
+- Remote L2 and remote L2-full variants.
+
 ## [v0.11.0] — 2026-04-23
 
 Go 1.21 baseline (Windows 7 binary support), Opener composition analog to

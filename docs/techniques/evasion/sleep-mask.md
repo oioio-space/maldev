@@ -10,7 +10,7 @@ An in-memory implant that stays executable 24/7 is easy to spot. Every EDR that 
 
 Sleep masking cuts their window to nearly zero. Right before going idle, the implant **flips its own pages off the executable list** (dropping the `X` bit to `PAGE_READWRITE`) and **XOR-scrambles** the bytes under a fresh random key. Anything that scans executable memory during that idle period will not even see the region, let alone match a signature. When the sleep ends, the mask XORs back and restores the original protection, and the implant is ready to run.
 
-This package's `Mask` type is the minimum viable implementation: multi-region, permission-aware, fresh key per cycle, two selectable sleep implementations. The e2e tests in [`sleepmask_e2e_windows_test.go`](../../../evasion/sleepmask/sleepmask_e2e_windows_test.go) run a real concurrent memory scanner during `Sleep()` and assert it finds nothing.
+This package's `Mask` type composes a **`Cipher`** (XOR / RC4 / AES-CTR) with a **`Strategy`** (inline / timerqueue / ekko) and accepts a `context.Context` so sleep cycles can be cancelled. It also ships a **`RemoteMask`** for masking memory in another process. The e2e tests in [`sleepmask_e2e_windows_test.go`](../../../evasion/sleepmask/sleepmask_e2e_windows_test.go) run a real concurrent memory scanner during `Sleep()` across the available strategies and assert it finds nothing.
 
 ## How It Works
 
@@ -50,11 +50,23 @@ sequenceDiagram
 
 **Step-by-step:**
 
-1. **Generate key** — 32 random bytes from `crypto/rand`.
-2. **Downgrade + encrypt** — for each region: `VirtualProtect(PAGE_READWRITE, &origProtect[i])` then XOR the bytes in-place.
-3. **Sleep** — `time.Sleep` (default, `MethodNtDelay`) or trig busy-wait (`MethodBusyTrig`, defeats scheduler-based hooks and sandbox time-acceleration).
-4. **Decrypt + restore** — `VirtualProtect(PAGE_READWRITE)` (idempotent), XOR again to decrypt, `VirtualProtect(origProtect[i])` to restore the original bits.
-5. **Scrub key** — `cleanup/memory.SecureZero(key)` so the XOR material does not linger on the Go stack.
+1. **Generate key** — `cipher.KeySize()` random bytes from `crypto/rand` (32 for XOR/RC4, 48 for AES-CTR).
+2. **Downgrade + encrypt** — for each region: `VirtualProtect(PAGE_READWRITE, &origProtect[i])` then `cipher.Apply(buf, key)`.
+3. **Wait** — delegated to the selected `Strategy`: `InlineStrategy` waits on the caller goroutine; `TimerQueueStrategy` waits on a thread-pool worker; `EkkoStrategy` (WIP) waits inside a `WaitForSingleObjectEx` ROP gadget on a pool thread so the beacon RIP never sits in `Sleep`/`SleepEx`.
+4. **Decrypt + restore** — `VirtualProtect(PAGE_READWRITE)` (idempotent), `cipher.Apply` again (self-inverse for XOR/RC4; symmetric counter for AES-CTR), `VirtualProtect(origProtect[i])` to restore the original bits.
+5. **Scrub key** — `cleanup/memory.SecureZero(key)` so keying material does not linger on the Go stack.
+
+## Taxonomy: Levels of sleep mask
+
+| Level | Name | What it hides | Strategy in this package |
+|---|---|---|---|
+| L1 | Inline | Region bytes + executable bit | `InlineStrategy` (default) |
+| L2-light | Pool thread | Above + caller thread's wait syscall is not Sleep | `TimerQueueStrategy` |
+| L2-full | Ekko | Above + beacon thread RIP sits inside VirtualProtect / SystemFunction032 / WaitForSingleObjectEx via NtContinue ROP chain | `EkkoStrategy` (scaffold; ROP chain WIP) |
+| L3 | Foliage | L2 + thread stack scrubbing on wait | not shipped |
+| L4 | BOF-style | L3 + in-memory loader isolation | not shipped |
+
+See the design spec in `docs/superpowers/specs/2026-04-23-sleepmask-variants-design.md` for the full taxonomy and deferred work.
 
 ## Usage
 
@@ -62,6 +74,7 @@ sequenceDiagram
 
 ```go
 import (
+    "context"
     "time"
     "github.com/oioio-space/maldev/evasion/sleepmask"
 )
@@ -71,7 +84,8 @@ mask := sleepmask.New(sleepmask.Region{
     Addr: shellcodeAddr,
     Size: shellcodeLen,
 })
-mask.Sleep(30 * time.Second) // region is RW + scrambled during these 30s
+// region is RW + scrambled during these 30s
+_ = mask.Sleep(context.Background(), 30*time.Second)
 ```
 
 ### Multi-region: protect non-contiguous memory
@@ -82,23 +96,53 @@ mask := sleepmask.New(
     sleepmask.Region{Addr: reflectiveDLL, Size: dllSize},
     sleepmask.Region{Addr: configBlock, Size: configLen},
 )
-mask.Sleep(45 * time.Second)
+_ = mask.Sleep(context.Background(), 45*time.Second)
 ```
 
 Each region keeps its own original protection. An RX region is restored to RX; an RWX region is restored to RWX. See [`TestSleepMaskE2E_MultiRegionIndependentEncryption`](../../../evasion/sleepmask/sleepmask_e2e_windows_test.go) and [`TestSleepMaskE2E_RestoresOriginalRWXProtection`](../../../evasion/sleepmask/sleepmask_e2e_windows_test.go).
 
-### Choosing the sleep method
+### Choosing a strategy
 
 ```go
-mask := sleepmask.New(region).WithMethod(sleepmask.MethodBusyTrig)
+// Default (L1): caller goroutine runs encrypt → wait → decrypt.
+mask := sleepmask.New(region) // equivalent to WithStrategy(&InlineStrategy{})
+
+// Same strategy but with a trigonometric busy-wait instead of time.Sleep.
+mask := sleepmask.New(region).
+    WithStrategy(&sleepmask.InlineStrategy{UseBusyTrig: true})
+
+// L2-light: cycle runs on a thread-pool worker, caller blocks on an event.
+mask := sleepmask.New(region).
+    WithStrategy(&sleepmask.TimerQueueStrategy{})
+
+// L2-full: NtContinue ROP chain (WIP — see strategy_ekko_windows.go).
+mask := sleepmask.New(region).
+    WithCipher(sleepmask.NewRC4Cipher()).
+    WithStrategy(&sleepmask.EkkoStrategy{})
 ```
 
-| Method | Implementation | Defeats | Cost |
-|---|---|---|---|
-| `MethodNtDelay` (default) | `time.Sleep` → Go runtime → `NtWaitForSingleObject` on a timer | hooks on `kernel32!Sleep`, `SleepEx` | near-zero CPU |
-| `MethodBusyTrig` | `evasion/timing.BusyWaitTrig` — CPU-bound trig loop | sandbox time-acceleration, hooks on scheduler waits, any Sleep-class hook | full core busy |
+| Strategy | Thread doing the wait | Wait syscall on that thread | Cost | Status |
+|---|---|---|---|---|
+| `InlineStrategy{}` | caller goroutine | `NtWaitForSingleObject` (time.Sleep) | near-zero CPU | shipped |
+| `InlineStrategy{UseBusyTrig: true}` | caller goroutine | none (CPU-bound trig loop) | full core busy | shipped |
+| `TimerQueueStrategy{}` | thread-pool worker | `WaitForSingleObject` on a never-fired event | near-zero CPU | shipped |
+| `EkkoStrategy{}` | thread-pool worker | `WaitForSingleObjectEx` reached via an NtContinue gadget chain | near-zero CPU | scaffold only — ROP chain WIP |
 
-Rule of thumb: default to `MethodNtDelay`. Switch to `MethodBusyTrig` only when you're fighting a sandbox that warps time or an EDR that has hooked every kernel wait primitive — it trades a CPU core for independence from every wait syscall.
+Rule of thumb: default to `InlineStrategy{}`. Switch to `TimerQueueStrategy{}` when you want the beacon goroutine's wait to look distinct from `Sleep`. Switch to `InlineStrategy{UseBusyTrig: true}` when you're fighting a sandbox that warps time or an EDR that has hooked every kernel wait primitive.
+
+### Choosing a cipher
+
+```go
+mask := sleepmask.New(region).WithCipher(sleepmask.NewRC4Cipher())
+```
+
+| Cipher | Keyspace | Strengths | Weaknesses |
+|---|---|---|---|
+| `NewXORCipher()` (default) | 32 bytes, repeating | tiny, dependency-free, self-inverse | 32-byte period visible under key-period analysis |
+| `NewRC4Cipher()` | 32 bytes, stream | stream cipher, no period, required by `EkkoStrategy` (SystemFunction032) | RC4 key-schedule biases — not a cryptographic guarantee |
+| `NewAESCTRCipher()` | 48 bytes (32 key + 16 nonce) | modern, audited primitive | larger code footprint, slightly heavier CPU |
+
+The cipher has no bearing on scanner evasion (any of them scrambles the region) — it matters for analysts dumping the region and trying to reconstruct bytes after seeing multiple cycles under the same key material. Since the key is fresh per cycle, the practical gap between XOR and AES is small; pick on footprint.
 
 ### Real beacon loop
 
@@ -137,7 +181,7 @@ func beacon(shellcode []byte) error {
             return err
         }
         // Hide while idle.
-        mask.Sleep(30 * time.Second)
+        _ = mask.Sleep(context.Background(), 30*time.Second)
     }
 }
 ```
@@ -166,11 +210,11 @@ r, ok := self.InjectedRegion()
 if !ok { return fmt.Errorf("no region published (cross-process method?)") }
 
 mask := sleepmask.New(sleepmask.Region{Addr: r.Addr, Size: r.Size}).
-    WithMethod(sleepmask.MethodBusyTrig)
+    WithStrategy(&sleepmask.InlineStrategy{UseBusyTrig: true})
 
 for {
     // beacon work...
-    mask.Sleep(30 * time.Second)
+    _ = mask.Sleep(context.Background(), 30*time.Second)
 }
 ```
 
@@ -224,7 +268,7 @@ func TestSleepMaskE2E_DefeatsExecutablePageScanner(t *testing.T) {
         }
     }()
 
-    mask.Sleep(300 * time.Millisecond)
+    _ = mask.Sleep(context.Background(), 300*time.Millisecond)
     close(stopScan); <-scanDone
 
     assert.Zero(t, atomic.LoadInt32(&scanHits),
@@ -246,7 +290,11 @@ The full suite (all run on a real Win10 VM via `scripts/vm-run-tests.sh`):
 | `TestSleepMaskE2E_RestoresOriginalRWXProtection` | An RWX region stays RWX after the cycle (not collapsed to RX). |
 | `TestSleepMaskE2E_MultiRegionIndependentEncryption` | Two distinct markers, each region scrambled mid-sleep, both bytes restored. |
 | `TestSleepMaskE2E_BeaconLoopStableAcrossCycles` | 10 back-to-back cycles; bytes and protection unchanged after every cycle. |
-| `TestSleepMaskE2E_BusyTrigAlsoDefeatsScanner` | `MethodBusyTrig` gives the same scanner-defeating guarantee as the default. |
+| `TestSleepMaskE2E_BusyTrigAlsoDefeatsScanner` | `InlineStrategy{UseBusyTrig: true}` gives the same scanner-defeating guarantee as the default. |
+| `TestSleepMaskE2E_DefeatsExecutablePageScanner/{inline,timerqueue}` | sub-tests loop the core scan-defeats invariant over every shipped strategy. |
+| `TestTimerQueueStrategy_CycleRoundTrip` / `_CtxCancellation` | Pool-thread variant encrypts + decrypts correctly and still decrypts on `ctx.DeadlineExceeded`. |
+| `TestEkkoStrategy_RejectsNonRC4Cipher` / `_RejectsMultiRegion` | Ekko validates its input constraints (RC4 only, single region). |
+| `TestRemoteInlineStrategy_RoundTrip` | RemoteMask round-trips bytes through `ReadProcessMemory → Apply → WriteProcessMemory` against a spawned notepad. |
 
 Run locally:
 
@@ -264,7 +312,7 @@ Run locally:
 
 **Very short sleeps cost more than they hide.** Below ~50 ms the VirtualProtect + XOR round-trip becomes a measurable fraction of the "sleep", and you've traded scanner-visibility for API-call-volume visibility. Sleep mask pays off when the idle interval is comfortably longer than the encrypt/decrypt cycle.
 
-**`MethodNtDelay` still goes through the kernel.** Go's `time.Sleep` on Windows is implemented via a timer object. Any EDR hooking `NtWaitForSingleObject` or the scheduler will observe the wait — it won't see the XOR'd memory, but it will see you sleeping. Use `MethodBusyTrig` if you specifically need to avoid any wait syscall.
+**`InlineStrategy` still goes through the kernel.** Go's `time.Sleep` on Windows is implemented via a timer object. Any EDR hooking `NtWaitForSingleObject` or the scheduler will observe the wait — it won't see the scrambled memory, but it will see you sleeping. Use `InlineStrategy{UseBusyTrig: true}` to avoid any wait syscall, or `TimerQueueStrategy` to move the wait off the caller goroutine.
 
 ## Comparison
 
@@ -273,9 +321,29 @@ Run locally:
 | Cipher | repeating-key XOR (32 bytes, fresh per sleep) | XOR (historically); tunable via BOF | AES |
 | Permission downgrade | yes, per-region, original restored | yes | yes |
 | Multi-region | yes | generally one | generally one |
-| Busy-wait alternative | `MethodBusyTrig` | no (BOF-replaceable) | no |
+| Busy-wait alternative | `InlineStrategy{UseBusyTrig: true}` | no (BOF-replaceable) | no |
+| Pluggable cipher | XOR / RC4 / AES-CTR | BOF-replaceable | AES only |
+| Pluggable wait-thread | `InlineStrategy`, `TimerQueueStrategy`, `EkkoStrategy` (WIP) | no | no |
+| Cross-process masking | `RemoteMask` + `RemoteInlineStrategy` | yes | yes |
 | Key zeroing | yes (`SecureZero`) | varies by BOF | yes |
 | Self-encryption | no (limitation) | no | no |
+
+## Running the demo
+
+`cmd/sleepmask-demo` exercises both scenarios with a configurable cipher/strategy and a concurrent scanner:
+
+```bash
+# Scenario A: mask a canary in our own process (default strategy=inline, cipher=xor).
+go run ./cmd/sleepmask-demo -scenario=self -cycles=3 -sleep=5s
+
+# Pool-thread variant, aes cipher, 10s sleeps.
+go run ./cmd/sleepmask-demo -scenario=self -strategy=timerqueue -cipher=aes -cycles=2 -sleep=10s
+
+# Scenario B: spawn notepad suspended, mask a canary in its address space.
+go run ./cmd/sleepmask-demo -scenario=host -host-binary='C:\Windows\System32\notepad.exe' -cipher=rc4
+```
+
+The scanner prints `HIT` before/after each cycle and `MISS` throughout the masked window.
 
 ## API Reference
 
@@ -286,24 +354,49 @@ type Region struct {
     Size uintptr
 }
 
-// SleepMethod selects how the wait is performed (not how memory is protected).
-type SleepMethod int
-const (
-    MethodNtDelay  SleepMethod = iota // time.Sleep (Go runtime → NtWaitForSingleObject)
-    MethodBusyTrig                    // evasion/timing.BusyWaitTrig (CPU burn)
-)
+// Cipher transforms region bytes in-place. Implementations must be
+// self-inverse (Apply(Apply(x, k), k) == x) so encrypt and decrypt are
+// the same call. XORCipher, RC4Cipher, AESCTRCipher ship.
+type Cipher interface {
+    Apply(buf, key []byte)
+    KeySize() int
+}
 
-// New creates a Mask covering the given regions. Default method: MethodNtDelay.
+func NewXORCipher() *XORCipher
+func NewRC4Cipher() *RC4Cipher
+func NewAESCTRCipher() *AESCTRCipher
+
+// Strategy encapsulates the encrypt → wait → decrypt cycle. InlineStrategy,
+// TimerQueueStrategy, EkkoStrategy (windows+amd64, scaffold only) ship.
+type Strategy interface {
+    Cycle(ctx context.Context, regions []Region, cipher Cipher, key []byte, d time.Duration) error
+}
+
+// New creates a Mask covering the given regions. Defaults: XORCipher + InlineStrategy.
 func New(regions ...Region) *Mask
+func (m *Mask) WithCipher(c Cipher) *Mask     // nil → XORCipher
+func (m *Mask) WithStrategy(s Strategy) *Mask // nil → InlineStrategy
 
-// WithMethod overrides the sleep method. Returns the receiver for chaining.
-func (m *Mask) WithMethod(method SleepMethod) *Mask
+// Sleep runs one encrypt → wait → decrypt cycle.
+// Returns ctx.Err() if the wait was cancelled; the strategy's error on syscall
+// failure; nil on success. Zero regions or non-positive d short-circuits.
+// Decrypt always runs, even on ctx cancellation.
+func (m *Mask) Sleep(ctx context.Context, d time.Duration) error
 
-// Sleep performs the full encrypt-sleep-decrypt cycle:
-//   for each region: VirtualProtect(RW) capture origProtect -> XOR encrypt
-//   wait d via the selected method
-//   for each region: VirtualProtect(RW) -> XOR decrypt -> VirtualProtect(origProtect)
-//   SecureZero the XOR key
-// Zero regions or a non-positive d short-circuits.
-func (m *Mask) Sleep(d time.Duration)
+// RemoteRegion / RemoteMask mask memory in another process. Handle must carry
+// PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ.
+type RemoteRegion struct {
+    Handle uintptr
+    Addr   uintptr
+    Size   uintptr
+}
+
+type RemoteStrategy interface {
+    Cycle(ctx context.Context, regions []RemoteRegion, cipher Cipher, key []byte, d time.Duration) error
+}
+
+func NewRemote(regions ...RemoteRegion) *RemoteMask
+func (m *RemoteMask) WithCipher(c Cipher) *RemoteMask
+func (m *RemoteMask) WithStrategy(s RemoteStrategy) *RemoteMask
+func (m *RemoteMask) Sleep(ctx context.Context, d time.Duration) error
 ```
