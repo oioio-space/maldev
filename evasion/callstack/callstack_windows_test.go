@@ -57,3 +57,72 @@ func TestLookupFunctionEntry_UnknownAddressFails(t *testing.T) {
 		t.Fatalf("stack address 0x%X: got err=%v, want ErrFunctionEntryNotFound", addr, err)
 	}
 }
+
+// TestStandardChain_ShapeAndBounds asserts the 2-frame chain resolves
+// to kernel32!BaseThreadInitThunk + ntdll!RtlUserThreadStart with
+// non-zero ImageBase and RUNTIME_FUNCTION bounds enclosing each
+// ControlPc.
+func TestStandardChain_ShapeAndBounds(t *testing.T) {
+	chain, err := StandardChain()
+	if err != nil {
+		t.Fatalf("StandardChain: %v", err)
+	}
+	if len(chain) != 2 {
+		t.Fatalf("chain length: got %d want 2", len(chain))
+	}
+	for i, f := range chain {
+		if f.ReturnAddress == 0 || f.ImageBase == 0 {
+			t.Errorf("frame[%d] zero field: %+v", i, f)
+		}
+		begin := f.ImageBase + uintptr(f.RuntimeFunction.BeginAddress)
+		end := f.ImageBase + uintptr(f.RuntimeFunction.EndAddress)
+		if f.ReturnAddress < begin || f.ReturnAddress >= end {
+			t.Errorf("frame[%d] ControlPc 0x%X outside [0x%X, 0x%X)",
+				i, f.ReturnAddress, begin, end)
+		}
+	}
+}
+
+// TestStandardChain_Cached verifies the Once cache returns equivalent
+// frames on repeated calls (same addresses + unwind metadata).
+func TestStandardChain_Cached(t *testing.T) {
+	a, err := StandardChain()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := StandardChain()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a) != len(b) {
+		t.Fatalf("lengths differ: %d vs %d", len(a), len(b))
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			t.Errorf("frame[%d] differs across calls: %+v vs %+v", i, a[i], b[i])
+		}
+	}
+}
+
+// TestFindReturnGadget_HasUnwindCoverage asserts the discovered RET
+// gadget lies inside an ntdll function with its own RUNTIME_FUNCTION
+// — critical property for chain validity: a stack walker landing on
+// the gadget via a fake return must find unwind metadata, otherwise
+// the spoof shows as a broken frame.
+func TestFindReturnGadget_HasUnwindCoverage(t *testing.T) {
+	addr, err := FindReturnGadget()
+	if err != nil {
+		t.Fatalf("FindReturnGadget: %v", err)
+	}
+	if addr == 0 {
+		t.Fatal("nil gadget address")
+	}
+	// Dereference the byte at addr — should be 0xC3 (RET).
+	got := *(*byte)(unsafe.Pointer(addr))
+	if got != 0xC3 {
+		t.Fatalf("gadget @ 0x%X: byte is 0x%X, want 0xC3", addr, got)
+	}
+	if _, err := LookupFunctionEntry(addr); err != nil {
+		t.Fatalf("gadget @ 0x%X lacks RUNTIME_FUNCTION coverage: %v", addr, err)
+	}
+}
