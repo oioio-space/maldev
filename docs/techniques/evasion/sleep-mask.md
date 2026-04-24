@@ -52,7 +52,7 @@ sequenceDiagram
 
 1. **Generate key** — `cipher.KeySize()` random bytes from `crypto/rand` (32 for XOR/RC4, 48 for AES-CTR).
 2. **Downgrade + encrypt** — for each region: `VirtualProtect(PAGE_READWRITE, &origProtect[i])` then `cipher.Apply(buf, key)`.
-3. **Wait** — delegated to the selected `Strategy`: `InlineStrategy` waits on the caller goroutine; `TimerQueueStrategy` waits on a thread-pool worker; `EkkoStrategy` (WIP) waits inside a `WaitForSingleObjectEx` ROP gadget on a pool thread so the beacon RIP never sits in `Sleep`/`SleepEx`.
+3. **Wait** — delegated to the selected `Strategy`: `InlineStrategy` waits on the caller goroutine; `TimerQueueStrategy` waits on a thread-pool worker; `EkkoStrategy` waits inside a `WaitForSingleObjectEx` ROP gadget on a pool thread so the beacon RIP never sits in `Sleep`/`SleepEx`.
 4. **Decrypt + restore** — `VirtualProtect(PAGE_READWRITE)` (idempotent), `cipher.Apply` again (self-inverse for XOR/RC4; symmetric counter for AES-CTR), `VirtualProtect(origProtect[i])` to restore the original bits.
 5. **Scrub key** — `cleanup/memory.SecureZero(key)` so keying material does not linger on the Go stack.
 
@@ -62,7 +62,7 @@ sequenceDiagram
 |---|---|---|---|
 | L1 | Inline | Region bytes + executable bit | `InlineStrategy` (default) |
 | L2-light | Pool thread | Above + caller thread's wait syscall is not Sleep | `TimerQueueStrategy` |
-| L2-full | Ekko | Above + beacon thread RIP sits inside VirtualProtect / SystemFunction032 / WaitForSingleObjectEx via NtContinue ROP chain | `EkkoStrategy` (scaffold; ROP chain WIP) |
+| L2-full | Ekko | Above + beacon thread RIP sits inside VirtualProtect / SystemFunction032 / WaitForSingleObjectEx via NtContinue ROP chain | `EkkoStrategy` |
 | L3 | Foliage | L2 + thread stack scrubbing on wait | not shipped |
 | L4 | BOF-style | L3 + in-memory loader isolation | not shipped |
 
@@ -115,7 +115,7 @@ mask := sleepmask.New(region).
 mask := sleepmask.New(region).
     WithStrategy(&sleepmask.TimerQueueStrategy{})
 
-// L2-full: NtContinue ROP chain (WIP — see strategy_ekko_windows.go).
+// L2-full: NtContinue ROP chain (windows+amd64 only, RC4 cipher required).
 mask := sleepmask.New(region).
     WithCipher(sleepmask.NewRC4Cipher()).
     WithStrategy(&sleepmask.EkkoStrategy{})
@@ -126,7 +126,7 @@ mask := sleepmask.New(region).
 | `InlineStrategy{}` | caller goroutine | `NtWaitForSingleObject` (time.Sleep) | near-zero CPU | shipped |
 | `InlineStrategy{UseBusyTrig: true}` | caller goroutine | none (CPU-bound trig loop) | full core busy | shipped |
 | `TimerQueueStrategy{}` | thread-pool worker | `WaitForSingleObject` on a never-fired event | near-zero CPU | shipped |
-| `EkkoStrategy{}` | thread-pool worker | `WaitForSingleObjectEx` reached via an NtContinue gadget chain | near-zero CPU | scaffold only — ROP chain WIP |
+| `EkkoStrategy{}` | thread-pool worker | `WaitForSingleObjectEx` reached via an NtContinue gadget chain | near-zero CPU | shipped (windows+amd64, RC4 only, single region) |
 
 Rule of thumb: default to `InlineStrategy{}`. Switch to `TimerQueueStrategy{}` when you want the beacon goroutine's wait to look distinct from `Sleep`. Switch to `InlineStrategy{UseBusyTrig: true}` when you're fighting a sandbox that warps time or an EDR that has hooked every kernel wait primitive.
 
@@ -323,7 +323,7 @@ Run locally:
 | Multi-region | yes | generally one | generally one |
 | Busy-wait alternative | `InlineStrategy{UseBusyTrig: true}` | no (BOF-replaceable) | no |
 | Pluggable cipher | XOR / RC4 / AES-CTR | BOF-replaceable | AES only |
-| Pluggable wait-thread | `InlineStrategy`, `TimerQueueStrategy`, `EkkoStrategy` (WIP) | no | no |
+| Pluggable wait-thread | `InlineStrategy`, `TimerQueueStrategy`, `EkkoStrategy` | no | no |
 | Cross-process masking | `RemoteMask` + `RemoteInlineStrategy` | yes | yes |
 | Key zeroing | yes (`SecureZero`) | varies by BOF | yes |
 | Self-encryption | no (limitation) | no | no |
@@ -367,7 +367,7 @@ func NewRC4Cipher() *RC4Cipher
 func NewAESCTRCipher() *AESCTRCipher
 
 // Strategy encapsulates the encrypt → wait → decrypt cycle. InlineStrategy,
-// TimerQueueStrategy, EkkoStrategy (windows+amd64, scaffold only) ship.
+// TimerQueueStrategy, EkkoStrategy (windows+amd64, RC4 only) ship.
 type Strategy interface {
     Cycle(ctx context.Context, regions []Region, cipher Cipher, key []byte, d time.Duration) error
 }
