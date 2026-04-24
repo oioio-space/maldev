@@ -135,9 +135,9 @@ func ScanScheduledTasks() ([]Opportunity, error) {
 	return opps, nil
 }
 
-// ScanAll runs ScanServices + ScanProcesses + ScanScheduledTasks and
-// concatenates the results. Errors from any individual scanner are
-// wrapped but do not abort the others.
+// ScanAll runs ScanServices + ScanProcesses + ScanScheduledTasks +
+// ScanAutoElevate and concatenates the results. Errors from any
+// individual scanner are wrapped but do not abort the others.
 func ScanAll() ([]Opportunity, error) {
 	var all []Opportunity
 	var errs []string
@@ -153,6 +153,11 @@ func ScanAll() ([]Opportunity, error) {
 	}
 	if opps, err := ScanScheduledTasks(); err != nil {
 		errs = append(errs, "tasks: "+err.Error())
+	} else {
+		all = append(all, opps...)
+	}
+	if opps, err := ScanAutoElevate(); err != nil {
+		errs = append(errs, "autoelevate: "+err.Error())
 	} else {
 		all = append(all, opps...)
 	}

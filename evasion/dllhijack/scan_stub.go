@@ -57,3 +57,8 @@ type ValidateOpts struct {
 func Validate(opp Opportunity, canaryDLL []byte, opts ValidateOpts) (*ValidationResult, error) {
 	return nil, errors.New("dllhijack: Validate requires Windows")
 }
+
+// ScanAutoElevate stub. Windows-only.
+func ScanAutoElevate() ([]Opportunity, error) {
+	return nil, errors.New("dllhijack: ScanAutoElevate requires Windows")
+}

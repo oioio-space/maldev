@@ -9,6 +9,17 @@ introduce breaking API changes.
 
 ### Added
 
+- `evasion/dllhijack`: `ScanAutoElevate` + `Rank` + `IsAutoElevate`
+  (**Phase D**). Walks System32 .exes whose embedded manifest sets
+  `autoElevate=true` (fodhelper, sdclt, WSReset, …) — the UAC-bypass
+  vector class — parses PE imports + search order, and emits
+  Opportunities flagged `AutoElevate=true` + `IntegrityGain=true`
+  (MITRE T1548.002). `Rank` scores all Opportunities with a coarse
+  weighting (AutoElevate +200, IntegrityGain +100, Kind base score)
+  and returns a sorted slice. `IsAutoElevate([]byte)` is a
+  cross-platform byte-level check for the manifest flag. New
+  `KindAutoElevate` Kind value. `ScanAll` now aggregates
+  services + processes + tasks + auto-elevate.
 - `evasion/dllhijack`: `Validate` + canary-drop/trigger/poll orchestration
   (**Phase C**). Given an Opportunity and a user-supplied canary DLL,
   Validate drops the DLL at HijackedPath, triggers the victim (service

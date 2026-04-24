@@ -167,11 +167,11 @@ pre-built canary is not shipped so each operator's PE has a unique hash.
 
 ## Comparison
 
-| Tool                  | Ships canary validation | Covers processes | Covers services | Covers tasks | Go-native |
-|-----------------------|-------------------------|------------------|-----------------|--------------|-----------|
-| `maldev/dllhijack`    | no (Phase C)            | **yes**          | **yes**         | **yes**      | yes       |
-| DLLHijackHunter (.NET)| yes                     | yes              | yes             | yes          | no        |
-| Siofra (Koret)        | no                      | yes              | no              | no           | no        |
+| Tool                  | Canary validation | Processes | Services | Tasks    | AutoElevate (UAC) | Scoring | Go-native |
+|-----------------------|-------------------|-----------|----------|----------|-------------------|---------|-----------|
+| `maldev/dllhijack`    | **yes**           | **yes**   | **yes**  | **yes**  | **yes**           | **yes** | yes       |
+| DLLHijackHunter (.NET)| yes               | yes       | yes      | yes      | yes               | partial | no        |
+| Siofra (Koret)        | no                | yes       | no       | no       | no                | no      | no        |
 
 ---
 
@@ -228,6 +228,21 @@ func HijackPath(exeDir, dllName string) (hijackDir, resolvedDir string)
 // polls for a marker file, and cleans up. Returns a ValidationResult
 // describing each stage (Dropped/Triggered/Confirmed/CleanedUp).
 func Validate(opp Opportunity, canaryDLL []byte, opts ValidateOpts) (*ValidationResult, error)
+
+// ScanAutoElevate enumerates System32 .exes whose application manifest
+// sets autoElevate=true and emits hijack Opportunities via the same
+// PE-imports + search-order pipeline. Rows carry AutoElevate=true and
+// IntegrityGain=true, feeding into Rank.
+func ScanAutoElevate() ([]Opportunity, error)
+
+// IsAutoElevate reports whether the PE's embedded manifest flags the
+// binary as auto-elevating (<autoElevate>true</autoElevate> or the
+// attribute-style autoElevate="true"). Pure byte-level match.
+func IsAutoElevate(peBytes []byte) bool
+
+// Rank scores each Opportunity (AutoElevate, IntegrityGain, Kind
+// weighting) and returns a new slice sorted by descending Score.
+func Rank(opps []Opportunity) []Opportunity
 
 // ScanServices enumerates Windows services with a writable binary dir.
 // Windows only; cross-platform stub returns an error.

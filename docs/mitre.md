@@ -42,7 +42,7 @@
 | T1529 | System Shutdown/Reboot | `system/bsod` | D3-DA (Dynamic Analysis) |
 | T1543.003 | Create or Modify System Process: Windows Service | `persistence/service`, `cleanup/service` | D3-SBV (Service Binary Verification) |
 | T1547.009 | Shortcut Modification | `system/lnk`, `persistence/startup` | D3-FDA (File Discovery Analysis) |
-| T1548.002 | Bypass UAC | `uacbypass` | D3-UAP (User Account Profiling) |
+| T1548.002 | Bypass UAC | `uacbypass`, `evasion/dllhijack` (AutoElevate scanner) | D3-UAP (User Account Profiling) |
 | T1553.002 | Subvert Trust Controls: Code Signing | `pe/cert` | D3-SEA (Static Executable Analysis) |
 | T1562.001 | Disable or Modify Tools | `evasion/amsi`, `evasion/etw`, `evasion/unhook`, `evasion/acg`, `evasion/blockdlls` | D3-AIPA (Application Integrity Analysis) |
 | T1562.002 | Disable Windows Event Logging | `evasion/phant0m` | D3-EAL (Execution Activity Logging) |

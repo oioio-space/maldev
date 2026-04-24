@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestKindString(t *testing.T) {
@@ -11,12 +12,64 @@ func TestKindString(t *testing.T) {
 		KindService:       "service",
 		KindProcess:       "process",
 		KindScheduledTask: "scheduled-task",
+		KindAutoElevate:   "auto-elevate",
 		Kind(0):           "unknown",
 		Kind(99):          "unknown",
 	}
 	for k, want := range cases {
 		assert.Equal(t, want, k.String(), "Kind(%d)", int(k))
 	}
+}
+
+func TestIsAutoElevate(t *testing.T) {
+	// Positive: element form
+	pe := []byte(`...<autoElevate>true</autoElevate>...`)
+	assert.True(t, IsAutoElevate(pe))
+
+	// Positive: attribute form + case-insensitive
+	pe = []byte(`<requestedExecutionLevel level="highestAvailable" autoElevate="true" uiAccess="false" />`)
+	assert.True(t, IsAutoElevate(pe))
+
+	// Positive: uppercase mixed
+	pe = []byte(`<AUTOELEVATE>True</AUTOELEVATE>`)
+	assert.True(t, IsAutoElevate(pe))
+
+	// Negative: autoElevate=false
+	pe = []byte(`<autoElevate>false</autoElevate>`)
+	assert.False(t, IsAutoElevate(pe))
+
+	// Negative: no autoElevate element
+	pe = []byte(`<?xml version="1.0"?><assembly></assembly>`)
+	assert.False(t, IsAutoElevate(pe))
+
+	// Negative: empty
+	assert.False(t, IsAutoElevate(nil))
+	assert.False(t, IsAutoElevate([]byte{}))
+}
+
+func TestRank(t *testing.T) {
+	in := []Opportunity{
+		{Kind: KindProcess, BinaryPath: "a.exe", HijackedDLL: "foo.dll"},
+		{Kind: KindService, BinaryPath: "svc.exe", HijackedDLL: "bar.dll", IntegrityGain: true},
+		{Kind: KindAutoElevate, BinaryPath: "fodhelper.exe", HijackedDLL: "version.dll", AutoElevate: true, IntegrityGain: true},
+		{Kind: KindScheduledTask, BinaryPath: "t.exe", HijackedDLL: "baz.dll"},
+	}
+	out := Rank(in)
+	require.Len(t, out, 4)
+
+	// Auto-elevate first (AutoElevate + IntegrityGain + KindAutoElevate)
+	assert.Equal(t, KindAutoElevate, out[0].Kind)
+	assert.Equal(t, 310, out[0].Score, "200 (AutoElevate) + 100 (IntegrityGain) + 10 (KindAutoElevate)")
+
+	// Service with IntegrityGain second
+	assert.Equal(t, KindService, out[1].Kind)
+	assert.Equal(t, 150, out[1].Score, "100 (IntegrityGain) + 50 (KindService)")
+
+	// Scheduled task third
+	assert.Equal(t, KindScheduledTask, out[2].Kind)
+
+	// Process last
+	assert.Equal(t, KindProcess, out[3].Kind)
 }
 
 func TestParseBinaryPath(t *testing.T) {

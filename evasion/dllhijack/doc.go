@@ -18,14 +18,19 @@
 //     imports.
 //   - ScanScheduledTasks pulls every registered task's exec actions via
 //     COM ITaskService and applies the same PE-imports filter to each.
-//   - ScanAll aggregates the three.
-//   - SearchOrder / HijackPath are the primitives callers can use on any
-//     (exe, dll) pair.
+//   - ScanAutoElevate walks System32 .exes whose manifest carries
+//     autoElevate=true (fodhelper, sdclt, ...) — UAC bypass vector
+//     (MITRE T1548.002).
+//   - ScanAll aggregates the four.
+//   - Validate drops a user-supplied canary DLL at an Opportunity's
+//     HijackedPath, triggers the victim, polls for a marker file, and
+//     cleans up.
+//   - Rank scores Opportunities (higher = more impact: AutoElevate +
+//     IntegrityGain weighted heavily).
+//   - SearchOrder / HijackPath / IsAutoElevate are the primitives
+//     callers can invoke on any (exe, dll) pair or raw PE bytes.
 //   - KnownDLLs (HKLM\...\Session Manager\KnownDLLs) are correctly
 //     excluded from hijack candidates.
-//
-// Deferred: canary-DLL generation + Validate workflow, AutoElevate
-// scoring.
 //
 // Example:
 //
