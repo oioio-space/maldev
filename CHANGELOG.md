@@ -7,6 +7,19 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added
+
+- `evasion/dllhijack` — new package for DLL search order hijack discovery
+  (MITRE T1574.001). MVP: `ScanServices()` enumerates every installed
+  Windows service and returns `Opportunity` rows for those whose binary
+  directory is writable by the current user — the classic "drop DLL →
+  service loads it next start" vector. `ParseBinaryPath` exported as a
+  pure-string helper that handles quoted + unquoted SCM BinaryPathNames.
+  Cross-platform stub returns an error on non-Windows. Process /
+  scheduled-task scanning, PE-imports resolution, and canary-DLL
+  validation deferred to Phase 2.1. Added to docs/mitre.md, README
+  tables, and docs/techniques/evasion/dll-hijack.md.
+
 ### Fixed
 
 - `evasion/sleepmask`: `EkkoStrategy` full ROP chain round-trip now works

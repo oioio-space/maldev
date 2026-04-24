@@ -62,6 +62,7 @@ flowchart TB
 | [Timing Evasion](timing.md) | `evasion/timing` | T1497.003 | Low | N/A (detection only) | No |
 | [Evasion Presets](preset.md) | `evasion/preset` | Multiple | Varies | Varies | Yes |
 | [Inline Hook](inline-hook.md) | `evasion/hook` `evasion/hook/bridge/` `evasion/hook/shellcode/` | T1574.012 | High | Yes (Remove) | Yes (`WithCaller`) |
+| [DLL Hijack Discovery](dll-hijack.md) | `evasion/dllhijack` | T1574.001 | Medium | N/A (discovery only) | No |
 
 ## Presets
 
