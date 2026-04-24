@@ -150,6 +150,32 @@ introduce breaking API changes.
   callbacks, ROP chains) on the VM.
 
 
+## [v0.17.0] — 2026-04-25
+
+### Added
+
+- `evasion/kcallback`: kernel callback-array enumeration (MITRE
+  T1562.001). User-mode symbol & driver resolution via
+  `NtQuerySystemInformation(SystemModuleInformation = 11)` —
+  `NtoskrnlBase()` returns the kernel image base, `DriverAt(addr)`
+  reverse-maps a kernel VA to its owning driver module name. Both
+  are cached once per process and require no elevation.
+- `Enumerate(reader KernelReader, tab OffsetTable)` reads the three
+  callback arrays (PspCreateProcessNotifyRoutine / ThreadNotifyRoutine
+  / LoadImageNotifyRoutine) via a caller-supplied KernelReader,
+  masks the `PEX_CALLBACK` flags, dereferences each ROUTINE_BLOCK+8
+  to get the callback function VA, and resolves the owning driver.
+  `NullKernelReader` (default) always returns `ErrNoKernelReader` —
+  callers plug in a BYOVD-backed reader (RTCore64, GDRV, custom
+  driver). Offsets are caller-supplied (no built-in database;
+  PDB-derivation workflow documented in
+  `docs/techniques/evasion/kernel-callback-removal.md`).
+- Removal is deliberately **out of scope** for v0.17.0; the write
+  primitive lands in v0.17.1 alongside a dedicated BYOVD chantier.
+  The `KernelReadWriter` interface + `ErrReadOnly` are shipped so
+  the removal API can slot in without a breaking change.
+
+
 ## [v0.16.0] — 2026-04-25
 
 ### Added

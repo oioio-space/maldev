@@ -45,7 +45,7 @@
 | T1547.009 | Shortcut Modification | `system/lnk`, `persistence/startup` | D3-FDA (File Discovery Analysis) |
 | T1548.002 | Bypass UAC | `uacbypass`, `evasion/dllhijack` (AutoElevate scanner) | D3-UAP (User Account Profiling) |
 | T1553.002 | Subvert Trust Controls: Code Signing | `pe/cert` | D3-SEA (Static Executable Analysis) |
-| T1562.001 | Disable or Modify Tools | `evasion/amsi`, `evasion/etw`, `evasion/unhook`, `evasion/acg`, `evasion/blockdlls` | D3-AIPA (Application Integrity Analysis) |
+| T1562.001 | Disable or Modify Tools | `evasion/amsi`, `evasion/etw`, `evasion/unhook`, `evasion/acg`, `evasion/blockdlls`, `evasion/kcallback` (kernel callback enumeration) | D3-AIPA (Application Integrity Analysis) |
 | T1562.002 | Disable Windows Event Logging | `evasion/phant0m` | D3-EAL (Execution Activity Logging) |
 | T1574.001 | Hijack Execution Flow: DLL Search Order Hijacking | `evasion/dllhijack` (discovery) | D3-PFV (Process File Verification) |
 | T1574.012 | Hijack Execution Flow: Inline Hooking | `evasion/hook` | D3-AIPA (Application Integrity Analysis) |
