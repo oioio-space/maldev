@@ -10,7 +10,7 @@ An in-memory implant that stays executable 24/7 is easy to spot. Every EDR that 
 
 Sleep masking cuts their window to nearly zero. Right before going idle, the implant **flips its own pages off the executable list** (dropping the `X` bit to `PAGE_READWRITE`) and **XOR-scrambles** the bytes under a fresh random key. Anything that scans executable memory during that idle period will not even see the region, let alone match a signature. When the sleep ends, the mask XORs back and restores the original protection, and the implant is ready to run.
 
-This package's `Mask` type composes a **`Cipher`** (XOR / RC4 / AES-CTR) with a **`Strategy`** (inline / timerqueue / ekko) and accepts a `context.Context` so sleep cycles can be cancelled. It also ships a **`RemoteMask`** for masking memory in another process. The e2e tests in [`sleepmask_e2e_windows_test.go`](../../../evasion/sleepmask/sleepmask_e2e_windows_test.go) run a real concurrent memory scanner during `Sleep()` across the available strategies and assert it finds nothing.
+This package's `Mask` type composes a **`Cipher`** (XOR / RC4 / AES-CTR) with a **`Strategy`** (inline / timerqueue / ekko / foliage) and accepts a `context.Context` so sleep cycles can be cancelled. It also ships a **`RemoteMask`** for masking memory in another process. The e2e tests in [`sleepmask_e2e_windows_test.go`](../../../evasion/sleepmask/sleepmask_e2e_windows_test.go) run a real concurrent memory scanner during `Sleep()` across the available strategies and assert it finds nothing.
 
 ## How It Works
 
@@ -63,7 +63,7 @@ sequenceDiagram
 | L1 | Inline | Region bytes + executable bit | `InlineStrategy` (default) |
 | L2-light | Pool thread | Above + caller thread's wait syscall is not Sleep | `TimerQueueStrategy` |
 | L2-full | Ekko | Above + beacon thread RIP sits inside VirtualProtect / SystemFunction032 / WaitForSingleObjectEx via NtContinue ROP chain | `EkkoStrategy` |
-| L3 | Foliage | L2 + thread stack scrubbing on wait | not shipped |
+| L3 | Foliage | L2 + thread stack scrubbing on wait (memset of used shadow frames) | `FoliageStrategy` |
 | L4 | BOF-style | L3 + in-memory loader isolation | not shipped |
 
 See the design spec in `docs/superpowers/specs/2026-04-23-sleepmask-variants-design.md` for the full taxonomy and deferred work.
@@ -119,6 +119,13 @@ mask := sleepmask.New(region).
 mask := sleepmask.New(region).
     WithCipher(sleepmask.NewRC4Cipher()).
     WithStrategy(&sleepmask.EkkoStrategy{})
+
+// L3 Foliage: Ekko + stack-scrub (zero our used gadget shadows
+// mid-chain so a walker mid-wait sees clean zeros above Rsp instead
+// of VP/SF032 residue).
+mask := sleepmask.New(region).
+    WithCipher(sleepmask.NewRC4Cipher()).
+    WithStrategy(&sleepmask.FoliageStrategy{})
 ```
 
 | Strategy | Thread doing the wait | Wait syscall on that thread | Cost | Status |
@@ -127,6 +134,7 @@ mask := sleepmask.New(region).
 | `InlineStrategy{UseBusyTrig: true}` | caller goroutine | none (CPU-bound trig loop) | full core busy | shipped |
 | `TimerQueueStrategy{}` | thread-pool worker | `WaitForSingleObject` on a never-fired event | near-zero CPU | shipped |
 | `EkkoStrategy{}` | thread-pool worker | `WaitForSingleObjectEx` reached via an NtContinue gadget chain | near-zero CPU | shipped (windows+amd64, RC4 only, single region) |
+| `FoliageStrategy{}` | thread-pool worker | Same as Ekko + extra `memset` gadget scrubs used shadow frames to zeros before the wait | near-zero CPU | shipped (L3; windows+amd64, RC4 only, single region) |
 
 Rule of thumb: default to `InlineStrategy{}`. Switch to `TimerQueueStrategy{}` when you want the beacon goroutine's wait to look distinct from `Sleep`. Switch to `InlineStrategy{UseBusyTrig: true}` when you're fighting a sandbox that warps time or an EDR that has hooked every kernel wait primitive.
 
@@ -323,7 +331,8 @@ Run locally:
 | Multi-region | yes | generally one | generally one |
 | Busy-wait alternative | `InlineStrategy{UseBusyTrig: true}` | no (BOF-replaceable) | no |
 | Pluggable cipher | XOR / RC4 / AES-CTR | BOF-replaceable | AES only |
-| Pluggable wait-thread | `InlineStrategy`, `TimerQueueStrategy`, `EkkoStrategy` | no | no |
+| Pluggable wait-thread | `InlineStrategy`, `TimerQueueStrategy`, `EkkoStrategy`, `FoliageStrategy` | no | no |
+| Stack scrubbing during wait | `FoliageStrategy` (L3 — zeros used shadow frames mid-chain) | BOF-replaceable | no |
 | Cross-process masking | `RemoteMask` + `RemoteInlineStrategy` | yes | yes |
 | Key zeroing | yes (`SecureZero`) | varies by BOF | yes |
 | Self-encryption | no (limitation) | no | no |
@@ -367,9 +376,17 @@ func NewRC4Cipher() *RC4Cipher
 func NewAESCTRCipher() *AESCTRCipher
 
 // Strategy encapsulates the encrypt → wait → decrypt cycle. InlineStrategy,
-// TimerQueueStrategy, EkkoStrategy (windows+amd64, RC4 only) ship.
+// TimerQueueStrategy, EkkoStrategy, and FoliageStrategy (windows+amd64, RC4 only
+// — last two) ship.
 type Strategy interface {
     Cycle(ctx context.Context, regions []Region, cipher Cipher, key []byte, d time.Duration) error
+}
+
+// FoliageStrategy is Ekko + a stack-scrub gadget that zeroes the used
+// gadget shadow frames before the wait. ScrubBytes is clamped to a
+// safe max that does not clobber the memset gadget's own return frame.
+type FoliageStrategy struct {
+    ScrubBytes uintptr // 0 = default (2 * ekkoShadowStride); max is clamped internally
 }
 
 // New creates a Mask covering the given regions. Defaults: XORCipher + InlineStrategy.

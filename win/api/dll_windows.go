@@ -104,6 +104,8 @@ var (
 	ProcRtlDeregisterWaitEx              = Ntdll.NewProc("RtlDeregisterWaitEx")
 	ProcNtContinue                       = Ntdll.NewProc("NtContinue")
 	ProcRtlCaptureContext                = Ntdll.NewProc("RtlCaptureContext")
+	ProcRtlFillMemory                    = Ntdll.NewProc("RtlFillMemory")
+	ProcMemset                           = Ntdll.NewProc("memset")
 )
 
 // advapi32.dll procs

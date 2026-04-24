@@ -44,6 +44,7 @@ func e2eStrategies() []struct {
 		{"inline", func() Strategy { return &InlineStrategy{} }, nil},
 		{"timerqueue", func() Strategy { return &TimerQueueStrategy{} }, nil},
 		{"ekko", func() Strategy { return &EkkoStrategy{} }, NewRC4Cipher()},
+		{"foliage", func() Strategy { return &FoliageStrategy{} }, NewRC4Cipher()},
 	}
 }
 

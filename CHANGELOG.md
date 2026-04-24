@@ -9,6 +9,21 @@ introduce breaking API changes.
 
 ### Added
 
+- `evasion/sleepmask`: `FoliageStrategy` (L3) — Ekko + a stack-scrub
+  `memset` gadget inserted between the encrypt and wait steps. Before
+  the pool thread blocks in `WaitForSingleObjectEx`, it zeros the used
+  gadget shadow frames so a stack-walker mid-sleep sees clean zeros
+  above Rsp instead of VP/SF032 residue. Lighter than Austin Hudson's
+  full Foliage (no fake-RA chain), but self-contained. Clamp on
+  `ScrubBytes` prevents over-requesting from clobbering the memset's
+  own return path. Added to the 4-strategy e2e sub-test loop
+  (inline / timerqueue / ekko / foliage) — all pass the concurrent
+  scanner invariant. Layout bumped to accommodate 7 gadgets
+  (trampolines at +0x10000, slots at +0x10160, contexts at +0x11000)
+  in the shared `ekkoLayout`. `ntdll!memset` added to `win/api` (used
+  via `.Addr()` as gadget target — the exported `RtlFillMemory` is a
+  memset alias, so calling it with RtlFillMemory's documented arg
+  order crashes).
 - `evasion/dllhijack` — new package for DLL search order hijack discovery
   (MITRE T1574.001). MVP: `ScanServices()` enumerates every installed
   Windows service and returns `Opportunity` rows for those whose binary
