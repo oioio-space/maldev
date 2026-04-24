@@ -150,6 +150,37 @@ introduce breaking API changes.
   callbacks, ROP chains) on the VM.
 
 
+## [v0.14.1] — 2026-04-24
+
+### Fixed
+
+- `persistence/scheduler`: `CoInitializeEx` now accepts `S_FALSE`
+  (0x00000001) as a success code. COM refcounts per thread — when a
+  prior caller on the same goroutine's underlying thread already
+  initialised COM, CoInitializeEx returns `S_FALSE`, which go-ole
+  wraps as an OleError. The handler only whitelisted
+  `RPC_E_CHANGED_MODE`, so any scheduler call after another
+  COM-initialising path failed with "Fonction incorrecte." Surfaced
+  by the dllhijack VM sweep (ScanScheduledTasks + Validate running
+  in the same test binary).
+
+### Changed
+
+- `evasion/dllhijack`: drop `readAll` / `readImports` nil-opener
+  branches in favour of `stealthopen.Use`/`stealthopen.OpenRead`;
+  `ScanAutoElevate` now reads each candidate PE once (not twice) and
+  parses imports from the in-memory bytes via `importsFromBytes`.
+- `testutil`: new `SpyOpener` consolidates the `stealthopen.Opener`
+  spy pattern previously duplicated across four test files
+  (`evasion/dllhijack`, `evasion/herpaderping`, `evasion/unhook`,
+  `inject/phantomdll`). Single source, mutex-guarded `Paths()` /
+  `Last()` snapshots, and a defaulted `Inner` so tests can stay
+  focused on call-count / last-path assertions.
+- `evasion/dllhijack`: `TestValidate_OrchestrationEndToEnd` timeout
+  bumped 10s → 30s to tolerate PowerShell cold-start on a
+  freshly-reverted VM (observed up to 10.4s from first run).
+
+
 ## [v0.12.0] — 2026-04-24
 
 3-strategy sleep-mask architecture, pluggable Cipher (XOR/RC4/AES-CTR),
