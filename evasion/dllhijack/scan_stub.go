@@ -10,6 +10,21 @@ func ScanServices() ([]Opportunity, error) {
 	return nil, errors.New("dllhijack: ScanServices requires Windows")
 }
 
+// ScanProcesses stub. Windows-only.
+func ScanProcesses() ([]Opportunity, error) {
+	return nil, errors.New("dllhijack: ScanProcesses requires Windows")
+}
+
+// ScanScheduledTasks stub. Windows-only.
+func ScanScheduledTasks() ([]Opportunity, error) {
+	return nil, errors.New("dllhijack: ScanScheduledTasks requires Windows")
+}
+
+// ScanAll stub. Windows-only.
+func ScanAll() ([]Opportunity, error) {
+	return nil, errors.New("dllhijack: ScanAll requires Windows")
+}
+
 // SearchOrder stub. Windows-only.
 func SearchOrder(exeDir string) []string { return nil }
 

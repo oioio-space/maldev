@@ -4,6 +4,7 @@ package enum
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,4 +42,35 @@ func TestSessionIDPopulated(t *testing.T) {
 		}
 	}
 	t.Fatal("current process not found in List()")
+}
+
+func TestImagePath(t *testing.T) {
+	self, err := os.Executable()
+	require.NoError(t, err)
+
+	got, err := ImagePath(uint32(os.Getpid()))
+	require.NoError(t, err)
+	assert.True(t, strings.EqualFold(self, got),
+		"ImagePath should return %q, got %q", self, got)
+}
+
+func TestModules(t *testing.T) {
+	mods, err := Modules(uint32(os.Getpid()))
+	require.NoError(t, err)
+	require.NotEmpty(t, mods, "process has at least one module (the main exe)")
+
+	// First module is always the main exe.
+	selfExe, err := os.Executable()
+	require.NoError(t, err)
+	assert.True(t, strings.EqualFold(mods[0].Path, selfExe),
+		"first module should be the main exe: want %q, got %q", selfExe, mods[0].Path)
+
+	foundKernel32 := false
+	for _, m := range mods {
+		if strings.EqualFold(m.Name, "kernel32.dll") {
+			foundKernel32 = true
+			break
+		}
+	}
+	assert.True(t, foundKernel32, "kernel32.dll must be in the loaded module list")
 }

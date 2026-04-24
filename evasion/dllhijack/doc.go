@@ -11,27 +11,28 @@
 // DLL location and actual load path)
 //
 // Scope:
-//   - ScanServices() enumerates every installed Windows service, parses
-//     its binary's PE import table, resolves the DLL search order, and
-//     emits one Opportunity per (service, importedDLL) pair where a
-//     user-writable directory sits EARLIER in the search order than the
-//     DLL's legitimate location. Each Opportunity names the exact DLL
-//     and drop path — no "writable dir alone" false positives.
-//   - SearchOrder / HijackPath are the reusable primitives the scanner
-//     uses; callers can invoke them directly on any (exe, dll) pair.
+//   - ScanServices parses each service binary's PE import table and emits
+//     Opportunities via DLL search-order resolution.
+//   - ScanProcesses reads live loaded-module lists from every accessible
+//     process (Toolhelp32) — covers runtime LoadLibrary, not just static
+//     imports.
+//   - ScanScheduledTasks pulls every registered task's exec actions via
+//     COM ITaskService and applies the same PE-imports filter to each.
+//   - ScanAll aggregates the three.
+//   - SearchOrder / HijackPath are the primitives callers can use on any
+//     (exe, dll) pair.
 //   - KnownDLLs (HKLM\...\Session Manager\KnownDLLs) are correctly
 //     excluded from hijack candidates.
 //
-// Deferred: ScanProcesses (Toolhelp32 module walk), ScanScheduledTasks
-// (COM ITaskService), canary-DLL generation + validation, AutoElevate
+// Deferred: canary-DLL generation + Validate workflow, AutoElevate
 // scoring.
 //
 // Example:
 //
-//	opps, err := dllhijack.ScanServices()
-//	if err != nil { log.Fatal(err) }
-//	for _, o := range opps {
-//	    fmt.Printf("%s (%s) → drop %s (instead of %s)\n",
-//	        o.ID, o.DisplayName, o.HijackedPath, o.ResolvedDLL)
+//	all, err := dllhijack.ScanAll()
+//	if err != nil { log.Print(err) /* partial failures OK */ }
+//	for _, o := range all {
+//	    fmt.Printf("%s[%s] %s → drop %s (instead of %s)\n",
+//	        o.Kind, o.ID, o.DisplayName, o.HijackedPath, o.ResolvedDLL)
 //	}
 package dllhijack

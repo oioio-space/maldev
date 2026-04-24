@@ -31,6 +31,12 @@ func TestCreateAndDelete(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, found, "task not found after Create")
 
+	// Actions() should return the binary path we registered.
+	actions, err := Actions(testTaskName)
+	require.NoError(t, err)
+	require.Len(t, actions, 1)
+	assert.Equal(t, `C:\Windows\System32\notepad.exe`, actions[0])
+
 	require.NoError(t, Delete(testTaskName))
 }
 

@@ -9,6 +9,22 @@ introduce breaking API changes.
 
 ### Added
 
+- `evasion/dllhijack`: two new scanners (**Phase B**):
+  - `ScanProcesses` — enumerates every accessible running process and
+    reads the live loaded-module list via Toolhelp32, covering DLLs
+    loaded at runtime via LoadLibrary (the blind spot of static PE
+    import analysis).
+  - `ScanScheduledTasks` — walks every registered scheduled task via
+    COM ITaskService, extracts each exec action's binary path, applies
+    the same PE-imports filter as `ScanServices`.
+  - `ScanAll` aggregates services + processes + tasks. Partial failures
+    are surfaced but don't abort the remaining scanners.
+- `process/enum`: `ImagePath(pid)` via `QueryFullProcessImageNameW`,
+  `Modules(pid)` via `CreateToolhelp32Snapshot(TH32CS_SNAPMODULE)`,
+  and the `Module` struct (Name/Path/Base/Size).
+- `persistence/scheduler`: `Actions(name)` returns exec-action binary
+  paths for a registered task. Only `TASK_ACTION_EXEC` entries are
+  reported; COM/email/message actions are skipped.
 - `evasion/dllhijack`: `ScanServices` rewritten to use PE imports + DLL
   search-order resolution (**Phase A**). Each Opportunity now names the
   exact `HijackedDLL` and the `HijackedPath` where a payload DLL

@@ -132,14 +132,12 @@ exe := dllhijack.ParseBinaryPath(`"C:\Program Files\Svc\svc.exe" --service`)
 
 ## Limitations
 
-- **Static imports only.** The scanner parses each binary's PE import
-  table. DLLs loaded at runtime via `LoadLibrary` / `GetModuleHandle`
-  are invisible — `ScanProcesses` (shipping in the next phase) will
-  cover those via the loaded-module list of running processes.
-- **Services only (this phase).** `ScanProcesses` and
-  `ScanScheduledTasks` ship next.
-- **No canary.** Validation that a dropped DLL would actually be loaded
-  requires the canary-DLL workflow — shipping after the extra scanners.
+- **Services + scheduled tasks analyze STATIC imports** (PE import table).
+  DLLs loaded at runtime via `LoadLibrary` / `GetModuleHandle` are invisible
+  there. `ScanProcesses` covers the runtime-load blind spot by reading the
+  live loaded-module list from every accessible process.
+- **No canary** yet. Validation that a dropped DLL would actually be
+  loaded requires the canary-DLL workflow — shipping in the next phase.
 
 ---
 
@@ -147,7 +145,7 @@ exe := dllhijack.ParseBinaryPath(`"C:\Program Files\Svc\svc.exe" --service`)
 
 | Tool                  | Ships canary validation | Covers processes | Covers services | Covers tasks | Go-native |
 |-----------------------|-------------------------|------------------|-----------------|--------------|-----------|
-| `maldev/dllhijack`    | no (Phase C)            | no (Phase B)     | **yes**         | no (Phase B) | yes       |
+| `maldev/dllhijack`    | no (Phase C)            | **yes**          | **yes**         | **yes**      | yes       |
 | DLLHijackHunter (.NET)| yes                     | yes              | yes             | yes          | no        |
 | Siofra (Koret)        | no                      | yes              | no              | no           | no        |
 
@@ -176,6 +174,21 @@ type Opportunity struct {
     Writable     bool
     Reason       string
 }
+
+// ScanServices enumerates services; per-import PE analysis.
+func ScanServices() ([]Opportunity, error)
+
+// ScanProcesses enumerates every accessible running process and reads
+// its LIVE loaded-module list via Toolhelp32 — covers runtime LoadLibrary.
+func ScanProcesses() ([]Opportunity, error)
+
+// ScanScheduledTasks enumerates registered tasks via COM ITaskService,
+// walks each task's exec actions, applies PE-imports filter per binary.
+func ScanScheduledTasks() ([]Opportunity, error)
+
+// ScanAll = Services ∪ Processes ∪ Tasks. Partial failures are surfaced
+// as a wrapped error but do not abort the remaining scanners.
+func ScanAll() ([]Opportunity, error)
 
 // SearchOrder returns the DLL search order for a binary in exeDir:
 // [exeDir, System32, SysWOW64, Windows]. SafeDllSearchMode is assumed

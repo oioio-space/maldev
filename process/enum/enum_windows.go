@@ -87,3 +87,61 @@ func processFromEntry(e *windows.ProcessEntry32) Process {
 	windows.ProcessIdToSessionId(e.ProcessID, &p.SessionID)
 	return p
 }
+
+// ImagePath returns the full image path for a given process via
+// QueryFullProcessImageNameW. Requires PROCESS_QUERY_LIMITED_INFORMATION
+// (granted to the current user for processes it owns, and to admins
+// for everything except Protected Process Light).
+func ImagePath(pid uint32) (string, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return "", err
+	}
+	defer windows.CloseHandle(h)
+	buf := make([]uint16, windows.MAX_PATH)
+	n := uint32(len(buf))
+	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &n); err != nil {
+		return "", err
+	}
+	return windows.UTF16ToString(buf[:n]), nil
+}
+
+// Module is a single loaded module (DLL or main exe) for a process.
+type Module struct {
+	Name string // base file name, e.g. "kernel32.dll"
+	Path string // full path, e.g. "C:\\Windows\\System32\\kernel32.dll"
+	Base uintptr
+	Size uint32
+}
+
+// Modules returns every module loaded into the given process via
+// CreateToolhelp32Snapshot(TH32CS_SNAPMODULE). Requires the same
+// rights as OpenProcess for that pid; protected processes return an
+// error. The first returned module is the process's main exe.
+func Modules(pid uint32) ([]Module, error) {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPMODULE|windows.TH32CS_SNAPMODULE32, pid)
+	if err != nil {
+		return nil, err
+	}
+	defer windows.CloseHandle(snap)
+
+	var me windows.ModuleEntry32
+	me.Size = uint32(unsafe.Sizeof(me))
+
+	if err := windows.Module32First(snap, &me); err != nil {
+		return nil, err
+	}
+	var mods []Module
+	for {
+		mods = append(mods, Module{
+			Name: syscall.UTF16ToString(me.Module[:]),
+			Path: syscall.UTF16ToString(me.ExePath[:]),
+			Base: uintptr(unsafe.Pointer(me.ModBaseAddr)),
+			Size: me.ModBaseSize,
+		})
+		if err := windows.Module32Next(snap, &me); err != nil {
+			break
+		}
+	}
+	return mods, nil
+}

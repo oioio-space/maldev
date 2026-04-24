@@ -213,6 +213,55 @@ func List() ([]Task, error) {
 	return result, err
 }
 
+// Actions returns the exec-action binary paths for a registered task.
+// Only TASK_ACTION_EXEC entries are reported; COM/email/message actions
+// are skipped. Returns an empty slice if the task has no exec actions.
+func Actions(name string) ([]string, error) {
+	var paths []string
+	err := withTaskService(func(ts *ole.IDispatch) error {
+		taskVar, err := oleutil.CallMethod(ts, "GetTask", name)
+		if err != nil {
+			return fmt.Errorf("GetTask(%s): %w", name, err)
+		}
+		task := taskVar.ToIDispatch()
+		defer task.Release()
+
+		def, err := dispatchProperty(task, "Definition")
+		if err != nil {
+			return err
+		}
+		defer def.Release()
+
+		acts, err := dispatchProperty(def, "Actions")
+		if err != nil {
+			return err
+		}
+		defer acts.Release()
+
+		countVar, err := oleutil.GetProperty(acts, "Count")
+		if err != nil {
+			return fmt.Errorf("Actions.Count: %w", err)
+		}
+		count := int(countVar.Val)
+		for i := 1; i <= count; i++ {
+			itemVar, err := oleutil.CallMethod(acts, "Item", i)
+			if err != nil {
+				continue
+			}
+			item := itemVar.ToIDispatch()
+			typeVar, err := oleutil.GetProperty(item, "Type")
+			if err == nil && int(typeVar.Val) == 0 /* TASK_ACTION_EXEC */ {
+				if p, err := oleutil.GetProperty(item, "Path"); err == nil {
+					paths = append(paths, p.ToString())
+				}
+			}
+			item.Release()
+		}
+		return nil
+	})
+	return paths, err
+}
+
 // Run immediately executes a registered task.
 func Run(name string) error {
 	return withTaskService(func(ts *ole.IDispatch) error {
