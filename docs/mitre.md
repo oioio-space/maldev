@@ -9,7 +9,7 @@
 | T1027 | Obfuscated Files or Information | `evasion/sleepmask`, `pe/strip`, `crypto` (TEA/XTEA/ArithShift/SBox/MatrixTransform) | D3-SMRA (System Memory Range Analysis) |
 | T1027.013 | Encrypted/Encoded File | `crypto`, `encode` | D3-FCA (File Content Analysis) |
 | T1027.002 | Software Packing | `pe/morph` | D3-SEA (Static Executable Analysis) |
-| T1036 | Masquerading | `evasion/stealthopen` | D3-FHA (File Hash Analysis) |
+| T1036 | Masquerading | `evasion/stealthopen`, `evasion/callstack` (call-stack spoof metadata) | D3-FHA (File Hash Analysis) |
 | T1036.005 | Masquerading: Match Legitimate Name or Location | `evasion/fakecmd` (self + remote via `SpoofPID`), `pe/masquerade` | D3-PLA (Process Listing Analysis) |
 | T1047.001 | Boot or Logon Autostart Execution: Registry Run Keys | `persistence/registry` | D3-SBV (Service Binary Verification) |
 | T1003.001 | OS Credential Dumping: LSASS Memory | `collection/lsassdump` | D3-PSA (Process Spawn Analysis), D3-SICA (System Image Change Analysis) |

@@ -150,6 +150,26 @@ introduce breaking API changes.
   callbacks, ROP chains) on the VM.
 
 
+## [v0.16.0] — 2026-04-25
+
+### Added
+
+- `evasion/callstack`: call-stack spoofing metadata primitives (MITRE
+  T1036). Ships `LookupFunctionEntry` (ntdll!RtlLookupFunctionEntry
+  wrapper, returns a Frame carrying ReturnAddress + ImageBase +
+  RUNTIME_FUNCTION by value), `StandardChain` (cached 2-frame chain:
+  kernel32!BaseThreadInitThunk inner → ntdll!RtlUserThreadStart
+  outer, each frame pre-populated with unwind metadata),
+  `FindReturnGadget` (byte-scans ntdll's .text for a lone RET
+  0xC3 + int3/nop padding, cached once per process, guaranteed to
+  have its own RUNTIME_FUNCTION), and `Validate` (structural chain
+  consistency check).
+- The asm pivot that actually executes a call through a synthesized
+  chain is deferred to **v0.16.1** — v0.16.0 provides the building
+  blocks so higher-level packages (`inject`, `evasion/unhook`,
+  future sleepmask L4) can compose their own pivots.
+
+
 ## [v0.15.0] — 2026-04-24
 
 ### Added
