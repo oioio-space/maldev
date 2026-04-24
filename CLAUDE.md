@@ -83,6 +83,7 @@ go run scripts/vm-test-memscan.go
 - `WindowsSearchableCanary` — 19-byte canary with ASCII marker (for memory scanning)
 - `SpawnSacrificial(t)` / `SpawnAndResume(t)` — notepad for injection tests
 - `KaliSSH(t, cmd)` / `KaliGenerateShellcode(t, payload, lhost, lport)` — Kali MSF helpers
+- `SpyOpener` — `stealthopen.Opener` spy for tests that assert a code path routed file reads through the injected Opener (records `Calls` + mutex-guarded `Paths()`/`Last()`)
 
 ## Package Structure
 Single module `github.com/oioio-space/maldev`. Dependencies flow bottom-up:
