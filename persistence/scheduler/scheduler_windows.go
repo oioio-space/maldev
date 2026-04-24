@@ -40,6 +40,7 @@ const (
 	taskLogonInteractiveToken  = 3
 	taskActionExec             = 0
 	rpcChangedMode             = 0x80010106
+	sFalse                     = 0x00000001 // CoInitializeEx: already initialised on this thread; still needs balancing CoUninitialize.
 )
 
 type options struct {
@@ -295,7 +296,8 @@ func Run(name string) error {
 // the connected ITaskService IDispatch to fn. All teardown is handled here.
 func withTaskService(fn func(*ole.IDispatch) error) error {
 	if err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED); err != nil {
-		if oe, ok := err.(*ole.OleError); !ok || oe.Code() != rpcChangedMode {
+		oe, ok := err.(*ole.OleError)
+		if !ok || (oe.Code() != rpcChangedMode && oe.Code() != sFalse) {
 			return fmt.Errorf("CoInitializeEx: %w", err)
 		}
 	}
