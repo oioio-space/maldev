@@ -15,18 +15,22 @@ func TestScanServices(t *testing.T) {
 	opps, err := ScanServices()
 	require.NoError(t, err)
 
-	// On a stock Win10 the current user typically can't write to any
-	// service binary's directory — System32/Program Files are protected.
-	// Zero opportunities is the expected common case. If any are found,
-	// verify the structured data.
+	// Phase-A filter is strict: every Opportunity names the exact DLL
+	// and drop path. Zero is fine (nothing hijackable on this host);
+	// any returned row must carry the new fields.
 	t.Logf("found %d hijack opportunities", len(opps))
 	for _, o := range opps {
-		t.Logf("  %s (%q) binary=%s dir=%s", o.ID, o.DisplayName, o.BinaryPath, o.SearchDir)
+		t.Logf("  %s (%q) binary=%s hijackedDLL=%s drop=%s resolved=%s",
+			o.ID, o.DisplayName, o.BinaryPath, o.HijackedDLL, o.HijackedPath, o.ResolvedDLL)
 		assert.Equal(t, KindService, o.Kind)
 		assert.True(t, o.Writable)
 		assert.NotEmpty(t, o.ID)
 		assert.NotEmpty(t, o.BinaryPath)
 		assert.NotEmpty(t, o.SearchDir)
+		assert.NotEmpty(t, o.HijackedDLL, "HijackedDLL must be populated")
+		assert.NotEmpty(t, o.HijackedPath, "HijackedPath must be populated")
+		assert.Equal(t, o.SearchDir, filepath.Dir(o.HijackedPath),
+			"HijackedPath must sit inside SearchDir")
 	}
 }
 

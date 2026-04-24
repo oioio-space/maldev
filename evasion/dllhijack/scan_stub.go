@@ -9,3 +9,9 @@ import "errors"
 func ScanServices() ([]Opportunity, error) {
 	return nil, errors.New("dllhijack: ScanServices requires Windows")
 }
+
+// SearchOrder stub. Windows-only.
+func SearchOrder(exeDir string) []string { return nil }
+
+// HijackPath stub. Windows-only; always returns empty strings.
+func HijackPath(exeDir, dllName string) (string, string) { return "", "" }

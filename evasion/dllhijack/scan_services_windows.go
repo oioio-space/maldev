@@ -6,19 +6,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
+
+	"github.com/oioio-space/maldev/pe/imports"
 )
 
-// ScanServices enumerates every installed Windows service and returns
-// an Opportunity for those whose binary directory is writable by the
-// current user — a classic DLL-hijack vector: drop a DLL named like
-// one of the service binary's imports and the service loads it on
-// next start.
+// ScanServices enumerates every installed Windows service, parses its
+// binary's import table, and emits one Opportunity per (service,
+// importedDLL) pair where Windows' DLL search order exposes a
+// user-writable directory earlier than the DLL's real location.
 //
-// Requires no elevation to enumerate; the writability probe runs as
-// the current token. Services whose Config cannot be read (access
-// denied, missing registry keys) are silently skipped.
+// This is the "real" filter: we no longer flag every writable service
+// dir, only the ones where a specific DLL can be hijacked. Services
+// whose binary cannot be opened, whose imports cannot be parsed, or
+// whose Config cannot be read are silently skipped.
+//
+// Requires no elevation.
 func ScanServices() ([]Opportunity, error) {
 	m, err := mgr.Connect()
 	if err != nil {
@@ -47,26 +53,62 @@ func ScanServices() ([]Opportunity, error) {
 		if binPath == "" {
 			continue
 		}
-		dir := filepath.Dir(binPath)
-		if dir == "" || dir == "." {
+		binPath = expandEnvVars(binPath)
+		if !fileExists(binPath) {
+			continue
+		}
+		exeDir := filepath.Dir(binPath)
+
+		imps, err := imports.List(binPath)
+		if err != nil {
 			continue
 		}
 
-		if !dirWritable(dir) {
-			continue
-		}
+		// Dedup DLL names — a single DLL may export many imported
+		// functions; we only care about the DLL name.
+		seen := make(map[string]struct{}, len(imps))
+		for _, imp := range imps {
+			dllName := strings.ToLower(imp.DLL)
+			if _, dup := seen[dllName]; dup {
+				continue
+			}
+			seen[dllName] = struct{}{}
 
-		opps = append(opps, Opportunity{
-			Kind:        KindService,
-			ID:          name,
-			DisplayName: cfg.DisplayName,
-			BinaryPath:  binPath,
-			SearchDir:   dir,
-			Writable:    true,
-			Reason:      "service binary directory writable by current user",
-		})
+			hijackDir, resolvedDir := HijackPath(exeDir, imp.DLL)
+			if hijackDir == "" {
+				continue
+			}
+			opps = append(opps, Opportunity{
+				Kind:         KindService,
+				ID:           name,
+				DisplayName:  cfg.DisplayName,
+				BinaryPath:   binPath,
+				HijackedDLL:  imp.DLL,
+				HijackedPath: filepath.Join(hijackDir, imp.DLL),
+				ResolvedDLL:  filepath.Join(resolvedDir, imp.DLL),
+				SearchDir:    hijackDir,
+				Writable:     true,
+				Reason:       "import " + imp.DLL + " resolves from writable " + hijackDir + " before " + resolvedDir,
+			})
+		}
 	}
 	return opps, nil
+}
+
+// expandEnvVars expands %SystemRoot%-style placeholders that the SCM
+// sometimes stores in BinaryPathName. Falls back to the original
+// string on error.
+func expandEnvVars(p string) string {
+	in, err := windows.UTF16PtrFromString(p)
+	if err != nil {
+		return p
+	}
+	out := make([]uint16, windows.MAX_PATH*2)
+	n, err := windows.ExpandEnvironmentStrings(in, &out[0], uint32(len(out)))
+	if err != nil || n == 0 {
+		return p
+	}
+	return windows.UTF16ToString(out[:n])
 }
 
 // dirWritable returns true if the current process can create a file in

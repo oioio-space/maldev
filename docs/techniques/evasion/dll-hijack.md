@@ -90,12 +90,33 @@ func main() {
 
     for _, o := range opps {
         fmt.Printf("%s (%s)\n", o.ID, o.DisplayName)
-        fmt.Printf("  binary : %s\n", o.BinaryPath)
-        fmt.Printf("  dir    : %s  (writable: %v)\n", o.SearchDir, o.Writable)
-        fmt.Printf("  reason : %s\n\n", o.Reason)
+        fmt.Printf("  binary       : %s\n", o.BinaryPath)
+        fmt.Printf("  hijacked DLL : %s\n", o.HijackedDLL)
+        fmt.Printf("  drop at      : %s\n", o.HijackedPath)
+        fmt.Printf("  legit at     : %s\n\n", o.ResolvedDLL)
     }
 }
 ```
+
+Sample output on a Win10 host running as admin (`uhssvc` = Microsoft
+Update Health Service, binary in `C:\Program Files\Microsoft Update
+Health Tools\`):
+
+```
+uhssvc (Microsoft Update Health Service)
+  binary       : C:\Program Files\Microsoft Update Health Tools\uhssvc.exe
+  hijacked DLL : WINHTTP.dll
+  drop at      : C:\Program Files\Microsoft Update Health Tools\WINHTTP.dll
+  legit at     : C:\Windows\system32\WINHTTP.dll
+```
+
+### Low-level helpers
+
+`SearchOrder(exeDir)` returns the ordered directory list Windows walks
+for a DLL load (app dir → System32 → SysWOW64 → Windows).
+`HijackPath(exeDir, dllName)` returns the first writable dir in that
+order that doesn't already contain the DLL, or `""` if there's no
+opportunity (including KnownDLL cases).
 
 ### Parsing `BinaryPathName` manually
 
@@ -111,16 +132,14 @@ exe := dllhijack.ParseBinaryPath(`"C:\Program Files\Svc\svc.exe" --service`)
 
 ## Limitations
 
-- **No import analysis.** A writable service dir is a *potential* hijack
-  vector, not a confirmed one. To confirm, a Phase 2.1 helper (deferred)
-  will parse the binary's imports, resolve each one against the effective
-  search order, and return only the DLL names that actually resolve to
-  a writable location before System32.
-- **Services only.** `ScanProcesses` (via `Toolhelp32` module walk) and
-  `ScanScheduledTasks` (via COM `ITaskService`) are future additions.
-- **No canary.** A canary DLL with the victim's expected exports + a
-  load-time log marker is needed to prove end-to-end exploitability —
-  see `docs/superpowers/specs/` for the design when it lands.
+- **Static imports only.** The scanner parses each binary's PE import
+  table. DLLs loaded at runtime via `LoadLibrary` / `GetModuleHandle`
+  are invisible — `ScanProcesses` (shipping in the next phase) will
+  cover those via the loaded-module list of running processes.
+- **Services only (this phase).** `ScanProcesses` and
+  `ScanScheduledTasks` ship next.
+- **No canary.** Validation that a dropped DLL would actually be loaded
+  requires the canary-DLL workflow — shipping after the extra scanners.
 
 ---
 
@@ -128,7 +147,7 @@ exe := dllhijack.ParseBinaryPath(`"C:\Program Files\Svc\svc.exe" --service`)
 
 | Tool                  | Ships canary validation | Covers processes | Covers services | Covers tasks | Go-native |
 |-----------------------|-------------------------|------------------|-----------------|--------------|-----------|
-| `maldev/dllhijack`    | no (Phase 2.1)          | no (Phase 2.1)   | **yes**         | no (Phase 2.1)| yes       |
+| `maldev/dllhijack`    | no (Phase C)            | no (Phase B)     | **yes**         | no (Phase B) | yes       |
 | DLLHijackHunter (.NET)| yes                     | yes              | yes             | yes          | no        |
 | Siofra (Koret)        | no                      | yes              | no              | no           | no        |
 
@@ -146,14 +165,27 @@ const (
 func (k Kind) String() string
 
 type Opportunity struct {
-    Kind        Kind
-    ID          string   // ServiceName / PID / TaskPath
-    DisplayName string
-    BinaryPath  string
-    SearchDir   string
-    Writable    bool
-    Reason      string
+    Kind         Kind
+    ID           string // ServiceName / PID / TaskPath
+    DisplayName  string
+    BinaryPath   string // the exe that loads DLLs
+    HijackedDLL  string // e.g. "version.dll" — the import that would be hijacked
+    HijackedPath string // exact drop path for the payload
+    ResolvedDLL  string // where the DLL currently resolves (usually System32)
+    SearchDir    string // dirname(HijackedPath)
+    Writable     bool
+    Reason       string
 }
+
+// SearchOrder returns the DLL search order for a binary in exeDir:
+// [exeDir, System32, SysWOW64, Windows]. SafeDllSearchMode is assumed
+// on; CWD and %PATH% are deliberately skipped.
+func SearchOrder(exeDir string) []string
+
+// HijackPath reports the hijack candidate dir for one (exe, dll) pair:
+// the first writable dir earlier in the search order than the DLL's
+// real location, or "" if no opportunity. Correctly excludes KnownDLLs.
+func HijackPath(exeDir, dllName string) (hijackDir, resolvedDir string)
 
 // ScanServices enumerates Windows services with a writable binary dir.
 // Windows only; cross-platform stub returns an error.

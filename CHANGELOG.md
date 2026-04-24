@@ -9,6 +9,14 @@ introduce breaking API changes.
 
 ### Added
 
+- `evasion/dllhijack`: `ScanServices` rewritten to use PE imports + DLL
+  search-order resolution (**Phase A**). Each Opportunity now names the
+  exact `HijackedDLL` and the `HijackedPath` where a payload DLL
+  should be dropped, instead of just flagging writable service
+  directories. KnownDLLs (HKLM\...\Session Manager\KnownDLLs) are
+  correctly excluded. New exported primitives `SearchOrder(exeDir)`
+  and `HijackPath(exeDir, dllName)` for callers that read service
+  config from non-SCM sources.
 - `evasion/sleepmask`: `FoliageStrategy` (L3) — Ekko + a stack-scrub
   `memset` gadget inserted between the encrypt and wait steps. Before
   the pool thread blocks in `WaitForSingleObjectEx`, it zeros the used

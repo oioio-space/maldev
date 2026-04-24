@@ -28,15 +28,25 @@ func (k Kind) String() string {
 // Opportunity describes one discovered DLL hijack candidate. The caller
 // should treat every field as reconnaissance data, not an assertion of
 // exploitability — confirm by dropping a canary DLL + triggering the
-// victim (deferred helper, see package doc).
+// victim (see the canary/Validate helpers shipped alongside).
 type Opportunity struct {
 	Kind        Kind
 	ID          string // ServiceName / PID / TaskPath depending on Kind
 	DisplayName string // human-readable label, may be empty
 	BinaryPath  string // the exe that loads DLLs at runtime
-	SearchDir   string // a directory on the victim's DLL search path
-	Writable    bool   // true if the current user can write to SearchDir
-	Reason      string // why this Opportunity was flagged
+
+	// HijackedDLL is the import name that would be hijacked, e.g. "version.dll".
+	HijackedDLL string
+	// HijackedPath is the exact file path where a payload DLL can be
+	// dropped so the victim loads it BEFORE reaching the legitimate copy.
+	HijackedPath string
+	// ResolvedDLL is the path the victim currently loads the DLL from
+	// (typically System32). Empty if the scanner could not resolve it.
+	ResolvedDLL string
+
+	SearchDir string // directory where a dropped DLL would sit (= dirname(HijackedPath))
+	Writable  bool   // true if the current user can write to SearchDir
+	Reason    string // why this Opportunity was flagged
 }
 
 // ParseBinaryPath extracts the executable path from a service
