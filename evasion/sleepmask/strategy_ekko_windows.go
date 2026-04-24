@@ -34,13 +34,26 @@ import (
 //   - Not safe for concurrent invocation (shared asm-globals feeding the
 //     resume stub).
 //
-// Status: substantial progress on the ROP chain infrastructure (7
-// CONTEXTs page-aligned in VirtualAlloc'd scratch, Rsp post-CALL
-// alignment, USTRING struct, single-timer kickoff, spin-forever resume
-// stub). VirtualProtect + trampolines + NtContinue + resumeStub verified
-// working in isolation on a pool thread. The SystemFunction032 gadget
-// still crashes the pool thread for undiagnosed reasons; round-trip
-// test remains skipped until resolved.
+// Status: full ROP chain verified end-to-end via
+// TestEkkoStrategy_CycleRoundTrip on Win10 amd64. Key design points:
+//   - All 7 CONTEXTs + trampolines + USTR pool live in a page-aligned
+//     VirtualAlloc'd scratch (16-byte alignment for FXSAVE).
+//   - Each gadget's Rsp is placed with 8 KB of padding below it, so
+//     the API function's stack grows into empty scratch, never into
+//     our metadata. (This was the last bug: SF032's stack frame was
+//     clobbering our slot table, breaking subsequent trampolines.)
+//   - USTRING struct (ULONG Length, not USHORT) matches the advapi32
+//     signature of SystemFunction032.
+//   - Single timer kicks off the chain; trampolines drive the 5
+//     remaining gadgets without additional timer races.
+//   - resumeStub spins-forever after SetEvent (PAUSE/JMP) — can't call
+//     ExitThread without corrupting thread-pool callback bookkeeping.
+//   - DeleteTimerQueueEx(NULL) is non-blocking to avoid deadlock on
+//     the spinning resume thread. One pool worker "leaks" per Cycle.
+//   - Final gadget 4 restores the region to PAGE_EXECUTE_READ (the
+//     typical post-inject state). Callers whose regions need a
+//     different protection should use TimerQueueStrategy or
+//     InlineStrategy.
 type EkkoStrategy struct{}
 
 // resumeStub is implemented in plan9 asm (strategy_ekko_amd64.s). Its
@@ -57,35 +70,51 @@ var (
 	ekkoProcExitThread uintptr
 )
 
-// Scratch layout — a single VirtualAlloc'd RWX page, automatically
-// 16-byte aligned (page-aligned). All data the chain touches lives
-// here so we never depend on Go's stack/heap alignment for CONTEXT
-// (RtlCaptureContext uses FXSAVE → requires 16-byte alignment).
+// Scratch layout — a single VirtualAlloc'd RWX region, page-aligned
+// (so automatically 16-byte aligned for FXSAVE targets).
 //
-//	+0x0000  trampolines             6 × 0x30
-//	+0x0120  ctx-slot table          6 × 8
-//	+0x0150  key copy                up to 0x40 bytes
-//	+0x0190  USTR pool               dataUSTR (16) + keyUSTR (16)
-//	+0x0300  shadow frames           6 × 0x48 bytes
-//	+0x0800  contexts                7 × 0x500 bytes   (ctxMain + 6 gadgets)
-//	         total                  ~0x2B00, allocate 16 KB for safety
+// CRITICAL: Win32 API functions invoked by NtContinue use the caller's
+// Rsp as their stack, growing DOWN from Rsp into lower addresses. If
+// any of our metadata (trampolines, slot table, USTRs, key copy) sits
+// in that downward-grow range, the function clobbers it mid-chain and
+// subsequent trampolines load garbage ctx pointers. The layout below
+// places each gadget's Rsp LOW, with only padding below for stack
+// growth, and puts ALL read-back-by-chain metadata above the highest
+// Rsp so it is never in any stack's downward-grow range.
+//
+//	+0x0000  (padding — gadget 0's stack grows down into this)
+//	+0x2000  gadget 0 shadow frame (16 bytes, Rsp = +0x2008)
+//	+0x2010  (padding — gadget 1's stack)
+//	+0x4000  gadget 1 shadow frame (Rsp = +0x4008)
+//	+0x4010  (padding — gadget 2's stack)
+//	+0x6000  gadget 2 shadow frame (Rsp = +0x6008)
+//	+0x8000  gadget 3 shadow frame (Rsp = +0x8008)
+//	+0xA000  gadget 4 shadow frame (Rsp = +0xA008)
+//	+0xC000  gadget 5 shadow frame (Rsp = +0xC008)
+//	+0xE000  trampolines          6 × 0x30
+//	+0xE120  ctx slot table       6 × 8
+//	+0xE150  key copy             ≤ 0x40 bytes
+//	+0xE190  USTR pool            32 bytes
+//	+0xF000  contexts             7 × 0x500 (ctxMain + 6 gadgets) = 0x2300
+//	         total scratch = 0x11300 < 128 KB
 const (
-	ekkoScratchSize = 16 * 1024
+	ekkoScratchSize = 128 * 1024
 
-	ekkoTrampOffset = 0x0000
+	ekkoShadowStride = 0x2000 // huge gap between gadget Rsps so each stack has 8 KB headroom
+	ekkoShadowOffset = 0x2000
+	ekkoShadowSlotOff = 0x08 // post-CALL alignment offset within each slot
+
+	ekkoTrampOffset = 0xE000
 	ekkoTrampStride = 0x30
 
-	ekkoSlotsOffset = 0x0120
+	ekkoSlotsOffset = 0xE120
 
-	ekkoKeyCopyOffset = 0x0150
+	ekkoKeyCopyOffset = 0xE150
 	ekkoKeyCopyMax    = 0x40
 
-	ekkoUSTROffset = 0x0190 // dataUSTR + keyUSTR (32 bytes)
+	ekkoUSTROffset = 0xE190 // dataUSTR + keyUSTR (32 bytes)
 
-	ekkoShadowOffset = 0x0300
-	ekkoShadowStride = 0x48
-
-	ekkoCtxOffset = 0x0800
+	ekkoCtxOffset = 0xF000
 	ekkoCtxStride = 0x0500
 )
 

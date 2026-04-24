@@ -7,6 +7,40 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- `evasion/sleepmask`: `EkkoStrategy` full ROP chain round-trip now works
+  end-to-end on Win10 amd64. Root cause of the previous crashes was that
+  `SystemFunction032`'s stack frame grew downward from each gadget's Rsp
+  into our own slot-table / trampoline bytes, corrupting them mid-chain;
+  subsequent trampolines then loaded garbage CONTEXT pointers and
+  NtContinue faulted at `0xffffffffffffffff`. Scratch layout restructured
+  so all metadata (trampolines, slots, USTRs, key, contexts) lives at the
+  top of the buffer, above every gadget's Rsp; each gadget gets 8 KB of
+  pure padding below its Rsp for the API's own stack growth.
+  `TestEkkoStrategy_CycleRoundTrip` un-skipped; Ekko added to the
+  `TestSleepMaskE2E_DefeatsExecutablePageScanner/{inline,timerqueue,ekko}`
+  sub-test loop. Also fixed: single-timer kickoff (removed multi-timer
+  pool-thread race), `resumeStub` spins-forever instead of ExitThread
+  (avoids corrupting thread-pool callback bookkeeping),
+  `DeleteTimerQueueEx(NULL)` for non-blocking cleanup, USTRING layout
+  (`ULONG Length` not `USHORT`), `ContextFlags` narrowed to
+  CONTROL|INTEGER so FPU state isn't restored cross-thread.
+
+### Added
+
+- `scripts/vm-provision.sh`: Windows VM now gets WER LocalDumps
+  configured (HKLM\...\LocalDumps → `C:\Dumps`, DumpType=2/full,
+  DumpCount=10, DontShowUI=1). Used to diagnose the Ekko SF032
+  stack-clobbering bug; stays for future pool-thread crash
+  investigation. `vm_running` locale fix (`LC_ALL=C virsh domstate`) so
+  the script no longer trips on French `en cours d'exécution`.
+- `docs/vm-test-setup.md`: new "Debugging native crashes" section
+  documenting the Go crash-reporter + WER LocalDumps workflow for
+  investigating non-Go-thread access violations (e.g. thread-pool
+  callbacks, ROP chains) on the VM.
+
+
 ## [v0.12.0] — 2026-04-24
 
 3-strategy sleep-mask architecture, pluggable Cipher (XOR/RC4/AES-CTR),

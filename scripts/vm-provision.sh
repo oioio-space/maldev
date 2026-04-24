@@ -8,6 +8,10 @@
 #     - .NET Framework 3.5 (for pe/clr CLR tests)
 #     - (UPX 4.x is already present by default, 3.x install path documented
 #        but skipped — pe/morph would need a rewrite)
+#     - WER LocalDumps (no install; registry keys) so crashing test binaries
+#       write a full minidump to C:\Dumps for post-mortem analysis. Debugged
+#       EkkoStrategy's SF032 stack-clobbering bug and stays configured for
+#       future pool-thread crash investigation.
 #   Kali VM (debian13)
 #     - postgresql service enabled + started
 #     - msfdb init (database.yml for MSF)
@@ -62,7 +66,7 @@ selected() {
     return 1
 }
 
-vm_running() { virsh -c "$LIBVIRT_URI" domstate "$1" 2>/dev/null | grep -q "running"; }
+vm_running() { LC_ALL=C virsh -c "$LIBVIRT_URI" domstate "$1" 2>/dev/null | grep -q "running"; }
 vm_ensure_up() {
     local name="$1"
     if ! vm_running "$name"; then
@@ -140,6 +144,20 @@ BAT
         fi
         ssh "${ssh_base[@]}" "test@$ip" 'schtasks /delete /tn MaldevProvNetFx3 /f' 2>&1 | tail -1
     fi
+
+    log "Windows: configuring WER LocalDumps"
+    # LocalDumps requires HKLM edits, which medium-integrity OpenSSH can't do;
+    # OpenSSH on this build runs at high integrity (token has S-1-16-12288),
+    # so reg.exe directly works. Idempotent — 'reg add /f' overwrites.
+    for cmd in \
+        'reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps" /v DumpFolder /t REG_EXPAND_SZ /d "C:\Dumps" /f' \
+        'reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps" /v DumpType /t REG_DWORD /d 2 /f' \
+        'reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps" /v DumpCount /t REG_DWORD /d 10 /f' \
+        'reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting" /v DontShowUI /t REG_DWORD /d 1 /f' \
+        'if not exist C:\Dumps mkdir C:\Dumps'; do
+        ssh "${ssh_base[@]}" "test@$ip" "$cmd" > /dev/null 2>&1
+    done
+    done_msg "WER LocalDumps → C:\\Dumps, DumpType=2 (full)"
 
     log "Windows: checking UPX"
     if ssh "${ssh_base[@]}" "test@$ip" 'where upx' >/dev/null 2>&1; then

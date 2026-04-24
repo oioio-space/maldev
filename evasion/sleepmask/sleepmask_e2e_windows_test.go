@@ -27,16 +27,23 @@ import (
 // e2eStrategies lists every strategy the e2e suite asserts the
 // "masked window is opaque" invariant against. Extended as new
 // strategies are shipped.
+//
+// Each entry may pin a specific cipher (for strategies that require
+// one — EkkoStrategy only works with RC4). cipher=nil keeps the
+// Mask's default XOR cipher.
 func e2eStrategies() []struct {
-	name string
-	ctor func() Strategy
+	name   string
+	ctor   func() Strategy
+	cipher Cipher
 } {
 	return []struct {
-		name string
-		ctor func() Strategy
+		name   string
+		ctor   func() Strategy
+		cipher Cipher
 	}{
-		{"inline", func() Strategy { return &InlineStrategy{} }},
-		{"timerqueue", func() Strategy { return &TimerQueueStrategy{} }},
+		{"inline", func() Strategy { return &InlineStrategy{} }, nil},
+		{"timerqueue", func() Strategy { return &TimerQueueStrategy{} }, nil},
+		{"ekko", func() Strategy { return &EkkoStrategy{} }, NewRC4Cipher()},
 	}
 }
 
@@ -79,12 +86,12 @@ func TestSleepMaskE2E_DefeatsExecutablePageScanner(t *testing.T) {
 	for _, strat := range e2eStrategies() {
 		strat := strat
 		t.Run(strat.name, func(t *testing.T) {
-			testDefeatsExecutablePageScanner(t, strat.ctor())
+			testDefeatsExecutablePageScanner(t, strat.ctor(), strat.cipher)
 		})
 	}
 }
 
-func testDefeatsExecutablePageScanner(t *testing.T, strategy Strategy) {
+func testDefeatsExecutablePageScanner(t *testing.T, strategy Strategy, cipher Cipher) {
 	payload := testutil.WindowsSearchableCanary
 	addr, cleanup := allocAndWriteRX(t, payload)
 	defer cleanup()
@@ -96,6 +103,9 @@ func testDefeatsExecutablePageScanner(t *testing.T, strategy Strategy) {
 	require.Equal(t, addr+3, found, "canary marker should sit 3 bytes after base (past xor eax/ret)")
 
 	mask := New(Region{Addr: addr, Size: uintptr(len(payload))}).WithStrategy(strategy)
+	if cipher != nil {
+		mask = mask.WithCipher(cipher)
+	}
 
 	// The scanner counts a hit only when the mask was engaged for the
 	// ENTIRE scan pass. Three windows exist during mask.Sleep:

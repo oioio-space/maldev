@@ -178,6 +178,37 @@ overall: PASS
 
 ---
 
+## Debugging native crashes inside the Windows VM
+
+When a test process crashes with an access violation on a non-Go thread
+(e.g. a thread-pool callback, as happens with the Ekko ROP chain), Go's
+own crash reporter usually catches it and prints a traceback — but the
+stack dump is often enough to pinpoint the bug. Workflow:
+
+```bash
+# Run the failing test DIRECTLY via SSH (bypassing vmtest so the VM
+# doesn't auto-revert and lose state). Source is pushed as a tarball.
+tar -czf /tmp/src.tar.gz --exclude='.git' --exclude='ignore' .
+scp -i $HOME/.ssh/vm_windows_key -o StrictHostKeyChecking=no \
+    /tmp/src.tar.gz test@<VM_IP>:C:/maldev-src.tar.gz
+ssh -i $HOME/.ssh/vm_windows_key test@<VM_IP> \
+    'cd /d C:\maldev & tar -xzf C:\maldev-src.tar.gz & \
+     go test -c -o C:\t.exe ./<package>/'
+ssh -i $HOME/.ssh/vm_windows_key test@<VM_IP> \
+    'C:\t.exe -test.v -test.run <Name>' > /tmp/crash.log 2>&1
+head -30 /tmp/crash.log    # exception code, address, goroutine trace
+```
+
+Go's crash output includes:
+- `signal 0xc0000005 code=0x0 addr=0x...` — exception code + fault address
+- `goroutine N gp=... [running]:` + symbolic stack frames
+- `unexpected return pc for X called from 0x...` — surfaces stack corruption
+
+If the Go reporter doesn't surface enough detail, WER LocalDumps (configured
+by `scripts/vm-provision.sh`) writes a full minidump to `C:\Dumps\*.dmp`;
+fetch it back via scp and analyze on the host. The TOOLS snapshot already
+has the registry keys (DumpType=2, DumpFolder=C:\Dumps).
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
