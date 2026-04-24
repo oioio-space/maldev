@@ -96,8 +96,10 @@ func TestValidate_OrchestrationEndToEnd(t *testing.T) {
 	}
 
 	result, err := Validate(opp, canaryBytes, ValidateOpts{
-		MarkerGlob:   markerName,
-		Timeout:      10 * time.Second,
+		MarkerGlob: markerName,
+		// 30s covers PowerShell cold-start on freshly reverted VMs (observed
+		// 10.4s at tip of run; 5.5s warmed up mid-suite).
+		Timeout:      30 * time.Second,
 		PollInterval: 300 * time.Millisecond,
 	})
 	require.NoError(t, err)

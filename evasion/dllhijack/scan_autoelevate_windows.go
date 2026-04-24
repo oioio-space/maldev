@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/oioio-space/maldev/evasion/stealthopen"
 )
 
 // ScanAutoElevate walks every .exe under %SystemRoot%\System32 that
@@ -46,7 +48,7 @@ func ScanAutoElevate(opts ...ScanOpts) ([]Opportunity, error) {
 			continue
 		}
 		full := filepath.Join(sys32, name)
-		peBytes, err := readAll(full, o.Opener)
+		peBytes, err := stealthopen.OpenRead(o.Opener, full)
 		if err != nil {
 			continue
 		}
@@ -54,7 +56,7 @@ func ScanAutoElevate(opts ...ScanOpts) ([]Opportunity, error) {
 			continue
 		}
 
-		imps, err := readImports(full, o.Opener)
+		imps, err := importsFromBytes(peBytes)
 		if err != nil {
 			continue
 		}

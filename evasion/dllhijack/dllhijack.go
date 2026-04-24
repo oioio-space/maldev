@@ -2,8 +2,6 @@ package dllhijack
 
 import (
 	"bytes"
-	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -38,13 +36,9 @@ func firstOpts(opts []ScanOpts) ScanOpts {
 }
 
 // readImports parses the PE import table of path, routed through the
-// given opener when non-nil. Falls back to imports.List (plain
-// os.Open) otherwise.
+// opener (stealthopen.Use normalises nil to Standard).
 func readImports(path string, opener stealthopen.Opener) ([]imports.Import, error) {
-	if opener == nil {
-		return imports.List(path)
-	}
-	f, err := opener.Open(path)
+	f, err := stealthopen.Use(opener).Open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -52,18 +46,10 @@ func readImports(path string, opener stealthopen.Opener) ([]imports.Import, erro
 	return imports.FromReader(f)
 }
 
-// readAll reads a file's bytes routed through the given opener when
-// non-nil, falling back to os.ReadFile otherwise.
-func readAll(path string, opener stealthopen.Opener) ([]byte, error) {
-	if opener == nil {
-		return os.ReadFile(path)
-	}
-	f, err := opener.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return io.ReadAll(f)
+// importsFromBytes parses the PE import table from an in-memory PE, for
+// callers that already needed the raw bytes (e.g. manifest inspection).
+func importsFromBytes(peBytes []byte) ([]imports.Import, error) {
+	return imports.FromReader(bytes.NewReader(peBytes))
 }
 
 // Kind distinguishes the victim surface (service / running process /
