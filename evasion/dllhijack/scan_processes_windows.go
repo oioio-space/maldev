@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/oioio-space/maldev/pe/imports"
 	"github.com/oioio-space/maldev/process/enum"
 )
 
@@ -22,7 +21,12 @@ import (
 //
 // Processes we cannot open (PPL, protected, other user's sessions)
 // are silently skipped; enumeration continues.
-func ScanProcesses() ([]Opportunity, error) {
+// ScanProcesses: opts is accepted for API symmetry with other scanners
+// but the Opener is unused — this path reads LIVE loaded modules via
+// Toolhelp32, not PE files from disk, so there is no file-read surface
+// to reroute.
+func ScanProcesses(opts ...ScanOpts) ([]Opportunity, error) {
+	_ = firstOpts(opts)
 	procs, err := enum.List()
 	if err != nil {
 		return nil, fmt.Errorf("dllhijack/processes: enum: %w", err)
@@ -43,35 +47,21 @@ func ScanProcesses() ([]Opportunity, error) {
 		if err != nil || len(mods) == 0 {
 			continue
 		}
-		seen := make(map[string]struct{}, len(mods))
+		dllNames := make([]string, 0, len(mods))
 		for _, m := range mods {
 			// Skip the main exe; we care about DLL imports only.
 			if strings.EqualFold(m.Path, exePath) {
 				continue
 			}
-			name := strings.ToLower(m.Name)
-			if _, dup := seen[name]; dup {
-				continue
-			}
-			seen[name] = struct{}{}
-
-			hijackDir, resolvedDir := HijackPath(exeDir, m.Name)
-			if hijackDir == "" {
-				continue
-			}
-			opps = append(opps, Opportunity{
-				Kind:         KindProcess,
-				ID:           fmt.Sprintf("%d", p.PID),
-				DisplayName:  p.Name,
-				BinaryPath:   exePath,
-				HijackedDLL:  m.Name,
-				HijackedPath: filepath.Join(hijackDir, m.Name),
-				ResolvedDLL:  filepath.Join(resolvedDir, m.Name),
-				SearchDir:    hijackDir,
-				Writable:     true,
-				Reason:       "loaded module " + m.Name + " resolves from writable " + hijackDir + " before " + resolvedDir,
-			})
+			dllNames = append(dllNames, m.Name)
 		}
+		opps = append(opps, emitOppsForDLLs(
+			exePath, exeDir, KindProcess, fmt.Sprintf("%d", p.PID), p.Name, dllNames,
+			func(dll, hijackDir, resolvedDir string) string {
+				return "loaded module " + dll + " resolves from writable " + hijackDir + " before " + resolvedDir
+			},
+			nil,
+		)...)
 	}
 	return opps, nil
 }
@@ -86,7 +76,8 @@ func ScanProcesses() ([]Opportunity, error) {
 //
 // Requires no elevation to enumerate; writability probe runs as the
 // current token.
-func ScanScheduledTasks() ([]Opportunity, error) {
+func ScanScheduledTasks(opts ...ScanOpts) ([]Opportunity, error) {
+	o := firstOpts(opts)
 	tasks, err := scanTasks()
 	if err != nil {
 		return nil, fmt.Errorf("dllhijack/tasks: enumerate tasks: %w", err)
@@ -101,35 +92,22 @@ func ScanScheduledTasks() ([]Opportunity, error) {
 			}
 			exeDir := filepath.Dir(binPath)
 
-			imps, err := imports.List(binPath)
+			imps, err := readImports(binPath, o.Opener)
 			if err != nil {
 				continue
 			}
-			seen := make(map[string]struct{}, len(imps))
+			dllNames := make([]string, 0, len(imps))
 			for _, imp := range imps {
-				dllName := strings.ToLower(imp.DLL)
-				if _, dup := seen[dllName]; dup {
-					continue
-				}
-				seen[dllName] = struct{}{}
-
-				hijackDir, resolvedDir := HijackPath(exeDir, imp.DLL)
-				if hijackDir == "" {
-					continue
-				}
-				opps = append(opps, Opportunity{
-					Kind:         KindScheduledTask,
-					ID:           t.path,
-					DisplayName:  t.name,
-					BinaryPath:   binPath,
-					HijackedDLL:  imp.DLL,
-					HijackedPath: filepath.Join(hijackDir, imp.DLL),
-					ResolvedDLL:  filepath.Join(resolvedDir, imp.DLL),
-					SearchDir:    hijackDir,
-					Writable:     true,
-					Reason:       "task action " + filepath.Base(binPath) + " imports " + imp.DLL + " resolvable from writable " + hijackDir,
-				})
+				dllNames = append(dllNames, imp.DLL)
 			}
+			actionBase := filepath.Base(binPath)
+			opps = append(opps, emitOppsForDLLs(
+				binPath, exeDir, KindScheduledTask, t.path, t.name, dllNames,
+				func(dll, hijackDir, _ string) string {
+					return "task action " + actionBase + " imports " + dll + " resolvable from writable " + hijackDir
+				},
+				nil,
+			)...)
 		}
 	}
 	return opps, nil
@@ -138,25 +116,25 @@ func ScanScheduledTasks() ([]Opportunity, error) {
 // ScanAll runs ScanServices + ScanProcesses + ScanScheduledTasks +
 // ScanAutoElevate and concatenates the results. Errors from any
 // individual scanner are wrapped but do not abort the others.
-func ScanAll() ([]Opportunity, error) {
+func ScanAll(opts ...ScanOpts) ([]Opportunity, error) {
 	var all []Opportunity
 	var errs []string
-	if opps, err := ScanServices(); err != nil {
+	if opps, err := ScanServices(opts...); err != nil {
 		errs = append(errs, "services: "+err.Error())
 	} else {
 		all = append(all, opps...)
 	}
-	if opps, err := ScanProcesses(); err != nil {
+	if opps, err := ScanProcesses(opts...); err != nil {
 		errs = append(errs, "processes: "+err.Error())
 	} else {
 		all = append(all, opps...)
 	}
-	if opps, err := ScanScheduledTasks(); err != nil {
+	if opps, err := ScanScheduledTasks(opts...); err != nil {
 		errs = append(errs, "tasks: "+err.Error())
 	} else {
 		all = append(all, opps...)
 	}
-	if opps, err := ScanAutoElevate(); err != nil {
+	if opps, err := ScanAutoElevate(opts...); err != nil {
 		errs = append(errs, "autoelevate: "+err.Error())
 	} else {
 		all = append(all, opps...)

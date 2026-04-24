@@ -45,8 +45,13 @@ func TestScanAll(t *testing.T) {
 	}
 	t.Logf("aggregated %d opportunities across all scanners", len(all))
 
-	// Sanity: each Opportunity belongs to exactly one of the 3 known Kinds.
-	valid := map[Kind]bool{KindService: true, KindProcess: true, KindScheduledTask: true}
+	// Sanity: each Opportunity belongs to exactly one of the 4 known Kinds.
+	valid := map[Kind]bool{
+		KindService:       true,
+		KindProcess:       true,
+		KindScheduledTask: true,
+		KindAutoElevate:   true,
+	}
 	for _, o := range all {
 		assert.True(t, valid[o.Kind], "unknown Kind %v", o.Kind)
 	}

@@ -6,12 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
-
-	"github.com/oioio-space/maldev/pe/imports"
 )
 
 // ScanServices enumerates every installed Windows service, parses its
@@ -25,7 +22,8 @@ import (
 // whose Config cannot be read are silently skipped.
 //
 // Requires no elevation.
-func ScanServices() ([]Opportunity, error) {
+func ScanServices(opts ...ScanOpts) ([]Opportunity, error) {
+	o := firstOpts(opts)
 	m, err := mgr.Connect()
 	if err != nil {
 		return nil, fmt.Errorf("dllhijack/services: connect to SCM: %w", err)
@@ -59,38 +57,15 @@ func ScanServices() ([]Opportunity, error) {
 		}
 		exeDir := filepath.Dir(binPath)
 
-		imps, err := imports.List(binPath)
+		imps, err := readImports(binPath, o.Opener)
 		if err != nil {
 			continue
 		}
-
-		// Dedup DLL names — a single DLL may export many imported
-		// functions; we only care about the DLL name.
-		seen := make(map[string]struct{}, len(imps))
+		dllNames := make([]string, 0, len(imps))
 		for _, imp := range imps {
-			dllName := strings.ToLower(imp.DLL)
-			if _, dup := seen[dllName]; dup {
-				continue
-			}
-			seen[dllName] = struct{}{}
-
-			hijackDir, resolvedDir := HijackPath(exeDir, imp.DLL)
-			if hijackDir == "" {
-				continue
-			}
-			opps = append(opps, Opportunity{
-				Kind:         KindService,
-				ID:           name,
-				DisplayName:  cfg.DisplayName,
-				BinaryPath:   binPath,
-				HijackedDLL:  imp.DLL,
-				HijackedPath: filepath.Join(hijackDir, imp.DLL),
-				ResolvedDLL:  filepath.Join(resolvedDir, imp.DLL),
-				SearchDir:    hijackDir,
-				Writable:     true,
-				Reason:       "import " + imp.DLL + " resolves from writable " + hijackDir + " before " + resolvedDir,
-			})
+			dllNames = append(dllNames, imp.DLL)
 		}
+		opps = append(opps, emitOppsForDLLs(binPath, exeDir, KindService, name, cfg.DisplayName, dllNames, nil, nil)...)
 	}
 	return opps, nil
 }

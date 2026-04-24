@@ -47,6 +47,29 @@ func TestIsAutoElevate(t *testing.T) {
 	assert.False(t, IsAutoElevate([]byte{}))
 }
 
+func TestRank_EmptyAndTies(t *testing.T) {
+	// Empty slice: must not panic, returns a new empty slice.
+	out := Rank(nil)
+	assert.NotNil(t, out)
+	assert.Empty(t, out)
+	out = Rank([]Opportunity{})
+	assert.Empty(t, out)
+
+	// Tied scores: tie-break is alphabetical on (BinaryPath, HijackedDLL).
+	in := []Opportunity{
+		{Kind: KindService, BinaryPath: "z.exe", HijackedDLL: "aaa.dll"},
+		{Kind: KindService, BinaryPath: "a.exe", HijackedDLL: "zzz.dll"},
+		{Kind: KindService, BinaryPath: "a.exe", HijackedDLL: "aaa.dll"},
+	}
+	out = Rank(in)
+	require.Len(t, out, 3)
+	assert.Equal(t, "a.exe", out[0].BinaryPath)
+	assert.Equal(t, "aaa.dll", out[0].HijackedDLL)
+	assert.Equal(t, "a.exe", out[1].BinaryPath)
+	assert.Equal(t, "zzz.dll", out[1].HijackedDLL)
+	assert.Equal(t, "z.exe", out[2].BinaryPath)
+}
+
 func TestRank(t *testing.T) {
 	in := []Opportunity{
 		{Kind: KindProcess, BinaryPath: "a.exe", HijackedDLL: "foo.dll"},

@@ -9,22 +9,22 @@ import (
 
 // ScanServices stub: the discovery scanner is Windows-only. ParseBinaryPath
 // (cross-platform) lives in dllhijack.go and is usable on any OS.
-func ScanServices() ([]Opportunity, error) {
+func ScanServices(opts ...ScanOpts) ([]Opportunity, error) {
 	return nil, errors.New("dllhijack: ScanServices requires Windows")
 }
 
 // ScanProcesses stub. Windows-only.
-func ScanProcesses() ([]Opportunity, error) {
+func ScanProcesses(opts ...ScanOpts) ([]Opportunity, error) {
 	return nil, errors.New("dllhijack: ScanProcesses requires Windows")
 }
 
 // ScanScheduledTasks stub. Windows-only.
-func ScanScheduledTasks() ([]Opportunity, error) {
+func ScanScheduledTasks(opts ...ScanOpts) ([]Opportunity, error) {
 	return nil, errors.New("dllhijack: ScanScheduledTasks requires Windows")
 }
 
 // ScanAll stub. Windows-only.
-func ScanAll() ([]Opportunity, error) {
+func ScanAll(opts ...ScanOpts) ([]Opportunity, error) {
 	return nil, errors.New("dllhijack: ScanAll requires Windows")
 }
 
@@ -59,6 +59,6 @@ func Validate(opp Opportunity, canaryDLL []byte, opts ValidateOpts) (*Validation
 }
 
 // ScanAutoElevate stub. Windows-only.
-func ScanAutoElevate() ([]Opportunity, error) {
+func ScanAutoElevate(opts ...ScanOpts) ([]Opportunity, error) {
 	return nil, errors.New("dllhijack: ScanAutoElevate requires Windows")
 }

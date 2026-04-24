@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
@@ -52,9 +53,24 @@ func HijackPath(exeDir, dllName string) (hijackDir, resolvedDir string) {
 	}
 	dirs := SearchOrder(exeDir)
 
+	// Cache os.Stat results so the two loops don't stat the same path
+	// twice. Materially reduces syscalls on a full-system scan (each
+	// HijackPath call goes from up to 8 stats down to 4, and the
+	// outer scanner loops keep calling HijackPath for the same app
+	// dirs).
+	stats := make(map[string]bool, len(dirs))
+	exists := func(path string) bool {
+		if v, ok := stats[path]; ok {
+			return v
+		}
+		v := fileExists(path)
+		stats[path] = v
+		return v
+	}
+
 	resolvedIdx := -1
 	for i, dir := range dirs {
-		if fileExists(filepath.Join(dir, dllName)) {
+		if exists(filepath.Join(dir, dllName)) {
 			resolvedIdx = i
 			resolvedDir = dir
 			break
@@ -68,7 +84,7 @@ func HijackPath(exeDir, dllName string) (hijackDir, resolvedDir string) {
 
 	for i := 0; i < resolvedIdx; i++ {
 		dir := dirs[i]
-		if fileExists(filepath.Join(dir, dllName)) {
+		if exists(filepath.Join(dir, dllName)) {
 			// Earlier dir already has a copy — loader would resolve
 			// there, not the supposed resolvedIdx. Skip.
 			continue
@@ -80,34 +96,46 @@ func HijackPath(exeDir, dllName string) (hijackDir, resolvedDir string) {
 	return "", resolvedDir
 }
 
-// isKnownDLL returns true when dllName is listed in
-// HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\KnownDLLs,
-// meaning Windows bypasses the search order for it.
-func isKnownDLL(dllName string) bool {
+// knownDLLs is the cached KnownDLLs set, loaded once per process via
+// sync.Once. Reading the registry on every isKnownDLL call dominated
+// scanner cost on servers with many services — this turns an O(N×M)
+// registry workload into O(1) lookups after the first call.
+var (
+	knownDLLsOnce sync.Once
+	knownDLLs     map[string]struct{}
+)
+
+func loadKnownDLLs() {
+	knownDLLs = make(map[string]struct{})
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE,
 		`SYSTEM\CurrentControlSet\Control\Session Manager\KnownDLLs`,
 		registry.QUERY_VALUE|registry.ENUMERATE_SUB_KEYS)
 	if err != nil {
-		return false
+		return
 	}
 	defer k.Close()
 	names, err := k.ReadValueNames(-1)
 	if err != nil {
-		return false
+		return
 	}
-	// Keys here are strings like "version" with the value being "version.dll".
-	// Match case-insensitively on both the value name and its data.
-	want := strings.ToLower(strings.TrimSuffix(dllName, ".dll"))
 	for _, n := range names {
-		if strings.EqualFold(n, want) {
-			return true
-		}
-		val, _, err := k.GetStringValue(n)
-		if err == nil && strings.EqualFold(val, dllName) {
-			return true
+		// Value name (e.g. "version") AND value data (e.g. "version.dll") —
+		// both are hijack-protected; store both forms lowercased.
+		knownDLLs[strings.ToLower(n)+".dll"] = struct{}{}
+		if val, _, err := k.GetStringValue(n); err == nil {
+			knownDLLs[strings.ToLower(val)] = struct{}{}
 		}
 	}
-	return false
+}
+
+// isKnownDLL returns true when dllName is listed in
+// HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\KnownDLLs,
+// meaning Windows bypasses the search order for it. Lookup is O(1)
+// after first call (sync.Once-guarded).
+func isKnownDLL(dllName string) bool {
+	knownDLLsOnce.Do(loadKnownDLLs)
+	_, ok := knownDLLs[strings.ToLower(dllName)]
+	return ok
 }
 
 func systemDirectory() string {

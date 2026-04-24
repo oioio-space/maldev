@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/oioio-space/maldev/pe/imports"
 )
 
 // ScanAutoElevate walks every .exe under %SystemRoot%\System32 that
@@ -26,7 +24,8 @@ import (
 //
 // Requires no elevation to scan — we only read the PEs and probe
 // writable directories with the current token.
-func ScanAutoElevate() ([]Opportunity, error) {
+func ScanAutoElevate(opts ...ScanOpts) ([]Opportunity, error) {
+	o := firstOpts(opts)
 	sys32 := systemDirectory()
 	if sys32 == "" {
 		return nil, fmt.Errorf("dllhijack/autoelevate: could not locate System32")
@@ -47,7 +46,7 @@ func ScanAutoElevate() ([]Opportunity, error) {
 			continue
 		}
 		full := filepath.Join(sys32, name)
-		peBytes, err := os.ReadFile(full)
+		peBytes, err := readAll(full, o.Opener)
 		if err != nil {
 			continue
 		}
@@ -55,37 +54,25 @@ func ScanAutoElevate() ([]Opportunity, error) {
 			continue
 		}
 
-		imps, err := imports.List(full)
+		imps, err := readImports(full, o.Opener)
 		if err != nil {
 			continue
 		}
-		seen := make(map[string]struct{}, len(imps))
+		dllNames := make([]string, 0, len(imps))
 		for _, imp := range imps {
-			dllName := strings.ToLower(imp.DLL)
-			if _, dup := seen[dllName]; dup {
-				continue
-			}
-			seen[dllName] = struct{}{}
-
-			hijackDir, resolvedDir := HijackPath(sys32, imp.DLL)
-			if hijackDir == "" {
-				continue
-			}
-			opps = append(opps, Opportunity{
-				Kind:          KindAutoElevate,
-				ID:            name,
-				DisplayName:   name,
-				BinaryPath:    full,
-				HijackedDLL:   imp.DLL,
-				HijackedPath:  filepath.Join(hijackDir, imp.DLL),
-				ResolvedDLL:   filepath.Join(resolvedDir, imp.DLL),
-				SearchDir:     hijackDir,
-				Writable:      true,
-				AutoElevate:   true,
-				IntegrityGain: true,
-				Reason:        "auto-elevate binary " + name + " imports " + imp.DLL + " resolvable from writable " + hijackDir,
-			})
+			dllNames = append(dllNames, imp.DLL)
 		}
+		binName := name
+		opps = append(opps, emitOppsForDLLs(
+			full, sys32, KindAutoElevate, name, name, dllNames,
+			func(dll, hijackDir, _ string) string {
+				return "auto-elevate binary " + binName + " imports " + dll + " resolvable from writable " + hijackDir
+			},
+			func(o *Opportunity) {
+				o.AutoElevate = true
+				o.IntegrityGain = true
+			},
+		)...)
 	}
 	return opps, nil
 }

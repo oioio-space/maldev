@@ -130,6 +130,36 @@ exe := dllhijack.ParseBinaryPath(`"C:\Program Files\Svc\svc.exe" --service`)
 
 ---
 
+## Composing with `stealthopen.Opener`
+
+Every scanner (`ScanServices`, `ScanProcesses`, `ScanScheduledTasks`,
+`ScanAutoElevate`, `ScanAll`) accepts an optional trailing `ScanOpts`
+variadic that can route every PE file read through a
+`stealthopen.Opener`. Path-keyed EDR file hooks then only see the
+volume-root handle, not the victim binary's path.
+
+```go
+import (
+    "github.com/oioio-space/maldev/evasion/dllhijack"
+    "github.com/oioio-space/maldev/evasion/stealthopen"
+)
+
+opener, _ := stealthopen.NewStealth(`C:\`)
+defer opener.Close()
+
+opps, err := dllhijack.ScanAll(dllhijack.ScanOpts{Opener: opener})
+```
+
+`ScanProcesses` accepts `ScanOpts` too, but the Opener is unused there —
+it reads live loaded-module lists via Toolhelp32, not PE files from
+disk, so there's no file-read surface to reroute. `Validate`'s canary
+drop and marker poll are also not reroutable today (writes; future
+work).
+
+The `*wsyscall.Caller` pattern does not apply: `dllhijack` doesn't
+make `NtXxx` calls — all kernel interaction goes through typed `windows.*`
+wrappers + `svc/mgr` + COM `ITaskService`, and PE parsing is pure Go.
+
 ## Validating an Opportunity with a canary DLL
 
 `dllhijack.Validate` confirms exploitability end-to-end: drop a canary
@@ -199,20 +229,27 @@ type Opportunity struct {
     Reason       string
 }
 
+// ScanOpts composes scanner-wide options. Pass to any Scan* function
+// (variadic: zero or one). Zero value preserves default behaviour.
+type ScanOpts struct {
+    Opener stealthopen.Opener // optional; path-stealth PE reads
+}
+
 // ScanServices enumerates services; per-import PE analysis.
-func ScanServices() ([]Opportunity, error)
+func ScanServices(opts ...ScanOpts) ([]Opportunity, error)
 
 // ScanProcesses enumerates every accessible running process and reads
 // its LIVE loaded-module list via Toolhelp32 — covers runtime LoadLibrary.
-func ScanProcesses() ([]Opportunity, error)
+// Accepts ScanOpts for API symmetry; the Opener is unused (no file reads).
+func ScanProcesses(opts ...ScanOpts) ([]Opportunity, error)
 
 // ScanScheduledTasks enumerates registered tasks via COM ITaskService,
 // walks each task's exec actions, applies PE-imports filter per binary.
-func ScanScheduledTasks() ([]Opportunity, error)
+func ScanScheduledTasks(opts ...ScanOpts) ([]Opportunity, error)
 
-// ScanAll = Services ∪ Processes ∪ Tasks. Partial failures are surfaced
-// as a wrapped error but do not abort the remaining scanners.
-func ScanAll() ([]Opportunity, error)
+// ScanAll = Services ∪ Processes ∪ Tasks ∪ AutoElevate. Partial failures
+// are surfaced as a wrapped error but do not abort the remaining scanners.
+func ScanAll(opts ...ScanOpts) ([]Opportunity, error)
 
 // SearchOrder returns the DLL search order for a binary in exeDir:
 // [exeDir, System32, SysWOW64, Windows]. SafeDllSearchMode is assumed
@@ -233,7 +270,7 @@ func Validate(opp Opportunity, canaryDLL []byte, opts ValidateOpts) (*Validation
 // sets autoElevate=true and emits hijack Opportunities via the same
 // PE-imports + search-order pipeline. Rows carry AutoElevate=true and
 // IntegrityGain=true, feeding into Rank.
-func ScanAutoElevate() ([]Opportunity, error)
+func ScanAutoElevate(opts ...ScanOpts) ([]Opportunity, error)
 
 // IsAutoElevate reports whether the PE's embedded manifest flags the
 // binary as auto-elevating (<autoElevate>true</autoElevate> or the

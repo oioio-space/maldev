@@ -9,6 +9,35 @@ introduce breaking API changes.
 
 ### Added
 
+- `evasion/dllhijack`: `stealthopen.Opener` composition — every scanner
+  (`ScanServices` / `ScanProcesses` / `ScanScheduledTasks` /
+  `ScanAutoElevate` / `ScanAll`) now accepts a trailing `...ScanOpts`
+  variadic whose `Opener` field routes every PE file read through the
+  given stealth open strategy (e.g. NTFS Object ID, bypassing
+  path-keyed EDR file hooks). Backward-compatible: zero args preserves
+  the historical `os.Open` path. `ScanProcesses` accepts the opts for
+  symmetry but has no file-read surface (loaded-module Toolhelp32
+  reads only).
+
+### Changed
+
+- `evasion/dllhijack`: major `/simplify` pass against the v0.14.0 series
+  (aggregated 4 review agents: reuse, quality, efficiency, skill-
+  conformity + test relevance). Single shared `emitOppsForDLLs` helper
+  replaces the near-identical loop body of all 4 scanners (dedup →
+  `HijackPath` → emit Opportunity with consistent field fill). ~120 LOC
+  removed from scan_services / scan_processes / scan_autoelevate. Each
+  scanner now passes scanner-specific reason + extras via closures.
+- `evasion/dllhijack`: `isKnownDLL` caches the KnownDLLs registry list
+  behind a `sync.Once` — a full service+process+task scan previously
+  re-enumerated the registry ~3,000× (O(N×M)); now it's loaded once
+  and backed by a `map[string]struct{}` for O(1) lookups.
+- `evasion/dllhijack`: `HijackPath` adds a per-call `map[string]bool`
+  stat cache so the resolver's two directory walks share `os.Stat`
+  results, halving syscalls per call.
+
+### Added
+
 - `evasion/dllhijack`: `ScanAutoElevate` + `Rank` + `IsAutoElevate`
   (**Phase D**). Walks System32 .exes whose embedded manifest sets
   `autoElevate=true` (fodhelper, sdclt, WSReset, …) — the UAC-bypass

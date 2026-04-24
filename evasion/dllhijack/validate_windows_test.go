@@ -125,6 +125,45 @@ func TestValidate_OrchestrationEndToEnd(t *testing.T) {
 	}
 }
 
+func TestValidate_KeepCanary(t *testing.T) {
+	testutil.RequireIntrusive(t)
+	testutil.RequireAdmin(t)
+
+	// Unique drop path so parallel-running tests don't collide.
+	dropPath := filepath.Join(t.TempDir(), "keep-canary.dll")
+	canaryBytes := []byte{0x4D, 0x5A, 0x90, 0x00}
+
+	// Use a task that does nothing — we only care about the drop+cleanup
+	// contract, not whether a marker appears.
+	taskName := `\maldev-dllhijack-keepcanary-test`
+	require.NoError(t, scheduler.Create(taskName,
+		scheduler.WithAction(`C:\Windows\System32\cmd.exe`, "/c", "exit 0"),
+		scheduler.WithTriggerDaily(1),
+		scheduler.WithHidden(),
+	))
+	defer scheduler.Delete(taskName) //nolint:errcheck
+
+	opp := Opportunity{
+		Kind:         KindScheduledTask,
+		ID:           taskName,
+		HijackedPath: dropPath,
+	}
+	result, err := Validate(opp, canaryBytes, ValidateOpts{
+		KeepCanary: true,
+		Timeout:    500 * time.Millisecond, // we don't care about Confirmed
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Dropped)
+
+	// The drop path MUST still exist because KeepCanary was set.
+	_, err = os.Stat(dropPath)
+	assert.NoError(t, err, "KeepCanary=true must leave the dropped DLL on disk")
+
+	// Clean up manually.
+	_ = os.Remove(dropPath)
+}
+
 func TestValidateOpts_Defaults(t *testing.T) {
 	var o ValidateOpts
 	o.defaults()

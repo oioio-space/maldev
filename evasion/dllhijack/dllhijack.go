@@ -2,9 +2,69 @@ package dllhijack
 
 import (
 	"bytes"
+	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/oioio-space/maldev/evasion/stealthopen"
+	"github.com/oioio-space/maldev/pe/imports"
 )
+
+// ScanOpts bundles optional, composable behaviour for the scanners.
+// Zero value preserves the default path-based file open.
+//
+// Pass a configured ScanOpts to any scanner (all accept `opts ...ScanOpts`
+// — zero or one) to swap in e.g. a stealth Opener that reads PE bytes
+// via NTFS Object ID rather than by path, so path-keyed EDR file hooks
+// never observe the scan.
+//
+// The rest of the API (Validate, Rank, HijackPath, ...) is unaffected;
+// canary drops and marker reads are not reroutable through an Opener.
+type ScanOpts struct {
+	// Opener routes every PE file read through the given stealth open
+	// strategy (see evasion/stealthopen). nil → stealthopen.Standard
+	// (plain os.Open).
+	Opener stealthopen.Opener
+}
+
+// firstOpts returns the first ScanOpts in opts, or a zero value.
+func firstOpts(opts []ScanOpts) ScanOpts {
+	if len(opts) > 0 {
+		return opts[0]
+	}
+	return ScanOpts{}
+}
+
+// readImports parses the PE import table of path, routed through the
+// given opener when non-nil. Falls back to imports.List (plain
+// os.Open) otherwise.
+func readImports(path string, opener stealthopen.Opener) ([]imports.Import, error) {
+	if opener == nil {
+		return imports.List(path)
+	}
+	f, err := opener.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return imports.FromReader(f)
+}
+
+// readAll reads a file's bytes routed through the given opener when
+// non-nil, falling back to os.ReadFile otherwise.
+func readAll(path string, opener stealthopen.Opener) ([]byte, error) {
+	if opener == nil {
+		return os.ReadFile(path)
+	}
+	f, err := opener.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
+}
 
 // Kind distinguishes the victim surface (service / running process /
 // scheduled task). Only Service is populated in v0.12.2.
@@ -125,6 +185,62 @@ func Rank(opps []Opportunity) []Opportunity {
 		return scored[i].HijackedDLL < scored[j].HijackedDLL
 	})
 	return scored
+}
+
+// emitOppsForDLLs is the shared core of every discovery scanner: dedup
+// dllNames case-insensitively, call HijackPath for each unique DLL,
+// and emit one Opportunity per hijackable candidate. Reason and any
+// extra field patches (AutoElevate, IntegrityGain, ...) are injected
+// via reasonFn / extras closures.
+//
+// Kept package-local (not exported) because it's purely an internal
+// factoring of the 4 scanners' loop body — callers should reach for
+// ScanServices / ScanProcesses / ... instead.
+func emitOppsForDLLs(
+	binaryPath, exeDir string,
+	kind Kind,
+	id, displayName string,
+	dllNames []string,
+	reasonFn func(dll, hijackDir, resolvedDir string) string,
+	extras func(*Opportunity),
+) []Opportunity {
+	var opps []Opportunity
+	seen := make(map[string]struct{}, len(dllNames))
+	for _, dll := range dllNames {
+		k := strings.ToLower(dll)
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+
+		hijackDir, resolvedDir := HijackPath(exeDir, dll)
+		if hijackDir == "" {
+			continue
+		}
+
+		reason := "import " + dll + " resolves from writable " + hijackDir + " before " + resolvedDir
+		if reasonFn != nil {
+			reason = reasonFn(dll, hijackDir, resolvedDir)
+		}
+
+		o := Opportunity{
+			Kind:         kind,
+			ID:           id,
+			DisplayName:  displayName,
+			BinaryPath:   binaryPath,
+			HijackedDLL:  dll,
+			HijackedPath: filepath.Join(hijackDir, dll),
+			ResolvedDLL:  filepath.Join(resolvedDir, dll),
+			SearchDir:    hijackDir,
+			Writable:     true,
+			Reason:       reason,
+		}
+		if extras != nil {
+			extras(&o)
+		}
+		opps = append(opps, o)
+	}
+	return opps
 }
 
 // IsAutoElevate returns true when the given PE bytes embed an
