@@ -1,6 +1,9 @@
 package callstack
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // ErrUnsupportedPlatform is returned by every entry point on non-Windows
 // or non-amd64 builds. Stack spoofing relies on the x64 unwind-metadata
@@ -41,4 +44,43 @@ type RuntimeFunction struct {
 	BeginAddress      uint32
 	EndAddress        uint32
 	UnwindInfoAddress uint32
+}
+
+// String renders a Frame for debug output. Format:
+// "RIP=0x... base=0x... [0x..+0x..-0x..] unwind=0x..".
+func (f Frame) String() string {
+	return fmt.Sprintf("RIP=0x%X base=0x%X [0x%X+0x%X-0x%X] unwind=0x%X",
+		f.ReturnAddress, f.ImageBase,
+		f.ImageBase+uintptr(f.RuntimeFunction.BeginAddress),
+		f.RuntimeFunction.BeginAddress,
+		f.RuntimeFunction.EndAddress,
+		f.RuntimeFunction.UnwindInfoAddress,
+	)
+}
+
+// Validate checks a chain's structural consistency: every frame must
+// carry a non-zero ReturnAddress + ImageBase + UnwindInfoAddress, and
+// the ControlPc must fall inside [ImageBase+Begin, ImageBase+End) so
+// RtlVirtualUnwind can find a RUNTIME_FUNCTION row when walking the
+// fake stack. Returns nil when every frame is safe to drop into a
+// synthetic return chain.
+func Validate(chain []Frame) error {
+	for i, f := range chain {
+		if f.ReturnAddress == 0 {
+			return fmt.Errorf("callstack: frame[%d]: zero ReturnAddress", i)
+		}
+		if f.ImageBase == 0 {
+			return fmt.Errorf("callstack: frame[%d]: zero ImageBase", i)
+		}
+		if f.RuntimeFunction.UnwindInfoAddress == 0 {
+			return fmt.Errorf("callstack: frame[%d]: zero UnwindInfoAddress", i)
+		}
+		begin := f.ImageBase + uintptr(f.RuntimeFunction.BeginAddress)
+		end := f.ImageBase + uintptr(f.RuntimeFunction.EndAddress)
+		if f.ReturnAddress < begin || f.ReturnAddress >= end {
+			return fmt.Errorf("callstack: frame[%d]: ControlPc 0x%X outside [0x%X, 0x%X)",
+				i, f.ReturnAddress, begin, end)
+		}
+	}
+	return nil
 }
