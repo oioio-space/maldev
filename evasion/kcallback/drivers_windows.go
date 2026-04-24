@@ -9,7 +9,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"golang.org/x/sys/windows"
+	"github.com/oioio-space/maldev/win/api"
 )
 
 // SystemModuleInformation = 11 (from the SYSTEM_INFORMATION_CLASS enum).
@@ -59,7 +59,7 @@ func ensureLoadedModules() ([]loadedModule, error) {
 func fetchLoadedModules() ([]loadedModule, error) {
 	var retLen uint32
 	// Probe for the required size.
-	r, _, _ := procNtQuerySystemInformation.Call(
+	r, _, _ := api.ProcNtQuerySystemInformation.Call(
 		systemModuleInformation, 0, 0,
 		uintptr(unsafe.Pointer(&retLen)),
 	)
@@ -68,7 +68,7 @@ func fetchLoadedModules() ([]loadedModule, error) {
 	}
 	// Pad a bit because the module list can grow between the two calls.
 	buf := make([]byte, retLen+0x1000)
-	r, _, _ = procNtQuerySystemInformation.Call(
+	r, _, _ = api.ProcNtQuerySystemInformation.Call(
 		systemModuleInformation,
 		uintptr(unsafe.Pointer(&buf[0])),
 		uintptr(len(buf)),
@@ -139,7 +139,3 @@ func cstrUntilNul(b []byte) string {
 	return string(b)
 }
 
-var (
-	modNtdll                     = windows.NewLazySystemDLL("ntdll.dll")
-	procNtQuerySystemInformation = modNtdll.NewProc("NtQuerySystemInformation")
-)

