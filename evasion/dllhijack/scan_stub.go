@@ -2,7 +2,10 @@
 
 package dllhijack
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 // ScanServices stub: the discovery scanner is Windows-only. ParseBinaryPath
 // (cross-platform) lives in dllhijack.go and is usable on any OS.
@@ -30,3 +33,27 @@ func SearchOrder(exeDir string) []string { return nil }
 
 // HijackPath stub. Windows-only; always returns empty strings.
 func HijackPath(exeDir, dllName string) (string, string) { return "", "" }
+
+// ValidationResult is a cross-platform type so callers can reference it
+// from non-Windows code paths; the Windows definition is authoritative.
+type ValidationResult struct {
+	Dropped, Triggered, Confirmed, CleanedUp bool
+	MarkerPath                               string
+	MarkerContents                           []byte
+	Errors                                   []string
+}
+
+// ValidateOpts is a cross-platform type; see validate_windows.go for the
+// field meanings.
+type ValidateOpts struct {
+	MarkerGlob   string
+	MarkerDir    string
+	Timeout      time.Duration
+	PollInterval time.Duration
+	KeepCanary   bool
+}
+
+// Validate stub. Windows-only.
+func Validate(opp Opportunity, canaryDLL []byte, opts ValidateOpts) (*ValidationResult, error) {
+	return nil, errors.New("dllhijack: Validate requires Windows")
+}

@@ -9,6 +9,23 @@ introduce breaking API changes.
 
 ### Added
 
+- `evasion/dllhijack`: `Validate` + canary-drop/trigger/poll orchestration
+  (**Phase C**). Given an Opportunity and a user-supplied canary DLL,
+  Validate drops the DLL at HijackedPath, triggers the victim (service
+  restart via SCM for KindService, scheduler.Run for KindScheduledTask),
+  polls a configurable glob for a marker file created by the canary's
+  DllMain, and always cleans up (retries removal to tolerate writers
+  still holding the handle). `ValidateOpts` exposes MarkerGlob /
+  MarkerDir / Timeout / PollInterval / KeepCanary. KindProcess is
+  rejected (can't cleanly relaunch a running process). Sample
+  `canary.c` (30 lines, MinGW-buildable) shipped in
+  `evasion/dllhijack/canary/` with build instructions — deliberately
+  not pre-built to avoid committing a hash-fingerprinted artifact.
+- `persistence/scheduler`: `Actions(name)` returns the IAction Path
+  entries for a registered task (used by dllhijack). `Run` and
+  `Actions` routed through ITaskFolder.GetTask rather than
+  ITaskService.GetTask (which is not an actual method on that
+  interface; the old call path would always fail).
 - `evasion/dllhijack`: two new scanners (**Phase B**):
   - `ScanProcesses` — enumerates every accessible running process and
     reads the live loaded-module list via Toolhelp32, covering DLLs

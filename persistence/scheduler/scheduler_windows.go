@@ -213,15 +213,23 @@ func List() ([]Task, error) {
 	return result, err
 }
 
-// Actions returns the exec-action binary paths for a registered task.
-// Only TASK_ACTION_EXEC entries are reported; COM/email/message actions
-// are skipped. Returns an empty slice if the task has no exec actions.
+// Actions returns the binary paths for every action on a registered
+// task that exposes a Path property — in practice exec actions
+// (IExecAction). COM/email/message actions have no Path and are
+// silently skipped. Returns an empty slice if the task has no such
+// actions.
 func Actions(name string) ([]string, error) {
+	folder, leaf := splitTaskName(name)
 	var paths []string
 	err := withTaskService(func(ts *ole.IDispatch) error {
-		taskVar, err := oleutil.CallMethod(ts, "GetTask", name)
+		f, err := oleFolder(ts, folder)
 		if err != nil {
-			return fmt.Errorf("GetTask(%s): %w", name, err)
+			return err
+		}
+		defer f.Release()
+		taskVar, err := oleutil.CallMethod(f, "GetTask", leaf)
+		if err != nil {
+			return fmt.Errorf("GetTask(%s): %w", leaf, err)
 		}
 		task := taskVar.ToIDispatch()
 		defer task.Release()
@@ -238,22 +246,18 @@ func Actions(name string) ([]string, error) {
 		}
 		defer acts.Release()
 
-		countVar, err := oleutil.GetProperty(acts, "Count")
-		if err != nil {
-			return fmt.Errorf("Actions.Count: %w", err)
-		}
-		count := int(countVar.Val)
-		for i := 1; i <= count; i++ {
+		// IActionCollection is 1-indexed; iterate until Item(i) errors.
+		// Avoids relying on the Count property (some task registrations
+		// expose it as a weakly-typed VARIANT that go-ole can't unwrap).
+		for i := 1; i < 64; i++ {
 			itemVar, err := oleutil.CallMethod(acts, "Item", i)
 			if err != nil {
-				continue
+				break
 			}
 			item := itemVar.ToIDispatch()
-			typeVar, err := oleutil.GetProperty(item, "Type")
-			if err == nil && int(typeVar.Val) == 0 /* TASK_ACTION_EXEC */ {
-				if p, err := oleutil.GetProperty(item, "Path"); err == nil {
-					paths = append(paths, p.ToString())
-				}
+			// exec actions have Path; COM/email/message don't.
+			if p, err := oleutil.GetProperty(item, "Path"); err == nil {
+				paths = append(paths, p.ToString())
 			}
 			item.Release()
 		}
@@ -264,10 +268,16 @@ func Actions(name string) ([]string, error) {
 
 // Run immediately executes a registered task.
 func Run(name string) error {
+	folder, leaf := splitTaskName(name)
 	return withTaskService(func(ts *ole.IDispatch) error {
-		taskVar, err := oleutil.CallMethod(ts, "GetTask", name)
+		f, err := oleFolder(ts, folder)
 		if err != nil {
-			return fmt.Errorf("GetTask(%s): %w", name, err)
+			return err
+		}
+		defer f.Release()
+		taskVar, err := oleutil.CallMethod(f, "GetTask", leaf)
+		if err != nil {
+			return fmt.Errorf("GetTask(%s): %w", leaf, err)
 		}
 		task := taskVar.ToIDispatch()
 		defer task.Release()

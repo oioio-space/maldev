@@ -130,14 +130,38 @@ exe := dllhijack.ParseBinaryPath(`"C:\Program Files\Svc\svc.exe" --service`)
 
 ---
 
+## Validating an Opportunity with a canary DLL
+
+`dllhijack.Validate` confirms exploitability end-to-end: drop a canary
+DLL at the Opportunity's `HijackedPath`, trigger the victim (service
+restart / scheduled task run), poll for a marker file the canary's
+`DllMain` creates on load, then clean up.
+
+```go
+bytes, _ := os.ReadFile("canary.dll")
+result, err := dllhijack.Validate(opp, bytes, dllhijack.ValidateOpts{
+    Timeout: 15 * time.Second,
+})
+if err != nil { log.Fatal(err) }
+fmt.Printf("dropped=%v triggered=%v confirmed=%v marker=%s\n",
+    result.Dropped, result.Triggered, result.Confirmed, result.MarkerPath)
+```
+
+Ship your own canary: see
+[`evasion/dllhijack/canary/README.md`](../../../evasion/dllhijack/canary/README.md)
+for the 30-line C source (`DllMain` writes a marker file in
+`%ProgramData%` and returns TRUE) and MinGW/MSVC build commands. A
+pre-built canary is not shipped so each operator's PE has a unique hash.
+
 ## Limitations
 
 - **Services + scheduled tasks analyze STATIC imports** (PE import table).
   DLLs loaded at runtime via `LoadLibrary` / `GetModuleHandle` are invisible
   there. `ScanProcesses` covers the runtime-load blind spot by reading the
   live loaded-module list from every accessible process.
-- **No canary** yet. Validation that a dropped DLL would actually be
-  loaded requires the canary-DLL workflow — shipping in the next phase.
+- **KindProcess Validate unsupported** — triggering a DLL reload in a
+  running process requires killing + relaunching it, which is out of
+  scope (too destructive for a reconnaissance helper).
 
 ---
 
@@ -199,6 +223,11 @@ func SearchOrder(exeDir string) []string
 // the first writable dir earlier in the search order than the DLL's
 // real location, or "" if no opportunity. Correctly excludes KnownDLLs.
 func HijackPath(exeDir, dllName string) (hijackDir, resolvedDir string)
+
+// Validate drops canaryDLL at opp.HijackedPath, triggers the victim,
+// polls for a marker file, and cleans up. Returns a ValidationResult
+// describing each stage (Dropped/Triggered/Confirmed/CleanedUp).
+func Validate(opp Opportunity, canaryDLL []byte, opts ValidateOpts) (*ValidationResult, error)
 
 // ScanServices enumerates Windows services with a writable binary dir.
 // Windows only; cross-platform stub returns an error.
