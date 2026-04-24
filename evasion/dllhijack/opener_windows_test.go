@@ -3,41 +3,26 @@
 package dllhijack
 
 import (
-	"os"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/oioio-space/maldev/evasion/stealthopen"
+	"github.com/oioio-space/maldev/testutil"
 )
-
-// spyOpener records every Open call and delegates to os.Open so the
-// PE parser can still read the file. Used to assert the scanners
-// consult the provided Opener instead of opening paths directly.
-type spyOpener struct {
-	calls atomic.Int32
-	paths []string
-}
-
-func (s *spyOpener) Open(path string) (*os.File, error) {
-	s.calls.Add(1)
-	s.paths = append(s.paths, path)
-	return os.Open(path)
-}
 
 // TestScanServices_UsesOpener confirms the Opener composition surface
 // works end-to-end: a spy opener passed through ScanOpts is consulted
 // for every PE file read during the scan.
 func TestScanServices_UsesOpener(t *testing.T) {
-	spy := &spyOpener{}
+	spy := &testutil.SpyOpener{}
 	_, err := ScanServices(ScanOpts{Opener: spy})
 	require.NoError(t, err)
 	// Win10 has ~150 services; at least a handful of them have
 	// readable binaries. Any positive count proves the opener was
 	// consulted in the scanner's inner loop.
-	assert.Positive(t, int(spy.calls.Load()),
+	assert.Positive(t, int(spy.Calls.Load()),
 		"scanner should have asked the Opener to open at least one service binary")
 }
 

@@ -3,9 +3,7 @@
 package unhook
 
 import (
-	"os"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,24 +14,6 @@ import (
 	"github.com/oioio-space/maldev/testutil"
 )
 
-// spyOpener wraps a real Opener and counts Open calls, letting us assert
-// that ClassicUnhook/FullUnhook routed the ntdll read through the passed
-// opener instead of bypassing it.
-type spyOpener struct {
-	inner stealthopen.Opener
-	calls atomic.Int32
-	last  atomic.Pointer[string]
-}
-
-func (s *spyOpener) Open(path string) (*os.File, error) {
-	s.calls.Add(1)
-	s.last.Store(&path)
-	if s.inner == nil {
-		s.inner = &stealthopen.Standard{}
-	}
-	return s.inner.Open(path)
-}
-
 // TestClassicUnhook_UsesProvidedOpener proves the new opener parameter
 // is not ignored: a spy opener wrapping a Standard reader is consulted
 // exactly once per ClassicUnhook call, with a path that points at
@@ -41,7 +21,7 @@ func (s *spyOpener) Open(path string) (*os.File, error) {
 func TestClassicUnhook_UsesProvidedOpener(t *testing.T) {
 	testutil.RequireIntrusive(t)
 
-	spy := &spyOpener{}
+	spy := &testutil.SpyOpener{}
 	// NtCreateSection is safe — the Go runtime never calls it, so failing
 	// to patch doesn't break later tests.
 	err := ClassicUnhook("NtCreateSection", nil, spy)
@@ -49,10 +29,10 @@ func TestClassicUnhook_UsesProvidedOpener(t *testing.T) {
 	if err != nil {
 		t.Logf("ClassicUnhook returned %v (non-fatal for this assertion)", err)
 	}
-	assert.Equal(t, int32(1), spy.calls.Load(),
+	assert.Equal(t, int32(1), spy.Calls.Load(),
 		"ClassicUnhook must call Opener.Open exactly once")
-	if p := spy.last.Load(); p != nil {
-		assert.Equal(t, "ntdll.dll", filepath.Base(*p),
+	if last := spy.Last(); last != "" {
+		assert.Equal(t, "ntdll.dll", filepath.Base(last),
 			"Opener must be asked for ntdll.dll")
 	}
 }
@@ -61,12 +41,12 @@ func TestClassicUnhook_UsesProvidedOpener(t *testing.T) {
 func TestFullUnhook_UsesProvidedOpener(t *testing.T) {
 	testutil.RequireIntrusive(t)
 
-	spy := &spyOpener{}
+	spy := &testutil.SpyOpener{}
 	_ = FullUnhook(nil, spy)
-	assert.Equal(t, int32(1), spy.calls.Load(),
+	assert.Equal(t, int32(1), spy.Calls.Load(),
 		"FullUnhook must call Opener.Open exactly once")
-	if p := spy.last.Load(); p != nil {
-		assert.Equal(t, "ntdll.dll", filepath.Base(*p))
+	if last := spy.Last(); last != "" {
+		assert.Equal(t, "ntdll.dll", filepath.Base(last))
 	}
 }
 

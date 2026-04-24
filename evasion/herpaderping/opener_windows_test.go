@@ -5,29 +5,13 @@ package herpaderping
 import (
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/oioio-space/maldev/evasion/stealthopen"
+	"github.com/oioio-space/maldev/testutil"
 )
-
-type herpSpyOpener struct {
-	inner stealthopen.Opener
-	calls atomic.Int32
-	paths []string
-}
-
-func (s *herpSpyOpener) Open(path string) (*os.File, error) {
-	s.calls.Add(1)
-	s.paths = append(s.paths, path)
-	if s.inner == nil {
-		s.inner = &stealthopen.Standard{}
-	}
-	return s.inner.Open(path)
-}
 
 // TestRun_UsesProvidedOpener verifies that Config.Opener is consulted
 // for the payload read. We use a minimal garbage-bytes payload so
@@ -43,17 +27,18 @@ func TestRun_UsesProvidedOpener(t *testing.T) {
 	require.NoError(t, os.WriteFile(payloadPath, []byte{0xDE, 0xAD}, 0o600))
 	require.NoError(t, os.WriteFile(decoyPath, []byte{0xBE, 0xEF}, 0o600))
 
-	spy := &herpSpyOpener{}
+	spy := &testutil.SpyOpener{}
 	_ = Run(Config{
 		PayloadPath: payloadPath,
 		TargetPath:  filepath.Join(dir, "target.exe"),
 		DecoyPath:   decoyPath,
 		Opener:      spy,
 	})
-	assert.GreaterOrEqual(t, spy.calls.Load(), int32(1),
+	assert.GreaterOrEqual(t, spy.Calls.Load(), int32(1),
 		"Opener must be consulted at least once (for the payload read)")
-	require.NotEmpty(t, spy.paths)
-	assert.Equal(t, payloadPath, spy.paths[0],
+	paths := spy.Paths()
+	require.NotEmpty(t, paths)
+	assert.Equal(t, payloadPath, paths[0],
 		"first Opener call must be for PayloadPath")
 }
 
@@ -65,14 +50,14 @@ func TestRun_NoDecoyPath_SingleOpenerCall(t *testing.T) {
 	payloadPath := filepath.Join(dir, "payload.bin")
 	require.NoError(t, os.WriteFile(payloadPath, []byte{0xAA, 0xBB}, 0o600))
 
-	spy := &herpSpyOpener{}
+	spy := &testutil.SpyOpener{}
 	_ = Run(Config{
 		PayloadPath: payloadPath,
 		TargetPath:  filepath.Join(dir, "target.exe"),
 		// DecoyPath empty → random decoy, no opener call
 		Opener: spy,
 	})
-	assert.Equal(t, int32(1), spy.calls.Load(),
+	assert.Equal(t, int32(1), spy.Calls.Load(),
 		"Opener must be consulted exactly once when DecoyPath is empty")
 }
 
