@@ -4,23 +4,8 @@ package kcallback
 
 import "errors"
 
-// errNotImplemented is a scaffold sentinel filled by C3.2 / C3.3.
+// errNotImplemented is a scaffold sentinel filled by C3.3.
 var errNotImplemented = errors.New("kcallback: not implemented yet")
-
-// NtoskrnlBase returns the loaded kernel image base via
-// NtQuerySystemInformation(SystemModuleInformation). Requires no
-// elevation — the query is user-mode accessible.
-func NtoskrnlBase() (uintptr, error) {
-	return 0, errNotImplemented
-}
-
-// DriverAt walks the loaded-driver list and reports which driver
-// module owns addr. Returns "" + nil when no driver covers the
-// address.
-func DriverAt(addr uintptr) (string, error) {
-	_ = addr
-	return "", errNotImplemented
-}
 
 // Enumerate reads the three callback arrays described by tab via
 // reader, resolves each callback's owning driver, and returns the
