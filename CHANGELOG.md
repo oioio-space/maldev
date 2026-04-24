@@ -150,6 +150,34 @@ introduce breaking API changes.
   callbacks, ROP chains) on the VM.
 
 
+## [v0.15.0] — 2026-04-24
+
+### Added
+
+- `collection/lsassdump`: LSASS credential dump package (MITRE
+  T1003.001). `OpenLSASS` walks the process list via
+  `NtGetNextProcess` with `PROCESS_QUERY_LIMITED_INFORMATION` (cheap
+  access even protected processes grant), identifies `lsass.exe` via
+  `NtQueryInformationProcess(ProcessImageFileName)`, reads the PID
+  via `ProcessBasicInformation`, and reopens the target via
+  `NtOpenProcess(pid, QUERY_LIMITED | VM_READ)` — keeping the
+  `VM_READ` audit surface to a single targeted event. `Dump` streams
+  a MINIDUMP blob (MDMP, SystemInfo + ThreadList + ModuleList +
+  Memory64List) to the caller's `io.Writer`; memory contents are
+  `NtQueryVirtualMemory`-walked and `NtReadVirtualMemory`-read one
+  region at a time, never via `MiniDumpWriteDump` (heavily
+  EDR-hooked). Every `Nt*` call accepts an optional
+  `*wsyscall.Caller` for direct/indirect syscall routing.
+- `collection/lsassdump.Build` is exported so callers can assemble a
+  MINIDUMP from arbitrary memory regions (test fixtures, replayed
+  snapshots). Pure-Go byte-packing; no dbghelp.
+- VM e2e (admin + MALDEV_INTRUSIVE, Win10 TOOLS snapshot): dumps
+  lsass in ~0.6s, produces a 56MB MINIDUMP parseable by pypykatz /
+  mimikatz — extracts MSV NT hashes, WDigest, Kerberos session
+  material, and DPAPI master keys. PPL-protected lsass returns
+  `ErrPPL`; bypass is a separate chantier.
+
+
 ## [v0.14.1] — 2026-04-24
 
 ### Fixed
