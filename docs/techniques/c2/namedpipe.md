@@ -237,4 +237,6 @@ into opaque, integrity-protected ciphertext.
 
 ## API Reference
 
-See [c2.md](../../c2.md#c2transportnamedpipe----windows-named-pipe-transport)
+The full surface is inlined in [§ API](#api) above. See also
+[c2.md](../../c2.md#c2transportnamedpipe----windows-named-pipe-transport)
+for the package summary row.

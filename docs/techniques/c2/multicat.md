@@ -216,4 +216,60 @@ shared key never touches storage.
 
 ## API Reference
 
-See [c2.md](../../c2.md#c2multicat----operator-side-multi-session-listener)
+```go
+// EventType discriminates lifecycle events on Manager.Events().
+type EventType int
+
+const (
+    EventConnected EventType = iota
+    EventDisconnected
+)
+
+// SessionMetadata aggregates connection-time facts about a session.
+type SessionMetadata struct {
+    RemoteAddr string
+    Hostname   string
+    Username   string
+    OS         string
+    ConnectedAt time.Time
+}
+
+// Session is one accepted reverse-shell connection.
+type Session struct {
+    ID       string
+    Conn     net.Conn
+    Metadata SessionMetadata
+}
+
+// Event surfaces a session lifecycle change.
+type Event struct {
+    Type    EventType
+    Session *Session
+}
+
+// Manager owns the listener loop, the session table, and the event fan-out.
+type Manager struct{ /* unexported fields */ }
+
+// New creates an empty Manager. Call Listen with one or more
+// transport.Listener implementations (TCP, named pipe, …) to start
+// accepting sessions.
+func New() *Manager
+
+// Listen accepts every connection from l and registers each as a
+// Session until ctx is canceled or l errors.
+func (m *Manager) Listen(ctx context.Context, l transport.Listener) error
+
+// Events returns the receive-only channel of Event values.
+func (m *Manager) Events() <-chan Event
+
+// Sessions returns a snapshot of every currently-registered session.
+func (m *Manager) Sessions() []*Session
+
+// Get returns the Session with the given ID, or (nil, false) if absent.
+func (m *Manager) Get(id string) (*Session, bool)
+
+// Remove closes and unregisters the named session.
+func (m *Manager) Remove(id string) error
+```
+
+See also [c2.md](../../c2.md#c2multicat----operator-side-multi-session-listener) for the package summary row.

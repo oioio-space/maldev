@@ -119,6 +119,45 @@ make debug
 make release
 ```
 
+## Per-Package Quick-Reference
+
+If you know the technique you want, jump straight to the matching package:
+
+| Goal | Package | Doc |
+|---|---|---|
+| Encrypt the payload before embedding | `crypto` | [Payload Encryption](techniques/crypto/payload-encryption.md) |
+| Encode the payload for transport | `encode` | [Encode](techniques/encode/README.md) |
+| Patch AMSI / ETW in-process | `evasion/amsi`, `evasion/etw` | [AMSI](techniques/evasion/amsi-bypass.md) · [ETW](techniques/evasion/etw-patching.md) |
+| Restore hooked ntdll | `evasion/unhook` | [NTDLL Unhooking](techniques/evasion/ntdll-unhooking.md) |
+| Sleep with masked memory | `evasion/sleepmask` | [Sleep Mask](techniques/evasion/sleep-mask.md) |
+| Spoof a callstack frame | `evasion/callstack` | [Callstack Spoof](techniques/evasion/callstack-spoof.md) |
+| Remove EDR kernel callbacks | `evasion/kcallback` | [Kernel-Callback Removal](techniques/evasion/kernel-callback-removal.md) |
+| BYOVD kernel R/W | `kernel/driver` (`rtcore64`) | [BYOVD RTCore64](techniques/evasion/byovd-rtcore64.md) |
+| Direct/indirect syscalls | `win/syscall` | [Syscall Methods](techniques/syscalls/README.md) |
+| Inject shellcode | `inject/*` (15 methods) | [Injection](techniques/injection/README.md) |
+| Reflectively load a PE | `pe/srdi` | [PE → Shellcode](techniques/pe/pe-to-shellcode.md) |
+| Strip Go fingerprints | `pe/strip` | [Strip + Sanitize](techniques/pe/strip-sanitize.md) |
+| Run a .NET assembly in-process | `runtime/clr` | [Runtime](runtime.md) |
+| Run a Beacon Object File | `runtime/bof` | [Runtime](runtime.md) |
+| Dump LSASS | `credentials/lsassdump` | [LSASS Dump](techniques/collection/lsass-dump.md) |
+| Parse a MINIDUMP for NT hashes | `credentials/lsasparse` | [LSASS Parse](techniques/credentials/lsasparse.md) |
+| Bypass UAC | `privesc/uac` | [Privilege](privilege.md) |
+| Spoof a process command-line | `process/tamper/fakecmd` | [FakeCmd](techniques/evasion/fakecmd.md) |
+| Suspend Event Log threads | `process/tamper/phant0m` | [Phant0m](techniques/evasion/phant0m.md) |
+| Persistence — registry | `persistence/registry` | [Registry](techniques/persistence/registry.md) |
+| Persistence — Startup folder | `persistence/startup` | [Startup Folder](techniques/persistence/startup-folder.md) |
+| Persistence — scheduled task | `persistence/scheduler` | [Task Scheduler](techniques/persistence/task-scheduler.md) |
+| Capture clipboard / keys / screen | `collection/{clipboard,keylog,screenshot}` | [Collection](collection.md) |
+| Reverse shell | `c2/shell` | [Reverse Shell](techniques/c2/reverse-shell.md) |
+| Metasploit staging | `c2/meterpreter` | [Meterpreter](techniques/c2/meterpreter.md) |
+| Multi-session listener (operator side) | `c2/multicat` | [Multicat](techniques/c2/multicat.md) |
+| Named-pipe transport | `c2/transport/namedpipe` | [Named Pipe](techniques/c2/namedpipe.md) |
+| Wipe in-process buffers | `cleanup/memory` | [Memory Wipe](techniques/cleanup/memory-wipe.md) |
+| Self-delete on exit | `cleanup/selfdel` | [Self-Delete](techniques/cleanup/self-delete.md) |
+| Compute fuzzy hash similarity | `hash` | [Fuzzy Hashing](techniques/crypto/fuzzy-hashing.md) |
+
+For the full layered map, see [Architecture § Per-Package Quick-Reference](architecture.md#per-package-quick-reference).
+
 ## What to Read Next
 
 | Goal | Read |

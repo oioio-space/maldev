@@ -177,4 +177,23 @@ binary path, so defenders ingesting that event source are not fooled.
 
 ## API Reference
 
-See [evasion.md](../../evasion.md#fakecmd----peb-commandline-spoof)
+```go
+// Spoof rewrites the current process's PEB CommandLine in place.
+// caller=nil uses direct WinAPI; pass a wsyscall.Caller to route the
+// PEB read/write through indirect syscalls (avoids hooked ntdll).
+func Spoof(fakeCmd string, caller *wsyscall.Caller) error
+
+// Restore writes the saved original CommandLine back to the PEB.
+// No-op if Spoof was never called.
+func Restore() error
+
+// Current returns the value currently visible in the PEB CommandLine.
+func Current() string
+
+// SpoofPID rewrites another process's PEB. Caller typically needs
+// SeDebugPrivilege; the handle is opened with VM_READ | VM_WRITE |
+// VM_OPERATION | QUERY_INFORMATION.
+func SpoofPID(pid uint32, fakeCmd string, caller *wsyscall.Caller) error
+```
+
+See also [evasion.md](../../evasion.md#fakecmd----peb-commandline-spoof) for the package summary row.

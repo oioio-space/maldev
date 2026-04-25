@@ -157,4 +157,30 @@ pre-existing file avoids MFT-creation events.
 
 ## API Reference
 
-See [collection.md](../../collection.md#collectionscreenshot----screen-capture)
+```go
+var (
+    ErrCapture      = errors.New("screen capture failed")
+    ErrInvalidRect  = errors.New("invalid capture rectangle")
+    ErrDisplayIndex = errors.New("display index out of range")
+)
+
+// Capture grabs the entire virtual desktop (every attached monitor)
+// and returns the result PNG-encoded.
+func Capture() ([]byte, error)
+
+// CaptureRect grabs a specific screen region. (x, y) is the
+// top-left corner in virtual-desktop pixels.
+func CaptureRect(x, y, width, height int) ([]byte, error)
+
+// DisplayCount returns the number of attached monitors.
+func DisplayCount() int
+
+// DisplayBounds returns the pixel rectangle of monitor `index`
+// (zero-based, in virtual-desktop coordinates).
+func DisplayBounds(index int) image.Rectangle
+
+// CaptureDisplay grabs a single monitor's content as PNG.
+func CaptureDisplay(index int) ([]byte, error)
+```
+
+See also [collection.md](../../collection.md#collectionscreenshot----screen-capture) for the package summary row.

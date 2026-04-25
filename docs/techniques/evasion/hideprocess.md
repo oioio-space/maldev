@@ -159,4 +159,15 @@ ever touching the kernel.
 
 ## API Reference
 
-See [evasion.md](../../evasion.md) (table row: `process/tamper/hideprocess`)
+```go
+// PatchProcessMonitor patches the live target Process Hacker /
+// Process Explorer process so the implant's own process disappears
+// from its NtQuerySystemInformation listing. The patch is applied to
+// the running process; it does not persist a restart of the monitor.
+//
+// caller=nil uses direct WinAPI. Pass a wsyscall.Caller to route the
+// cross-process read/write through indirect syscalls.
+func PatchProcessMonitor(pid int, caller *wsyscall.Caller) error
+```
+
+See also [evasion.md](../../evasion.md) (table row: `process/tamper/hideprocess`).

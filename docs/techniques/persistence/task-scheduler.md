@@ -152,4 +152,59 @@ the analyst must find and remove separately.
 
 ## API Reference
 
-See [persistence.md](../../persistence.md#persistencescheduler----task-scheduler)
+```go
+// Task is one parsed schtasks /Query row.
+type Task struct {
+    Name    string
+    Path    string
+    Enabled bool
+}
+
+// Option configures Create. Zero or more may be passed; trigger
+// options are mutually exclusive (last one wins).
+type Option func(*options)
+
+// WithAction sets the binary the task runs at trigger time.
+func WithAction(path string, args ...string) Option
+
+// Trigger options.
+func WithTriggerLogon() Option
+func WithTriggerStartup() Option
+func WithTriggerDaily(interval int) Option   // every N days
+func WithTriggerTime(t time.Time) Option     // one-shot at t
+
+// WithHidden hides the task from non-elevated schtasks listings
+// (sets the SCHED_FLAG_HIDDEN bit).
+func WithHidden() Option
+
+// Create registers a scheduled task. Wraps schtasks.exe under the hood.
+func Create(name string, opts ...Option) error
+
+// Delete removes the named task.
+func Delete(name string) error
+
+// Exists reports whether the named task is registered.
+func Exists(name string) (bool, error)
+
+// List enumerates registered tasks.
+func List() ([]Task, error)
+
+// Actions returns the configured action paths for the named task.
+func Actions(name string) ([]string, error)
+
+// Run forces an immediate one-off run of the named task.
+func Run(name string) error
+
+// ScheduledTask returns a persistence.Mechanism wrapping
+// Create/Delete/Exists for use with persistence.Pipeline.
+func ScheduledTask(name string, opts ...Option) *TaskMechanism
+
+type TaskMechanism struct{ /* unexported */ }
+
+func (m *TaskMechanism) Name() string
+func (m *TaskMechanism) Install() error
+func (m *TaskMechanism) Uninstall() error
+func (m *TaskMechanism) Installed() (bool, error)
+```
+
+See also [persistence.md](../../persistence.md#persistencescheduler----task-scheduler) for the package summary row.

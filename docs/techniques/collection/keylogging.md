@@ -163,4 +163,31 @@ reduces MFT-creation anomaly detections.
 
 ## API Reference
 
-See [collection.md](../../collection.md#collectionkeylog----keyboard-hook)
+```go
+// ErrAlreadyRunning fires when Start is called while a hook is
+// already active in the current process.
+var ErrAlreadyRunning = errors.New("keyboard hook already running")
+
+// Event is one captured keystroke with foreground-window context.
+// The Character field is empty for non-printable keys; Clipboard is
+// populated only on Ctrl+V so paste-snipers can capture credential
+// pastes that bypass keylogging entirely.
+type Event struct {
+    KeyCode   int       // Virtual key code (VK_*)
+    Character string    // Translated character, or label like [Enter], [Backspace]
+    Ctrl      bool      // Ctrl modifier was held
+    Shift     bool      // Shift modifier was held
+    Alt       bool      // Alt modifier was held
+    Clipboard string    // Clipboard text (populated only on Ctrl+V)
+    Window    string    // Foreground window title
+    Process   string    // Foreground process executable path
+    Time      time.Time // Capture timestamp
+}
+
+// Start installs a low-level keyboard hook (WH_KEYBOARD_LL) and
+// streams events on the returned channel until ctx is canceled.
+// The hook runs on a dedicated OS thread with its own message pump.
+func Start(ctx context.Context) (<-chan Event, error)
+```
+
+See also [collection.md](../../collection.md#collectionkeylog----keyboard-hook) for the package summary row.

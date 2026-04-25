@@ -154,4 +154,20 @@ Layered benefit: clipboard monitoring catches credentials in transit (password m
 
 ## API Reference
 
-See [collection.md](../../collection.md#collectionclipboard----clipboard-monitoring)
+```go
+// ErrOpen fires when OpenClipboard returns 0 (typically because
+// another process holds the clipboard at that instant). Callers
+// usually retry on a short backoff.
+var ErrOpen = errors.New("clipboard open failed")
+
+// ReadText returns the current clipboard text as UTF-8 (CF_UNICODETEXT
+// → UTF-16LE → Go string). Returns ErrOpen if the clipboard is locked.
+func ReadText() (string, error)
+
+// Watch polls the clipboard every pollInterval and emits each new
+// distinct text value on the returned channel. Closes the channel
+// when ctx is canceled. The first read is emitted unconditionally.
+func Watch(ctx context.Context, pollInterval time.Duration) <-chan string
+```
+
+See also [collection.md](../../collection.md#collectionclipboard----clipboard-monitoring) for the package summary row.

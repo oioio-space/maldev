@@ -188,4 +188,39 @@ piecewise blocks and TLSH's locality-sensitive bucketing both see the
 
 ## API Reference
 
-See [crypto.md](../../crypto.md)
+```go
+// Cryptographic hashes (one-shot, no streaming variant).
+func MD5(data []byte) string
+func SHA1(data []byte) string
+func SHA256(data []byte) string
+func SHA512(data []byte) string
+
+// ROR13 — the per-name hash used by classic API-hashing payloads.
+// ROR13Module is the module-name variant (case-insensitive after
+// uppercasing).
+func ROR13(name string) uint32
+func ROR13Module(name string) uint32
+
+// ssdeep — context-triggered piecewise hashing. The hash string
+// looks like "12:abcd…:efgh…"; the leading number is the block-size
+// magnitude.
+func Ssdeep(data []byte) (string, error)
+func SsdeepFile(path string) (string, error)
+
+// SsdeepCompare returns a similarity score in [0, 100]; higher = more
+// similar. Comparison only works when both hashes share an adjacent
+// block-size magnitude.
+func SsdeepCompare(hash1, hash2 string) (int, error)
+
+// TLSH — locality-sensitive hash, fixed 70-byte hex strings.
+// Trend Micro's algorithm; works on any input >= 50 bytes.
+func TLSH(data []byte) (string, error)
+func TLSHFile(path string) (string, error)
+
+// TLSHCompare returns the TLSH distance: 0 = identical, lower =
+// more similar. Roughly: <30 high similarity, <70 same family,
+// >100 unrelated.
+func TLSHCompare(hash1, hash2 string) (int, error)
+```
+
+See also [crypto.md](../../crypto.md) for the area-doc summary.

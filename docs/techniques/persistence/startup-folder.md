@@ -139,4 +139,43 @@ timestomped LNK doesn't stand out in `dir /tq` forensics.
 
 ## API Reference
 
-See [persistence.md](../../persistence.md#persistencestartup----startup-folder-lnk-shortcuts)
+```go
+// UserDir resolves
+// %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup.
+func UserDir() (string, error)
+
+// MachineDir resolves
+// C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp
+// (writable only with admin).
+func MachineDir() (string, error)
+
+// Install drops a .lnk pointing at targetPath in the user-Startup
+// folder. The shortcut launches with `args` as its command-line.
+func Install(name, targetPath, args string) error
+
+// InstallMachine is the all-users counterpart of Install
+// (requires admin).
+func InstallMachine(name, targetPath, args string) error
+
+// Remove deletes the named user-Startup .lnk.
+func Remove(name string) error
+
+// RemoveMachine deletes the named all-users-Startup .lnk.
+func RemoveMachine(name string) error
+
+// Exists reports whether a user-Startup .lnk by that name is present.
+func Exists(name string) bool
+
+// Shortcut returns a persistence.Mechanism wrapping
+// Install/Remove/Exists for use with persistence.Pipeline.
+func Shortcut(name, targetPath, args string) *ShortcutMechanism
+
+type ShortcutMechanism struct{ /* unexported */ }
+
+func (m *ShortcutMechanism) Name() string
+func (m *ShortcutMechanism) Install() error
+func (m *ShortcutMechanism) Uninstall() error
+func (m *ShortcutMechanism) Installed() (bool, error)
+```
+
+See also [persistence.md](../../persistence.md#persistencestartup----startup-folder-lnk-shortcuts) for the package summary row.

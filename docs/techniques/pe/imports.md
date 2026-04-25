@@ -124,4 +124,26 @@ and no extra memory writes to explain.
 
 ## API Reference
 
-See [pe.md](../../pe.md#peimports----pe-import-table-analysis)
+```go
+// Import is one (DLL → Function) pair extracted from a PE's
+// IMAGE_DIRECTORY_ENTRY_IMPORT table.
+type Import struct {
+    DLL      string
+    Function string
+}
+
+// List parses the PE on disk at pePath and returns every import.
+// Pure-Go implementation — no Windows loader involvement.
+func List(pePath string) ([]Import, error)
+
+// ListByDLL filters List's output to imports from the named DLL
+// (case-insensitive match against IMAGE_IMPORT_DESCRIPTOR.Name).
+func ListByDLL(pePath, dllName string) ([]Import, error)
+
+// FromReader parses a PE buffer in memory and returns every import.
+// Useful when the PE bytes are decrypted in-process and never touch
+// disk.
+func FromReader(r io.ReaderAt) ([]Import, error)
+```
+
+See also [pe.md](../../pe.md#peimports----pe-import-table-analysis) for the package summary row.
