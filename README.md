@@ -55,6 +55,7 @@ injector.Inject(shellcode)
 | **Collection** | `collection/keylog/` `collection/clipboard/` `collection/screenshot/` `collection/lsassdump/` | Keyboard hook with process context, clipboard monitoring, multi-monitor screen capture, LSASS credential dump via NtGetNextProcess + in-process MINIDUMP assembly (T1003.001) |
 | **Cleanup** | `cleanup/selfdelete/` `cleanup/memory/` `cleanup/service/` `cleanup/timestomp/` `cleanup/wipe/` | Self-deletion (ADS rename + batch + reboot), secure memory wipe, service DACL hiding, timestomping |
 | **Privilege & Exploits** | `uacbypass/` `exploit/cve202430088/` | 4 UAC bypass methods (FODHelper, SLUI, SilentCleanup, EventVwr), CVE-2024-30088 kernel LPE |
+| **Kernel Driver (BYOVD)** | `kernel/driver/` `kernel/driver/rtcore64/` | Layer-1 BYOVD primitive interfaces (Reader / ReadWriter / Lifecycle), RTCore64.sys (CVE-2019-16098) service-install + IOCTL `0x80002048` read / `0x8000204C` write scaffold; consumed by `evasion/kcallback`'s Remove API and `collection/lsassdump`'s PPL Unprotect path. Driver binary embedding is opt-in via the `byovd_rtcore64` build tag. |
 
 ## Documentation
 

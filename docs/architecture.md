@@ -25,6 +25,7 @@ graph TD
         impersonate["win/impersonate<br/>Thread impersonation"]
         version["win/version<br/>Version detection"]
         domain["win/domain<br/>Domain membership"]
+        kerneldriver["kernel/driver<br/>BYOVD primitives (Reader/Writer/Lifecycle)"]
     end
 
     subgraph "Layer 2 — Techniques"
@@ -53,6 +54,8 @@ graph TD
     inject --> syscall
     evasion --> api
     evasion --> syscall
+    evasion --> kerneldriver
+    kerneldriver --> api
     shell --> transport
     shell --> evasion
     meterpreter --> transport
