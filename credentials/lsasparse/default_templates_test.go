@@ -20,17 +20,32 @@ func TestDefaultTemplates_RegisteredAtInit(t *testing.T) {
 		build uint32
 		want  bool
 	}{
+		// v0.25.1 covers Win 7 SP1 → Win 11 24H2 / Server 2025.
+		{"Win7 SP1 / Server 2008 R2", 7601, true},
+		{"Win8 / Server 2012", 9200, true},
+		{"Win8.1 / Server 2012 R2", 9600, true},
+		{"Win10 RTM (1507)", 10240, true},
+		{"Win10 1607 / Server 2016", 14393, true},
+		{"Win10 1703", 15063, true},
+		{"Win10 1709", 16299, true},
+		{"Win10 1803", 17134, true},
+		{"Win10 1809 / Server 2019", 17763, true},
 		{"Win10 19H1 (1903)", 18362, true},
+		{"Win10 1909", 18363, true},
+		{"Win10 2004", 19041, true},
+		{"Win10 21H2", 19044, true},
 		{"Win10 22H2", 19045, true},
+		{"Server 2022", 20348, true},
 		{"Win11 21H2", 22000, true},
 		{"Win11 22H2 pre-22622", 22621, true},
+		{"Win11 22622", 22622, true},
+		{"Win11 23H2", 22631, true},
+		{"Win11 24H2 / Server 2025", 26100, true},
 
-		// Out-of-range builds: no template, ErrUnsupportedBuild.
-		{"Win10 RTM (1507)", 10240, false},
-		{"Win10 1607", 14393, false},
-		{"Win10 1809", 17763, false},  // earlier than 19H1 — not yet covered
-		{"Win11 22622", 22622, false}, // newer MSV signature — needs distinct template
-		{"Server 2025 / Win11 24H2", 26100, false},
+		// Out-of-range: pre-Win7 SP1 NT5 era + far-future builds.
+		{"Win XP / Server 2003 (NT 5.x)", 2600, false},
+		{"Win Vista / Server 2008 (NT 6.0)", 6002, false},
+		{"Win 7 RTM (NT 6.1 pre-SP1)", 7600, false},
 		{"future", 99999, false},
 	}
 

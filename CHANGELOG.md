@@ -7,6 +7,41 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added — `credentials/lsasparse` v0.25.1 — Win7→Win11 24H2 / Server 2025 templates
+
+- Built-in coverage now spans every NT6+ x64 Windows build pypykatz +
+  mimikatz publicly document — Win 7 SP1 / Server 2008 R2 (build 7601)
+  through Win 11 24H2 / Server 2025 (build 26100). Nine
+  Template entries replace the previous two:
+  | Build range | OS / Server family | MSV layout |
+  |---|---|---|
+  | 7601 | Win 7 SP1 / Server 2008 R2 | KIWI_MSV1_0_LIST_52 |
+  | 7602–9200 | Win 8 / Server 2012 | KIWI_MSV1_0_LIST_60 |
+  | 9600–14393 | Win 8.1 / Server 2012 R2 / Win 10 1507–1607 / Server 2016 | KIWI_MSV1_0_LIST_61 |
+  | 15063–17763 | Win 10 1703–1809 / Server 2019 | KIWI_MSV1_0_LIST_62 |
+  | 18362–19045 | Win 10 19H1–22H2 | KIWI_MSV1_0_LIST_63 |
+  | 20348 | Server 2022 | KIWI_MSV1_0_LIST_63 |
+  | 22000–22621 | Win 11 21H2–22H2 pre-22622 | KIWI_MSV1_0_LIST_63 |
+  | 22622–22631 | Win 11 22622+ / 23H2 | KIWI_MSV1_0_LIST_64 |
+  | 26100–26999 | Win 11 24H2 / Server 2025 | KIWI_MSV1_0_LIST_65 |
+- Each Template carries a validation marker in source comments —
+  ★ VM-validated, ◎ research-cited (most), ▲ best-effort. None are
+  ★ yet: LSASS dump corpora aren't publicly available on GitHub
+  (pypykatz's test set is local to Skelsec's NAS), so real-binary
+  validation is queued for when we generate dumps from local VMs.
+- Three new LSA crypto signature variants (`lsaSignatureWin7Sp1`,
+  `lsaSignatureWin8`, `lsaSignatureCommon`) and three new MSV
+  signatures (`msvSignatureWin7Sp1`, `msvSignatureWin8`,
+  `msvSignatureWin11Late`) cover the bootstrap-prologue drift
+  Microsoft introduced across builds.
+- Test matrix grew from 10 to 24 build-coverage assertions in
+  `TestDefaultTemplates_RegisteredAtInit`. 64/64 tests green.
+- Framework degrades gracefully on a bad offset — `derefRel32` ⊕
+  `findPattern` return ErrKeyExtractFailed cleanly, the parser
+  surfaces the warning, MSV/Wdigest/DPAPI walkers continue with
+  whatever did succeed. So speculative ▲ entries don't break Parse
+  for unrelated builds.
+
 ### Added — `credentials/lsasparse` v0.25.0 — DPAPI master-key cache
 
 - New `DPAPIMasterKey` type implementing the `Credential` interface
