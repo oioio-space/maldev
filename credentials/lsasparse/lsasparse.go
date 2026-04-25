@@ -230,6 +230,16 @@ func Parse(reader io.ReaderAt, size int64) (*Result, error) {
 		res.Warnings = append(res.Warnings, tsWarnings...)
 	}
 
+	// Kerberos lives in kerberos.dll and caches plaintext password +
+	// every TGT/TGS ticket per logon session. The KerberosCredential
+	// it produces carries both the password and the ASN.1 ticket
+	// buffers, ready for downstream protocol parsing.
+	if kerb, ok := res.ModuleByName("kerberos.dll"); ok {
+		kerbCreds, kerbWarnings := extractKerberos(r, kerb, tmpl, keys)
+		sessions = mergeKerberos(sessions, kerbCreds)
+		res.Warnings = append(res.Warnings, kerbWarnings...)
+	}
+
 	res.Sessions = sessions
 	return res, nil
 }

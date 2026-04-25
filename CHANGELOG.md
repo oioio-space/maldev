@@ -7,6 +7,48 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added — `credentials/lsasparse` v0.26.1 — Kerberos provider
+
+Fifth credential provider — the most complex of the post-MSV
+providers. Kerberos sessions in `kerberos.dll` carry a plaintext
+password (when present) plus three ticket caches (TGT, TGS, MIT-style
+imports). Each ticket carries service / target / client names, flags,
+key + enc type, KVNO, and the raw ASN.1 ticket buffer.
+
+What ships:
+
+- `KerberosCredential` implementing the `Credential` interface with
+  `UserName` + `LogonDomain` + `Password` + `[]KerberosTicket`. Five
+  credential types now coexist in the same `Session.Credentials`
+  slice: MSV1_0 / Wdigest / DPAPI / TSPkg / Kerberos.
+- `KerberosTicket` carries `ServiceName` + `TargetName` + `ClientName`
+  + `Flags` + `KeyType` + `EncType` + `KVNO` + `Buffer`. The buffer
+  is the raw ASN.1 ticket bytes — feed to a downstream Kerberos
+  parser (impacket / Rubeus / pypykatz `kerberos ccache`) for
+  protocol-level inspection.
+- `KerberosLayout` struct + `KerberosList{Pattern,Wildcards,Offset}`
+  fields on `Template`. NodeSize=0 skips the walker.
+- The walker handles three structural quirks:
+  1. **LUID fallback offsets**: tries each in order if the primary
+     LUID reads as zero — Microsoft has shifted the LUID's position
+     across LCUs.
+  2. **Multiple ticket caches per session**: walks each pointer in
+     `KerberosLayout.TicketListOffsets` (default 3: TGT, TGS, …).
+  3. **External-name decoding**: service / target / client are
+     pointers to KIWI_KERBEROS_EXTERNAL_NAME structs with a
+     NameCount field + N UNICODE_STRING components — joined with "/"
+     so `krbtgt/CORP.LOCAL` round-trips correctly.
+- Every default template (all 9 build ranges, Win 7 → Win 11 25H2 /
+  Server 2025) now carries the Kerberos signature + layout per
+  KvcForensic `Kerberos_x64_vista_plus`. One signature suffices
+  because the kerberos.dll bootstrap prologue is unusually stable.
+- 9 new unit tests including a `readExternalName` round-trip
+  exercising the multi-component name decoder. **No full session
+  fixture** — the layout is complex enough that a synthetic test
+  would tautologically validate itself; real-binary validation is
+  queued for VM dumps.
+- 81/81 tests green (was 72; +9 from Kerberos).
+
 ### Added — `credentials/lsasparse` v0.26.0 — TSPkg provider
 
 Fourth credential provider on top of the v0.23.x crypto + walker

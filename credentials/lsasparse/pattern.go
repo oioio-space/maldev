@@ -98,6 +98,16 @@ type Template struct {
 	TSPkgListWildcards []int
 	TSPkgListOffset    int32
 	TSPkgLayout        TSPkgLayout
+
+	// Kerberos provider fields. The KIWI_KERBEROS_LOGON_SESSION list
+	// head lives in kerberos.dll (.data); each session node carries
+	// LUID + UserName / Domain / Password (encrypted) + multiple
+	// ticket-list pointers (TGT cache, TGS cache, …). Set
+	// KerberosLayout.NodeSize=0 to disable.
+	KerberosListPattern   []byte
+	KerberosListWildcards []int
+	KerberosListOffset    int32
+	KerberosLayout        KerberosLayout
 }
 
 // validate sanity-checks a template before it enters the registry.

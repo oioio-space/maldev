@@ -362,6 +362,41 @@ var tspkgLayoutCommon = TSPkgLayout{
 	PrimaryPtrOffset: 0x18,
 }
 
+// ===== Kerberos signature + layout (per KvcForensic) ================
+
+// kerberosSignatureCommon — KvcForensic `Kerberos_x64_vista_plus`.
+// One 6-byte signature covers Vista → Win 11 25H2 / Server 2025 (the
+// kerberos.dll bootstrap function prologue is unusually stable).
+//
+//	48 8B 18           mov    rbx, [rax]
+//	48 8D 0D           lea    rcx, [rip+rel32]   ← session list head
+var kerberosSignatureCommon = []byte{
+	0x48, 0x8B, 0x18,
+	0x48, 0x8D, 0x0D,
+}
+
+// kerberosLayoutCommon — every offset transcribed from KvcForensic
+// `Kerberos_x64_vista_plus`. Stable Vista → 25H2.
+var kerberosLayoutCommon = KerberosLayout{
+	NodeSize:                0x180, // largest field at 0x148+8 = 0x150
+	LUIDOffset:              0x40,  // session_luid_offset = 64
+	UserNameOffset:          0x78,  // session_username_offset = 120
+	DomainOffset:            0x88,  // session_domain_offset = 136
+	PasswordOffset:          0xA8,  // session_password_ustr_offset = 168
+	LUIDFallbackOffsets:     []uint32{56, 48, 72, 40, 32},
+	TicketListOffsets:       []uint32{280, 304, 328}, // 0x118, 0x130, 0x148
+	TicketServiceNameOffset: 0x20,                    // 32
+	TicketTargetNameOffset:  0x28,                    // 40
+	TicketClientNameOffset:  0x90,                    // 144
+	TicketFlagsOffset:       0xA0,                    // 160
+	TicketKeyTypeOffset:     0xB4,                    // 180
+	TicketEncTypeOffset:     0x134,                   // 308
+	TicketKvnoOffset:        0x138,                   // 312
+	TicketBufferLenOffset:   0x140,                   // 320
+	TicketBufferPtrOffset:   0x148,                   // 328
+	TicketNodeSize:          0x180,                   // covers up to ptr+8
+}
+
 // ===== builtinTemplates ==============================================
 //
 // Every Template documents its target builds, OS family, validation
@@ -395,6 +430,9 @@ var builtinTemplates = []*Template{
 		TSPkgListPattern:          tspkgSignatureCommon,
 		TSPkgListOffset:           7, // KvcForensic first_entry_offset
 		TSPkgLayout:               tspkgLayoutCommon,
+		KerberosListPattern:       kerberosSignatureCommon,
+		KerberosListOffset:        6, // KvcForensic first_entry_offset
+		KerberosLayout:            kerberosLayoutCommon,
 	},
 	{
 		// ▲ Win 8 / Server 2012 (builds 9200-9599).
@@ -415,6 +453,12 @@ var builtinTemplates = []*Template{
 		WdigestListPattern:      wdigestSignaturePre11,
 		WdigestListOffset:       -4,
 		WdigestLayout:           wdigestLayoutCommon,
+		TSPkgListPattern:        tspkgSignatureCommon,
+		TSPkgListOffset:         7,
+		TSPkgLayout:             tspkgLayoutCommon,
+		KerberosListPattern:     kerberosSignatureCommon,
+		KerberosListOffset:      6,
+		KerberosLayout:          kerberosLayoutCommon,
 	},
 	{
 		// ◎ Win 8.1 / Server 2012 R2 (builds 9600-10239).
@@ -436,6 +480,12 @@ var builtinTemplates = []*Template{
 		WdigestListPattern:      wdigestSignaturePre11,
 		WdigestListOffset:       -4,
 		WdigestLayout:           wdigestLayoutCommon,
+		TSPkgListPattern:        tspkgSignatureCommon,
+		TSPkgListOffset:         7,
+		TSPkgLayout:             tspkgLayoutCommon,
+		KerberosListPattern:     kerberosSignatureCommon,
+		KerberosListOffset:      6,
+		KerberosLayout:          kerberosLayoutCommon,
 	},
 	{
 		// ◎ Win 10 1507 / 1511 / 1607 / Server 2016 (builds
@@ -459,6 +509,12 @@ var builtinTemplates = []*Template{
 		DPAPIListPattern:        dpapiSignatureWin10Plus,
 		DPAPIListOffset:         11, // KvcForensic first_entry_offset
 		DPAPILayout:             dpapiLayoutCommon,
+		TSPkgListPattern:        tspkgSignatureCommon,
+		TSPkgListOffset:         7,
+		TSPkgLayout:             tspkgLayoutCommon,
+		KerberosListPattern:     kerberosSignatureCommon,
+		KerberosListOffset:      6,
+		KerberosLayout:          kerberosLayoutCommon,
 	},
 	{
 		// ◎ Win 10 1703 / 1709 (builds 15063-17133). KvcForensic
@@ -485,6 +541,9 @@ var builtinTemplates = []*Template{
 		TSPkgListPattern:        tspkgSignatureCommon,
 		TSPkgListOffset:         7, // KvcForensic first_entry_offset
 		TSPkgLayout:             tspkgLayoutCommon,
+		KerberosListPattern:     kerberosSignatureCommon,
+		KerberosListOffset:      6, // KvcForensic first_entry_offset
+		KerberosLayout:          kerberosLayoutCommon,
 	},
 	{
 		// ◎ Win 10 1803 → 22H2 / Server 2019 (builds 17134-20347).
@@ -511,6 +570,9 @@ var builtinTemplates = []*Template{
 		TSPkgListPattern:        tspkgSignatureCommon,
 		TSPkgListOffset:         7, // KvcForensic first_entry_offset
 		TSPkgLayout:             tspkgLayoutCommon,
+		KerberosListPattern:     kerberosSignatureCommon,
+		KerberosListOffset:      6, // KvcForensic first_entry_offset
+		KerberosLayout:          kerberosLayoutCommon,
 	},
 	{
 		// ◎ Server 2022 + Win 11 21H2 (builds 20348-22099).
@@ -537,6 +599,9 @@ var builtinTemplates = []*Template{
 		TSPkgListPattern:        tspkgSignatureCommon,
 		TSPkgListOffset:         7, // KvcForensic first_entry_offset
 		TSPkgLayout:             tspkgLayoutCommon,
+		KerberosListPattern:     kerberosSignatureCommon,
+		KerberosListOffset:      6, // KvcForensic first_entry_offset
+		KerberosLayout:          kerberosLayoutCommon,
 	},
 	{
 		// ◎ Win 11 22H2 / 23H2 (builds 22100-26099). KvcForensic
@@ -562,6 +627,9 @@ var builtinTemplates = []*Template{
 		TSPkgListPattern:        tspkgSignatureCommon,
 		TSPkgListOffset:         7, // KvcForensic first_entry_offset
 		TSPkgLayout:             tspkgLayoutCommon,
+		KerberosListPattern:     kerberosSignatureCommon,
+		KerberosListOffset:      6, // KvcForensic first_entry_offset
+		KerberosLayout:          kerberosLayoutCommon,
 	},
 	{
 		// ◎ Win 11 24H2 / 25H2 / Server 2025 (builds 26100+).
@@ -589,5 +657,8 @@ var builtinTemplates = []*Template{
 		TSPkgListPattern:        tspkgSignatureCommon,
 		TSPkgListOffset:         7, // KvcForensic first_entry_offset
 		TSPkgLayout:             tspkgLayoutCommon,
+		KerberosListPattern:     kerberosSignatureCommon,
+		KerberosListOffset:      6, // KvcForensic first_entry_offset
+		KerberosLayout:          kerberosLayoutCommon,
 	},
 }
