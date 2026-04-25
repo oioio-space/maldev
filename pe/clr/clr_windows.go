@@ -315,10 +315,14 @@ func corBindToRuntimeEx(candidates []string) (uintptr, error) {
 			return host, nil
 		}
 		if uint32(r) == regdbEClassNotReg {
-			lastErr = ErrLegacyRuntimeUnavailable
+			// Surface the HRESULT explicitly so admins can confirm "0x80040154
+			// from CorBindToRuntimeEx" matches the documented "missing legacy v2
+			// activation chain" blocker (docs/coverage-workflow.md).
+			lastErr = fmt.Errorf("CorBindToRuntimeEx(%s): HRESULT 0x%08X (REGDB_E_CLASSNOTREG): %w",
+				version, uint32(r), ErrLegacyRuntimeUnavailable)
 			continue
 		}
-		lastErr = fmt.Errorf("CorBindToRuntimeEx(%s): HRESULT 0x%X", version, uint32(r))
+		lastErr = fmt.Errorf("CorBindToRuntimeEx(%s): HRESULT 0x%08X", version, uint32(r))
 	}
 	if lastErr == nil {
 		lastErr = ErrLegacyRuntimeUnavailable

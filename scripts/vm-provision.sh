@@ -145,6 +145,51 @@ BAT
         ssh "${ssh_base[@]}" "test@$ip" 'schtasks /delete /tn MaldevProvNetFx3 /f' 2>&1 | tail -1
     fi
 
+    # CorRuntimeHost CLSID registration. DISM /enable-feature NetFx3 enables
+    # the runtime bits (mscorwks.dll present, csc.exe runs) but skips the
+    # legacy COM registration chain — CLSID {CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}
+    # remains absent, so CorBindToRuntimeEx returns REGDB_E_CLASSNOTREG and
+    # pe/clr tests skip. We mirror the structure of the sibling CLSID
+    # {CB2F6723-…} (CorMetaDataDispenser, registered by NetFx3) which points
+    # to the same mscoree.dll. Idempotent — `reg import` overwrites.
+    log "Windows: registering CorRuntimeHost CLSID"
+    cat > /tmp/maldev-corhost.reg << 'REG'
+Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}]
+@="Microsoft Common Language Runtime CorRuntimeHost"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}\Implemented Categories]
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}\Implemented Categories\{62C8FE65-4EBB-45E7-B440-6E39B2CDBF29}]
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}\InprocServer32]
+@="C:\\Windows\\System32\\mscoree.dll"
+"ThreadingModel"="Both"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}\InprocServer32\2.0.50727]
+"ImplementedInThisVersion"=""
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}\InprocServer32\4.0.30319]
+"ImplementedInThisVersion"=""
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}\NotInsertable]
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}\ProgID]
+@="CLRRuntimeHost"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}\VersionIndependentProgID]
+@="CLRRuntimeHost"
+REG
+    scp -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        /tmp/maldev-corhost.reg "test@$ip:C:/Users/Public/maldev-corhost.reg" >/dev/null
+    ssh "${ssh_base[@]}" "test@$ip" 'reg import C:\Users\Public\maldev-corhost.reg' 2>&1 | tr -d '\r' | tail -2
+    if ssh "${ssh_base[@]}" "test@$ip" 'reg query "HKLM\SOFTWARE\Classes\CLSID\{CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}\InprocServer32" /ve' >/dev/null 2>&1; then
+        done_msg "CorRuntimeHost CLSID registered"
+    else
+        warn "CorRuntimeHost CLSID registration failed — pe/clr tests will SKIP"
+    fi
+
     log "Windows: configuring WER LocalDumps"
     # LocalDumps requires HKLM edits, which medium-integrity OpenSSH can't do;
     # OpenSSH on this build runs at high integrity (token has S-1-16-12288),

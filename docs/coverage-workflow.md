@@ -204,17 +204,23 @@ Attempts that did NOT unblock it (all tried during the session):
 - Reboot (actually `shutdown /r` under SYSTEM didn't really reboot)
 - `regsvr32 mscoree.dll` (System32 + SysWOW64, both exit 0 but CLSID still missing)
 - `RegAsm.exe mscorlib.dll /codebase` (failed RA0000 "need admin credentials" even under SYSTEM)
-- Manual `reg import` of the CLSID structure (keys created, test still skips)
+- Manual `reg import` of the CLSID structure mirroring the sibling `{CB2F6723-…}` entry — keys exist (`HKLM\SOFTWARE\Classes\CLSID\{CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}\InprocServer32` → `mscoree.dll`, `ThreadingModel=Both`, `ProgID=CLRRuntimeHost`, `ImplementedInThisVersion={2.0.50727,4.0.30319}`) but `CorBindToRuntimeEx` still returns `0x80040154 (REGDB_E_CLASSNOTREG)` for both v2.0.50727 and v4.0.30319. Confirmed 2026-04-25 with a one-shot Go diagnostic that calls `mscoree!CorBindToRuntimeEx` directly and prints the raw HRESULT. Conclusion: mscoree's internal binding looks at more than just the CLSID — interface registration, typelib, and Fusion entries are also missing, and only the full `.NET 3.5 Redistributable` (offline `dotnetfx35.exe` from Win7-era, or the in-place `sources/sxs` payload from a Win10 ISO) runs the complete chain.
 - `InstallRuntimeActivationPolicy()` at startup of `clrhost` (writes `<exe>.config` — doesn't help, the issue is COM registration)
 
-**What to try next:**
+**What was added in TOOLS v2 (2026-04-25):**
 
-1. Install the `.NET Framework 3.5 Redistributable` offline package
-   (`sources/sxs/*.cab` from a Windows ISO). The full installer runs the
-   complete registration chain — unlike DISM.
-2. Add explicit HRESULT logging in `pe/clr/clr_windows.go::corBindToRuntimeEx`
-   so the actual error code is visible (the current generic
-   `ErrLegacyRuntimeUnavailable` message hides it).
+- `scripts/vm-provision.sh` now imports the CLSID `{CB2F6722-…}` entry every provisioning pass, so future debug rounds start from the same baseline rather than rediscovering the missing key.
+- `pe/clr/clr_windows.go::corBindToRuntimeEx` wraps the `REGDB_E_CLASSNOTREG` path with `%w` + the raw HRESULT, so SKIP messages now read `CorBindToRuntimeEx(v2.0.50727): HRESULT 0x80040154 (REGDB_E_CLASSNOTREG): clr: ICorRuntimeHost unavailable …` — the next investigator sees the actual code without rebuilding.
+
+**What to try next (still open, needs Windows ISO):**
+
+1. Mount a Win10 22H2 ISO inside the VM and run
+   `dism /online /enable-feature /featurename:NetFx3 /all /source:D:\sources\sxs /LimitAccess`.
+   This drives the full registration chain that the network-only DISM path
+   skips.
+2. Install the `.NET Framework 3.5 Redistributable` offline installer
+   (`dotnetfx35.exe`, Win7-era) — even on Win10 it tends to trigger the full
+   COM/typelib/Fusion registration via `mscorsvw.exe` post-install hooks.
 3. `sfc /scannow` to restore system file coherence.
 4. Re-provision the `win10` VM from a fresh Windows ISO that bundles .NET 3.5
    in the install base rather than activated after the fact via DISM.
