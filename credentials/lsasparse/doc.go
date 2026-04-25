@@ -24,10 +24,11 @@
 //   - DPAPI master-key cache — v0.25.x
 //   - TSPkg (Terminal Services / RDP) plaintext — v0.26.0
 //   - Kerberos password + tickets — v0.26.1
-//   - CredMan / Vault — v0.27.x (framework only; per-node layout opt-in)
-// Out of scope today: LiveSSP / CloudAP secrets, live-process attach.
-// Each is a follow-up chantier on top of the existing crypto + walker
-// layers.
+//   - CredMan / Vault — v0.27.x (framework; per-node layout opt-in)
+//   - CloudAP (Azure AD PRT) + LiveSSP — v0.28.x (framework;
+//     per-build layouts opt-in)
+// Out of scope today: WoW64 (x86) dumps, live-process attach. Each
+// is a follow-up chantier on top of the existing walker layers.
 //
 // Each provider auto-disables when its Layout.NodeSize is zero — the
 // walker is skipped at no runtime cost. The v0.25.2+ default

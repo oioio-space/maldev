@@ -108,6 +108,24 @@ type Template struct {
 	KerberosListWildcards []int
 	KerberosListOffset    int32
 	KerberosLayout        KerberosLayout
+
+	// CloudAP (Cloud Authentication Provider) fields. The
+	// KIWI_CLOUDAP_LOGON_SESSION list head lives in cloudap.dll
+	// (.data); each node carries LUID + Microsoft Account ID +
+	// Primary Refresh Token (PRT) bytes for Azure AD lateral
+	// movement. Set NodeSize=0 to disable. Win 10+ only.
+	CloudAPListPattern   []byte
+	CloudAPListWildcards []int
+	CloudAPListOffset    int32
+	CloudAPLayout        CloudAPLayout
+
+	// LiveSSP (legacy Microsoft Account SSP) fields. Lives in
+	// livessp.dll on Win 8+; mostly superseded by CloudAP from
+	// Win 10 forward. Set NodeSize=0 to disable.
+	LiveSSPListPattern   []byte
+	LiveSSPListWildcards []int
+	LiveSSPListOffset    int32
+	LiveSSPLayout        LiveSSPLayout
 }
 
 // validate sanity-checks a template before it enters the registry.

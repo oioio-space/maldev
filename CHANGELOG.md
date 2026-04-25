@@ -7,6 +7,47 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added — `credentials/lsasparse` v0.28.0 — CloudAP + LiveSSP providers (framework)
+
+Seventh and eighth credential providers — covering modern (Azure AD)
+and legacy (Microsoft Account) cloud-auth flows.
+
+**CloudAP** (`cloudap.dll`, Win 10+) is the modern cloud-auth
+provider. Azure AD-joined accounts, Microsoft Account SSO, hybrid
+AD-joined sessions all route through it. The big prize is the
+**Primary Refresh Token (PRT)** — feed it to a downstream tool like
+AADInternals to derive a session token and pivot to any Azure AD
+application the account can reach.
+
+**LiveSSP** (`livessp.dll`, Win 8+) is the legacy Microsoft Account
+SSP, mostly superseded by CloudAP from Win 10 forward. Same
+walker shape as Wdigest — single doubly-linked list with
+plaintext password (encrypted, decrypt with LSA keys).
+
+What ships:
+
+- `CloudAPCredential` (UserName + AccountID + PRT bytes) +
+  `CloudAPLayout` with both pointer-and-inline PRT-read modes —
+  Win 10 LCUs vary on this.
+- `LiveSSPCredential` (UserName + LogonDomain + Password) +
+  `LiveSSPLayout`. Same shape as TSPkg.
+- Both walkers add `*ListPattern` / `*ListWildcards` / `*ListOffset`
+  + `*Layout` fields to `Template`. Eight credential types now
+  coexist in `Session.Credentials`.
+- Parse() scans `cloudap.dll` and `livessp.dll` after Kerberos.
+  Same merge-by-LUID + orphan-surface semantics as the other
+  per-DLL walkers.
+- 15 new unit tests including merge graft/orphan/empty + bounds
+  guards.
+
+**v0.28.0 ships framework-only.** Default templates leave both
+providers disabled (NodeSize=0). KvcForensic's JSON has no entries
+for CloudAP / LiveSSP — their layouts shift between Win 10 LCUs
+more aggressively than older providers, so default auto-enable
+awaits per-build verification against real binaries.
+
+103/103 tests green (was 88; +15 from CloudAP+LiveSSP).
+
 ### Added — `credentials/lsasparse` v0.27.0 — CredMan / Vault provider (framework)
 
 Sixth credential provider — Windows Credential Manager (Vault).

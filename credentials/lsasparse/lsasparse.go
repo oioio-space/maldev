@@ -240,6 +240,26 @@ func Parse(reader io.ReaderAt, size int64) (*Result, error) {
 		res.Warnings = append(res.Warnings, kerbWarnings...)
 	}
 
+	// CloudAP (cloudap.dll, Win 10+) is the modern cloud-auth
+	// provider — Azure AD-joined accounts, Microsoft Account SSO,
+	// hybrid AD-joined sessions all route through it. The big prize
+	// is the Primary Refresh Token (PRT) for Azure AD lateral
+	// movement.
+	if cloudap, ok := res.ModuleByName("cloudap.dll"); ok {
+		capCreds, capWarnings := extractCloudAP(r, cloudap, tmpl)
+		sessions = mergeCloudAP(sessions, capCreds)
+		res.Warnings = append(res.Warnings, capWarnings...)
+	}
+
+	// LiveSSP (livessp.dll, Win 8+) — legacy Microsoft Account SSP,
+	// mostly superseded by CloudAP from Win 10 forward but still
+	// present on systems that didn't migrate.
+	if live, ok := res.ModuleByName("livessp.dll"); ok {
+		liveCreds, liveWarnings := extractLiveSSP(r, live, tmpl, keys)
+		sessions = mergeLiveSSP(sessions, liveCreds)
+		res.Warnings = append(res.Warnings, liveWarnings...)
+	}
+
 	res.Sessions = sessions
 	return res, nil
 }
