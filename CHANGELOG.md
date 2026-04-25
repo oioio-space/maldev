@@ -7,6 +7,48 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added — `credentials/lsasparse` v0.29.0 — x86 dump detection + rejection
+
+WoW64 / legacy x86 lsass dumps are now detected at Parse() entry and
+rejected with a new sentinel `ErrUnsupportedArchitecture`. The
+partial Result still populates `BuildNumber` + `Architecture` +
+`Modules` so callers can report the rejection cleanly with full
+context.
+
+Rationale: implementing the x86 walker would require a parallel set
+of layouts with 4-byte pointers + 8-byte UNICODE_STRINGs (vs x64's
+8-byte pointers + 16-byte UNICODE_STRINGs) — roughly 400 LOC of
+near-duplicated code that operationally yields little because modern
+Win 10/11 lsass is x64 by default. Operators on x86-only targets
+should use pypykatz which has dedicated x86 layout support.
+
+What ships:
+
+- `ErrUnsupportedArchitecture` sentinel + Parse() short-circuit
+  (returns the partial Result with the sentinel wrapped via fmt.Errorf
+  so callers can `errors.Is` to dispatch).
+- 2 new unit tests covering x86 (`ProcessorArchitecture=0`) and
+  ARM64 (`ProcessorArchitecture=12`) rejection. Both produce the
+  same sentinel — the parser is x64-only regardless of the specific
+  non-x64 architecture.
+
+105/105 tests green (was 103; +2 from arch rejection).
+
+This closes the v0.2x.x credential-extraction roadmap. After v0.29.0
+the lsasparse package supports:
+
+| Provider | Status |
+|---|---|
+| MSV1_0 | inline default templates Win 7 → Win 11 25H2 |
+| Wdigest | inline default templates Win 7 → Win 11 25H2 |
+| DPAPI master keys | inline default templates Win 10+ |
+| TSPkg (RDP) | inline default templates Win 7 → Win 11 25H2 |
+| Kerberos (password + tickets) | inline default templates Win 7 → Win 11 25H2 |
+| CredMan / Vault | framework; per-build layouts opt-in |
+| CloudAP (Azure AD PRT) | framework; per-build layouts opt-in |
+| LiveSSP (legacy MSA) | framework; per-build layouts opt-in |
+| x86 / WoW64 | detected + rejected with sentinel |
+
 ### Added — `credentials/lsasparse` v0.28.0 — CloudAP + LiveSSP providers (framework)
 
 Seventh and eighth credential providers — covering modern (Azure AD)

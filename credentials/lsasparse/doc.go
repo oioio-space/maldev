@@ -27,8 +27,15 @@
 //   - CredMan / Vault — v0.27.x (framework; per-node layout opt-in)
 //   - CloudAP (Azure AD PRT) + LiveSSP — v0.28.x (framework;
 //     per-build layouts opt-in)
-// Out of scope today: WoW64 (x86) dumps, live-process attach. Each
-// is a follow-up chantier on top of the existing walker layers.
+// WoW64 / x86 dumps are detected and rejected with
+// ErrUnsupportedArchitecture in v0.29.0+ — the parser only ships
+// x64 walkers. Implementing x86 would require a parallel set of
+// layouts with 4-byte pointers and 8-byte UNICODE_STRINGs; modern
+// Win 10/11 lsass is x64 by default so the operational value is
+// limited.
+//
+// Out of scope today: WoW64 (x86) extraction, live-process attach.
+// Each is a follow-up chantier on top of the existing walker layers.
 //
 // Each provider auto-disables when its Layout.NodeSize is zero — the
 // walker is skipped at no runtime cost. The v0.25.2+ default

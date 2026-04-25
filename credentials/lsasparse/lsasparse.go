@@ -33,6 +33,15 @@ var (
 	// impossible key length, …) — typically signals the wrong
 	// template is in play even though BuildNumber matched.
 	ErrKeyExtractFailed = errors.New("lsasparse: LSA crypto keys could not be extracted")
+
+	// ErrUnsupportedArchitecture fires when the dump's
+	// SystemInfo.ProcessorArchitecture is anything other than x64.
+	// v1 only ships x64 walkers; 32-bit (WoW64 / legacy x86) lsass
+	// dumps would need a parallel set of layouts with 4-byte
+	// pointers and 8-byte UNICODE_STRINGs. The Result is still
+	// returned with Architecture + Modules populated so the caller
+	// can report the unsupported architecture cleanly.
+	ErrUnsupportedArchitecture = errors.New("lsasparse: dump is not x64 (only x64 minidumps are supported)")
 )
 
 // Architecture identifies the dump's processor family. v1 ships x64
@@ -172,6 +181,14 @@ func Parse(reader io.ReaderAt, size int64) (*Result, error) {
 		BuildNumber:  r.systemInfo.BuildNumber,
 		Architecture: archFromMinidump(r.systemInfo.ProcessorArchitecture),
 		Modules:      modulesFromReader(r),
+	}
+
+	// v1 only ships x64 walkers; reject WoW64 / legacy x86 dumps
+	// early with a clean sentinel rather than half-parsing them with
+	// the wrong pointer size. BuildNumber + Architecture + Modules
+	// still populate so callers can report the rejection cleanly.
+	if res.Architecture != ArchX64 {
+		return res, fmt.Errorf("%w: got %s", ErrUnsupportedArchitecture, res.Architecture)
 	}
 
 	// Find a template for this build. Missing template is non-fatal —
