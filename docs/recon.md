@@ -262,18 +262,18 @@ import (
 )
 
 func main() {
-    dm := drive.NewWatcher(context.Background(), func(d *drive.Info) bool { return d.Type == drive.DriveRemovable })
-
-    // Get all removable drives
-    removable, err := dm.All(func(d *drive.Info) bool {
-        return d.Type == drive.DriveRemovable
+    dm := drive.NewWatcher(context.Background(), func(d *drive.Info) bool {
+        return d.Type == drive.TypeRemovable
     })
+
+    // Snapshot returns all currently connected drives that match the filter.
+    removable, err := dm.Snapshot()
     if err != nil {
         log.Fatal(err)
     }
 
     for _, d := range removable {
-        fmt.Printf("Removable: %s (%s)\n", d.Letter, d.Infos.Name)
+        fmt.Printf("Removable: %s (%s)\n", d.Letter, d.Volume.Name)
     }
 }
 ```
@@ -325,21 +325,25 @@ func main() {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    dm := drive.NewWatcher(ctx)
-    ch, err := dm.WatchNew(func(d *drive.Info) bool {
-        return d.Type == drive.DriveRemovable
-    }, true)
+    // NewWatcher takes (ctx, filter); Watch returns an Event channel that
+    // emits Added/Removed events as drives appear or disappear.
+    dm := drive.NewWatcher(ctx, func(d *drive.Info) bool {
+        return d.Type == drive.TypeRemovable
+    })
+    ch, err := dm.Watch(0) // 0 → default 500 ms poll interval
     if err != nil {
         log.Fatal(err)
     }
 
     fmt.Println("Watching for USB drives... (Ctrl+C to stop)")
-    for item := range ch {
-        switch v := item.(type) {
-        case *drive.Info:
-            fmt.Printf("New USB: %s (%s, %s)\n", v.Letter, v.Infos.Name, v.Infos.FileSystemName)
-        case error:
-            fmt.Printf("Error: %v\n", v)
+    for ev := range ch {
+        if ev.Err != nil {
+            fmt.Printf("Error: %v\n", ev.Err)
+            continue
+        }
+        if ev.Drive != nil {
+            fmt.Printf("[%v] %s (%s, %s)\n", ev.Kind, ev.Drive.Letter,
+                ev.Drive.Volume.Name, ev.Drive.Volume.FileSystemName)
         }
     }
 }

