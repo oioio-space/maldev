@@ -7,6 +7,39 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Fixed — `credentials/lsassdump` v0.31.1 — extractor handles all 3 prologue variants
+
+Real-binary validation against a Win 10 22H2 build 19045
+ntoskrnl.exe surfaced two prologue variants v0.31.0's extractor
+didn't handle:
+
+- `PsIsProtectedProcess` → `F6 81 [disp32] [imm8]`
+  (test byte ptr [rcx+disp32], imm8)
+- `PsIsProtectedProcessLight` → `8A 91 [disp32]`
+  (mov dl, byte ptr [rcx+disp32])
+
+v0.31.0 only matched `0F B6 81 [disp32]` (movzx). The compiler
+picks any of these three lowerings depending on the target build's
+optimization profile.
+
+Generalized the matcher: it now recognises any one-byte opcode
+followed by a ModR/M byte that encodes `[rcx+disp32]` (mask
+`0xC7` against `0x81` — i.e., `mod=10b, rm=001b`), and the
+two-byte `0F xx [ModR/M]` form for movzx and friends. New
+`isModRMRcxDisp32` helper documents the bit pattern.
+
+**Real-binary result on Win 10 22H2 build 19045:**
+
+	EPROCESS.Protection offset = 0x87A
+	EPROCESS.SignatureLevel offset = 0x878
+	EPROCESS.SectionSignatureLevel offset = 0x879
+
+Both PsIsProtectedProcess and PsIsProtectedProcessLight extracted
+the same offset (cross-validation passed).
+
+5/5 tests green; the env-gated TestDiscoverProtectionOffset_RealNtoskrnl
+now passes against a captured ntoskrnl.exe.
+
 ### Added — `credentials/lsassdump` v0.31.0 — dynamic EPROCESS offset discovery
 
 Ports the offset-finding technique from

@@ -114,33 +114,61 @@ func SectionSignatureLevelOffset(protectionOff uint32) uint32 {
 }
 
 // extractProtectionOffset finds `name` in the PE's exports, reads
-// the first 7 bytes of that function from .text, and returns the
-// disp32 from a `movzx eax, byte ptr [rcx + disp32]` instruction.
+// the first ~8 bytes of that function from .text, and returns the
+// disp32 from a `[rcx+disp32]`-targeted instruction. Modern x64
+// kernel emits one of three lowerings (compiler-dependent):
+//
+//	movzx eax, byte ptr [rcx+disp32]   →  0F B6 [ModR/M] [disp32]
+//	test  byte ptr [rcx+disp32], imm8  →  F6    [ModR/M] [disp32] [imm8]
+//	mov   r8,  byte ptr [rcx+disp32]   →  8A    [ModR/M] [disp32]
+//
+// All three reference EPROCESS.Protection at the same byte offset.
+// The ModR/M byte is `10 rrr 001` for any [rcx+disp32] memory
+// operand — values 0x81, 0x89, 0x91, 0x99 cover the common reg
+// fields (AX/AL, CX/CL, DX/DL, BX/BL).
+//
+// On Win 10 22H2 build 19045 we observed:
+//   - PsIsProtectedProcess       → `F6 81 …` (test)
+//   - PsIsProtectedProcessLight  → `8A 91 …` (mov dl)
+//
+// Both decoded to the same disp32 = EPROCESS.Protection offset.
 func extractProtectionOffset(f io.ReaderAt, pf *pe.File, name string) (uint32, error) {
 	rva, err := exportRVA(pf, name)
 	if err != nil {
 		return 0, err
 	}
 
-	// Map RVA → file offset via the section that contains it.
 	sec := sectionForRVA(pf, rva)
 	if sec == nil {
 		return 0, fmt.Errorf("RVA 0x%X not in any section", rva)
 	}
 	fileOff := int64(sec.Offset) + int64(rva) - int64(sec.VirtualAddress)
 
-	// Read the first 7 bytes of the function — `movzx eax, byte ptr
-	// [rcx + disp32]` on x64 is `0F B6 81 d0 d1 d2 d3` (0x81 = ModR/M
-	// for RAX with [RCX+disp32]).
-	prologue := make([]byte, 7)
+	prologue := make([]byte, 8)
 	if _, err := f.ReadAt(prologue, fileOff); err != nil {
 		return 0, fmt.Errorf("read prologue @0x%X: %w", fileOff, err)
 	}
-	if prologue[0] != 0x0F || prologue[1] != 0xB6 || prologue[2] != 0x81 {
-		return 0, fmt.Errorf("%w: prologue %02X %02X %02X (want 0F B6 81)",
-			ErrProtectionOffsetNotFound, prologue[0], prologue[1], prologue[2])
+
+	// Two-byte opcode (0F xx): movzx and friends. ModR/M sits at
+	// offset 2; disp32 follows at offset 3.
+	if prologue[0] == 0x0F && isModRMRcxDisp32(prologue[2]) {
+		return binary.LittleEndian.Uint32(prologue[3:7]), nil
 	}
-	return binary.LittleEndian.Uint32(prologue[3:7]), nil
+	// One-byte opcode: test (F6) / mov (8A, 8B, 88, 89). ModR/M sits
+	// at offset 1; disp32 follows at offset 2.
+	if isModRMRcxDisp32(prologue[1]) {
+		return binary.LittleEndian.Uint32(prologue[2:6]), nil
+	}
+	return 0, fmt.Errorf("%w: prologue %02X %02X %02X (no [rcx+disp32] addressing form recognised)",
+		ErrProtectionOffsetNotFound, prologue[0], prologue[1], prologue[2])
+}
+
+// isModRMRcxDisp32 reports whether b is a ModR/M byte that encodes
+// `[rcx + disp32]` for ANY reg field. Bit pattern: `10 rrr 001`
+// (mod=10 → 32-bit displacement; rm=001 → RCX). Mask 0xC7 isolates
+// the mod + rm bits; the comparison value 0x81 is `mod=10, rm=001`.
+func isModRMRcxDisp32(b byte) bool {
+	return (b & 0xC7) == 0x81
 }
 
 // exportRVA looks up `name` in the PE's export directory and
