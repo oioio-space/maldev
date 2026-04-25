@@ -7,6 +7,57 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added — `credentials/sekurlsa` v0.30.1 — RTL_AVL_TABLE walker for Kerberos
+
+Vista+ Kerberos uses an `RTL_AVL_TABLE` (balanced binary tree) for
+session enumeration, NOT a flat doubly-linked LIST_ENTRY chain. The
+v0.26.1 walker assumed Flink-at-offset-0 semantics — on AVL nodes,
+that position holds the Parent pointer, so the walker walked UP to
+the root sentinel and stopped without surfacing any sessions. The
+real-binary diagnostic in v0.30.0 confirmed this on a Win 10 22H2
+dump (signature matched in kerberos.dll, walker returned zero).
+
+What ships:
+
+- New `credentials/sekurlsa/avl.go` with a generic `walkAVL` helper
+  that traverses an `RTL_AVL_TABLE`-rooted tree in-order, with a
+  visited-set guard against corrupted-dump cycles and an explicit
+  maxNodes cap.
+- New `readAVLTreeRoot` helper that dereferences
+  `RTL_AVL_TABLE.BalancedRoot.RightChild` (offset +0x10 of the
+  table) — the actual tree root that callers pass to walkAVL.
+- `extractKerberos` refactored to call `readAVLTreeRoot` +
+  `walkAVL` instead of the Flink-chain walker. The session layout
+  + ticket-cache walks remain unchanged (Kerberos tickets are
+  still flat lists per cache).
+- LUID-fallback heuristic improved: triggers when the primary
+  read is zero OR when the upper-32 bits are non-zero (real LUIDs
+  allocated by NT stay well under 2^32; an upper-bits-set value
+  is almost always a stray pointer).
+- `KerberosLayout` defaults updated: LUIDOffset shifts from
+  0x40 (KvcForensic Vista-generic) to 0x48 (pypykatz Win 10
+  1607+ struct), with the fallback list reordered. Real-binary
+  validation surfaces 2 Kerberos sessions where v0.26.1 surfaced
+  zero — but field offsets (UserName, Domain, ticket layout) on
+  Win 10 22H2 still produce junk; per-build refinement queued.
+- maxTickets cap reduced from 256 → 32 to limit junk-ticket
+  runaway when offsets misalign (real caches rarely exceed
+  ~20 tickets per session).
+- 5 new unit tests for walkAVL + readAVLTreeRoot covering in-order
+  traversal, empty root, maxNodes cap, cycle detection, and
+  table-root deref. 112/112 tests green (was 108).
+
+Real-binary status on Win 10 22H2 build 19045:
+- AVL walker fires + visits Kerberos session nodes ✅
+- LUID extraction lands on stray pointers (per-build offsets need
+  to land on the actual Win 10 1607+ session struct LUID at +0x48
+  inside the BalancedLinks-prefixed node) — refinement queued.
+
+TSPkg also uses an AVL on Vista+ but the v0.30.0 diagnostic shows
+its KvcForensic signature `48 83 EC 20 48 8B 0D` doesn't match in
+tspkg.dll on this build — separate refinement before the AVL
+refactor lands there.
+
 ### Added/Fixed — `credentials/sekurlsa` v0.30.0 — DPAPI fallback to dpapisrv.dll + diagnostic infrastructure
 
 Real-binary validation continued. Findings documented in package

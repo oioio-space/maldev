@@ -109,12 +109,18 @@ func (c *KerberosCredential) wipe() {
 }
 
 // extractKerberos walks kerberos.dll's KIWI_KERBEROS_LOGON_SESSION
-// list and returns one KerberosCredential per LUID. Each credential
-// carries the decrypted password (when present) plus every ticket
-// from the session's caches.
+// AVL tree and returns one KerberosCredential per LUID. Each
+// credential carries the decrypted password (when present) plus
+// every ticket from the session's caches.
 //
 // Returns (nil, nil) without warning when the template lacks
 // Kerberos support (KerberosLayout.NodeSize == 0).
+//
+// Vista+ Kerberos uses an RTL_AVL_TABLE for session enumeration —
+// the rel32 lands on the table's BalancedRoot (sentinel), and the
+// actual tree root is `BalancedRoot.RightChild` (table+0x10). We
+// recursively in-order walk every node and project each through
+// the layout.
 func extractKerberos(r *reader, kerbModule Module, t *Template, lsaKey *lsaKey) (map[uint64]KerberosCredential, []string) {
 	if t.KerberosLayout.NodeSize == 0 || len(t.KerberosListPattern) == 0 {
 		return nil, nil
@@ -125,7 +131,7 @@ func extractKerberos(r *reader, kerbModule Module, t *Template, lsaKey *lsaKey) 
 		return nil, []string{fmt.Sprintf("Kerberos: read kerberos.dll body: %v", err)}
 	}
 
-	listHead, err := derefRel32(
+	tableVA, err := derefRel32(
 		body,
 		kerbModule.BaseOfImage,
 		t.KerberosListPattern,
@@ -137,8 +143,10 @@ func extractKerberos(r *reader, kerbModule Module, t *Template, lsaKey *lsaKey) 
 		return nil, []string{fmt.Sprintf("Kerberos list head: %v", err)}
 	}
 
-	flink, err := readPointer(r, listHead)
-	if err != nil || flink == 0 || flink == listHead {
+	// The rel32 lands on the RTL_AVL_TABLE's BalancedRoot sentinel.
+	// The actual tree root is BalancedRoot.RightChild (offset +0x10).
+	treeRoot := readAVLTreeRoot(r, tableVA)
+	if treeRoot == 0 {
 		return nil, nil
 	}
 
@@ -146,31 +154,25 @@ func extractKerberos(r *reader, kerbModule Module, t *Template, lsaKey *lsaKey) 
 	var warnings []string
 
 	const maxNodes = 1024
-	walked := 0
-	for cur := flink; cur != listHead && walked < maxNodes; walked++ {
-		node, err := r.ReadVA(cur, int(t.KerberosLayout.NodeSize))
+	walkAVL(r, treeRoot, maxNodes, func(addr uint64) {
+		node, err := r.ReadVA(addr, int(t.KerberosLayout.NodeSize))
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("Kerberos node @0x%X: %v", cur, err))
-			break
+			warnings = append(warnings, fmt.Sprintf("Kerberos node @0x%X: %v", addr, err))
+			return
 		}
 		cred, luid, warn := decodeKerberosSession(r, node, t, lsaKey)
 		if warn != "" {
 			warnings = append(warnings, warn)
 		}
 		if cred.Found && luid != 0 {
-			// Coalesce duplicate LUIDs (some sessions appear twice in
-			// the list under different bucket links). Keep the entry
-			// with the longest ticket cache.
+			// Coalesce duplicate LUIDs (the same logon session can
+			// appear in multiple cache trees with different ticket
+			// counts). Keep the entry with the longest ticket cache.
 			if existing, ok := creds[luid]; !ok || len(cred.Tickets) > len(existing.Tickets) {
 				creds[luid] = cred
 			}
 		}
-		next, err := readPointer(r, cur) // Flink at offset 0
-		if err != nil || next == 0 {
-			break
-		}
-		cur = next
-	}
+	})
 
 	return creds, warnings
 }
@@ -185,14 +187,19 @@ func decodeKerberosSession(r *reader, node []byte, t *Template, lsaKey *lsaKey) 
 	}
 
 	luid := binary.LittleEndian.Uint64(node[l.LUIDOffset : l.LUIDOffset+8])
-	// LUID fallback scan: if the primary read is zero, try each
-	// alternate offset in order.
-	if luid == 0 {
+	// LUID fallback scan: trigger when the primary read is zero OR
+	// when the read has its upper 32 bits set (real LUIDs allocated
+	// by NT are sequential from 1 and stay well under 2^32 in
+	// practice — an upper-32 bit non-zero value is almost always
+	// a stray pointer or unrelated field misread). Try each
+	// alternate offset until a plausible LUID surfaces.
+	if luid == 0 || luid>>32 != 0 {
 		for _, off := range l.LUIDFallbackOffsets {
 			if off+8 > l.NodeSize {
 				continue
 			}
-			if v := binary.LittleEndian.Uint64(node[off : off+8]); v != 0 {
+			v := binary.LittleEndian.Uint64(node[off : off+8])
+			if v != 0 && v>>32 == 0 {
 				luid = v
 				break
 			}
@@ -254,7 +261,11 @@ func decodeKerberosSession(r *reader, node []byte, t *Template, lsaKey *lsaKey) 
 // cap never trips on a healthy dump.
 func walkKerberosTickets(r *reader, head uint64, l KerberosLayout) []KerberosTicket {
 	var out []KerberosTicket
-	const maxTickets = 256
+	// Real Kerberos cache wraps within ~5-20 tickets per session;
+	// 32 is a generous cap that limits junk-ticket runaway when our
+	// per-build offsets are misaligned and we end up walking arbitrary
+	// memory. Per-build field-offset refinement is queued for v0.30.x.
+	const maxTickets = 32
 	tnSize := l.TicketNodeSize
 	if tnSize == 0 {
 		tnSize = 0x180

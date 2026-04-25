@@ -375,15 +375,22 @@ var kerberosSignatureCommon = []byte{
 	0x48, 0x8D, 0x0D,
 }
 
-// kerberosLayoutCommon — every offset transcribed from KvcForensic
-// `Kerberos_x64_vista_plus`. Stable Vista → 25H2.
+// kerberosLayoutCommon — offsets blended from KvcForensic +
+// pypykatz per-build session structs. KvcForensic over-simplifies
+// (one entry for all of Vista+), and pypykatz's
+// KIWI_KERBEROS_LOGON_SESSION_10_1607 layout shifts LUID to +0x48.
+// We ship the Win 10 1607+ value as the primary and let the
+// fallback heuristic in decodeKerberosSession recover when an
+// older-build session sits at a different offset (the heuristic
+// fires when the primary read has its upper-32 bits set, which
+// indicates a stray pointer rather than a real LUID).
 var kerberosLayoutCommon = KerberosLayout{
 	NodeSize:                0x180, // largest field at 0x148+8 = 0x150
-	LUIDOffset:              0x40,  // session_luid_offset = 64
-	UserNameOffset:          0x78,  // session_username_offset = 120
+	LUIDOffset:              0x48,  // pypykatz LOGON_SESSION_10_1607.LocallyUniqueIdentifier
+	UserNameOffset:          0x78,  // pypykatz / KvcForensic session_username_offset = 120
 	DomainOffset:            0x88,  // session_domain_offset = 136
 	PasswordOffset:          0xA8,  // session_password_ustr_offset = 168
-	LUIDFallbackOffsets:     []uint32{56, 48, 72, 40, 32},
+	LUIDFallbackOffsets:     []uint32{0x48, 0x40, 0x38, 0x30, 0x20},
 	TicketListOffsets:       []uint32{280, 304, 328}, // 0x118, 0x130, 0x148
 	TicketServiceNameOffset: 0x20,                    // 32
 	TicketTargetNameOffset:  0x28,                    // 40
