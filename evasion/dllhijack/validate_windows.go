@@ -171,7 +171,21 @@ func triggerVictim(opp Opportunity) error {
 	case KindScheduledTask:
 		return scheduler.Run(opp.ID)
 	case KindProcess:
-		return fmt.Errorf("triggering KindProcess opportunities is not supported by Validate (would require killing + relaunching the process)")
+		// Original rejection: killing + relaunching a live process is
+		// too destructive for a reconnaissance helper. Re-eval (2026-04-25):
+		// the *correct* pattern is to spawn a *fresh* copy of the same
+		// binary in a sandboxed working directory (the dropped canary
+		// reproduces the production DLL search path) and terminate it
+		// once a marker fires. This validates the binary's hijack
+		// behavior without touching the live PID. Implementation kept
+		// as deferred work — needs (a) a sandboxed-spawn helper that
+		// doesn't inherit the parent's environment, (b) a strict
+		// timeout to terminate child processes that don't exit on
+		// their own, (c) AV-allow-listing of the canary because some
+		// binaries are signed and refuse unsigned co-located DLLs.
+		// See docs/techniques/evasion/dll-hijack.md "KindProcess
+		// roadmap" for the design sketch.
+		return fmt.Errorf("triggering KindProcess opportunities is deferred work — sandboxed-spawn pattern designed but not yet shipped (see dll-hijack.md)")
 	default:
 		return fmt.Errorf("unknown Kind %v", opp.Kind)
 	}

@@ -189,9 +189,25 @@ pre-built canary is not shipped so each operator's PE has a unique hash.
   DLLs loaded at runtime via `LoadLibrary` / `GetModuleHandle` are invisible
   there. `ScanProcesses` covers the runtime-load blind spot by reading the
   live loaded-module list from every accessible process.
-- **KindProcess Validate unsupported** — triggering a DLL reload in a
-  running process requires killing + relaunching it, which is out of
-  scope (too destructive for a reconnaissance helper).
+- **KindProcess Validate unsupported (deferred design)** — original
+  rejection rationale (killing + relaunching the live process) stands
+  for the live PID. The re-eval design (2026-04-25) is to spawn a
+  **fresh** copy of the same binary in a sandboxed working directory
+  reproducing the production DLL search path, drop the canary
+  alongside, wait for a marker (or bounded timeout), then terminate
+  the child. The live process is never touched. Implementation
+  pending — needs:
+  1. A sandboxed-spawn helper that doesn't inherit the parent's
+     environment (CREATE_NEW_CONSOLE + clean cwd).
+  2. A strict timeout that terminates the child via `TerminateProcess`
+     if no marker fires within `opts.Timeout`.
+  3. AV-allow-listing of the dropped canary — some target binaries
+     are signed (e.g. Microsoft Office) and refuse unsigned co-located
+     DLLs; the canary needs a self-signed cert (or the validate fails
+     loudly with "binary refused canary, sign your DLL").
+  4. Operator opt-in flag `opts.AllowSpawn = true` so the reconnaissance
+     default stays non-destructive — spawning even a fresh process can
+     trip parent-tracker EDRs and isn't free.
 
 ---
 
