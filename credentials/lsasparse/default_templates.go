@@ -339,6 +339,29 @@ var dpapiLayoutCommon = DPAPILayout{
 	KeyBytesOffset: 0x30,
 }
 
+// ===== TSPkg signature + layout (per KvcForensic) ====================
+
+// tspkgSignatureCommon — KvcForensic `Tspkg_x64_vista_to_win10` and
+// `Tspkg_x64_win11_24h2_plus` both ship the same 7-byte signature
+// `48 83 EC 20 48 8B 0D` (sub rsp, 20h; mov rcx, [rip+rel32]) covering
+// every Vista+ x64 build. The single-signature suffices because the
+// terminal-services bootstrap function prologue is unusually stable.
+var tspkgSignatureCommon = []byte{
+	0x48, 0x83, 0xEC, 0x20,
+	0x48, 0x8B, 0x0D,
+}
+
+// tspkgLayoutCommon — KIWI_TS_CREDENTIAL outer-node layout per
+// KvcForensic JSON: luid_offset=16, primary_offset=24. Inner
+// KIWI_TS_PRIMARY_CREDENTIAL UNICODE_STRING offsets (UserName=0x00,
+// Domain=0x10, Password=0x20) are stable across builds and live in
+// tspkg.go's decodeTSPkgNode.
+var tspkgLayoutCommon = TSPkgLayout{
+	NodeSize:         0x20,
+	LUIDOffset:       0x10,
+	PrimaryPtrOffset: 0x18,
+}
+
 // ===== builtinTemplates ==============================================
 //
 // Every Template documents its target builds, OS family, validation
@@ -369,6 +392,9 @@ var builtinTemplates = []*Template{
 		WdigestListPattern:        wdigestSignaturePre11,
 		WdigestListOffset:         -4,
 		WdigestLayout:             wdigestLayoutCommon,
+		TSPkgListPattern:          tspkgSignatureCommon,
+		TSPkgListOffset:           7, // KvcForensic first_entry_offset
+		TSPkgLayout:               tspkgLayoutCommon,
 	},
 	{
 		// ▲ Win 8 / Server 2012 (builds 9200-9599).
@@ -456,6 +482,9 @@ var builtinTemplates = []*Template{
 		DPAPIListPattern:        dpapiSignatureWin10Plus,
 		DPAPIListOffset:         11,
 		DPAPILayout:             dpapiLayoutCommon,
+		TSPkgListPattern:        tspkgSignatureCommon,
+		TSPkgListOffset:         7, // KvcForensic first_entry_offset
+		TSPkgLayout:             tspkgLayoutCommon,
 	},
 	{
 		// ◎ Win 10 1803 → 22H2 / Server 2019 (builds 17134-20347).
@@ -479,6 +508,9 @@ var builtinTemplates = []*Template{
 		DPAPIListPattern:        dpapiSignatureWin10Plus,
 		DPAPIListOffset:         11,
 		DPAPILayout:             dpapiLayoutCommon,
+		TSPkgListPattern:        tspkgSignatureCommon,
+		TSPkgListOffset:         7, // KvcForensic first_entry_offset
+		TSPkgLayout:             tspkgLayoutCommon,
 	},
 	{
 		// ◎ Server 2022 + Win 11 21H2 (builds 20348-22099).
@@ -502,6 +534,9 @@ var builtinTemplates = []*Template{
 		DPAPIListPattern:        dpapiSignatureWin10Plus,
 		DPAPIListOffset:         11,
 		DPAPILayout:             dpapiLayoutCommon,
+		TSPkgListPattern:        tspkgSignatureCommon,
+		TSPkgListOffset:         7, // KvcForensic first_entry_offset
+		TSPkgLayout:             tspkgLayoutCommon,
 	},
 	{
 		// ◎ Win 11 22H2 / 23H2 (builds 22100-26099). KvcForensic
@@ -524,6 +559,9 @@ var builtinTemplates = []*Template{
 		DPAPIListPattern:        dpapiSignatureWin10Plus,
 		DPAPIListOffset:         11,
 		DPAPILayout:             dpapiLayoutCommon,
+		TSPkgListPattern:        tspkgSignatureCommon,
+		TSPkgListOffset:         7, // KvcForensic first_entry_offset
+		TSPkgLayout:             tspkgLayoutCommon,
 	},
 	{
 		// ◎ Win 11 24H2 / 25H2 / Server 2025 (builds 26100+).
@@ -548,5 +586,8 @@ var builtinTemplates = []*Template{
 		DPAPIListPattern:        dpapiSignatureWin10Plus,
 		DPAPIListOffset:         11,
 		DPAPILayout:             dpapiLayoutCommon,
+		TSPkgListPattern:        tspkgSignatureCommon,
+		TSPkgListOffset:         7, // KvcForensic first_entry_offset
+		TSPkgLayout:             tspkgLayoutCommon,
 	},
 }

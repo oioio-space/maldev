@@ -88,6 +88,16 @@ type Template struct {
 	DPAPIListWildcards []int
 	DPAPIListOffset    int32
 	DPAPILayout        DPAPILayout
+
+	// TSPkg (Terminal Services Package) fields. The list head global
+	// lives in tspkg.dll (.data) and roots a doubly-linked list of
+	// KIWI_TS_CREDENTIAL nodes. Each carries a LUID + a pointer to a
+	// KIWI_TS_PRIMARY_CREDENTIAL with the UserName / Domain / encrypted
+	// Password UNICODE_STRINGs. Set NodeSize=0 to disable.
+	TSPkgListPattern   []byte
+	TSPkgListWildcards []int
+	TSPkgListOffset    int32
+	TSPkgLayout        TSPkgLayout
 }
 
 // validate sanity-checks a template before it enters the registry.

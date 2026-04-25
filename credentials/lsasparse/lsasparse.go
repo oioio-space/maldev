@@ -221,6 +221,15 @@ func Parse(reader io.ReaderAt, size int64) (*Result, error) {
 	sessions = mergeDPAPI(sessions, dpapiKeys)
 	res.Warnings = append(res.Warnings, dpapiWarnings...)
 
+	// TSPkg (Terminal Services Package) lives in tspkg.dll and
+	// caches plaintext RDP credentials. Same merge-by-LUID +
+	// orphan-surface semantics as Wdigest.
+	if tspkg, ok := res.ModuleByName("tspkg.dll"); ok {
+		tsCreds, tsWarnings := extractTSPkg(r, tspkg, tmpl, keys)
+		sessions = mergeTSPkg(sessions, tsCreds)
+		res.Warnings = append(res.Warnings, tsWarnings...)
+	}
+
 	res.Sessions = sessions
 	return res, nil
 }

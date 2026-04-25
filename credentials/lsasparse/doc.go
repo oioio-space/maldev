@@ -20,18 +20,18 @@
 //
 // Scope:
 //   - MSV1_0 NTLM hashes (NT / LM / SHA1) — v0.23.x
-//   - Wdigest plaintext passwords — v0.24.x (opt-in per template)
-//   - DPAPI master-key cache — v0.25.x (opt-in per template)
-// Out of scope today: Kerberos tickets, LiveSSP / TSPkg / CloudAP
+//   - Wdigest plaintext passwords — v0.24.x
+//   - DPAPI master-key cache — v0.25.x
+//   - TSPkg (Terminal Services / RDP) plaintext — v0.26.x
+// Out of scope today: Kerberos tickets, CredMan, LiveSSP / CloudAP
 // secrets, live-process attach. Each is a follow-up chantier on top
 // of the existing crypto + walker layers.
 //
-// Wdigest and DPAPI providers auto-disable when the registered
-// Template has WdigestLayout.NodeSize == 0 / DPAPILayout.NodeSize ==
-// 0 (the default for the v0.23.x templates). Operators with verified
-// Win10/Win11 signatures register an extended Template that fills
-// the relevant fields — see Wdigest/DPAPILayout docs for the
-// field-by-field meaning.
+// Each provider auto-disables when its Layout.NodeSize is zero — the
+// walker is skipped at no runtime cost. The v0.25.2+ default
+// templates ship every signature + layout from KvcForensic's
+// validated JSON corpus, so all four providers run by default on a
+// covered build.
 //
 // DPAPI master keys are stored pre-decrypted in lsasrv.dll's
 // g_MasterKeyCacheList; the walker reads them as-is and grafts them

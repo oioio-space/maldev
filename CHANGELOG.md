@@ -7,6 +7,37 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added — `credentials/lsasparse` v0.26.0 — TSPkg provider
+
+Fourth credential provider on top of the v0.23.x crypto + walker
+layers. Terminal Services Package (`tspkg.dll`) caches plaintext
+RDP / Terminal Services credentials — the classic "domain admin
+RDP'd to a server, we dump LSASS" scenario.
+
+What ships:
+
+- `TSPkgCredential` implementing the `Credential` interface alongside
+  `MSV1_0Credential` + `WdigestCredential` + `DPAPIMasterKey`. Fields:
+  `UserName` + `LogonDomain` + `Password` (plaintext after LSA decrypt).
+- `TSPkgLayout` struct + `TSPkgList{Pattern,Wildcards,Offset}` fields
+  on `Template`. `NodeSize=0` skips the walker at no cost.
+- The outer `KIWI_TS_CREDENTIAL` carries a pointer to an inner
+  `KIWI_TS_PRIMARY_CREDENTIAL` whose UserName / Domain / Password
+  UNICODE_STRINGs sit at stable offsets (0x00 / 0x10 / 0x20 across
+  every Win 7+ build). The walker dereferences the inner pointer and
+  decrypts the Password buffer with the same lsaKey chain.
+- `Parse()` now scans `tspkg.dll` (when present) after DPAPI. TSPkg
+  credentials merge onto matching MSV/Wdigest/DPAPI sessions by LUID;
+  orphan LUIDs surface as new sessions.
+- 8 new unit tests including a synthetic-fixture round-trip
+  exercising pattern → rel32 deref → outer-list walk → inner-pointer
+  deref → AES-CBC decrypt → UTF-16LE decode → LUID-merge.
+- Default templates include TSPkg signature + layout for every
+  Win 7+ build per KvcForensic's `Tspkg_x64_vista_to_win10` /
+  `Tspkg_x64_win11_24h2_plus` (same 7-byte signature, same
+  first_entry_offset = 7).
+- 72/72 tests green (was 64; +8 from TSPkg).
+
 ### Fixed/Added — `credentials/lsasparse` v0.25.2 — KvcForensic-validated templates
 
 Major rewrite of `default_templates.go` integrating the validated
