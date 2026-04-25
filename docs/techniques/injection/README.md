@@ -117,6 +117,19 @@ that address away, forcing callers who want to sleep-mask or wipe the
 region to compute it themselves. The optional `SelfInjector` interface
 exposes it:
 
+> **`MethodCreateFiber` warning** — `ConvertThreadToFiber` permanently
+> transforms the calling OS thread; Go's M:N scheduler does not know
+> about fibers and any subsequent goroutine multiplexed onto that
+> thread observes fiber state instead of goroutine state. Real
+> shellcode that calls `ExitThread` kills the host runtime mid-test.
+> If you need the Fiber injection method from a Go program, spawn a
+> *true* OS thread via `kernel32!CreateThread` (not `go func()` —
+> goroutines + `runtime.LockOSThread` aren't enough), let it run the
+> fiber dance there, and let it die when the shellcode exits. The
+> matrix test `TestFiber_RealShellcode` is permanently skipped — see
+> the comment in `inject/realsc_windows_test.go` for the full
+> diagnosis.
+
 ```go
 type Region struct {
     Addr uintptr

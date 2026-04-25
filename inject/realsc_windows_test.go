@@ -209,9 +209,33 @@ func TestCreateRemoteThread_RealShellcode(t *testing.T) {
 	assert.Contains(t, string(data), "MALDEV_EXEC_OK")
 }
 
-// TestFiber_RealShellcode injects via CreateFiber.
+// TestFiber_RealShellcode injects via CreateFiber. Permanently skipped
+// in our test harness — see analysis below.
+//
+// Root cause (diagnosed 2026-04-25): ConvertThreadToFiber permanently
+// transforms the calling OS thread into a fiber-controlling thread.
+// Go's M:N scheduler does not know about fibers — it expects to be
+// able to multiplex other goroutines onto the now-fiber thread. Any
+// subsequent goroutine scheduled onto that thread observes the fiber
+// state instead of the goroutine state and the runtime deadlocks (or
+// in the marker_x64.bin case the shellcode calls ExitThread and the
+// test process is killed mid-test).
+//
+// Correct integration pattern (NOT implemented here, kept as
+// documentation): spawn a *true* OS thread via CreateThread (not
+// `go func()`), have that thread run ConvertThreadToFiber +
+// CreateFiber + SwitchToFiber, and let it die when the shellcode
+// exits. A goroutine + runtime.LockOSThread is NOT enough: Go's
+// runtime still owns the goroutine's stack and panics when the OS
+// thread vanishes underneath it.
+//
+// The `MethodCreateFiber` injector path stays in the public API for
+// host-process use cases where the caller controls the thread
+// lifecycle (PE loaders, language-bridge wrappers). For pure-Go
+// injection callers, use MethodCreateThread / MethodCreateRemoteThread
+// — those are equally stealthy and don't fight the runtime.
 func TestFiber_RealShellcode(t *testing.T) {
-	t.Skip("CreateFiber with real shellcode deadlocks Go's M:N scheduler — see feedback_x64dbg_testing.md #7")
+	t.Skip("CreateFiber + Go runtime: documented incompatibility — use a CreateThread-spawned OS thread, not a goroutine. See header comment.")
 	testutil.RequireManual(t)
 	testutil.RequireIntrusive(t)
 	cleanupMarker()
