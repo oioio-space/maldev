@@ -17,8 +17,9 @@
 // during the BYOVD driver load — Win10/11 HVCI blocks unsigned
 // drivers and the attested driver list is audited.
 //
-// v0.17.0 scope: enumeration only. Callers who plug in a real
-// KernelReadWriter can experiment with Remove, but the API is marked
-// Experimental until a driver chantier ships the arbitrary-kernel-
-// memory-write primitive required to do so safely.
+// v0.17.1 scope: enumeration + Remove + Restore. Callers plug in a
+// KernelReadWriter (kernel/driver/rtcore64.Driver, GDRV, custom) and
+// the package zeroes the chosen slot under a refcount-aware token so
+// Restore puts the original value back without callers needing to
+// remember the displaced bytes.
 package kcallback

@@ -53,6 +53,7 @@ func (k Kind) String() string {
 type Callback struct {
 	Kind     Kind    // which array
 	Index    int     // slot in the array
+	SlotAddr uintptr // kernel VA of the slot itself (where Remove zeroes 8 bytes)
 	Address  uintptr // kernel VA of the callback function (masked PEX_CALLBACK_ROUTINE_BLOCK)
 	Module   string  // resolved driver name (best effort)
 	Enabled  bool    // false when the low bit is 0 (indicates disabled slot)
@@ -85,7 +86,7 @@ type KernelReader interface {
 }
 
 // KernelReadWriter extends KernelReader with a write primitive. Used
-// by the experimental Remove paths.
+// by Remove + Restore to NULL a slot and roll the change back.
 type KernelReadWriter interface {
 	KernelReader
 	WriteKernel(addr uintptr, data []byte) (int, error)

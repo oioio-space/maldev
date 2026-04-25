@@ -77,25 +77,28 @@ func readCallbackArray(reader KernelReader, arrayAddr uintptr, n int, kind Kind)
 		}
 		block := uintptr(slot &^ 0xF)
 		enabled := slot&1 != 0
+		slotAddr := arrayAddr + uintptr(i*8)
 
 		fnBuf := make([]byte, 8)
 		if _, err := reader.ReadKernel(block+8, fnBuf); err != nil {
 			// Can't read the block — record the slot but leave Address zero.
 			out = append(out, Callback{
-				Kind:    kind,
-				Index:   i,
-				Enabled: enabled,
+				Kind:     kind,
+				Index:    i,
+				SlotAddr: slotAddr,
+				Enabled:  enabled,
 			})
 			continue
 		}
 		fn := uintptr(binary.LittleEndian.Uint64(fnBuf))
 		mod, _ := DriverAt(fn)
 		out = append(out, Callback{
-			Kind:    kind,
-			Index:   i,
-			Address: fn,
-			Module:  mod,
-			Enabled: enabled,
+			Kind:     kind,
+			Index:    i,
+			SlotAddr: slotAddr,
+			Address:  fn,
+			Module:   mod,
+			Enabled:  enabled,
 		})
 	}
 	return out, nil

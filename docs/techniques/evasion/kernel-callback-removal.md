@@ -65,12 +65,24 @@ type KernelReadWriter interface {
 type NullKernelReader struct{} // default, always returns ErrNoKernelReader
 ```
 
-**Removal** (`Remove(cb Callback, writer KernelReadWriter) error`) is
-**not shipped** in v0.17.0 — the safe write surface requires the BYOVD
-chantier currently on the roadmap. Callers with their own writer can
-experiment by composing the enumeration results + a hand-rolled write
-step; the v0.17.0 API is stable so future Remove will simply accept
-the same `Callback` shape.
+**Removal** (`Remove(cb Callback, writer KernelReadWriter) (RemoveToken, error)`)
+ships in **v0.17.1**. It reads the 8-byte slot at `cb.SlotAddr`,
+captures the original tagged-pointer value into a `RemoveToken`, then
+writes 8 zero bytes — the EDR's notify routine stops being called as
+soon as the kernel sees the zero write. `Restore(tok, writer) error`
+puts the original value back. The token is opaque except for `IsZero()`
+which makes the deferred-cleanup idiom safe:
+
+```go
+tok, err := kcallback.Remove(cb, writer)
+if err != nil { return err }
+defer kcallback.Restore(tok, writer)
+```
+
+The API exposes a ~µs race window between read-original and
+write-zero where a competing actor could observe a half-written slot,
+but driver-backed primitives like RTCore64 issue both IOCTLs fast
+enough that this is rarely observable in practice.
 
 ### No built-in offset database
 
@@ -171,13 +183,13 @@ PspLoadImageNotifyRoutine[0]     -> 0xFFFFF89abcdef100 (WdFilter.sys) enabled=tr
 
 ## Future work
 
-- **v0.17.1** — shipped `Remove(cb Callback, writer KernelReadWriter)`
-  once the BYOVD chantier merges (clean write primitive, ROUTINE_BLOCK
-  refcount handling, safe NULL-out).
 - Per-build offset cache baked into `win/version` so callers don't
   reimplement the map themselves.
-- Thread notify / Load-image removal have the same ROUTINE_BLOCK
-  shape — one Remove implementation covers all three Kinds.
+- Per-Kind unhook helpers that wrap Remove for the most common slot
+  patterns (e.g. `RemoveByModule("WdFilter.sys", writer)`).
+- A real VM e2e against a driver-loaded RTCore64 (currently
+  `kernel/driver/rtcore64` ships as scaffold; the binary embedding
+  requires a separate build with `-tags=byovd_rtcore64`).
 
 ---
 
