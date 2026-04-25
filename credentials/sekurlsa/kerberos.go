@@ -167,10 +167,17 @@ func extractKerberos(r *reader, kerbModule Module, t *Template, lsaKey *lsaKey) 
 	var warnings []string
 
 	const maxNodes = 1024
-	walkAVL(r, treeRoot, maxNodes, func(addr uint64) {
-		node, err := r.ReadVA(addr, int(t.KerberosLayout.NodeSize))
+	walkAVL(r, treeRoot, maxNodes, func(avlNode uint64) {
+		// The AVL node is [RTL_BALANCED_LINKS (0x20)][user_data].
+		// Per pypykatz, user_data at +0x20 is a pointer to the
+		// actual KIWI_KERBEROS_LOGON_SESSION struct — read it.
+		sessionPtr, err := readPointer(r, avlNode+avlNodeUserDataOffset)
+		if err != nil || sessionPtr == 0 {
+			return
+		}
+		node, err := r.ReadVA(sessionPtr, int(t.KerberosLayout.NodeSize))
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("Kerberos node @0x%X: %v", addr, err))
+			warnings = append(warnings, fmt.Sprintf("Kerberos session @0x%X: %v", sessionPtr, err))
 			return
 		}
 		cred, luid, warn := decodeKerberosSession(r, node, t, lsaKey)
@@ -178,9 +185,9 @@ func extractKerberos(r *reader, kerbModule Module, t *Template, lsaKey *lsaKey) 
 			warnings = append(warnings, warn)
 		}
 		if cred.Found && luid != 0 {
-			// Coalesce duplicate LUIDs (the same logon session can
-			// appear in multiple cache trees with different ticket
-			// counts). Keep the entry with the longest ticket cache.
+			// Coalesce duplicate LUIDs — keep the entry with the
+			// longest ticket cache (multiple AVL paths can lead to
+			// the same session in malformed dumps).
 			if existing, ok := creds[luid]; !ok || len(cred.Tickets) > len(existing.Tickets) {
 				creds[luid] = cred
 			}

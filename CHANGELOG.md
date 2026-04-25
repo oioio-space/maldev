@@ -7,6 +7,48 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Fixed — `credentials/sekurlsa` v0.30.3 — Kerberos AVL user_data deref (real-binary validated)
+
+**Real-binary validation: 4 Kerberos credentials extracted from a
+Win 10 22H2 dump, including `DESKTOP-41TGTR3\test` with both an
+MSV NT hash and 2 Kerberos tickets.**
+
+The remaining bug after v0.30.2: AVL nodes are NOT the
+KIWI_KERBEROS_LOGON_SESSION structs themselves — each AVL node is
+laid out as `[RTL_BALANCED_LINKS (0x20 bytes)][user_data]`, and
+the user_data at +0x20 is a *pointer* to the actual session
+struct. My v0.30.1 walker called `decodeKerberosSession` directly
+on the AVL node's address, which is the BalancedLinks (Parent /
+Left / Right pointers). Result: every "session" had garbled
+fields because we were reading session-struct offsets out of the
+balanced-links bytes.
+
+Diagnosed by writing `kerb_probe_test.go` — env-gated dump
+introspection that prints the bytes at globalVA + at *globalVA
+and applies an AVL-shape sniffer (Parent self-ref + Right pointing
+into userland). The dump confirmed: globalVA IS the table (Parent
+self-ref + Right at lsass-heap VA), and the fix is at the
+*per-node* level via the user_data offset.
+
+Fix: `walkAVL` callback now reads `*(node + 0x20)` to get the
+session pointer, then reads the session struct at THAT address.
+New constant `avlNodeUserDataOffset = 0x20` documents the layout.
+
+Result on the Win 10 22H2 dump:
+
+  Session  LUID         Cred types
+  -------  -----------  ----------------------------
+  test                  MSV1_0 + Kerberos (2 tickets)
+  machine$ (3E4/3E7)    MSV1_0 + Kerberos (2 tickets each)
+  test (orphan AVL LUID 3D49D) → new session, 2 tickets
+
+Same approach should fix TSPkg once the build-19045 signature
+lands. Queued for v0.30.4.
+
+`kerb_probe_test.go` ships as a gated diagnostic
+(`MALDEV_REALDUMP=<path>`) for anyone needing to triage future
+build variations. 112/112 tests green at default, +1 gated probe.
+
 ### Fixed — `credentials/sekurlsa` v0.30.2 — Kerberos pointer chain + field offsets per pypykatz Win 10 1607+
 
 Continued real-binary refinement of the Kerberos walker. Two fixes:

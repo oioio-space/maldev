@@ -3,33 +3,34 @@ package sekurlsa
 // AVL-tree traversal helper.
 //
 // Vista+ Kerberos and TSPkg replaced the legacy doubly-linked
-// LIST_ENTRY walker with an `RTL_AVL_TABLE` (a balanced binary
-// tree managed by the NT runtime library). Each node begins with
-// an `RTL_BALANCED_LINKS`:
+// LIST_ENTRY walker with an NT-runtime AVL tree backed by
+// `RTL_AVL_TABLE` allocations. The non-obvious layout pypykatz
+// documents:
 //
-//	+0x00 Parent      pointer
-//	+0x08 LeftChild   pointer
-//	+0x10 RightChild  pointer
-//	+0x18 Balance     int8 (signed)
-//	+0x19 Reserved    [3]uint8
+//	Each AVL node has an RTL_BALANCED_LINKS at offset 0x00:
+//	  +0x00 Parent      pointer
+//	  +0x08 LeftChild   pointer
+//	  +0x10 RightChild  pointer
+//	  +0x18 Balance     int8 (signed) + 3 reserved
 //
-// The `RTL_AVL_TABLE` structure starts with a `BalancedRoot`
-// (a sentinel `RTL_BALANCED_LINKS`), then carries other fields
-// (NumberGenericTableElements, DepthOfTree, RestartKey, …). The
-// actual tree root is `BalancedRoot.RightChild` — i.e., the
-// pointer at table_va + 0x10.
+//	IMMEDIATELY AFTER the RTL_BALANCED_LINKS, at +0x20, the node
+//	carries the user payload. Microsoft's `RtlInsertElement-
+//	GenericTableAvl` allocates `sizeof(RTL_BALANCED_LINKS) + UserSize`
+//	per node; the first user-payload bytes start at +0x20. For
+//	Kerberos the user payload is `KIWI_KERBEROS_LOGON_SESSION *`
+//	(8 bytes), so the actual session struct lives at the address
+//	stored at node+0x20 — NOT at the node itself.
 //
-// Per-session credential structures (KIWI_KERBEROS_LOGON_SESSION,
-// KIWI_TS_CREDENTIAL post-Vista) overlay on top of the
-// RTL_BALANCED_LINKS — their LUID / UNICODE_STRING fields sit at
-// build-specific offsets past the AVL header.
+// The tree root is the `RTL_AVL_TABLE.BalancedRoot.RightChild`
+// (offset 0x10 of the table). The table itself is a sentinel
+// whose Parent is self-referential and Left/Right anchor the
+// real tree.
 //
 // References:
 //   pypykatz: pypykatz/lsadecryptor/package_commons.py walk_avl
-//   ReactOS:  ntoskrnl/rtl/avltree.c (RtlEnumerateGenericTableAvl)
+//   Microsoft: nt!RtlEnumerateGenericTableAvl in ntoskrnl
 //
-// The pre-Vista Kerberos walker (flat linked list) is gone from our
-// code — pypykatz keeps it as a Vista-buildnumber gate, but every
+// The pre-Vista Kerberos walker (flat linked list) is gone — every
 // modern target is Vista+ so we ship only the AVL path.
 
 const (
@@ -39,6 +40,11 @@ const (
 	// rtlBalancedLinksRightOffset is the byte offset to the
 	// RightChild pointer inside an RTL_BALANCED_LINKS struct.
 	rtlBalancedLinksRightOffset uint64 = 0x10
+	// avlNodeUserDataOffset is the offset of the user-payload bytes
+	// past the RTL_BALANCED_LINKS prefix. For Kerberos this is the
+	// `KIWI_KERBEROS_LOGON_SESSION *` pointer the walker dereferences
+	// to reach the actual session struct.
+	avlNodeUserDataOffset uint64 = 0x20
 )
 
 // walkAVL traverses the AVL tree rooted at root and invokes visit
