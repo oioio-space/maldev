@@ -71,7 +71,7 @@ The loader supports three x64 COFF relocation types:
 ### Load and Execute a BOF
 
 ```go
-import "github.com/oioio-space/maldev/pe/bof"
+import "github.com/oioio-space/maldev/runtime/bof"
 
 // Load COFF object file
 data, _ := os.ReadFile("whoami.o")
@@ -101,7 +101,7 @@ b.Execute(nil)
 ```go
 import (
     _ "embed"
-    "github.com/oioio-space/maldev/pe/bof"
+    "github.com/oioio-space/maldev/runtime/bof"
 )
 
 //go:embed bofs/enum_users.o
@@ -130,7 +130,7 @@ import (
     "github.com/oioio-space/maldev/evasion"
     "github.com/oioio-space/maldev/evasion/amsi"
     "github.com/oioio-space/maldev/evasion/etw"
-    "github.com/oioio-space/maldev/pe/bof"
+    "github.com/oioio-space/maldev/runtime/bof"
     wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
@@ -179,7 +179,7 @@ func main() {
 
 ## Compared to Other Implementations
 
-| Feature | maldev (pe/bof) | COFFLoader | RunOF | InlineExecute-Assembly |
+| Feature | maldev (runtime/bof) | COFFLoader | RunOF | InlineExecute-Assembly |
 |---------|-----------------|-----------|-------|------------------------|
 | Language | Go | C | Rust | C# |
 | Relocation types | 3 (ADDR64, ADDR32NB, REL32) | Full | Full | N/A |

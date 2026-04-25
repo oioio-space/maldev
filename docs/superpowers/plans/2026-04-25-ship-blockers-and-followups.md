@@ -14,7 +14,7 @@
 
 | Chantier | State | Tag/SHA | Notes |
 |---|---|---|---|
-| **F** — pe/clr env | ✅ Partial (pt 1/2) | `092ce14` | TOOLS v2 CLSID baseline + HRESULT diag in clrhost. Pt 2/2 (full ISO sources/sxs) still requires a Win10 ISO. |
+| **F** — runtime/clr env | ✅ Partial (pt 1/2) | `092ce14` | TOOLS v2 CLSID baseline + HRESULT diag in clrhost. Pt 2/2 (full ISO sources/sxs) still requires a Win10 ISO. |
 | **A** — BYOVD foundation | ✅ A.1 (scaffold) | `66d80d5` | `kernel/driver` + `kernel/driver/rtcore64` shipped; driver binary embedding behind `byovd_rtcore64` build tag (not in default repo). A.2-A.5 (real e2e, embedded driver, IOCTL stress) deferred. |
 | **B** — kcallback Remove | ✅ Shipped | `1c93d87` (tag `v0.17.1`) | Remove/Restore/RemoveToken + 12 mock tests; VM e2e waits on `byovd_rtcore64` build path. |
 | **C** — lsassdump PPL | ✅ Shipped | `0d31c50` (tag `v0.15.1`) | Unprotect/Reprotect/PPLToken/PPLOffsetTable + 8 mock tests; VM e2e on RunAsPPL=1 lsass waits on `byovd_rtcore64`. |
@@ -36,7 +36,7 @@ We tackle in three waves, ordered by dependency and unblocking value:
 |---|---|---|---|
 | A | **BYOVD foundation** (`kernel/driver` new package) | Foundation | Unblocks B (kcallback Remove) and C (lsassdump PPL-bypass). Heaviest research load, biggest payoff. |
 | D | **`callstack` v0.16.1** (asm pivot) | Self-contained | Needs no other package. Closes the explicit "v0.16.1 deferred" debt without coordination cost. |
-| F | **`pe/clr` environmental fix** | Environmental | One-off VM-snapshot rebuild; .NET 3.5 offline installer. Unblocks 4 tests. |
+| F | **`runtime/clr` environmental fix** | Environmental | One-off VM-snapshot rebuild; .NET 3.5 offline installer. Unblocks 4 tests. |
 
 **Wave 2 — Consumes Wave 1 (sequential after A)**
 
@@ -217,19 +217,19 @@ Ship the active spoof pivot deferred from v0.16.0:
 
 ---
 
-## Chantier F — `pe/clr` environmental fix
+## Chantier F — `runtime/clr` environmental fix
 
 **Environmental — no code change anticipated.**
 
 ### Scope
 
-`docs/coverage-workflow.md:178-227` documents that 4 `pe/clr` tests SKIP on Win10 TOOLS snapshot because ICorRuntimeHost CLSID isn't registered. Root cause: .NET 3.5 enabled via DISM but offline installer never ran.
+`docs/coverage-workflow.md:178-227` documents that 4 `runtime/clr` tests SKIP on Win10 TOOLS snapshot because ICorRuntimeHost CLSID isn't registered. Root cause: .NET 3.5 enabled via DISM but offline installer never ran.
 
 ### Plan
 
 - **F.1** Download .NET 3.5 offline installer (`dotnetfx35.exe` from Microsoft), drop it into a new TOOLS-builder script.
 - **F.2** Reprovision the TOOLS snapshot via `scripts/vm-provision.sh` updates: install offline .NET 3.5 first, then DISM, then snapshot.
-- **F.3** Verify all 4 `pe/clr` tests pass on the new TOOLS snapshot.
+- **F.3** Verify all 4 `runtime/clr` tests pass on the new TOOLS snapshot.
 - **F.4** Update `docs/coverage-workflow.md` "Known blockers" section to mark resolved; bump TOOLS snapshot version note.
 
 **Estimate:** ~1 hour wall-clock once the .NET 3.5 binary is in hand. Zero LOC.

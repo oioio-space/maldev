@@ -21,7 +21,7 @@ graph TD
             SANITIZE --> RENAME
         end
 
-        subgraph "pe/bof"
+        subgraph "runtime/bof"
             LOAD["Load()"]
             EXEC["Execute()"]
             LOAD --> EXEC
@@ -57,13 +57,13 @@ graph TD
 | Document | Description |
 |----------|-------------|
 | [PE Sanitization](strip-sanitize.md) | Remove Go metadata: timestamps, pclntab, section names |
-| [BOF Loader](bof-loader.md) | Load and execute Cobalt Strike BOFs (COFF objects) |
 | [PE Morphing](morph.md) | Randomize UPX section names to evade signatures |
 | [PE-to-Shellcode](pe-to-shellcode.md) | Convert EXE/DLL/.NET/scripts to injectable shellcode via Donut |
 | [Certificate Theft](certificate-theft.md) | Read, copy, strip, and write Authenticode certificates |
-| [CLR Hosting](clr.md) | In-process .NET assembly execution via ICorRuntimeHost — T1620 |
 | [Resource Masquerade](masquerade.md) | Compile-time manifest/icon/VERSIONINFO embedding via blank import (`pe/masquerade/preset/`) **or** programmatic `.syso` generation (`pe/masquerade`) — T1036.005 |
 | [Import Table Analysis](imports.md) | Enumerate DLL dependencies and imported function names from PE bytes — T1106 |
+| [BOF Loader](../runtime/bof-loader.md) | Moved to `runtime/bof` in v0.21.0 — load and execute Cobalt Strike BOFs (COFF objects) |
+| [CLR Hosting](../runtime/clr.md) | Moved to `runtime/clr` in v0.21.0 — in-process .NET assembly execution via ICorRuntimeHost — T1620 |
 
 ## MITRE ATT&CK
 

@@ -15,7 +15,7 @@ The `win/syscall` package provides a `Caller` that routes NT function calls thro
   builders (`NewUnicodeString`), status-code mapping (`NTSTATUS.Error`).
 - **Used by** — `evasion/unhook`, `evasion/phant0m`, `inject/phantomdll`,
   `inject/modulestomp`, `evasion/fakecmd`, `evasion/hideprocess`,
-  `evasion/stealthopen`, `pe/clr`.
+  `evasion/stealthopen`, `runtime/clr`.
 
 `win/ntapi` does **not** execute syscalls — it supplies the data
 structures `win/syscall`'s `Caller` operates on. Typical usage:

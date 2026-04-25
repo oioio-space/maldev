@@ -315,7 +315,7 @@ VERSIONINFO claim Microsoft authorship, but:
   certificate to defeat signature-based detection.
 - **`pe/strip`** — remove Go pclntab and timestamps that betray
   Go-compiled origin.
-- **`pe/clr`** — CLR-host detection blends with `masquerade/svchost`
+- **`runtime/clr`** — CLR-host detection blends with `masquerade/svchost`
   (svchost legitimately hosts managed services).
 
 ## Programmatic API — `pe/masquerade`

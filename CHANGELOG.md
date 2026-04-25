@@ -7,6 +7,47 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Reorganization — Pass 2 (v0.21.0): `runtime/` carve-out + `inject/` file split
+
+Top-level package restructure separating **in-process code loaders**
+(execute managed/COFF code) from **PE binary manipulation** (parse /
+transform / convert without executing). Plus an internal
+`inject/injector_windows.go` file split by audience (self vs remote
+process), no API change. See
+`docs/superpowers/plans/2026-04-25-package-reorganization.md` for the
+full audit.
+
+**Moved into new `runtime/`:**
+
+- `pe/clr` → `runtime/clr` (in-process .NET CLR hosting via ICLRMetaHost / ICorRuntimeHost — T1620)
+- `pe/bof` → `runtime/bof` (Beacon Object File / COFF loader for in-memory x64 object-file execution)
+
+**`inject/` internal file split (no API change):**
+
+- `inject/injector_windows.go` (736 lines) split into 4 files:
+  - `inject/injector_windows.go` (63 lines) — package types + `Inject` dispatch only
+  - `inject/injector_self_windows.go` — Methods 2/7/8/9 (self-process: CreateThread, Fiber, Etwp, deprecated DirectSyscall stub)
+  - `inject/injector_remote_windows.go` — Methods 1/3/4/5/6/10 (remote-process: CreateRemoteThread, QueueUserAPC, EarlyBird, ThreadHijack, RtlCreateUserThread, NtQueueApcThreadEx)
+  - `inject/memory_helpers_windows.go` — shared `findAllThreads`, `allocateAndWriteMemoryRemoteWithCaller`, `allocateAndWriteMemoryLocalWithCaller`
+
+Per-method files for the larger methods (`callback_windows.go`,
+`kcallback_windows.go`, `phantomdll_windows.go`,
+`sectionmap_windows.go`, `spoofargs_windows.go`,
+`threadpool_windows.go`, `modulestomp_windows.go`,
+`remoteexec_windows.go`) were already separated and stay put.
+
+**Breaking change for external consumers:** every import path that
+referenced `pe/clr` or `pe/bof` must be rewritten to `runtime/clr` /
+`runtime/bof`. The `inject/` API is unchanged — `Injector` interface,
+`Pipeline`, all `Method*` constants stay.
+
+**Docs updated:** README capability table (split "PE Operations" +
+new "In-process Runtimes" rows), `docs/architecture.md` Layer-2
+subgraph, `docs/pe.md` trimmed (CLR + BOF sections moved to new
+`docs/runtime.md`), `docs/techniques/pe/{clr.md,bof-loader.md}` moved
+to `docs/techniques/runtime/`, `docs/mitre.md` paths updated, technique
+landing page links updated.
+
 ### Reorganization — Pass 1 (v0.20.0): `recon/` carve-out + `system/` retirement
 
 Top-level package restructure separating **passive recon** (read-only
@@ -85,7 +126,7 @@ Layer-2 subgraph, `docs/system.md` renamed to `docs/recon.md`,
 
 ### Changed
 
-- `pe/clr`: `corBindToRuntimeEx` now wraps `REGDB_E_CLASSNOTREG`
+- `runtime/clr`: `corBindToRuntimeEx` now wraps `REGDB_E_CLASSNOTREG`
   (HRESULT `0x80040154`) with `%w` + the raw HRESULT, so SKIP
   messages on the win10 TOOLS snapshot now read
   `"CorBindToRuntimeEx(v2.0.50727): HRESULT 0x80040154 (REGDB_E_CLASSNOTREG): clr: ICorRuntimeHost unavailable …"`
@@ -94,7 +135,7 @@ Layer-2 subgraph, `docs/system.md` renamed to `docs/recon.md`,
 - `scripts/vm-provision.sh`: TOOLS v2 — registers the
   `{CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}` (CorRuntimeHost) CLSID
   every provisioning pass. Confirmed 2026-04-25 that this alone is
-  insufficient to unblock `pe/clr` tests — mscoree's binding chain
+  insufficient to unblock `runtime/clr` tests — mscoree's binding chain
   needs more than the CLSID (interface, typelib, Fusion entries),
   which only the full .NET 3.5 Redistributable / Win10-ISO
   `sources/sxs` payload runs. The CLSID baseline stays so future
@@ -531,12 +572,12 @@ coverage workflow.
 - 16 gap-filling tests covering non-Windows stubs (c2/transport/namedpipe,
   evasion/{fakecmd,hideprocess,preset,stealthopen,hook,hook/probe,
   hook/remote,hook/bridge/controller}, cleanup/ads, process/session,
-  pe/clr, cet) plus Windows-only factory tests (evasion/unhook,
+  runtime/clr, cet) plus Windows-only factory tests (evasion/unhook,
   recon/hwbp) and `internal/compat/{cmp,slices}` polyfill smoke tests.
   (914aab4)
 - `testutil/kali_test.go`: env-var resolvers (`kaliSSHHost/Port/Key/User`)
   with both override and fallback paths. (914aab4)
-- `pe/clr` subprocess coverage: `testutil/clrhost` now builds with
+- `runtime/clr` subprocess coverage: `testutil/clrhost` now builds with
   `go build -cover -covermode=atomic`, `GOCOVERDIR` points at a stable
   temp dir, `go tool covdata textfmt` converts to `clrhost-cover.out`
   which `cmd/vmtest` fetches and `coverage-merge` unions with the main
@@ -639,12 +680,12 @@ report at `ignore/coverage/report-full.md`.
 - 16 gap-filling tests covering non-Windows stubs (c2/transport/namedpipe,
   evasion/{fakecmd,hideprocess,preset,stealthopen,hook,hook/probe,
   hook/remote,hook/bridge/controller}, cleanup/ads, process/session,
-  pe/clr, cet) plus Windows-only factory tests (evasion/unhook,
+  runtime/clr, cet) plus Windows-only factory tests (evasion/unhook,
   recon/hwbp) and `internal/compat/{cmp,slices}` polyfill smoke tests.
   (914aab4)
 - `testutil/kali_test.go`: env-var resolvers (`kaliSSHHost/Port/Key/User`)
   with both override and fallback paths. (914aab4)
-- `pe/clr` subprocess coverage: `testutil/clrhost` now builds with
+- `runtime/clr` subprocess coverage: `testutil/clrhost` now builds with
   `go build -cover -covermode=atomic`, `GOCOVERDIR` points at a stable
   temp dir, `go tool covdata textfmt` converts to `clrhost-cover.out`
   which `cmd/vmtest` fetches and `coverage-merge` unions with the main

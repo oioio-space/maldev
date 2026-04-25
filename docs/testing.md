@@ -360,7 +360,7 @@ Two bugs fixed during the VM run: `ole.NewVariant(VT_NULL)` → `nil`
 (oleutil marshaller panic), and `StartBoundary` now always set (Task
 Scheduler rejects DAILY triggers without it).
 
-### pe/clr — in-process .NET hosting
+### runtime/clr — in-process .NET hosting
 
 | Test                                       | Result        | Gate                              |
 |--------------------------------------------|---------------|-----------------------------------|

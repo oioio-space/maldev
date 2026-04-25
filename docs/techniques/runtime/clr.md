@@ -3,7 +3,7 @@
 [<- Back to PE Operations](README.md)
 
 **MITRE ATT&CK:** [T1620 - Reflective Code Loading](https://attack.mitre.org/techniques/T1620/)
-**Package:** `pe/clr`
+**Package:** `runtime/clr`
 **Platform:** Windows only
 **Detection:** Medium
 
@@ -11,7 +11,7 @@
 
 ## Primer
 
-Lots of offensive tooling ships as .NET (Rubeus, SharpHound, Seatbelt). `pe/clr` loads the .NET runtime inside your Go process and executes that tooling from memory — no `powershell.exe`, no `InstallUtil.exe`, no child process for the defender to scope.
+Lots of offensive tooling ships as .NET (Rubeus, SharpHound, Seatbelt). `runtime/clr` loads the .NET runtime inside your Go process and executes that tooling from memory — no `powershell.exe`, no `InstallUtil.exe`, no child process for the defender to scope.
 
 ---
 
@@ -77,7 +77,7 @@ var ErrLegacyRuntimeUnavailable error
 
 ## Compared to `pe/srdi`
 
-|            | `pe/clr`                            | `pe/srdi`                  |
+|            | `runtime/clr`                            | `pe/srdi`                  |
 |------------|-------------------------------------|----------------------------|
 | Target     | Current process                     | Any remote process         |
 | .NET       | Native (IL execution)               | Donut-wrapped stub         |
@@ -119,7 +119,7 @@ useful for target profiling.
 ## Usage
 
 ```go
-import "github.com/oioio-space/maldev/pe/clr"
+import "github.com/oioio-space/maldev/runtime/clr"
 
 // One-time: write <exe>.config so legacy v2 activation policy is honoured.
 _ = clr.InstallRuntimeActivationPolicy()
@@ -154,7 +154,7 @@ import (
 	"os"
 
 	"github.com/oioio-space/maldev/evasion/amsi"
-	"github.com/oioio-space/maldev/pe/clr"
+	"github.com/oioio-space/maldev/runtime/clr"
 )
 
 func main() {
@@ -200,7 +200,7 @@ import (
 
     "github.com/oioio-space/maldev/crypto"
     "github.com/oioio-space/maldev/evasion/amsi"
-    "github.com/oioio-space/maldev/pe/clr"
+    "github.com/oioio-space/maldev/runtime/clr"
 )
 
 func main() {
@@ -254,7 +254,7 @@ code to connect it to).
 
 **What is written.** `InstallRuntimeActivationPolicy()` creates
 `<os.Executable()>.config` next to the running binary. This is the only
-mandatory on-disk writeback for `pe/clr`.
+mandatory on-disk writeback for `runtime/clr`.
 
 **Forensic visibility.**
 - EDR minifilter / sysmon EID 11 (file creation).
@@ -274,7 +274,7 @@ mandatory on-disk writeback for `pe/clr`.
   paths) and avoid writing anything at all.
 
 **Mitigations NOT provided (caller's responsibility).**
-- No ADS stashing of the config. `pe/clr` writes a visible file.
+- No ADS stashing of the config. `runtime/clr` writes a visible file.
 - No timestomp — pair with `cleanup/timestomp` if you want the config
   modification time to blend in.
 - If the process crashes between Install and Remove, the file stays.

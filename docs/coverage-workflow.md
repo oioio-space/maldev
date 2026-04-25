@@ -70,7 +70,7 @@ MALDEV_VM_WINDOWS_SSH_HOST=192.168.122.122 \
 MALDEV_VM_WINDOWS_SNAPSHOT=TOOLS \
 MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1 \
   go run ./cmd/vmtest -report-dir=ignore/coverage windows \
-    "./pe/clr/..." "-count=1 -v -timeout=5m"
+    "./runtime/clr/..." "-count=1 -v -timeout=5m"
 
 # Merge arbitrary profiles by hand.
 go run scripts/coverage-merge.go \
@@ -140,10 +140,10 @@ Progression over the course of the work:
 | + compat polyfill tests (`cmp`, `slices`) | 51.4% | +0.1 |
 | + clrhost subprocess coverage merge | **51.9–52.0%** | +0.6 |
 
-¹ The `pe/clr` CLR tests still SKIP on this VM — the TOOLS provisioning
+¹ The `runtime/clr` CLR tests still SKIP on this VM — the TOOLS provisioning
 enabled .NET 3.5 but the legacy v2 COM activation chain remains incomplete
 (see [CLR v2 activation blocker](#clr-v2-activation-blocker) below). The
-merge coverage for `pe/clr` is from the failure paths in `Load()`, which
+merge coverage for `runtime/clr` is from the failure paths in `Load()`, which
 the `clrhost-cover.out` profile captures.
 
 `*` Historical: `TestProcMemSelfInject` flapped 2 out of 3 runs (transient
@@ -177,7 +177,7 @@ SKIPs aren't a defect as long as each one is legitimate. Classification:
 
 ## <a id="clr-v2-activation-blocker"></a>CLR v2 legacy activation blocker
 
-`pe/clr` tests (`TestLoadAndClose`, `TestExecuteAssemblyEmpty`,
+`runtime/clr` tests (`TestLoadAndClose`, `TestExecuteAssemblyEmpty`,
 `TestExecuteDLLValidation`, `TestExecuteDLLReal`) skip with:
 
 ```text
@@ -210,7 +210,7 @@ Attempts that did NOT unblock it (all tried during the session):
 **What was added in TOOLS v2 (2026-04-25):**
 
 - `scripts/vm-provision.sh` now imports the CLSID `{CB2F6722-…}` entry every provisioning pass, so future debug rounds start from the same baseline rather than rediscovering the missing key. It also pushes + runs `dism /online /Add-Package` against the Win10 ISO's `sources/sxs/microsoft-windows-netfx3-ondemand-package*.cab` when staged at `MALDEV_NETFX3_CAB`. Confirmed 2026-04-25 that this still doesn't unblock `CorBindToRuntimeEx` after a reboot, but it gets the snapshot one step closer to a working CLR2 activation chain.
-- `pe/clr/clr_windows.go::corBindToRuntimeEx` wraps the `REGDB_E_CLASSNOTREG` path with `%w` + the raw HRESULT, so SKIP messages now read `CorBindToRuntimeEx(v2.0.50727): HRESULT 0x80040154 (REGDB_E_CLASSNOTREG): clr: ICorRuntimeHost unavailable …` — the next investigator sees the actual code without rebuilding.
+- `runtime/clr/clr_windows.go::corBindToRuntimeEx` wraps the `REGDB_E_CLASSNOTREG` path with `%w` + the raw HRESULT, so SKIP messages now read `CorBindToRuntimeEx(v2.0.50727): HRESULT 0x80040154 (REGDB_E_CLASSNOTREG): clr: ICorRuntimeHost unavailable …` — the next investigator sees the actual code without rebuilding.
 
 **What was tried + ruled out 2026-04-25 (after pt 1/2):**
 
@@ -233,7 +233,7 @@ Attempts that did NOT unblock it (all tried during the session):
 
 The clrhost **coverage infrastructure** itself is correct — `go build -cover`,
 `GOCOVERDIR`, `go tool covdata textfmt`, `vmtest.Fetch`, and `coverage-merge.go`
-all work. When the CLR environment cooperates, 7+ `pe/clr` functions light
+all work. When the CLR environment cooperates, 7+ `runtime/clr` functions light
 up in the merged profile (`Load` 56.7%, `enumerate` 100%, `orderCandidates`
 90%, `metaHostRuntime` 77.8%, `runtimeInfoBindLegacyV2` 100%, `runtimeInfoCorHost`
 62.5%, `createMetaHost` 80%). **Don't rewrite the mechanism — just fix the VM.**
@@ -305,11 +305,11 @@ evasion/hook/hook_lifecycle_windows_test.go     # TestReinstallAfterRemove, Test
 c2/transport/namedpipe/namedpipe_stub_test.go
 cleanup/ads/ads_stub_test.go
 process/session/sessions_stub_test.go
-pe/clr/clr_stub_test.go
+runtime/clr/clr_stub_test.go
 internal/compat/cmp/cmp_modern_test.go
 internal/compat/slices/slices_modern_test.go
 
-pe/clr/clr_windows_test.go                 # +TestExecuteDLLReal
+runtime/clr/clr_windows_test.go                 # +TestExecuteDLLReal
 
 recon/timing/timing_test.go              # TestBusyWaitPrimality upper bound 10s → 60s
 inject/linux_test.go                       # TestProcMemSelfInject retry 3× + PROCMEM_OK marker
@@ -341,7 +341,7 @@ inject/linux_test.go                       # TestProcMemSelfInject retry 3× + P
   SSH returns "No route to host". Workaround: `virsh destroy <vm> &&
   virsh snapshot-revert <vm> --snapshotname TOOLS --force`, then relaunch.
   If chronic, recreate `TOOLS` from a fresh `INIT`.
-- **`pe/clr` tests SKIP with `ICorRuntimeHost unavailable`.** See the
+- **`runtime/clr` tests SKIP with `ICorRuntimeHost unavailable`.** See the
   [CLR v2 activation blocker](#clr-v2-activation-blocker) section above.
   Not a code bug in maldev — the `.NET 3.5` install on this VM is
   incomplete at the COM-registration layer.

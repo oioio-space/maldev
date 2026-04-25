@@ -21,7 +21,7 @@
 | T1055.012 | Process Hollowing | `inject` (SpawnWithSpoofedArgs) | D3-PSMD (Process Spawn Monitoring) |
 | T1056.001 | Input Capture: Keylogging | `collection/keylog` | D3-KBIM (Keyboard Input Monitoring) |
 | T1057 | Process Discovery | `process/enum` | D3-PLA (Process Listing Analysis) |
-| T1059 | Command and Scripting Interpreter | `c2/shell`, `c2/meterpreter`, `pe/bof` | D3-EFA (Executable File Analysis) |
+| T1059 | Command and Scripting Interpreter | `c2/shell`, `c2/meterpreter`, `runtime/bof` | D3-EFA (Executable File Analysis) |
 | T1070 | Indicator Removal on Host | `cleanup/memory` | D3-SMRA |
 | T1070.004 | File Deletion | `cleanup/selfdelete`, `cleanup/wipe` | D3-FRA (File Removal Analysis) |
 | T1070.006 | Timestomp | `cleanup/timestomp` | D3-FHA (File Hash Analysis) |
@@ -53,7 +53,7 @@
 | T1564 | Hide Artifacts | `cleanup/service` | D3-FRA |
 | T1564.001 | Hide Artifacts: Hidden Process | `evasion/hideprocess` | D3-PLA (Process Listing Analysis) |
 | T1564.004 | Hide Artifacts: NTFS File Attributes | `cleanup/ads` | D3-FRA (File Removal Analysis) |
-| T1620 | Reflective Code Loading | `pe/clr` | D3-AIPA (Application Integrity Analysis) |
+| T1620 | Reflective Code Loading | `runtime/clr` | D3-AIPA (Application Integrity Analysis) |
 | T1571 | Non-Standard Port | `c2/multicat` (operator-side multi-session listener) | D3-NTA (Network Traffic Analysis) |
 | T1573.002 | Asymmetric Cryptography | `c2/transport` (TLS, uTLS) | D3-DNSTA (DNS Traffic Analysis) |
 | T1622 | Debugger Evasion | `recon/antidebug`, `recon/hwbp` | D3-DICA (Debug Instruction Analysis) |

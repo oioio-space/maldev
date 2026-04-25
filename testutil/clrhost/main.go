@@ -18,7 +18,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/oioio-space/maldev/pe/clr"
+	"github.com/oioio-space/maldev/runtime/clr"
 )
 
 func main() {
