@@ -1,4 +1,4 @@
-package lsasparse
+package sekurlsa
 
 import (
 	"bytes"

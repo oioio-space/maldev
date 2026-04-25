@@ -1,4 +1,4 @@
-package lsasparse
+package sekurlsa
 
 // Built-in Templates spanning every NT6+ x64 Windows build for which
 // MSV / Wdigest / DPAPI signatures and offsets are publicly

@@ -191,7 +191,7 @@ Click any package name to jump to its area-doc or technique page.
 | [`runtime/clr`](runtime.md) | In-process .NET CLR host |
 | [`runtime/bof`](runtime.md) | Beacon Object File loader |
 | [`credentials/lsassdump`](techniques/collection/lsass-dump.md) | LSASS minidump producer + PPL bypass |
-| [`credentials/lsasparse`](techniques/credentials/lsasparse.md) | MINIDUMP → MSV1_0 NT-hash extractor (cross-platform) |
+| [`credentials/sekurlsa`](techniques/credentials/sekurlsa.md) | MINIDUMP → MSV1_0 NT-hash extractor (cross-platform) |
 | [`privesc/uac`](privilege.md) | 4 UAC bypass primitives |
 | [`privesc/cve202430088`](privilege.md) | Kernel LPE PoC |
 

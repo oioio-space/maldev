@@ -1,4 +1,4 @@
-// Package lsasparse extracts credential material from a Windows LSASS
+// Package sekurlsa extracts credential material from a Windows LSASS
 // minidump — the consumer counterpart to credentials/lsassdump.
 //
 // Technique: parse a MINIDUMP blob, locate lsasrv.dll / msv1_0.dll in
@@ -62,4 +62,4 @@
 //
 // Layering: Layer 2 alongside credentials/lsassdump. Pure Go; no
 // dependency on win/api or kernel/driver.
-package lsasparse
+package sekurlsa

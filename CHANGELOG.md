@@ -7,7 +7,7 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
-### Added — `credentials/lsasparse` v0.29.0 — x86 dump detection + rejection
+### Added — `credentials/sekurlsa` v0.29.0 — x86 dump detection + rejection
 
 WoW64 / legacy x86 lsass dumps are now detected at Parse() entry and
 rejected with a new sentinel `ErrUnsupportedArchitecture`. The
@@ -35,7 +35,7 @@ What ships:
 105/105 tests green (was 103; +2 from arch rejection).
 
 This closes the v0.2x.x credential-extraction roadmap. After v0.29.0
-the lsasparse package supports:
+the sekurlsa package supports:
 
 | Provider | Status |
 |---|---|
@@ -49,7 +49,7 @@ the lsasparse package supports:
 | LiveSSP (legacy MSA) | framework; per-build layouts opt-in |
 | x86 / WoW64 | detected + rejected with sentinel |
 
-### Added — `credentials/lsasparse` v0.28.0 — CloudAP + LiveSSP providers (framework)
+### Added — `credentials/sekurlsa` v0.28.0 — CloudAP + LiveSSP providers (framework)
 
 Seventh and eighth credential providers — covering modern (Azure AD)
 and legacy (Microsoft Account) cloud-auth flows.
@@ -90,7 +90,7 @@ awaits per-build verification against real binaries.
 
 103/103 tests green (was 88; +15 from CloudAP+LiveSSP).
 
-### Added — `credentials/lsasparse` v0.27.0 — CredMan / Vault provider (framework)
+### Added — `credentials/sekurlsa` v0.27.0 — CredMan / Vault provider (framework)
 
 Sixth credential provider — Windows Credential Manager (Vault).
 CredMan stores RDP saved sessions, IE/Edge form passwords,
@@ -133,7 +133,7 @@ offsets are validated against a real binary.
 
 88/88 tests green (was 81; +7 from CredMan).
 
-### Added — `credentials/lsasparse` v0.26.1 — Kerberos provider
+### Added — `credentials/sekurlsa` v0.26.1 — Kerberos provider
 
 Fifth credential provider — the most complex of the post-MSV
 providers. Kerberos sessions in `kerberos.dll` carry a plaintext
@@ -175,7 +175,7 @@ What ships:
   queued for VM dumps.
 - 81/81 tests green (was 72; +9 from Kerberos).
 
-### Added — `credentials/lsasparse` v0.26.0 — TSPkg provider
+### Added — `credentials/sekurlsa` v0.26.0 — TSPkg provider
 
 Fourth credential provider on top of the v0.23.x crypto + walker
 layers. Terminal Services Package (`tspkg.dll`) caches plaintext
@@ -206,7 +206,7 @@ What ships:
   first_entry_offset = 7).
 - 72/72 tests green (was 64; +8 from TSPkg).
 
-### Fixed/Added — `credentials/lsasparse` v0.25.2 — KvcForensic-validated templates
+### Fixed/Added — `credentials/sekurlsa` v0.25.2 — KvcForensic-validated templates
 
 Major rewrite of `default_templates.go` integrating the validated
 per-build offsets from [KvcForensic](https://github.com/wesmar/KvcForensic)
@@ -248,7 +248,7 @@ Test matrix: 23 build-coverage assertions (was 24 in v0.25.1) — added
 Win 11 25H2 + far-future + Win 7 RTM coverage; removed obsolete
 exclusions. 64/64 tests green.
 
-### Added — `credentials/lsasparse` v0.25.1 — Win7→Win11 24H2 / Server 2025 templates
+### Added — `credentials/sekurlsa` v0.25.1 — Win7→Win11 24H2 / Server 2025 templates
 
 - Built-in coverage now spans every NT6+ x64 Windows build pypykatz +
   mimikatz publicly document — Win 7 SP1 / Server 2008 R2 (build 7601)
@@ -283,7 +283,7 @@ exclusions. 64/64 tests green.
   whatever did succeed. So speculative ▲ entries don't break Parse
   for unrelated builds.
 
-### Added — `credentials/lsasparse` v0.25.0 — DPAPI master-key cache
+### Added — `credentials/sekurlsa` v0.25.0 — DPAPI master-key cache
 
 - New `DPAPIMasterKey` type implementing the `Credential` interface
   alongside `MSV1_0Credential` + `WdigestCredential`. Carries the
@@ -319,7 +319,7 @@ Vault credentials, WinRM saved sessions, RDP saved credentials,
 Outlook PSTs, and any other DPAPI-protected blob bound to that
 LUID.
 
-### Added — `credentials/lsasparse` v0.24.0 — Wdigest provider
+### Added — `credentials/sekurlsa` v0.24.0 — Wdigest provider
 
 - New `WdigestCredential` type implementing the `Credential` interface
   (alongside `MSV1_0Credential`). Carries the plaintext password
@@ -339,7 +339,7 @@ LUID.
   pattern → rel32 deref → list walk → AES-CBC decrypt → UTF-16LE
   decode → LUID-merge.
 
-### Added — `credentials/lsasparse` v0.23.2 — inline default Templates
+### Added — `credentials/sekurlsa` v0.23.2 — inline default Templates
 
 - Win10 19H1 → 22H2 (builds 18362–19045) and Win11 21H2 → 22H2
   pre-22622 (builds 22000–22621) Templates now register at package
@@ -357,7 +357,7 @@ LUID.
   validate() pass for every shipping template, NodeSize ≥ max-offset
   invariant, no-overlap between BuildMin/BuildMax windows.
 
-### Fixed — `credentials/lsasparse` v0.23.1
+### Fixed — `credentials/sekurlsa` v0.23.1
 
 - `extractMSV1_0` now scans the LogonSessionList head pattern in
   `lsasrv.dll` (correct host) instead of `msv1_0.dll`. The list head
@@ -380,7 +380,7 @@ GPL/CC-NC code. Operators paste the values into a `Template` literal
 at `init()` and call `RegisterTemplate(t)` — framework + values stay
 separately licensed.
 
-### Added — `credentials/lsasparse` v0.23.0: pure-Go LSASS minidump parser
+### Added — `credentials/sekurlsa` v0.23.0: pure-Go LSASS minidump parser
 
 Consumer counterpart to `credentials/lsassdump`. Parses a MINIDUMP
 blob (the format `MiniDumpWriteDump(MiniDumpWithFullMemory)` and our
@@ -424,7 +424,7 @@ DPAPI master keys, LiveSSP / TSPkg / CloudAP, x86 / WoW64 dumps,
 live-process attach.
 
 Docs: `docs/credentials.md` (new area-doc covering producer +
-consumer as a matched pair), `docs/techniques/credentials/lsasparse.md`
+consumer as a matched pair), `docs/techniques/credentials/sekurlsa.md`
 (technique page with primer + simple/advanced/composed examples),
 README capability-table extension, `docs/mitre.md` T1003.001 row
 extension. Plan + 5-phase roadmap captured at

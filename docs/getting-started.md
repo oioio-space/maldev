@@ -140,7 +140,7 @@ If you know the technique you want, jump straight to the matching package:
 | Run a .NET assembly in-process | `runtime/clr` | [Runtime](runtime.md) |
 | Run a Beacon Object File | `runtime/bof` | [Runtime](runtime.md) |
 | Dump LSASS | `credentials/lsassdump` | [LSASS Dump](techniques/collection/lsass-dump.md) |
-| Parse a MINIDUMP for NT hashes | `credentials/lsasparse` | [LSASS Parse](techniques/credentials/lsasparse.md) |
+| Parse a MINIDUMP for NT hashes | `credentials/sekurlsa` | [LSASS Parse](techniques/credentials/sekurlsa.md) |
 | Bypass UAC | `privesc/uac` | [Privilege](privilege.md) |
 | Spoof a process command-line | `process/tamper/fakecmd` | [FakeCmd](techniques/evasion/fakecmd.md) |
 | Suspend Event Log threads | `process/tamper/phant0m` | [Phant0m](techniques/evasion/phant0m.md) |

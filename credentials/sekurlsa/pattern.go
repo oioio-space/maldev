@@ -1,4 +1,4 @@
-package lsasparse
+package sekurlsa
 
 import (
 	"encoding/binary"
@@ -157,7 +157,7 @@ var (
 // Safe for concurrent use. Operators typically call once at init():
 //
 //	func init() {
-//	    _ = lsasparse.RegisterTemplate(&lsasparse.Template{ BuildMin: 26100, BuildMax: 26100, … })
+//	    _ = sekurlsa.RegisterTemplate(&sekurlsa.Template{ BuildMin: 26100, BuildMax: 26100, … })
 //	}
 func RegisterTemplate(t *Template) error {
 	if t == nil {

@@ -1,4 +1,4 @@
-package lsasparse
+package sekurlsa
 
 import (
 	"errors"
@@ -12,27 +12,27 @@ import (
 var (
 	// ErrNotMinidump fires when the input does not start with the MDMP
 	// signature — typically passed wrong file or truncated read.
-	ErrNotMinidump = errors.New("lsasparse: input is not a MINIDUMP blob")
+	ErrNotMinidump = errors.New("sekurlsa: input is not a MINIDUMP blob")
 
 	// ErrUnsupportedBuild fires when the dump's BuildNumber doesn't
 	// match any registered lsaTemplate. Operator can supply their own
 	// via RegisterTemplate before retrying.
-	ErrUnsupportedBuild = errors.New("lsasparse: no signature template for this build")
+	ErrUnsupportedBuild = errors.New("sekurlsa: no signature template for this build")
 
 	// ErrLSASRVNotFound fires when lsasrv.dll isn't in the dump's
 	// MODULE_LIST stream. Possible if the operator dumped the wrong
 	// process or if the module-list capture failed.
-	ErrLSASRVNotFound = errors.New("lsasparse: lsasrv.dll module not in MODULE_LIST")
+	ErrLSASRVNotFound = errors.New("sekurlsa: lsasrv.dll module not in MODULE_LIST")
 
 	// ErrMSV1_0NotFound fires when msv1_0.dll isn't in MODULE_LIST.
 	// Same diagnosis as ErrLSASRVNotFound but for the MSV provider.
-	ErrMSV1_0NotFound = errors.New("lsasparse: msv1_0.dll module not in MODULE_LIST")
+	ErrMSV1_0NotFound = errors.New("sekurlsa: msv1_0.dll module not in MODULE_LIST")
 
 	// ErrKeyExtractFailed fires when pattern matching succeeded but
 	// the decoded BCRYPT_KEY_DATA_BLOB header is malformed (bad magic,
 	// impossible key length, …) — typically signals the wrong
 	// template is in play even though BuildNumber matched.
-	ErrKeyExtractFailed = errors.New("lsasparse: LSA crypto keys could not be extracted")
+	ErrKeyExtractFailed = errors.New("sekurlsa: LSA crypto keys could not be extracted")
 
 	// ErrUnsupportedArchitecture fires when the dump's
 	// SystemInfo.ProcessorArchitecture is anything other than x64.
@@ -41,7 +41,7 @@ var (
 	// pointers and 8-byte UNICODE_STRINGs. The Result is still
 	// returned with Architecture + Modules populated so the caller
 	// can report the unsupported architecture cleanly.
-	ErrUnsupportedArchitecture = errors.New("lsasparse: dump is not x64 (only x64 minidumps are supported)")
+	ErrUnsupportedArchitecture = errors.New("sekurlsa: dump is not x64 (only x64 minidumps are supported)")
 )
 
 // Architecture identifies the dump's processor family. v1 ships x64
