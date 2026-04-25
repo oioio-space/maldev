@@ -30,11 +30,12 @@ graph TD
 
     subgraph "Layer 2 — Techniques"
         inject["inject/<br/>15 injection methods"]
-        evasion["evasion/<br/>15 evasion techniques"]
-        cleanup["cleanup/<br/>Memory, files, timestamps"]
-        pe["pe/<br/>Parse, strip, morph, BOF, srdi, cert, clr, winres"]
-        process["process/<br/>Enum, session"]
-        system["system/<br/>ads, drive, folder, network, lnk, bsod, ui"]
+        evasion["evasion/<br/>active evasion (amsi, etw, unhook, sleepmask, callstack, kcallback, …)"]
+        recon["recon/<br/>read-only discovery (antidebug, antivm, sandbox, timing, hwbp, dllhijack, drive, folder, network)"]
+        cleanup["cleanup/<br/>memory, files, timestamps, ads, bsod"]
+        pe["pe/<br/>parse, strip, morph, BOF, srdi, cert, clr, winres"]
+        process["process/<br/>enum, session"]
+        ui["ui/<br/>MessageBox + sounds"]
         uacbypass["uacbypass/"]
     end
 

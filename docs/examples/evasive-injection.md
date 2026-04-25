@@ -28,7 +28,7 @@ import (
     "github.com/oioio-space/maldev/evasion"
     "github.com/oioio-space/maldev/evasion/amsi"
     "github.com/oioio-space/maldev/evasion/etw"
-    "github.com/oioio-space/maldev/evasion/hwbp"
+    "github.com/oioio-space/maldev/recon/hwbp"
     "github.com/oioio-space/maldev/evasion/unhook"
     "github.com/oioio-space/maldev/inject"
     wsyscall "github.com/oioio-space/maldev/win/syscall"

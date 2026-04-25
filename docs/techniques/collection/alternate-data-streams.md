@@ -4,7 +4,7 @@
 
 [<- Back to Collection Overview](README.md)
 
-**Package:** `system/ads`
+**Package:** `cleanup/ads`
 **Platform:** Windows (NTFS required)
 
 ---
@@ -57,7 +57,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/oioio-space/maldev/system/ads"
+    "github.com/oioio-space/maldev/cleanup/ads"
 )
 
 func main() {
@@ -101,7 +101,7 @@ import (
     "log"
     "os"
 
-    "github.com/oioio-space/maldev/system/ads"
+    "github.com/oioio-space/maldev/cleanup/ads"
     "github.com/oioio-space/maldev/inject"
     "github.com/oioio-space/maldev/encode"
 )

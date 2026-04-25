@@ -27,36 +27,36 @@
 | T1070.006 | Timestomp | `cleanup/timestomp` | D3-FHA (File Hash Analysis) |
 | T1071.001 | Web Protocols | `c2/transport/malleable`, `c2/transport/namedpipe` | D3-NTA (Network Traffic Analysis) |
 | T1082 | System Information Discovery | `win/domain`, `win/version` | D3-SYSIP (System Information Profiling) |
-| T1083 | File and Directory Discovery | `system/folder` | D3-FDA (File Discovery Analysis) |
+| T1083 | File and Directory Discovery | `recon/folder` | D3-FDA (File Discovery Analysis) |
 | T1106 | Native API | `win/api` (PEB walk, API hashing), `win/syscall`, `win/ntapi`, `pe/imports` (import table enumeration) | D3-SCA (System Call Analysis) |
 | T1113 | Screen Capture | `collection/screenshot` | D3-DA (Dynamic Analysis) |
 | T1115 | Clipboard Data | `collection/clipboard` | D3-DA (Dynamic Analysis) |
-| T1120 | Peripheral Device Discovery | `system/drive` | D3-PDD (Peripheral Device Discovery) |
+| T1120 | Peripheral Device Discovery | `recon/drive` | D3-PDD (Peripheral Device Discovery) |
 | T1134 | Access Token Manipulation | `win/token`, `win/privilege` | D3-TAAN (Token Auth Normalization) |
 | T1134.001 | Token Impersonation/Theft | `win/impersonate`, `win/token` | D3-TAAN |
 | T1134.002 | Create Process with Token | `process/session` | D3-TAAN |
 | T1136.001 | Create Account: Local Account | `win/user` | D3-UAP (User Account Profiling) |
-| T1204.002 | User Execution: Malicious File | `system/lnk` | D3-EFA (Executable File Analysis) |
-| T1497 | Virtualization/Sandbox Evasion | `evasion/sandbox` | D3-DA (Dynamic Analysis) |
-| T1497.001 | System Checks | `evasion/antivm` | D3-DA |
-| T1497.003 | Time Based Evasion | `evasion/timing` | D3-DA |
-| T1529 | System Shutdown/Reboot | `system/bsod` | D3-DA (Dynamic Analysis) |
+| T1204.002 | User Execution: Malicious File | `persistence/lnk` | D3-EFA (Executable File Analysis) |
+| T1497 | Virtualization/Sandbox Evasion | `recon/sandbox` | D3-DA (Dynamic Analysis) |
+| T1497.001 | System Checks | `recon/antivm` | D3-DA |
+| T1497.003 | Time Based Evasion | `recon/timing` | D3-DA |
+| T1529 | System Shutdown/Reboot | `cleanup/bsod` | D3-DA (Dynamic Analysis) |
 | T1014 | Rootkit | `kernel/driver/rtcore64` (BYOVD — RTCore64 / CVE-2019-16098) | D3-DLIC (Driver Load Integrity Checking) |
 | T1543.003 | Create or Modify System Process: Windows Service | `persistence/service`, `cleanup/service`, `kernel/driver/rtcore64` (signed-driver service install) | D3-SBV (Service Binary Verification) |
-| T1547.009 | Shortcut Modification | `system/lnk`, `persistence/startup` | D3-FDA (File Discovery Analysis) |
-| T1548.002 | Bypass UAC | `uacbypass`, `evasion/dllhijack` (AutoElevate scanner) | D3-UAP (User Account Profiling) |
+| T1547.009 | Shortcut Modification | `persistence/lnk`, `persistence/startup` | D3-FDA (File Discovery Analysis) |
+| T1548.002 | Bypass UAC | `uacbypass`, `recon/dllhijack` (AutoElevate scanner) | D3-UAP (User Account Profiling) |
 | T1553.002 | Subvert Trust Controls: Code Signing | `pe/cert` | D3-SEA (Static Executable Analysis) |
 | T1562.001 | Disable or Modify Tools | `evasion/amsi`, `evasion/etw`, `evasion/unhook`, `evasion/acg`, `evasion/blockdlls`, `evasion/kcallback` (kernel callback enumeration) | D3-AIPA (Application Integrity Analysis) |
 | T1562.002 | Disable Windows Event Logging | `evasion/phant0m` | D3-EAL (Execution Activity Logging) |
-| T1574.001 | Hijack Execution Flow: DLL Search Order Hijacking | `evasion/dllhijack` (discovery) | D3-PFV (Process File Verification) |
+| T1574.001 | Hijack Execution Flow: DLL Search Order Hijacking | `recon/dllhijack` (discovery) | D3-PFV (Process File Verification) |
 | T1574.012 | Hijack Execution Flow: Inline Hooking | `evasion/hook` | D3-AIPA (Application Integrity Analysis) |
 | T1564 | Hide Artifacts | `cleanup/service` | D3-FRA |
 | T1564.001 | Hide Artifacts: Hidden Process | `evasion/hideprocess` | D3-PLA (Process Listing Analysis) |
-| T1564.004 | Hide Artifacts: NTFS File Attributes | `system/ads` | D3-FRA (File Removal Analysis) |
+| T1564.004 | Hide Artifacts: NTFS File Attributes | `cleanup/ads` | D3-FRA (File Removal Analysis) |
 | T1620 | Reflective Code Loading | `pe/clr` | D3-AIPA (Application Integrity Analysis) |
 | T1571 | Non-Standard Port | `c2/multicat` (operator-side multi-session listener) | D3-NTA (Network Traffic Analysis) |
 | T1573.002 | Asymmetric Cryptography | `c2/transport` (TLS, uTLS) | D3-DNSTA (DNS Traffic Analysis) |
-| T1622 | Debugger Evasion | `evasion/antidebug`, `evasion/hwbp` | D3-DICA (Debug Instruction Analysis) |
+| T1622 | Debugger Evasion | `recon/antidebug`, `recon/hwbp` | D3-DICA (Debug Instruction Analysis) |
 
 ## D3FEND Defensive Techniques
 

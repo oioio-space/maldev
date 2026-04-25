@@ -50,19 +50,19 @@ flowchart TB
 | [ETW Patching](etw-patching.md) | `evasion/etw` | T1562.001 | Medium | No | Yes |
 | [ntdll Unhooking](ntdll-unhooking.md) | `evasion/unhook` | T1562.001 | High | No | Yes |
 | [Sleep Mask](sleep-mask.md) | `evasion/sleepmask` | T1027 | Low | Yes (auto-decrypt) | No |
-| [HW Breakpoints](hw-breakpoints.md) | `evasion/hwbp` | T1622 | Low | Yes (clear) | No |
+| [HW Breakpoints](hw-breakpoints.md) | `recon/hwbp` | T1622 | Low | Yes (clear) | No |
 | [ACG + BlockDLLs](acg-blockdlls.md) | `evasion/acg`, `evasion/blockdlls` | T1562.001 | Low | No (irreversible) | Partial |
-| [Anti-Analysis](anti-analysis.md) | `evasion/antidebug`, `evasion/antivm`, `evasion/sandbox` | T1497/T1622 | Low | N/A (detection only) | No |
+| [Anti-Analysis](anti-analysis.md) | `recon/antidebug`, `recon/antivm`, `recon/sandbox` | T1497/T1622 | Low | N/A (detection only) | No |
 | [PPID Spoofing](ppid-spoofing.md) | `c2/shell` | T1134.004 | Medium | N/A (child process) | No |
 | [FakeCmdLine](fakecmd.md) | `evasion/fakecmd` | T1036.005 | Low | Yes (Restore) | Yes |
 | [HideProcess](hideprocess.md) | `evasion/hideprocess` | T1564.001 | Medium | No (target patch) | Yes |
 | [StealthOpen](stealthopen.md) | `evasion/stealthopen` | T1036 | Low | N/A (file access) | No |
 | [Phant0m](phant0m.md) | `evasion/phant0m` | T1562.002 | High | No (thread kill) | Yes |
-| [Sandbox Detection](sandbox.md) | `evasion/sandbox` | T1497 | Low | N/A (detection only) | No |
-| [Timing Evasion](timing.md) | `evasion/timing` | T1497.003 | Low | N/A (detection only) | No |
+| [Sandbox Detection](sandbox.md) | `recon/sandbox` | T1497 | Low | N/A (detection only) | No |
+| [Timing Evasion](timing.md) | `recon/timing` | T1497.003 | Low | N/A (detection only) | No |
 | [Evasion Presets](preset.md) | `evasion/preset` | Multiple | Varies | Varies | Yes |
 | [Inline Hook](inline-hook.md) | `evasion/hook` `evasion/hook/bridge/` `evasion/hook/shellcode/` | T1574.012 | High | Yes (Remove) | Yes (`WithCaller`) |
-| [DLL Hijack Discovery](dll-hijack.md) | `evasion/dllhijack` | T1574.001 | Medium | N/A (discovery only) | No |
+| [DLL Hijack Discovery](dll-hijack.md) | `recon/dllhijack` | T1574.001 | Medium | N/A (discovery only) | No |
 | [Call-Stack Spoof (metadata)](callstack-spoof.md) | `evasion/callstack` | T1036 | Medium | N/A (primitives) | Future (pivot) |
 | [Kernel Callback Enumeration](kernel-callback-removal.md) | `evasion/kcallback` | T1562.001 | Low (read) / High (BYOVD load) | N/A (enum) | Future (Remove) |
 | [BYOVD — RTCore64](byovd-rtcore64.md) | `kernel/driver/rtcore64` | T1014, T1543.003 | High (driver load) / Medium (steady-state) | Yes (Uninstall) | N/A (foundation) |

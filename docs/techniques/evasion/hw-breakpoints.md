@@ -54,7 +54,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/oioio-space/maldev/evasion/hwbp"
+    "github.com/oioio-space/maldev/recon/hwbp"
 )
 
 func main() {
@@ -93,7 +93,7 @@ import (
     "log"
     "os"
 
-    "github.com/oioio-space/maldev/evasion/hwbp"
+    "github.com/oioio-space/maldev/recon/hwbp"
     "github.com/oioio-space/maldev/evasion"
     "github.com/oioio-space/maldev/evasion/preset"
     "github.com/oioio-space/maldev/inject"

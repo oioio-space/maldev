@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/oioio-space/maldev/evasion/timing"
+	"github.com/oioio-space/maldev/recon/timing"
 )
 
 // RemoteInlineStrategy is the L1 cross-process strategy: the caller

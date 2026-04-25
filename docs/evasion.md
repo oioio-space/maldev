@@ -15,12 +15,12 @@ The `evasion/` module provides composable defense evasion techniques for Windows
 | `evasion/blockdlls` | Block non-Microsoft DLLs | T1562.001 -- Impair Defenses | Low | Windows 10+ |
 | `evasion/phant0m` | Event Log thread termination | T1562.002 -- Disable Event Logging | High | Windows |
 | `evasion/herpaderping` | Process image tampering via kernel section cache | T1055 -- Process Injection | Medium | Windows 10+ |
-| `evasion/hwbp` | Hardware breakpoint detection and clearing | T1622 -- Debugger Evasion | Low | Windows |
+| `recon/hwbp` | Hardware breakpoint detection and clearing | T1622 -- Debugger Evasion | Low | Windows |
 | `evasion/sleepmask` | Encrypt memory regions during sleep | T1027 -- Obfuscated Files | Medium | Windows |
-| `evasion/antidebug` | Debugger detection | T1622 -- Debugger Evasion | Low | Cross-platform |
-| `evasion/antivm` | VM/hypervisor detection | T1497.001 -- System Checks | Low | Cross-platform |
-| `evasion/timing` | CPU-burning delays | T1497.003 -- Time Based Evasion | Low | Cross-platform |
-| `evasion/sandbox` | Multi-factor sandbox detection | T1497 -- Sandbox Evasion | Low | Cross-platform |
+| `recon/antidebug` | Debugger detection | T1622 -- Debugger Evasion | Low | Cross-platform |
+| `recon/antivm` | VM/hypervisor detection | T1497.001 -- System Checks | Low | Cross-platform |
+| `recon/timing` | CPU-burning delays | T1497.003 -- Time Based Evasion | Low | Cross-platform |
+| `recon/sandbox` | Multi-factor sandbox detection | T1497 -- Sandbox Evasion | Low | Cross-platform |
 | `evasion/fakecmd` | PEB CommandLine overwrite | T1036.005 -- Masquerading | Low | Windows |
 | `evasion/hideprocess` | Patch `NtQuerySystemInformation` in a target process | T1564.001 -- Hidden Process | Medium | Windows |
 | `evasion/stealthopen` | Open files by NTFS Object ID (bypass path-based EDR hooks) | T1036 -- Masquerading | Low | Windows |
@@ -709,7 +709,7 @@ If your code is being analyzed under a debugger, you may want to alter behavior 
 
 **Example:**
 ```go
-import "github.com/oioio-space/maldev/evasion/antidebug"
+import "github.com/oioio-space/maldev/recon/antidebug"
 
 if antidebug.IsDebuggerPresent() {
     os.Exit(0) // bail out
@@ -769,7 +769,7 @@ Detection dimensions are selected via a bitmask (`CheckType`), and the vendor li
 
 **Example:**
 ```go
-import "github.com/oioio-space/maldev/evasion/antivm"
+import "github.com/oioio-space/maldev/recon/antivm"
 
 vendors, err := antivm.DetectAll(antivm.DefaultConfig())
 if err != nil {
@@ -889,7 +889,7 @@ Sandboxes typically hook `Sleep`/`NtDelayExecution` and fast-forward time to spe
 
 **Example:**
 ```go
-import "github.com/oioio-space/maldev/evasion/timing"
+import "github.com/oioio-space/maldev/recon/timing"
 
 timing.BusyWait(10 * time.Second)
 // 10 seconds of real wall-clock time have now passed
@@ -949,7 +949,7 @@ The fake domain check sends an HTTP GET to a non-existent domain. In a real envi
 
 **Example:**
 ```go
-import "github.com/oioio-space/maldev/evasion/sandbox"
+import "github.com/oioio-space/maldev/recon/sandbox"
 
 checker := sandbox.New(sandbox.DefaultConfig())
 if sandboxed, reason, _ := checker.IsSandboxed(ctx); sandboxed {
@@ -1190,7 +1190,7 @@ func Technique() evasion.Technique
 **Example:**
 
 ```go
-import "github.com/oioio-space/maldev/evasion/hwbp"
+import "github.com/oioio-space/maldev/recon/hwbp"
 
 // Check for EDR hardware breakpoints
 bps, err := hwbp.DetectAll()

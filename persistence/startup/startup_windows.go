@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/oioio-space/maldev/system/lnk"
+	"github.com/oioio-space/maldev/persistence/lnk"
 )
 
 const (

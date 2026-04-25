@@ -290,7 +290,7 @@ testutil/clrhost/main.go                   # +exec-dll-real op, +--dll-path flag
 testutil/clrhost/maldev_clr_test.dll       # 3 KB .NET 2.0 assembly (Maldev.TestClass.Run)
 
 evasion/unhook/factories_test.go           # 5 factories + Name methods (Windows)
-evasion/hwbp/technique_test.go             # Technique() factory (Windows)
+recon/hwbp/technique_test.go             # Technique() factory (Windows)
 evasion/cet/cet_test.go                    # +Enforced/Disable stub tests
 evasion/hideprocess/hideprocess_stub_test.go
 evasion/stealthopen/stealthopen_stub_test.go
@@ -303,7 +303,7 @@ evasion/hook/bridge/controller_stub_test.go
 evasion/hook/bridge/controller_windows_test.go  # 8 deeper tests for CallOriginal, Args, Log, Ask
 evasion/hook/hook_lifecycle_windows_test.go     # TestReinstallAfterRemove, TestInstallOnPristineTargetAfterGroupRollback
 c2/transport/namedpipe/namedpipe_stub_test.go
-system/ads/ads_stub_test.go
+cleanup/ads/ads_stub_test.go
 process/session/sessions_stub_test.go
 pe/clr/clr_stub_test.go
 internal/compat/cmp/cmp_modern_test.go
@@ -311,7 +311,7 @@ internal/compat/slices/slices_modern_test.go
 
 pe/clr/clr_windows_test.go                 # +TestExecuteDLLReal
 
-evasion/timing/timing_test.go              # TestBusyWaitPrimality upper bound 10s → 60s
+recon/timing/timing_test.go              # TestBusyWaitPrimality upper bound 10s → 60s
 inject/linux_test.go                       # TestProcMemSelfInject retry 3× + PROCMEM_OK marker
 ```
 

@@ -242,7 +242,7 @@ Ship the active spoof pivot deferred from v0.16.0:
 
 ### Scope
 
-Original rejection (`evasion/dllhijack/validate_windows.go:174`): "triggering a DLL reload in a running process requires killing + relaunching it, which is out of scope (too destructive for a reconnaissance helper)."
+Original rejection (`recon/dllhijack/validate_windows.go:174`): "triggering a DLL reload in a running process requires killing + relaunching it, which is out of scope (too destructive for a reconnaissance helper)."
 
 **Re-eval angle:** instead of killing the live process, spawn a **fresh** copy of the same binary in a sandboxed environment (e.g. via `process/session`'s cross-session spawn), drop canary, validate the hijack, then terminate the spawn. The live process is never touched.
 
@@ -319,7 +319,7 @@ the test as soon as the new snapshot is in place.
 | `evasion/etw/etw_test.go:56` "NtTraceEvent not present" | Verify ntdll export is reachable on Win10 22H2; likely already there — test logic bug to investigate. | 30 min |
 | `evasion/amsi/caller_test.go:19,32,71` "amsi.dll / AmsiScanBuffer not available" | amsi.dll ships with Windows 10+; AmsiScanBuffer requires AMSI provider registration. Provisioning bump: ensure Windows Defender is enabled + AMSI registered. | 30 min |
 | `evasion/phant0m/phant0m_test.go:45` "No EventLog threads with service tags" | EventLog service must be running with full tags. Snapshot bump: verify `Get-Service eventlog` is `Running`. | 15 min |
-| `evasion/dllhijack/search_order_windows_test.go:44` "winhttp.dll is a KnownDLL" | Test-design fix: pick a different sentinel that is NOT a KnownDLL on Win10/11 (e.g. `samcli.dll`). | 15 min |
+| `recon/dllhijack/search_order_windows_test.go:44` "winhttp.dll is a KnownDLL" | Test-design fix: pick a different sentinel that is NOT a KnownDLL on Win10/11 (e.g. `samcli.dll`). | 15 min |
 | `signtool` (`TestBuildWithCertificate`) | Snapshot bump: install Windows SDK signtool.exe path. | 30 min |
 | `cleanup/service` skeleton tests | Snapshot bump: pre-create a sacrificial Windows service that tests can mutate. | 30 min |
 | `exploit/cve202430088/cve_test.go:58,104` "System not vulnerable" | Pin TOOLS to a known-vulnerable Win10 build (pre-2024-06 CU). Currently 22H2 19045.6093 — research which subbuild is still vulnerable. | 1h research + reprovision |

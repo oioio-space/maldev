@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/oioio-space/maldev/evasion/timing"
+	"github.com/oioio-space/maldev/recon/timing"
 )
 
 // InlineStrategy is the L1 strategy: the caller goroutine runs the

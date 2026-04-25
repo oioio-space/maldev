@@ -1,16 +1,23 @@
 [← Back to README](../README.md)
 
-# System Information
+# Recon, UI, ADS, LNK, BSOD — host-side primitives reference
 
-This page documents the seven system packages in maldev:
+> Renamed from `docs/system.md` in Pass 1 of the package
+> reorganization (2026-04-25). The packages this document covers now
+> live across four trees: `recon/` (read-only environment discovery),
+> `ui/` (interactive UX), `cleanup/` (anti-forensic + destructive),
+> `persistence/lnk` (LNK file creation). The per-package API reference
+> below remains factually current.
 
-- **`system/drive`** -- Drive enumeration, type detection, volume info, and monitoring (Windows)
-- **`system/folder`** -- Windows special folder paths via CSIDL constants (Windows)
-- **`system/network`** -- IP address retrieval and local address detection (cross-platform)
-- **`system/ui`** -- Message boxes and system sounds (Windows)
-- **`system/bsod`** -- Trigger Blue Screen of Death via NtRaiseHardError (Windows)
-- **`system/lnk`** -- Create Windows .lnk shortcut files via COM/OLE (Windows)
-- **`system/ads`** -- NTFS Alternate Data Streams CRUD + hidden/undeletable files (Windows, T1564.004)
+This page documents seven host-side primitives in maldev:
+
+- **`recon/drive`** -- Drive enumeration, type detection, volume info, and monitoring (Windows)
+- **`recon/folder`** -- Windows special folder paths via CSIDL constants (Windows)
+- **`recon/network`** -- IP address retrieval and local address detection (cross-platform)
+- **`ui`** -- Message boxes and system sounds (Windows)
+- **`cleanup/bsod`** -- Trigger Blue Screen of Death via NtRaiseHardError (Windows)
+- **`persistence/lnk`** -- Create Windows .lnk shortcut files via COM/OLE (Windows)
+- **`cleanup/ads`** -- NTFS Alternate Data Streams CRUD + hidden/undeletable files (Windows, T1564.004)
 
 For in-depth technique walkthroughs:
 - ADS: [docs/techniques/collection/alternate-data-streams.md](techniques/collection/alternate-data-streams.md)
@@ -18,7 +25,7 @@ For in-depth technique walkthroughs:
 
 ---
 
-## system/drive -- Drive Detection and Monitoring
+## recon/drive -- Drive Detection and Monitoring
 
 Package `drive` provides drive enumeration, type classification, volume metadata retrieval, and real-time monitoring for new drives. Useful for USB spreading, data exfiltration triggers, or drive-based persistence checks.
 
@@ -104,7 +111,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/oioio-space/maldev/system/drive"
+    "github.com/oioio-space/maldev/recon/drive"
 )
 
 func main() {
@@ -143,7 +150,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/oioio-space/maldev/system/drive"
+    "github.com/oioio-space/maldev/recon/drive"
 )
 
 func main() {
@@ -180,7 +187,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/oioio-space/maldev/system/drive"
+    "github.com/oioio-space/maldev/recon/drive"
 )
 
 func main() {
@@ -255,7 +262,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/oioio-space/maldev/system/drive"
+    "github.com/oioio-space/maldev/recon/drive"
 )
 
 func main() {
@@ -315,7 +322,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/oioio-space/maldev/system/drive"
+    "github.com/oioio-space/maldev/recon/drive"
 )
 
 func main() {
@@ -344,7 +351,7 @@ func main() {
 
 ---
 
-## system/folder -- Windows Special Folder Paths
+## recon/folder -- Windows Special Folder Paths
 
 Package `folder` provides access to Windows special folder paths using CSIDL (Constant Special Item ID List) identifiers. Wraps `SHGetSpecialFolderPathW`.
 
@@ -416,7 +423,7 @@ import (
     "fmt"
     "path/filepath"
 
-    "github.com/oioio-space/maldev/system/folder"
+    "github.com/oioio-space/maldev/recon/folder"
 )
 
 func main() {
@@ -437,7 +444,7 @@ func main() {
 
 ---
 
-## system/network -- IP Address Detection
+## recon/network -- IP Address Detection
 
 Package `network` provides cross-platform IP address retrieval and local address detection. Useful for determining the implant's network position, identifying local listeners, and C2 target selection.
 
@@ -474,7 +481,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/oioio-space/maldev/system/network"
+    "github.com/oioio-space/maldev/recon/network"
 )
 
 func main() {
@@ -523,7 +530,7 @@ import (
     "log"
     "net"
 
-    "github.com/oioio-space/maldev/system/network"
+    "github.com/oioio-space/maldev/recon/network"
 )
 
 func main() {
@@ -553,7 +560,7 @@ func main() {
 
 ---
 
-## system/ui -- Message Boxes and System Sounds
+## ui -- Message Boxes and System Sounds
 
 Package `ui` wraps `MessageBoxW` and `MessageBeep` for displaying Windows message boxes and playing system sounds. Useful for social engineering payloads that present fake dialogs.
 
@@ -681,7 +688,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/oioio-space/maldev/system/ui"
+    "github.com/oioio-space/maldev/ui"
 )
 
 func main() {
@@ -726,7 +733,7 @@ func Beep()
 ```go
 package main
 
-import "github.com/oioio-space/maldev/system/ui"
+import "github.com/oioio-space/maldev/ui"
 
 func main() {
     ui.Beep()
@@ -735,7 +742,7 @@ func main() {
 
 ---
 
-## system/bsod -- Blue Screen of Death
+## cleanup/bsod -- Blue Screen of Death
 
 Package `bsod` triggers an immediate Blue Screen of Death via `NtRaiseHardError`. This is a destructive, non-recoverable operation -- the system will crash immediately with no opportunity to save data.
 
@@ -773,7 +780,7 @@ func Trigger(caller *wsyscall.Caller) error
 **Example:**
 
 ```go
-import "github.com/oioio-space/maldev/system/bsod"
+import "github.com/oioio-space/maldev/cleanup/bsod"
 
 // Standard WinAPI path
 err := bsod.Trigger(nil)
@@ -784,7 +791,7 @@ if err != nil {
 
 ---
 
-## system/lnk -- Windows Shortcut File Creation
+## persistence/lnk -- Windows Shortcut File Creation
 
 Package `lnk` creates Windows `.lnk` shortcut files via COM/OLE (`WScript.Shell` + `IWshShortcut`). Useful for persistence (startup folder shortcuts), social engineering (malicious .lnk files), and general-purpose shortcut creation.
 
@@ -860,7 +867,7 @@ func (s *Shortcut) Save(path string) error
 **Example:**
 
 ```go
-import "github.com/oioio-space/maldev/system/lnk"
+import "github.com/oioio-space/maldev/persistence/lnk"
 
 err := lnk.New().
     SetTargetPath(`C:\Windows\System32\cmd.exe`).

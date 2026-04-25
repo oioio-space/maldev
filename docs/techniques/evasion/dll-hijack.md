@@ -3,7 +3,7 @@
 [<- Back to Evasion](README.md)
 
 **MITRE ATT&CK:** [T1574.001 — Hijack Execution Flow: DLL Search Order Hijacking](https://attack.mitre.org/techniques/T1574/001/)
-**Package:** `evasion/dllhijack`
+**Package:** `recon/dllhijack`
 **Platform:** Windows
 **Detection:** Medium
 
@@ -26,7 +26,7 @@ Discovery is a two-step problem:
    that the current user can write to before the target DLL is found
    elsewhere.
 
-`evasion/dllhijack` ships step 1 for **services** today. The API is a
+`recon/dllhijack` ships step 1 for **services** today. The API is a
 recon scanner; dropping a payload DLL and validating via a canary is
 future work (tracked in the package doc).
 
@@ -81,7 +81,7 @@ The writability probe's behaviour depends on the running token:
 import (
     "fmt"
     "log"
-    "github.com/oioio-space/maldev/evasion/dllhijack"
+    "github.com/oioio-space/maldev/recon/dllhijack"
 )
 
 func main() {
@@ -140,7 +140,7 @@ volume-root handle, not the victim binary's path.
 
 ```go
 import (
-    "github.com/oioio-space/maldev/evasion/dllhijack"
+    "github.com/oioio-space/maldev/recon/dllhijack"
     "github.com/oioio-space/maldev/evasion/stealthopen"
 )
 
@@ -178,7 +178,7 @@ fmt.Printf("dropped=%v triggered=%v confirmed=%v marker=%s\n",
 ```
 
 Ship your own canary: see
-[`evasion/dllhijack/canary/README.md`](../../../evasion/dllhijack/canary/README.md)
+[`recon/dllhijack/canary/README.md`](../../../recon/dllhijack/canary/README.md)
 for the 30-line C source (`DllMain` writes a marker file in
 `%ProgramData%` and returns TRUE) and MinGW/MSVC build commands. A
 pre-built canary is not shipped so each operator's PE has a unique hash.

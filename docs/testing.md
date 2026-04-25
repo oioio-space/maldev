@@ -186,7 +186,7 @@ listed in `docs/vm-test-setup.md` § Phase 5 is still TODO — reproduction
 today is manual:
 
 1. Launch the harness via scheduled task (interactive session, `schtasks /Run`).
-2. The harness calls `system/bsod.Trigger(nil)`.
+2. The harness calls `cleanup/bsod.Trigger(nil)`.
 3. First tries `NtRaiseHardError` (intercepted on Win 10 22H2).
 4. Falls back to `RtlSetProcessIsCritical(TRUE)` + `os.Exit(1)`.
 5. VM crashes with `CRITICAL_PROCESS_DIED`.

@@ -72,7 +72,7 @@ flowchart TD
 ### Anti-Debug
 
 ```go
-import "github.com/oioio-space/maldev/evasion/antidebug"
+import "github.com/oioio-space/maldev/recon/antidebug"
 
 if antidebug.IsDebuggerPresent() {
     os.Exit(0)
@@ -82,7 +82,7 @@ if antidebug.IsDebuggerPresent() {
 ### Anti-VM
 
 ```go
-import "github.com/oioio-space/maldev/evasion/antivm"
+import "github.com/oioio-space/maldev/recon/antivm"
 
 name, err := antivm.Detect(antivm.DefaultConfig())
 if name != "" {
@@ -96,7 +96,7 @@ if name != "" {
 import (
     "context"
 
-    "github.com/oioio-space/maldev/evasion/sandbox"
+    "github.com/oioio-space/maldev/recon/sandbox"
 )
 
 checker := sandbox.New(sandbox.DefaultConfig())
@@ -108,7 +108,7 @@ if sandboxed, _, _ := checker.IsSandboxed(context.Background()); sandboxed {
 ### CPU-Burn Timing (defeats Sleep fast-forwarding)
 
 ```go
-import "github.com/oioio-space/maldev/evasion/timing"
+import "github.com/oioio-space/maldev/recon/timing"
 
 // Trig-based busy wait — impossible for sandboxes to accelerate
 timing.BusyWaitTrig(200 * time.Millisecond)
@@ -122,10 +122,10 @@ import (
     "os"
     "time"
 
-    "github.com/oioio-space/maldev/evasion/antidebug"
-    "github.com/oioio-space/maldev/evasion/antivm"
-    "github.com/oioio-space/maldev/evasion/sandbox"
-    "github.com/oioio-space/maldev/evasion/timing"
+    "github.com/oioio-space/maldev/recon/antidebug"
+    "github.com/oioio-space/maldev/recon/antivm"
+    "github.com/oioio-space/maldev/recon/sandbox"
+    "github.com/oioio-space/maldev/recon/timing"
 )
 
 func checkEnvironment() bool {
@@ -184,7 +184,7 @@ func main() {
 
 ## API Reference
 
-- [`evasion/antidebug`](../../evasion.md) — `IsDebuggerPresent() bool`
-- [`evasion/antivm`](../../evasion.md) — `Detect(Config) (string, error)`, `DetectAll(Config) ([]string, error)`
-- [`evasion/sandbox`](../../evasion.md) — `New(Config) *Checker`, `IsSandboxed(ctx) (bool, string, error)`, `CheckAll(ctx) []Result`
-- [`evasion/timing`](../../evasion.md) — `BusyWait(d)`, `BusyWaitPrimality()`, `BusyWaitPrimalityN(n)`, `BusyWaitTrig(d)`
+- [`recon/antidebug`](../../evasion.md) — `IsDebuggerPresent() bool`
+- [`recon/antivm`](../../evasion.md) — `Detect(Config) (string, error)`, `DetectAll(Config) ([]string, error)`
+- [`recon/sandbox`](../../evasion.md) — `New(Config) *Checker`, `IsSandboxed(ctx) (bool, string, error)`, `CheckAll(ctx) []Result`
+- [`recon/timing`](../../evasion.md) — `BusyWait(d)`, `BusyWaitPrimality()`, `BusyWaitPrimalityN(n)`, `BusyWaitTrig(d)`

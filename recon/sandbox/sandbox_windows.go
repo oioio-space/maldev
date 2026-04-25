@@ -16,9 +16,9 @@ import (
 
 	"github.com/oioio-space/maldev/useragent"
 
-	"github.com/oioio-space/maldev/evasion/antidebug"
-	"github.com/oioio-space/maldev/evasion/antivm"
-	"github.com/oioio-space/maldev/evasion/timing"
+	"github.com/oioio-space/maldev/recon/antidebug"
+	"github.com/oioio-space/maldev/recon/antivm"
+	"github.com/oioio-space/maldev/recon/timing"
 	"github.com/oioio-space/maldev/process/enum"
 	"github.com/oioio-space/maldev/win/api"
 	"golang.org/x/sys/windows"

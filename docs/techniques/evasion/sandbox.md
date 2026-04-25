@@ -3,7 +3,7 @@
 [<- Back to Evasion](README.md)
 
 **MITRE ATT&CK:** [T1497](https://attack.mitre.org/techniques/T1497/) — Virtualization/Sandbox Evasion
-**Package:** `evasion/sandbox`
+**Package:** `recon/sandbox`
 **Platform:** Cross-platform (Windows and Linux)
 **Detection:** Low
 
@@ -188,7 +188,7 @@ import (
     "context"
     "os"
 
-    "github.com/oioio-space/maldev/evasion/sandbox"
+    "github.com/oioio-space/maldev/recon/sandbox"
 )
 
 checker := sandbox.New(sandbox.DefaultConfig())

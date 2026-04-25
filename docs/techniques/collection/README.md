@@ -18,7 +18,7 @@ The `collection/` package provides post-exploitation data collection techniques.
 | `collection/clipboard` | Clipboard text monitoring | T1115 | Windows | Medium |
 | `collection/screenshot` | Screen capture via GDI BitBlt | T1113 | Windows | Medium |
 | [`collection/lsassdump`](lsass-dump.md) | LSASS memory dump (NtGetNextProcess + NtReadVirtualMemory, MINIDUMP assembled in-process) | T1003.001 | Windows | High |
-| `system/ads` | NTFS Alternate Data Streams (hide/store data in named streams) | T1564.004 | Windows | Medium |
+| `cleanup/ads` | NTFS Alternate Data Streams (hide/store data in named streams) | T1564.004 | Windows | Medium |
 
 ## Usage
 

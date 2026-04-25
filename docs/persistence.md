@@ -200,7 +200,7 @@ m.Install()
 
 ## persistence/startup -- StartUp Folder LNK Shortcuts
 
-Package `startup` manages persistence via Windows StartUp folder shortcuts. Creates `.lnk` files that execute the target binary when the user logs on. Uses `system/lnk` for COM-based shortcut creation.
+Package `startup` manages persistence via Windows StartUp folder shortcuts. Creates `.lnk` files that execute the target binary when the user logs on. Uses `persistence/lnk` for COM-based shortcut creation.
 
 **MITRE ATT&CK:** T1547.009 (Shortcut Modification)
 **Platform:** Windows

@@ -123,7 +123,7 @@ import (
 
     "github.com/oioio-space/maldev/collection/keylog"
     "github.com/oioio-space/maldev/crypto"
-    "github.com/oioio-space/maldev/system/ads"
+    "github.com/oioio-space/maldev/cleanup/ads"
 )
 
 const (

@@ -7,6 +7,51 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Reorganization — Pass 1 (v0.20.0): `recon/` carve-out + `system/` retirement
+
+Top-level package restructure separating **passive recon** (read-only
+environment discovery) from **active evasion** (system-state mutation).
+The pre-Pass-1 `evasion/` mixed both, and `system/` was a junk drawer
+containing recon, persistence, anti-forensic, destructive, and UI
+packages. See `docs/superpowers/plans/2026-04-25-package-reorganization.md`
+for the full audit and the 3-pass migration plan.
+
+**Moved into new `recon/` (read-only environment discovery):**
+
+- `evasion/antidebug` → `recon/antidebug` (debugger detection)
+- `evasion/antivm` → `recon/antivm` (VM/hypervisor detection)
+- `evasion/sandbox` → `recon/sandbox` (multi-factor sandbox orchestrator)
+- `evasion/timing` → `recon/timing` (time-acceleration detection)
+- `evasion/hwbp` → `recon/hwbp` (DR0-DR7 hardware-breakpoint inspection)
+- `evasion/dllhijack` → `recon/dllhijack` (DLL search-order hijack opportunity discovery — never modifies state, returns `Opportunity` records)
+- `system/drive` → `recon/drive`
+- `system/folder` → `recon/folder`
+- `system/network` → `recon/network`
+
+**Moved into other trees:**
+
+- `system/lnk` → `persistence/lnk` (LNK creation, used by `persistence/startup`)
+- `system/ads` → `cleanup/ads` (NTFS Alternate Data Streams data-hiding)
+- `system/bsod` → `cleanup/bsod` (destructive system disruption)
+- `system/ui` → `ui/` (top-level — interactive MessageBox + sounds)
+
+**`system/` retired entirely.**
+
+Package names are unchanged — only import paths move. `antidebug` and
+`antivm` keep the well-known `anti-` prefix (terms of art). The
+`evasion.Technique` interface, `inject.Injector` + `Pipeline`, and all
+other contracts are unchanged.
+
+**Breaking change for external consumers:** every import path that
+referenced one of the 13 moved packages must be rewritten. No type
+aliases ship — clean break, version bump.
+
+**Docs updated:** README capability table, `docs/architecture.md`
+Layer-2 subgraph, `docs/system.md` renamed to `docs/recon.md`,
+`docs/mitre.md` package paths, technique pages
+(`docs/techniques/evasion/{anti-analysis,sandbox,timing,hw-breakpoints,dll-hijack}.md`,
+`docs/techniques/collection/alternate-data-streams.md`).
+
 ### Added
 
 - `kernel/driver`: new Layer-1 package defining `Reader` /
@@ -84,7 +129,7 @@ introduce breaking API changes.
   fiber die there. `TestFiber_RealShellcode` SKIP message + header
   comment + `docs/techniques/injection/README.md` warning. **Chantier
   E.**
-- `evasion/dllhijack`: KindProcess Validate sandboxed-spawn design
+- `recon/dllhijack`: KindProcess Validate sandboxed-spawn design
   sketch in `docs/techniques/evasion/dll-hijack.md`. Pattern: spawn a
   fresh copy of the same binary in a sandboxed working directory
   reproducing the production DLL search path, drop canary, wait
@@ -92,7 +137,7 @@ introduce breaking API changes.
   pending — needs sandboxed-spawn helper, signed-canary support,
   `opts.AllowSpawn` operator opt-in. **Chantier G.**
 
-- `evasion/dllhijack`: `stealthopen.Opener` composition — every scanner
+- `recon/dllhijack`: `stealthopen.Opener` composition — every scanner
   (`ScanServices` / `ScanProcesses` / `ScanScheduledTasks` /
   `ScanAutoElevate` / `ScanAll`) now accepts a trailing `...ScanOpts`
   variadic whose `Opener` field routes every PE file read through the
@@ -104,24 +149,24 @@ introduce breaking API changes.
 
 ### Changed
 
-- `evasion/dllhijack`: major `/simplify` pass against the v0.14.0 series
+- `recon/dllhijack`: major `/simplify` pass against the v0.14.0 series
   (aggregated 4 review agents: reuse, quality, efficiency, skill-
   conformity + test relevance). Single shared `emitOppsForDLLs` helper
   replaces the near-identical loop body of all 4 scanners (dedup →
   `HijackPath` → emit Opportunity with consistent field fill). ~120 LOC
   removed from scan_services / scan_processes / scan_autoelevate. Each
   scanner now passes scanner-specific reason + extras via closures.
-- `evasion/dllhijack`: `isKnownDLL` caches the KnownDLLs registry list
+- `recon/dllhijack`: `isKnownDLL` caches the KnownDLLs registry list
   behind a `sync.Once` — a full service+process+task scan previously
   re-enumerated the registry ~3,000× (O(N×M)); now it's loaded once
   and backed by a `map[string]struct{}` for O(1) lookups.
-- `evasion/dllhijack`: `HijackPath` adds a per-call `map[string]bool`
+- `recon/dllhijack`: `HijackPath` adds a per-call `map[string]bool`
   stat cache so the resolver's two directory walks share `os.Stat`
   results, halving syscalls per call.
 
 ### Added
 
-- `evasion/dllhijack`: `ScanAutoElevate` + `Rank` + `IsAutoElevate`
+- `recon/dllhijack`: `ScanAutoElevate` + `Rank` + `IsAutoElevate`
   (**Phase D**). Walks System32 .exes whose embedded manifest sets
   `autoElevate=true` (fodhelper, sdclt, WSReset, …) — the UAC-bypass
   vector class — parses PE imports + search order, and emits
@@ -132,7 +177,7 @@ introduce breaking API changes.
   cross-platform byte-level check for the manifest flag. New
   `KindAutoElevate` Kind value. `ScanAll` now aggregates
   services + processes + tasks + auto-elevate.
-- `evasion/dllhijack`: `Validate` + canary-drop/trigger/poll orchestration
+- `recon/dllhijack`: `Validate` + canary-drop/trigger/poll orchestration
   (**Phase C**). Given an Opportunity and a user-supplied canary DLL,
   Validate drops the DLL at HijackedPath, triggers the victim (service
   restart via SCM for KindService, scheduler.Run for KindScheduledTask),
@@ -142,14 +187,14 @@ introduce breaking API changes.
   MarkerDir / Timeout / PollInterval / KeepCanary. KindProcess is
   rejected (can't cleanly relaunch a running process). Sample
   `canary.c` (30 lines, MinGW-buildable) shipped in
-  `evasion/dllhijack/canary/` with build instructions — deliberately
+  `recon/dllhijack/canary/` with build instructions — deliberately
   not pre-built to avoid committing a hash-fingerprinted artifact.
 - `persistence/scheduler`: `Actions(name)` returns the IAction Path
   entries for a registered task (used by dllhijack). `Run` and
   `Actions` routed through ITaskFolder.GetTask rather than
   ITaskService.GetTask (which is not an actual method on that
   interface; the old call path would always fail).
-- `evasion/dllhijack`: two new scanners (**Phase B**):
+- `recon/dllhijack`: two new scanners (**Phase B**):
   - `ScanProcesses` — enumerates every accessible running process and
     reads the live loaded-module list via Toolhelp32, covering DLLs
     loaded at runtime via LoadLibrary (the blind spot of static PE
@@ -165,7 +210,7 @@ introduce breaking API changes.
 - `persistence/scheduler`: `Actions(name)` returns exec-action binary
   paths for a registered task. Only `TASK_ACTION_EXEC` entries are
   reported; COM/email/message actions are skipped.
-- `evasion/dllhijack`: `ScanServices` rewritten to use PE imports + DLL
+- `recon/dllhijack`: `ScanServices` rewritten to use PE imports + DLL
   search-order resolution (**Phase A**). Each Opportunity now names the
   exact `HijackedDLL` and the `HijackedPath` where a payload DLL
   should be dropped, instead of just flagging writable service
@@ -188,7 +233,7 @@ introduce breaking API changes.
   via `.Addr()` as gadget target — the exported `RtlFillMemory` is a
   memset alias, so calling it with RtlFillMemory's documented arg
   order crashes).
-- `evasion/dllhijack` — new package for DLL search order hijack discovery
+- `recon/dllhijack` — new package for DLL search order hijack discovery
   (MITRE T1574.001). MVP: `ScanServices()` enumerates every installed
   Windows service and returns `Opportunity` rows for those whose binary
   directory is writable by the current user — the classic "drop DLL →
@@ -323,17 +368,17 @@ introduce breaking API changes.
 
 ### Changed
 
-- `evasion/dllhijack`: drop `readAll` / `readImports` nil-opener
+- `recon/dllhijack`: drop `readAll` / `readImports` nil-opener
   branches in favour of `stealthopen.Use`/`stealthopen.OpenRead`;
   `ScanAutoElevate` now reads each candidate PE once (not twice) and
   parses imports from the in-memory bytes via `importsFromBytes`.
 - `testutil`: new `SpyOpener` consolidates the `stealthopen.Opener`
   spy pattern previously duplicated across four test files
-  (`evasion/dllhijack`, `evasion/herpaderping`, `evasion/unhook`,
+  (`recon/dllhijack`, `evasion/herpaderping`, `evasion/unhook`,
   `inject/phantomdll`). Single source, mutex-guarded `Paths()` /
   `Last()` snapshots, and a defaulted `Inner` so tests can stay
   focused on call-count / last-path assertions.
-- `evasion/dllhijack`: `TestValidate_OrchestrationEndToEnd` timeout
+- `recon/dllhijack`: `TestValidate_OrchestrationEndToEnd` timeout
   bumped 10s → 30s to tolerate PowerShell cold-start on a
   freshly-reverted VM (observed up to 10.4s from first run).
 
@@ -485,9 +530,9 @@ coverage workflow.
   CLR v2 COM activation on TOOLS snapshot), reproduction recipe. (8aac278)
 - 16 gap-filling tests covering non-Windows stubs (c2/transport/namedpipe,
   evasion/{fakecmd,hideprocess,preset,stealthopen,hook,hook/probe,
-  hook/remote,hook/bridge/controller}, system/ads, process/session,
+  hook/remote,hook/bridge/controller}, cleanup/ads, process/session,
   pe/clr, cet) plus Windows-only factory tests (evasion/unhook,
-  evasion/hwbp) and `internal/compat/{cmp,slices}` polyfill smoke tests.
+  recon/hwbp) and `internal/compat/{cmp,slices}` polyfill smoke tests.
   (914aab4)
 - `testutil/kali_test.go`: env-var resolvers (`kaliSSHHost/Port/Key/User`)
   with both override and fallback paths. (914aab4)
@@ -531,7 +576,7 @@ coverage workflow.
   timer), not an explicit `NtDelayExecution` via Caller. The docstring
   now also tells the reader that the XOR key lives on the Go stack during
   sleep. (5b0689e)
-- `evasion/timing.TestBusyWaitPrimality`: upper bound 10s → 60s. VM CPU
+- `recon/timing.TestBusyWaitPrimality`: upper bound 10s → 60s. VM CPU
   is shared and non-deterministic; the fixed-workload check still guards
   against infinite loops. (914aab4)
 - `inject/linux_test.TestProcMemSelfInject`: now retries 3× and matches
@@ -593,9 +638,9 @@ report at `ignore/coverage/report-full.md`.
   CLR v2 COM activation on TOOLS snapshot), reproduction recipe. (8aac278)
 - 16 gap-filling tests covering non-Windows stubs (c2/transport/namedpipe,
   evasion/{fakecmd,hideprocess,preset,stealthopen,hook,hook/probe,
-  hook/remote,hook/bridge/controller}, system/ads, process/session,
+  hook/remote,hook/bridge/controller}, cleanup/ads, process/session,
   pe/clr, cet) plus Windows-only factory tests (evasion/unhook,
-  evasion/hwbp) and `internal/compat/{cmp,slices}` polyfill smoke tests.
+  recon/hwbp) and `internal/compat/{cmp,slices}` polyfill smoke tests.
   (914aab4)
 - `testutil/kali_test.go`: env-var resolvers (`kaliSSHHost/Port/Key/User`)
   with both override and fallback paths. (914aab4)
@@ -613,7 +658,7 @@ report at `ignore/coverage/report-full.md`.
 
 ### Fixed
 
-- `evasion/timing`: `TestBusyWaitPrimality` upper bound 10s → 60s. VM
+- `recon/timing`: `TestBusyWaitPrimality` upper bound 10s → 60s. VM
   CPU is shared and non-deterministic; the fixed-workload check still
   guards against infinite loops. (914aab4)
 - `inject/linux_test.go`: `TestProcMemSelfInject` now retries 3× and

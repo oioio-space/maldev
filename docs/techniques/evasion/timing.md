@@ -3,7 +3,7 @@
 [<- Back to Evasion](README.md)
 
 **MITRE ATT&CK:** [T1497.003](https://attack.mitre.org/techniques/T1497/003/) — Virtualization/Sandbox Evasion: Time Based Evasion
-**Package:** `evasion/timing`
+**Package:** `recon/timing`
 **Platform:** Cross-platform
 **Detection:** Low
 
@@ -21,7 +21,7 @@ that calls either return immediately or fast-forward an internal clock.
 The sample thinks it slept 10 minutes; in reality the CPU only ran for a
 few seconds.
 
-The `evasion/timing` package defeats the fast-forward by **never calling
+The `recon/timing` package defeats the fast-forward by **never calling
 `Sleep` at all**. Instead it spins on real CPU work — an arithmetic or
 primality loop — that still needs its full wall-clock duration to
 complete, because a sandbox that fast-forwards the clock does not speed up
@@ -132,7 +132,7 @@ func BusyWaitPrimalityN(iterations int)
 ```go
 import (
     "time"
-    "github.com/oioio-space/maldev/evasion/timing"
+    "github.com/oioio-space/maldev/recon/timing"
 )
 
 // Wait 30 seconds without calling Sleep
@@ -158,7 +158,7 @@ timing.BusyWaitPrimalityN(5_000_000) // ~2s on modern hardware
 
 ### Combined with sandbox detection
 
-The `evasion/sandbox` package exposes `BusyWait` through `Checker.BusyWait()`,
+The `recon/sandbox` package exposes `BusyWait` through `Checker.BusyWait()`,
 which uses `EvasionTimeout` from the config:
 
 ```go
@@ -166,7 +166,7 @@ import (
     "context"
     "os"
     "time"
-    "github.com/oioio-space/maldev/evasion/sandbox"
+    "github.com/oioio-space/maldev/recon/sandbox"
 )
 
 cfg := sandbox.DefaultConfig()
@@ -186,7 +186,7 @@ Or call the timing package directly before any sensitive operation:
 ```go
 import (
     "time"
-    "github.com/oioio-space/maldev/evasion/timing"
+    "github.com/oioio-space/maldev/recon/timing"
 )
 
 // Stage 1: defeat time-skip sandbox analysis
