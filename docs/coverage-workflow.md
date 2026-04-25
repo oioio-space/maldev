@@ -209,8 +209,14 @@ Attempts that did NOT unblock it (all tried during the session):
 
 **What was added in TOOLS v2 (2026-04-25):**
 
-- `scripts/vm-provision.sh` now imports the CLSID `{CB2F6722-…}` entry every provisioning pass, so future debug rounds start from the same baseline rather than rediscovering the missing key.
+- `scripts/vm-provision.sh` now imports the CLSID `{CB2F6722-…}` entry every provisioning pass, so future debug rounds start from the same baseline rather than rediscovering the missing key. It also pushes + runs `dism /online /Add-Package` against the Win10 ISO's `sources/sxs/microsoft-windows-netfx3-ondemand-package*.cab` when staged at `MALDEV_NETFX3_CAB`. Confirmed 2026-04-25 that this still doesn't unblock `CorBindToRuntimeEx` after a reboot, but it gets the snapshot one step closer to a working CLR2 activation chain.
 - `pe/clr/clr_windows.go::corBindToRuntimeEx` wraps the `REGDB_E_CLASSNOTREG` path with `%w` + the raw HRESULT, so SKIP messages now read `CorBindToRuntimeEx(v2.0.50727): HRESULT 0x80040154 (REGDB_E_CLASSNOTREG): clr: ICorRuntimeHost unavailable …` — the next investigator sees the actual code without rebuilding.
+
+**What was tried + ruled out 2026-04-25 (after pt 1/2):**
+
+1. `dism /online /enable-feature /featurename:NetFx3 /all /Source:<sources/sxs> /LimitAccess` after a `dism /disable-feature` round-trip — failed `0x488 (1168, ERROR_NOT_FOUND)`. The OnDemand cab alone isn't enough for /enable-feature.
+2. `dism /online /Add-Package /PackagePath:<sources/sxs/...netfx3-ondemand...cab>` — succeeded, exit `3010 (REBOOT_REQUIRED)`. After reboot, `CorBindToRuntimeEx` still returns `0x80040154`. The OnDemand package adds the runtime files but not the legacy COM/typelib/Fusion chain mscoree binds against.
+3. Win7-era `.NET Framework 3.5 Redistributable` (`dotnetfx35.exe`, 232 MB from Microsoft download CDN) — the installer ran silently and returned `0` but produced no log content beyond `DONE_EXIT=0`; on Win10 it refuses to install (the OS is "newer than supported"). HRESULT unchanged.
 
 **What to try next (still open, needs Windows ISO):**
 

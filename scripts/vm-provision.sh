@@ -152,6 +152,30 @@ BAT
     # pe/clr tests skip. We mirror the structure of the sibling CLSID
     # {CB2F6723-…} (CorMetaDataDispenser, registered by NetFx3) which points
     # to the same mscoree.dll. Idempotent — `reg import` overwrites.
+    # If the Win10 ISO sources/sxs cab is staged on the host, push it +
+    # run dism /Add-Package + reboot. This is the most reliable path to
+    # finishing the legacy v2 COM activation chain on a TOOLS snapshot.
+    # Confirmed 2026-04-25: alone, /Add-Package on Win10 22H2 still leaves
+    # CorBindToRuntimeEx returning REGDB_E_CLASSNOTREG; the .NET 3.5 Win7
+    # redistributable (dotnetfx35.exe) refuses to install on Win10 silently.
+    # The full unblock requires mounting sources/install.wim and pointing
+    # DISM at its SxS payload — not yet wired into provisioning.
+    local netfx_cab="${MALDEV_NETFX3_CAB:-/run/media/mathieu/CCCOMA_X64FRE_FR-FR_DV9/sources/sxs/microsoft-windows-netfx3-ondemand-package~31bf3856ad364e35~amd64~~.cab}"
+    if [ -f "$netfx_cab" ]; then
+        log "Windows: pushing NetFx3 OnDemand cab + DISM /Add-Package"
+        scp -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$netfx_cab" "test@$ip:C:/Users/Public/netfx3.cab" >/dev/null 2>&1 || \
+            warn "scp NetFx3 cab failed — skipping /Add-Package"
+        if ssh "${ssh_base[@]}" "test@$ip" \
+            'dism /online /Add-Package /PackagePath:"C:\Users\Public\netfx3.cab" /quiet /norestart' >/dev/null 2>&1; then
+            done_msg "NetFx3 cab added (reboot may be required for full COM chain)"
+        else
+            warn "DISM /Add-Package returned non-zero — see netfx-pkg log on VM"
+        fi
+    else
+        warn "NetFx3 cab not staged at $netfx_cab — skip /Add-Package step"
+    fi
+
     log "Windows: registering CorRuntimeHost CLSID"
     cat > /tmp/maldev-corhost.reg << 'REG'
 Windows Registry Editor Version 5.00
