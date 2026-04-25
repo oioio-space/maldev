@@ -182,7 +182,6 @@ fmt.Println(level) // "High", "System", etc.
 package main
 
 import (
-    "context"
     "fmt"
 
     "github.com/oioio-space/maldev/win/privilege"

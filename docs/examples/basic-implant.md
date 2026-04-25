@@ -19,6 +19,7 @@ flowchart TD
 package main
 
 import (
+    "context"
     "time"
 
     "github.com/oioio-space/maldev/crypto"
@@ -66,8 +67,9 @@ func main() {
         Addr: 0, // set to shellcode address
         Size: uintptr(len(shellcode)),
     })
+    ctx := context.Background()
     for {
-        mask.Sleep(30 * time.Second)
+        mask.Sleep(ctx, 30*time.Second)
     }
 }
 ```

@@ -162,7 +162,6 @@ api.HashNtWriteVirtualMemory    // 0xC5108CC2
 package main
 
 import (
-    "context"
     "unsafe"
 
     "golang.org/x/sys/windows"

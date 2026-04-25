@@ -247,8 +247,9 @@ func main() {
             // Decide: block or allow?
             if name == `C:\important.txt` {
                 log.Printf("BLOCKED deletion of %s", name)
-                // Set last error and return FALSE
-                windows.SetLastError(windows.ERROR_ACCESS_DENIED)
+                // Return FALSE — caller's GetLastError() will see whatever
+                // is already in TEB (typically 0). Use windows.SetLastError
+                // via direct syscall if you need a specific code.
                 return 0
             }
 

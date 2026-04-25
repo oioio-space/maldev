@@ -111,7 +111,6 @@ import (
     "os/exec"
 
     "github.com/oioio-space/maldev/pe/strip"
-    "github.com/oioio-space/maldev/pe/morph"
 )
 
 func main() {

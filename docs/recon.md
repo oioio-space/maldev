@@ -148,16 +148,12 @@ package main
 
 import (
     "fmt"
-    "log"
 
     "github.com/oioio-space/maldev/recon/drive"
 )
 
 func main() {
-    dt, err := drive.Type(`C:\`)
-    if err != nil {
-        log.Fatal(err)
-    }
+    dt := drive.TypeOf(`C:\`)
 
     fmt.Printf("C: is %s\n", dt) // "fixed"
 }
@@ -191,7 +187,7 @@ import (
 )
 
 func main() {
-    vol, err := drive.Volume(`C:\`)
+    vol, err := drive.VolumeOf(`C:\`)
     if err != nil {
         log.Fatal(err)
     }
@@ -266,11 +262,11 @@ import (
 )
 
 func main() {
-    dm := drive.NewDrives(context.Background())
+    dm := drive.NewWatcher(context.Background(), func(d *drive.Info) bool { return d.Type == drive.DriveRemovable })
 
     // Get all removable drives
-    removable, err := dm.All(func(d *drive.Drive) bool {
-        return d.Type == drive.Removable
+    removable, err := dm.All(func(d *drive.Info) bool {
+        return d.Type == drive.DriveRemovable
     })
     if err != nil {
         log.Fatal(err)
@@ -329,9 +325,9 @@ func main() {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    dm := drive.NewDrives(ctx)
-    ch, err := dm.WatchNew(func(d *drive.Drive) bool {
-        return d.Type == drive.Removable
+    dm := drive.NewWatcher(ctx)
+    ch, err := dm.WatchNew(func(d *drive.Info) bool {
+        return d.Type == drive.DriveRemovable
     }, true)
     if err != nil {
         log.Fatal(err)
@@ -340,7 +336,7 @@ func main() {
     fmt.Println("Watching for USB drives... (Ctrl+C to stop)")
     for item := range ch {
         switch v := item.(type) {
-        case *drive.Drive:
+        case *drive.Info:
             fmt.Printf("New USB: %s (%s, %s)\n", v.Letter, v.Infos.Name, v.Infos.FileSystemName)
         case error:
             fmt.Printf("Error: %v\n", v)

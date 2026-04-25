@@ -91,7 +91,6 @@ package main
 
 import (
     "log"
-    "os"
 
     "github.com/oioio-space/maldev/recon/hwbp"
     "github.com/oioio-space/maldev/evasion"

