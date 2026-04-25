@@ -113,6 +113,109 @@ func SectionSignatureLevelOffset(protectionOff uint32) uint32 {
 	return protectionOff - 1
 }
 
+// DiscoverUniqueProcessIdOffset reads ntoskrnl.exe at `path` and
+// returns the EPROCESS.UniqueProcessId byte offset. Extracted from
+// the first instruction of PsGetProcessId, which always compiles to:
+//
+//	mov rax, qword ptr [rcx + EPROCESS.UniqueProcessId_offset]
+//	ret
+//
+// On x64 that's `48 8B 81 [disp32]` — REX.W + MOV + ModR/M for
+// `[rcx+disp32]`. The disp32 starts at file offset 3 of the function.
+//
+// Empty path defaults to %SystemRoot%\System32\ntoskrnl.exe (same
+// convention as DiscoverProtectionOffset).
+func DiscoverUniqueProcessIdOffset(path string) (uint32, error) {
+	if path == "" {
+		root := os.Getenv("SystemRoot")
+		if root == "" {
+			return 0, fmt.Errorf("DiscoverUniqueProcessIdOffset: no path and SystemRoot unset")
+		}
+		path = root + `\System32\ntoskrnl.exe`
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	pf, err := pe.NewFile(f)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s: %w", path, err)
+	}
+	defer pf.Close()
+
+	rva, err := findExportRVA(pf, "PsGetProcessId")
+	if err != nil {
+		return 0, fmt.Errorf("PsGetProcessId: %w", err)
+	}
+	sec := sectionForRVA(pf, rva)
+	if sec == nil {
+		return 0, fmt.Errorf("RVA 0x%X not in any section", rva)
+	}
+	fileOff := int64(sec.Offset) + int64(rva) - int64(sec.VirtualAddress)
+
+	prologue := make([]byte, 7)
+	if _, err := f.ReadAt(prologue, fileOff); err != nil {
+		return 0, fmt.Errorf("read PsGetProcessId prologue @0x%X: %w", fileOff, err)
+	}
+	// 48 8B 81 [disp32]: REX.W + mov r64, r/m64 + ModR/M [rcx+disp32].
+	if prologue[0] == 0x48 && prologue[1] == 0x8B && isModRMRcxDisp32(prologue[2]) {
+		off := binary.LittleEndian.Uint32(prologue[3:7])
+		if off == 0 || off > 0x1500 {
+			return 0, fmt.Errorf("%w: PsGetProcessId disp32 0x%X out of plausible range",
+				ErrProtectionOffsetNotFound, off)
+		}
+		return off, nil
+	}
+	return 0, fmt.Errorf("%w: PsGetProcessId prologue %02X %02X %02X (want 48 8B [ModR/M])",
+		ErrProtectionOffsetNotFound, prologue[0], prologue[1], prologue[2])
+}
+
+// DiscoverActiveProcessLinksOffset returns the EPROCESS.ActiveProcessLinks
+// byte offset given the UniqueProcessId offset. ActiveProcessLinks is
+// always sizeof(HANDLE) bytes after UniqueProcessId on x64 (= +8).
+//
+// Stable Vista → Win 11 25H2 per kvc's OffsetFinder; the relative
+// position has never shifted because ActiveProcessLinks sits in the
+// same struct slot pypykatz / mimikatz / Volatility all assume.
+func DiscoverActiveProcessLinksOffset(uniqueProcessIDOff uint32) uint32 {
+	return uniqueProcessIDOff + 8 // sizeof(HANDLE) on x64
+}
+
+// DiscoverInitialSystemProcessRVA returns the RVA of the
+// `PsInitialSystemProcess` export inside ntoskrnl.exe. The export
+// is a global pointer (PEPROCESS) — at runtime, reading 8 bytes at
+// `ntoskrnl_kernel_base + RVA` via a kernel-mode ReadWriter yields
+// the System process's EPROCESS, the head of the
+// `PsActiveProcessLinks` doubly-linked list.
+//
+// Empty path defaults to %SystemRoot%\System32\ntoskrnl.exe.
+func DiscoverInitialSystemProcessRVA(path string) (uint32, error) {
+	if path == "" {
+		root := os.Getenv("SystemRoot")
+		if root == "" {
+			return 0, fmt.Errorf("DiscoverInitialSystemProcessRVA: no path and SystemRoot unset")
+		}
+		path = root + `\System32\ntoskrnl.exe`
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	pf, err := pe.NewFile(f)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s: %w", path, err)
+	}
+	defer pf.Close()
+
+	return findExportRVA(pf, "PsInitialSystemProcess")
+}
+
 // extractProtectionOffset finds `name` in the PE's exports, reads
 // the first ~8 bytes of that function from .text, and returns the
 // disp32 from a `[rcx+disp32]`-targeted instruction. Modern x64

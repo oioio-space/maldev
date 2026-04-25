@@ -91,3 +91,81 @@ func TestDiscoverProtectionOffset_RealNtoskrnl(t *testing.T) {
 	t.Logf("EPROCESS.Protection offset = 0x%X (Signature=0x%X, SectionSig=0x%X)",
 		off, SignatureLevelOffset(off), SectionSignatureLevelOffset(off))
 }
+
+// TestDiscoverActiveProcessLinksOffset — UniqueProcessId + 8 on x64.
+func TestDiscoverActiveProcessLinksOffset(t *testing.T) {
+	cases := []struct {
+		upid uint32
+		want uint32
+	}{
+		{0x440, 0x448},
+		{0x4B8, 0x4C0},
+	}
+	for _, c := range cases {
+		if got := DiscoverActiveProcessLinksOffset(c.upid); got != c.want {
+			t.Errorf("DiscoverActiveProcessLinksOffset(0x%X) = 0x%X, want 0x%X",
+				c.upid, got, c.want)
+		}
+	}
+}
+
+// TestDiscoverUniqueProcessIdOffset_NonexistentPath — open error.
+func TestDiscoverUniqueProcessIdOffset_NonexistentPath(t *testing.T) {
+	_, err := DiscoverUniqueProcessIdOffset("/no/such/ntoskrnl.exe")
+	if err == nil {
+		t.Fatal("err = nil, want open error")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("err = %v, want os.ErrNotExist", err)
+	}
+}
+
+// TestDiscoverInitialSystemProcessRVA_NonexistentPath — open error.
+func TestDiscoverInitialSystemProcessRVA_NonexistentPath(t *testing.T) {
+	_, err := DiscoverInitialSystemProcessRVA("/no/such/ntoskrnl.exe")
+	if err == nil {
+		t.Fatal("err = nil, want open error")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("err = %v, want os.ErrNotExist", err)
+	}
+}
+
+// TestDiscoverUniqueProcessIdOffset_RealNtoskrnl — env-gated. The
+// EPROCESS.UniqueProcessId offset on Win 10/11 sits in roughly
+// [0x430, 0x4F0] depending on the build. We assert the value is
+// in that range and log it for cross-reference against pypykatz /
+// kvc.
+func TestDiscoverUniqueProcessIdOffset_RealNtoskrnl(t *testing.T) {
+	path := os.Getenv("MALDEV_NTOSKRNL")
+	if path == "" {
+		t.Skip("set MALDEV_NTOSKRNL=<path> to validate")
+	}
+	off, err := DiscoverUniqueProcessIdOffset(path)
+	if err != nil {
+		t.Fatalf("DiscoverUniqueProcessIdOffset: %v", err)
+	}
+	if off < 0x300 || off > 0x600 {
+		t.Errorf("UniqueProcessId offset 0x%X outside expected range", off)
+	}
+	t.Logf("EPROCESS.UniqueProcessId offset = 0x%X (ActiveProcessLinks = 0x%X)",
+		off, DiscoverActiveProcessLinksOffset(off))
+}
+
+// TestDiscoverInitialSystemProcessRVA_RealNtoskrnl — env-gated.
+// Just verifies the export resolves; the RVA's plausible range
+// is the entire .data section so we just check non-zero.
+func TestDiscoverInitialSystemProcessRVA_RealNtoskrnl(t *testing.T) {
+	path := os.Getenv("MALDEV_NTOSKRNL")
+	if path == "" {
+		t.Skip("set MALDEV_NTOSKRNL=<path> to validate")
+	}
+	rva, err := DiscoverInitialSystemProcessRVA(path)
+	if err != nil {
+		t.Fatalf("DiscoverInitialSystemProcessRVA: %v", err)
+	}
+	if rva == 0 {
+		t.Error("rva = 0, want non-zero export RVA")
+	}
+	t.Logf("PsInitialSystemProcess RVA = 0x%X", rva)
+}

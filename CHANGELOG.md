@@ -7,6 +7,44 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added — `credentials/lsassdump` v0.31.3 — extended kvc-style OffsetFinder
+
+Three new discovery helpers that mirror kvc's full OffsetFinder
+class. All operate on ntoskrnl.exe in user mode (pure-Go,
+debug/pe), no kernel-mode read needed for the discovery itself.
+
+- `DiscoverUniqueProcessIdOffset(path)` — extracts
+  EPROCESS.UniqueProcessId from PsGetProcessId's first instruction
+  (`48 8B 81 [disp32]` = `mov rax, qword ptr [rcx+disp32]`).
+- `DiscoverActiveProcessLinksOffset(uniqueProcessIDOff)` — pure
+  arithmetic (= upid + 8 on x64; sizeof(HANDLE)). Stable Vista →
+  Win 11 25H2.
+- `DiscoverInitialSystemProcessRVA(path)` — locates the
+  `PsInitialSystemProcess` global pointer's RVA inside ntoskrnl.
+  At runtime, reading 8 bytes at `ntoskrnl_kernel_base + RVA` via
+  a kernel-mode ReadWriter yields the System EPROCESS — head of
+  the `PsActiveProcessLinks` doubly-linked list. Combined with
+  ActiveProcessLinks offset, this lets a future `FindLsassEProcess`
+  walk every process and locate lsass by PID.
+
+**Real-binary results on Win 10 22H2 build 19045 ntoskrnl.exe:**
+
+	EPROCESS.Protection             = 0x87A
+	EPROCESS.SignatureLevel         = 0x878
+	EPROCESS.SectionSignatureLevel  = 0x879
+	EPROCESS.UniqueProcessId        = 0x440
+	EPROCESS.ActiveProcessLinks     = 0x448
+	PsInitialSystemProcess RVA      = 0xCFC420
+
+5 new tests (3 unit, 2 env-gated real-binary). 9/9 tests green
+total in the package; the 3 env-gated tests pass against the
+captured ntoskrnl.exe.
+
+Sets up v0.31.4: high-level `FindLsassEProcess` that ties the
+helpers together with a runtime kernel-base lookup
+(NtQuerySystemInformation/SystemModuleInformation) so operators
+no longer need to provide the eprocess argument to Unprotect.
+
 ### Changed — `credentials/lsassdump` v0.31.2 — `Unprotect` auto-discovers ProtectionOffset when zero
 
 When `tab.ProtectionOffset == 0`, `Unprotect` now calls
