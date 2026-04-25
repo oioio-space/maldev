@@ -1,8 +1,9 @@
 package lsasparse
 
-// Built-in Templates spanning every NT6+ x64 Windows build pypykatz
-// + mimikatz publicly document — Win 7 SP1 / Server 2008 R2 (build
-// 7601) through Win 11 24H2 / Server 2025 (build 26100).
+// Built-in Templates spanning every NT6+ x64 Windows build for which
+// MSV / Wdigest / DPAPI signatures and offsets are publicly
+// documented — Win 7 RTM / Server 2008 R2 (build 7600) through
+// Win 11 25H2 / Server 2025 (build 26200+).
 //
 // The values are *facts* about Microsoft's compiled lsasrv.dll —
 // byte signatures present in the binary, offset distances between
@@ -10,44 +11,50 @@ package lsasparse
 // structures. Facts are not copyrightable (Feist v. Rural). The code
 // that uses them is an independent re-implementation in Go.
 //
-// Research source — every credential-extraction tool reuses these
+// Research sources — every credential-extraction tool reuses these
 // patterns because they are empirical observations:
 //
+//   - KvcForensic (MIT, Marek Wesołowski / wesmar) —
+//       https://github.com/wesmar/KvcForensic
+//       The 10-range MSV signature breakdown plus the Wdigest /
+//       DPAPI / LSA-24H2 patterns ship as `KvcForensic.json`; we
+//       cite them directly because the upstream license is
+//       MIT-compatible with maldev.
 //   - pypykatz (GPL-3, Skelsec) —
 //       pypykatz/lsadecryptor/lsa_template_nt6.py
 //       pypykatz/lsadecryptor/packages/msv/templates.py
+//       Used as cross-reference for the older LSA crypto offsets
+//       (pre-24H2) and the KIWI_MSV1_0_LIST_NN layout offsets.
 //   - mimikatz (CC-BY-NC-SA, Benjamin Delpy "gentilkiwi") —
 //       mimikatz/modules/sekurlsa/kuhl_m_sekurlsa_*.c
+//       Original research; not vendored.
 //
-// We do not vendor or translate either project's source code; only
-// the documented byte values are carried into our Template structs.
-// maldev itself remains MIT — the same way pypykatz is GPL-3 despite
-// being inspired by mimikatz's CC-BY-NC-SA research.
+// We do not vendor or translate any project's source code; only the
+// documented byte values are carried into our Template structs.
+// maldev itself remains MIT.
 //
-// Validation status per template:
+// Validation status per layout:
 //
 //   ★ "VM-validated" — a real lsass.exe dump from that build round-tripped
-//     through Parse() with the canonical pypykatz JSON output.
+//     through Parse() with the canonical pypykatz / KvcForensic JSON.
+//     None yet — real-binary validation is queued for when local VM
+//     dumps are generated.
 //
-//   ◎ "research-cited" — values transcribed from pypykatz's published
-//     templates (research source, not source code), framework
-//     correctness verified via synthetic fixtures, but no real-binary
-//     validation pass yet. Most ship as ◎ until VM access lands.
+//   ◎ "research-validated" — values transcribed from KvcForensic's
+//     parser_support: true ranges (Win 11 24H2+) or pypykatz's
+//     published templates. Framework correctness verified via
+//     synthetic fixtures.
 //
-//   ▲ "best-effort" — values inferred from pypykatz's code structure
-//     where the exact constants weren't explicitly listed. May need
-//     ±8-byte tweaks per LCU; framework degrades gracefully (warning,
-//     not crash) on a miss.
+//   ▲ "best-effort" — older-build per-field offsets where KvcForensic
+//     ships parser_support: false (signature only, layout zeros).
+//     pypykatz's KIWI_MSV1_0_LIST_NN values are the best
+//     publicly-available source; ±8-byte tweaks per LCU possible.
 //
-// Operators on a build we don't cover, or where our values produce a
-// warning, register an additional Template via RegisterTemplate at
-// runtime — sorted ascending by BuildMin, the lookup picks the first
-// covering match so an operator's narrower range overrides a built-in.
+// Operators on a build whose values produce a warning register an
+// additional Template via RegisterTemplate at runtime — sorted
+// ascending by BuildMin, the lookup picks the first covering match
+// so an operator's narrower range overrides a built-in.
 
-// init registers every built-in template at package load. Tests that
-// need a clean registry call resetTemplates() then register their
-// own — the defaults won't survive a reset, which is what those
-// tests want.
 func init() {
 	registerDefaultTemplates()
 }
@@ -61,36 +68,17 @@ func registerDefaultTemplates() {
 	}
 }
 
-// ===== LSA crypto signatures (per build family) =====================
-
-// lsaSignatureWin7Sp1 — 10 bytes from `LsaInitializeProtectedMemory`
-// in Win 7 SP1 / Server 2008 R2 lsasrv.dll. The signature has a
-// wildcard at byte 7 (the rel32 starts there for one of the references
-// in some LCUs).
+// ===== LSA crypto signature ==========================================
 //
-//	48 83 EC 30        sub    rsp, 30h
-//	48 8B 05 ?? ?? ??  mov    rax, [rip+rel32]   ← OffsetIV
-var lsaSignatureWin7Sp1 = []byte{
-	0x48, 0x83, 0xEC, 0x30,
-	0x48, 0x8B, 0x05,
-	0x00, 0x00, 0x00, // wildcards 7-9 (the rel32 displacement)
-}
-var lsaWildcardsWin7Sp1 = []int{7, 8, 9}
+// The same 16-byte signature works from Win 8.1 (build 9600) through
+// Win 11 25H2 / Server 2025. The IV / 3DES / AES rel32 offsets shift
+// between the v0.23.x baseline (Win 10 1903 → Win 11 22H2 pre-22622:
+// IV +0x43) and Win 11 24H2+ (IV +0x47). KvcForensic's JSON ships
+// the 24H2+ offsets; pypykatz documents the older ones. Older builds
+// (Win 7 SP1, Win 8) use different signatures and are below.
 
-// lsaSignatureWin8 — 7 bytes from Win 8 / Server 2012 (build 9200).
-//
-//	48 8D 4D D8       lea    rcx, [rbp-28h]
-//	48 8B 05          mov    rax, [rip+rel32]   ← OffsetAES
-var lsaSignatureWin8 = []byte{
-	0x48, 0x8D, 0x4D, 0xD8,
-	0x48, 0x8B, 0x05,
-}
-
-// lsaSignatureCommon — 16 bytes from `LsaInitializeProtectedMemory`,
-// stable across Win 8.1 (9600) / Server 2012 R2 / every Win 10 LCU /
-// every Win 11 LCU through 24H2. The trailing `48 8D 15` is the LEA
-// loading the AES key-handle pointer; the rel32 begins at match
-// +0x10.
+// lsaSignatureCommon — `LsaInitializeProtectedMemory` prologue.
+// Stable byte sequence across Win 8.1 → Win 11 25H2.
 //
 //	83 64 24 30 00     and    dword ptr [rsp+30h], 0
 //	48 8D 45 E0        lea    rax, [rbp-20h]
@@ -103,50 +91,69 @@ var lsaSignatureCommon = []byte{
 	0x48, 0x8D, 0x15,
 }
 
-// ===== MSV1_0 LogonSessionList signatures (per build family) ========
-
-// msvSignatureWin7Sp1 — 8 bytes from the Win 7 SP1 MSV1_0 list
-// bootstrap inside lsasrv.dll. The list-head rel32 sits at match -4.
-//
-//	48 8B 05 ?? ?? ?? ?? 48     mov    rax, [rip+rel32]; <next-instr>
-var msvSignatureWin7Sp1 = []byte{
+// lsaSignatureWin7Sp1 — Win 7 SP1 / Server 2008 R2 (build 7601).
+// pypykatz template `LSADecryptorTemplate_x64_NT6_1_7601`.
+var lsaSignatureWin7Sp1 = []byte{
+	0x48, 0x83, 0xEC, 0x30,
 	0x48, 0x8B, 0x05,
-	0x00, 0x00, 0x00, 0x00, // wildcards 3-6 (the rel32)
-	0x48,
+	0x00, 0x00, 0x00, // wildcards 7-9 (the rel32)
 }
-var msvWildcardsWin7Sp1 = []int{3, 4, 5, 6}
+var lsaWildcardsWin7Sp1 = []int{7, 8, 9}
 
-// msvSignatureWin8 — 8 bytes from Win 8 / Server 2012 MSV1_0 list
-// bootstrap. Same shape as Win 7 SP1 with a different surrounding
-// instruction byte.
-var msvSignatureWin8 = []byte{
-	0x33, 0xFF,
-	0x45, 0x85,
-	0xC9, 0x74,
-	0x4C, 0x8D,
+// lsaSignatureWin8 — Win 8 / Server 2012 (build 9200).
+// pypykatz template `LSADecryptorTemplate_x64_NT6_2_9200`.
+var lsaSignatureWin8 = []byte{
+	0x48, 0x8D, 0x4D, 0xD8,
+	0x48, 0x8B, 0x05,
 }
 
-// msvSignatureCommon — 12 bytes covering Win 10 1903 → 22H2 and
-// Win 11 21H2 → 22H2 pre-22622. The rel32 to the list head sits at
-// match +23.
+// ===== MSV1_0 LogonSessionList signatures (per KvcForensic) ==========
 //
-//	33 FF              xor    edi, edi
-//	41 89 37           mov    dword ptr [r15], esi
-//	4C 8B F3           mov    r14, rbx
-//	45 85 C0           test   r8d, r8d
-//	74 ??              je     short ...
-var msvSignatureCommon = []byte{
-	0x33, 0xFF,
-	0x41, 0x89, 0x37,
+// KvcForensic's JSON ships nine MSV signature ranges. Each range's
+// byte sequence is reproduced verbatim here (research credit, no
+// source code reused). The variable naming uses descriptive
+// build-family suffixes; the canonical KvcForensic name for each
+// is documented in the comment.
+
+// msvSignatureWin7 — KvcForensic `MSV_x64_61` (builds 7600-9199).
+var msvSignatureWin7 = []byte{
+	0x33, 0xF6, 0x45, 0x89, 0x2F,
+	0x4C, 0x8B, 0xF3,
+	0x85, 0xFF,
+	0x0F, 0x84,
+}
+
+// msvSignatureWin8 — KvcForensic `MSV_x64_62` (builds 9200-9599).
+// Same bytes also seen on Win 10 1507-1607 (`MSV_x64_10_1507_1607`)
+// and Win 10 1803-22H2 / Server 2019 (`MSV_x64_1803_22H2`).
+var msvSignatureWin8 = []byte{
+	0x33, 0xFF, 0x41, 0x89, 0x37,
 	0x4C, 0x8B, 0xF3,
 	0x45, 0x85, 0xC0,
 	0x74,
 }
 
-// msvSignatureWin11Late — Win 11 22622+ uses a slightly reshuffled
-// bootstrap: `mov [r12], r14d` instead of `mov [r15], esi`. First
-// entry rel32 sits at match +24.
-var msvSignatureWin11Late = []byte{
+// msvSignatureWin81 — KvcForensic `MSV_x64_63` (builds 9600-10239).
+// Distinct 13-byte signature for Win 8.1 / Server 2012 R2.
+var msvSignatureWin81 = []byte{
+	0x8B, 0xDE,
+	0x48, 0x8D, 0x0C, 0x5B,
+	0x48, 0xC1, 0xE1, 0x05,
+	0x48, 0x8D, 0x05,
+}
+
+// msvSignatureWin10Cu — KvcForensic `MSV_x64_1703` (builds
+// 15063-17133). Win 10 Creators Update / Fall Creators Update.
+var msvSignatureWin10Cu = []byte{
+	0x33, 0xFF, 0x45, 0x89, 0x37,
+	0x48, 0x8B, 0xF3,
+	0x45, 0x85, 0xC9,
+	0x74,
+}
+
+// msvSignatureWin11Rtm — KvcForensic `MSV_x64_11_2022` (builds
+// 20348-22099). Server 2022 + Win 11 21H2.
+var msvSignatureWin11Rtm = []byte{
 	0x45, 0x89, 0x34, 0x24,
 	0x4C, 0x8B, 0xFF,
 	0x8B, 0xF3,
@@ -154,13 +161,36 @@ var msvSignatureWin11Late = []byte{
 	0x74,
 }
 
+// msvSignatureWin11_22H2 — KvcForensic `MSV_x64_11_2023` (builds
+// 22100-26099). Win 11 22H2 / 23H2.
+var msvSignatureWin1122H2 = []byte{
+	0x45, 0x89, 0x37,
+	0x4C, 0x8B, 0xF7,
+	0x8B, 0xF3,
+	0x45, 0x85, 0xC0,
+	0x0F,
+}
+
+// msvSignatureWin1124H2 — KvcForensic `MSV_x64_11_24H2` (builds
+// 26100+). Win 11 24H2 / 25H2 / Server 2025.
+var msvSignatureWin1124H2 = []byte{
+	0x45, 0x89, 0x34, 0x24,
+	0x8B, 0xFB,
+	0x45, 0x85, 0xC0,
+	0x0F,
+}
+
 // ===== MSV1_0 _MSV1_0_LOGON_SESSION layouts =========================
 //
 // Field offsets are byte distances from the start of the node. Each
 // layout corresponds to a KIWI_MSV1_0_LIST_NN class in pypykatz.
 // NodeSize is the smallest size that covers every offset we read,
-// not the full Microsoft struct (which Microsoft has freely appended
-// to across builds).
+// not the full Microsoft struct (Microsoft has freely appended
+// fields across builds).
+//
+// Only the LIST_65 (Win 11 24H2+) layout has KvcForensic
+// parser_support: true validation. Older layouts are pypykatz
+// research-cited (◎) or best-effort (▲).
 
 // msvLayoutKiwiList52 — Win 7 SP1 / Server 2008 R2 (build 7601). ▲
 var msvLayoutKiwiList52 = MSVLayout{
@@ -216,9 +246,8 @@ var msvLayoutKiwiList62 = MSVLayout{
 	CredentialsOffset: 0x108,
 }
 
-// msvLayoutKiwiList63 — Win 10 1903 – 22H2 + Win 11 21H2 – 22H2
-// pre-22622 (builds 18362 – 22621). ◎ — the layout we already shipped
-// in v0.23.2 / v0.23.x.
+// msvLayoutKiwiList63 — Win 10 1803 – 22H2 + Server 2019 (builds
+// 17134 – 20347). ◎
 var msvLayoutKiwiList63 = MSVLayout{
 	NodeSize:          0x180,
 	LUIDOffset:        0x70,
@@ -231,8 +260,8 @@ var msvLayoutKiwiList63 = MSVLayout{
 	CredentialsOffset: 0x108,
 }
 
-// msvLayoutKiwiList64 — Win 11 22622+ / 23H2 (builds 22622 – 22631).
-// ◎
+// msvLayoutKiwiList64 — Server 2022 / Win 11 21H2-23H2 (builds
+// 20348 – 26099). ◎
 var msvLayoutKiwiList64 = MSVLayout{
 	NodeSize:          0x190,
 	LUIDOffset:        0x70,
@@ -245,31 +274,85 @@ var msvLayoutKiwiList64 = MSVLayout{
 	CredentialsOffset: 0x110,
 }
 
-// msvLayoutKiwiList65 — Win 11 24H2 / Server 2025 (build 26100+). ▲
+// msvLayoutKiwiList65 — Win 11 24H2 / 25H2 / Server 2025 (builds
+// 26100+). ◎ KvcForensic parser_support: true — these offsets ship
+// in `KvcForensic.json` and are exercised by KvcForensic's parser on
+// real binaries.
 var msvLayoutKiwiList65 = MSVLayout{
-	NodeSize:          0x1A0,
-	LUIDOffset:        0x70,
-	UserNameOffset:    0x90,
-	LogonDomainOffset: 0xA0,
-	LogonServerOffset: 0x100,
-	LogonTypeOffset:   0xD8,
-	LogonTimeOffset:   0xF0,
-	SIDOffset:         0xD0,
-	CredentialsOffset: 0x118,
+	NodeSize:          0x180, // covers fields up to CredentialsOffset+8
+	LUIDOffset:        0x70,  // KvcForensic session_luid_offset = 112
+	UserNameOffset:    0xA0,  // KvcForensic session_username_offset = 160
+	LogonDomainOffset: 0xB0,  // KvcForensic session_domain_offset = 176
+	LogonServerOffset: 0xF8,  // not in KvcForensic; pypykatz best-effort
+	LogonTypeOffset:   0xD8,  // pypykatz best-effort
+	LogonTimeOffset:   0xF0,  // pypykatz best-effort
+	SIDOffset:         0xE0,  // KvcForensic session_sid_ptr_offset = 224
+	CredentialsOffset: 0x118, // KvcForensic session_credentials_ptr_offset = 280
+}
+
+// ===== Wdigest signatures (per KvcForensic) =========================
+
+// wdigestSignaturePre11 — KvcForensic `WDigest_x64_pre11`
+// (builds 6000-21999). 4-byte sig, rel32 at match-4.
+var wdigestSignaturePre11 = []byte{0x48, 0x3B, 0xD9, 0x74}
+
+// wdigestSignatureWin11Plus — KvcForensic `WDigest_x64_11plus`
+// (builds 22000+). Longer sig for the reshuffled prologue.
+var wdigestSignatureWin11Plus = []byte{
+	0x48, 0x3B, 0xC6,
+	0x74, 0x11,
+	0x8B, 0x4B, 0x20,
+	0x39, 0x48,
+}
+
+// wdigestLayoutCommon — KIWI_WDIGEST_LIST_ENTRY layout.
+// NodeSize/per-field offsets transcribed from pypykatz; KvcForensic
+// only ships first_entry_offset and primary_offset (= our
+// PasswordOffset, 48 = 0x30 — different from pypykatz's 0x58).
+// Operators with verified field offsets register an extended
+// Template at init.
+var wdigestLayoutCommon = WdigestLayout{
+	NodeSize:       0x80,
+	LUIDOffset:     0x28,
+	UserNameOffset: 0x38,
+	DomainOffset:   0x48,
+	PasswordOffset: 0x58,
+}
+
+// ===== DPAPI signature (per KvcForensic) ============================
+
+// dpapiSignatureWin10Plus — KvcForensic `Dpapi_x64_win10_plus`
+// (builds 14393+). Win 10 1607 / Server 2016 onward.
+var dpapiSignatureWin10Plus = []byte{
+	0x48, 0x89, 0x4F, 0x08,
+	0x48, 0x89, 0x78, 0x08,
+}
+
+// dpapiLayoutCommon — KIWI_MASTERKEY_CACHE_ENTRY layout. KvcForensic
+// doesn't break out the per-field offsets in its JSON; pypykatz
+// research-cited values are the best-effort baseline.
+var dpapiLayoutCommon = DPAPILayout{
+	NodeSize:       0x80,
+	LUIDOffset:     0x10,
+	KeyGUIDOffset:  0x18,
+	KeySizeOffset:  0x28,
+	KeyBytesOffset: 0x30,
 }
 
 // ===== builtinTemplates ==============================================
 //
-// Every Template is documented with its target builds, OS family, and
-// validation marker (★ / ◎ / ▲). Adding a new build means appending an
-// entry; the registry stays sorted by BuildMin ascending.
+// Every Template documents its target builds, OS family, validation
+// markers (★/◎/▲), and which KvcForensic JSON range it corresponds
+// to. The registry stays sorted by BuildMin ascending; KvcForensic's
+// boundaries are reproduced exactly.
 
 var builtinTemplates = []*Template{
 	{
-		// ▲ Win 7 SP1 / Server 2008 R2 (build 7601). LM hashes may be
-		// present (NoLMHash policy), Wdigest plaintext is the default.
-		BuildMin:                  7601,
-		BuildMax:                  7601,
+		// ▲ Win 7 RTM / SP1 / Server 2008 R2 (builds 7600-9199).
+		// KvcForensic `MSV_x64_61`. LSA crypto values from pypykatz
+		// `LSADecryptorTemplate_x64_NT6_1_7601`.
+		BuildMin:                  7600,
+		BuildMax:                  9199,
 		IVPattern:                 lsaSignatureWin7Sp1,
 		IVWildcards:               lsaWildcardsWin7Sp1,
 		IVOffset:                  -0x16,
@@ -279,16 +362,20 @@ var builtinTemplates = []*Template{
 		KeyAESPattern:             lsaSignatureWin7Sp1,
 		KeyAESWildcards:           lsaWildcardsWin7Sp1,
 		KeyAESOffset:              -0x68,
-		LogonSessionListPattern:   msvSignatureWin7Sp1,
-		LogonSessionListWildcards: msvWildcardsWin7Sp1,
-		LogonSessionListOffset:    -4,
+		LogonSessionListPattern:   msvSignatureWin7,
+		LogonSessionListOffset:    19, // KvcForensic first_entry_offset
 		LogonSessionListCount:     1,
 		MSVLayout:                 msvLayoutKiwiList52,
+		WdigestListPattern:        wdigestSignaturePre11,
+		WdigestListOffset:         -4,
+		WdigestLayout:             wdigestLayoutCommon,
 	},
 	{
-		// ▲ Win 8 / Server 2012 (build 9200). Wdigest plaintext default.
-		BuildMin:                7602,
-		BuildMax:                9200,
+		// ▲ Win 8 / Server 2012 (builds 9200-9599).
+		// KvcForensic `MSV_x64_62`. LSA crypto from pypykatz
+		// `LSADecryptorTemplate_x64_NT6_2_9200`.
+		BuildMin:                9200,
+		BuildMax:                9599,
 		IVPattern:               lsaSignatureWin8,
 		IVOffset:                -0x4C,
 		Key3DESPattern:          lsaSignatureWin8,
@@ -296,125 +383,170 @@ var builtinTemplates = []*Template{
 		KeyAESPattern:           lsaSignatureWin8,
 		KeyAESOffset:            -0x07,
 		LogonSessionListPattern: msvSignatureWin8,
-		LogonSessionListOffset:  16,
+		LogonSessionListOffset:  16, // KvcForensic first_entry_offset
 		LogonSessionListCount:   2,
 		MSVLayout:               msvLayoutKiwiList60,
+		WdigestListPattern:      wdigestSignaturePre11,
+		WdigestListOffset:       -4,
+		WdigestLayout:           wdigestLayoutCommon,
 	},
 	{
-		// ◎ Win 8.1 / Server 2012 R2 / Win 10 1507 / 1511 / 1607 /
-		// Server 2016 (builds 9600 – 14393). KB2871997 is available
-		// from this era forward; UseLogonCredential default flips to
-		// 0 with the patch.
+		// ◎ Win 8.1 / Server 2012 R2 (builds 9600-10239).
+		// KvcForensic `MSV_x64_63` ships a distinct signature for
+		// this range — different bytes from Win 10 forward despite
+		// the LSA signature being shared.
 		BuildMin:                9600,
-		BuildMax:                14393,
+		BuildMax:                10239,
 		IVPattern:               lsaSignatureCommon,
 		IVOffset:                0x43,
 		Key3DESPattern:          lsaSignatureCommon,
 		Key3DESOffset:           -0x59,
 		KeyAESPattern:           lsaSignatureCommon,
 		KeyAESOffset:            0x10,
-		LogonSessionListPattern: msvSignatureCommon,
-		LogonSessionListOffset:  23,
+		LogonSessionListPattern: msvSignatureWin81,
+		LogonSessionListOffset:  36, // KvcForensic first_entry_offset
 		LogonSessionListCount:   32,
 		MSVLayout:               msvLayoutKiwiList61,
+		WdigestListPattern:      wdigestSignaturePre11,
+		WdigestListOffset:       -4,
+		WdigestLayout:           wdigestLayoutCommon,
 	},
 	{
-		// ◎ Win 10 1703 – 1809 / Server 2019 (builds 15063 – 17763).
-		BuildMin:                15063,
-		BuildMax:                17763,
+		// ◎ Win 10 1507 / 1511 / 1607 / Server 2016 (builds
+		// 10240-15062). KvcForensic `MSV_x64_10_1507_1607`. DPAPI
+		// available from build 14393.
+		BuildMin:                10240,
+		BuildMax:                15062,
 		IVPattern:               lsaSignatureCommon,
 		IVOffset:                0x43,
 		Key3DESPattern:          lsaSignatureCommon,
 		Key3DESOffset:           -0x59,
 		KeyAESPattern:           lsaSignatureCommon,
 		KeyAESOffset:            0x10,
-		LogonSessionListPattern: msvSignatureCommon,
-		LogonSessionListOffset:  23,
+		LogonSessionListPattern: msvSignatureWin8, // same bytes as _62
+		LogonSessionListOffset:  16,                // KvcForensic first_entry_offset
+		LogonSessionListCount:   32,
+		MSVLayout:               msvLayoutKiwiList61,
+		WdigestListPattern:      wdigestSignaturePre11,
+		WdigestListOffset:       -4,
+		WdigestLayout:           wdigestLayoutCommon,
+		DPAPIListPattern:        dpapiSignatureWin10Plus,
+		DPAPIListOffset:         11, // KvcForensic first_entry_offset
+		DPAPILayout:             dpapiLayoutCommon,
+	},
+	{
+		// ◎ Win 10 1703 / 1709 (builds 15063-17133). KvcForensic
+		// `MSV_x64_1703` — distinct signature from neighbouring
+		// ranges.
+		BuildMin:                15063,
+		BuildMax:                17133,
+		IVPattern:               lsaSignatureCommon,
+		IVOffset:                0x43,
+		Key3DESPattern:          lsaSignatureCommon,
+		Key3DESOffset:           -0x59,
+		KeyAESPattern:           lsaSignatureCommon,
+		KeyAESOffset:            0x10,
+		LogonSessionListPattern: msvSignatureWin10Cu,
+		LogonSessionListOffset:  23, // KvcForensic first_entry_offset
 		LogonSessionListCount:   32,
 		MSVLayout:               msvLayoutKiwiList62,
+		WdigestListPattern:      wdigestSignaturePre11,
+		WdigestListOffset:       -4,
+		WdigestLayout:           wdigestLayoutCommon,
+		DPAPIListPattern:        dpapiSignatureWin10Plus,
+		DPAPIListOffset:         11,
+		DPAPILayout:             dpapiLayoutCommon,
 	},
 	{
-		// ◎ Win 10 1903 – 22H2 (builds 18362 – 19045). The original
-		// v0.23.2 entry, kept so a real binary that reports any of
-		// these specific build numbers picks this layout first.
-		BuildMin:                18362,
-		BuildMax:                19045,
+		// ◎ Win 10 1803 → 22H2 / Server 2019 (builds 17134-20347).
+		// KvcForensic `MSV_x64_1803_22H2`. The LIST_63 layout shipped
+		// in v0.23.x covers this range.
+		BuildMin:                17134,
+		BuildMax:                20347,
 		IVPattern:               lsaSignatureCommon,
 		IVOffset:                0x43,
 		Key3DESPattern:          lsaSignatureCommon,
 		Key3DESOffset:           -0x59,
 		KeyAESPattern:           lsaSignatureCommon,
 		KeyAESOffset:            0x10,
-		LogonSessionListPattern: msvSignatureCommon,
-		LogonSessionListOffset:  23,
+		LogonSessionListPattern: msvSignatureWin8, // same bytes as _62
+		LogonSessionListOffset:  23,                // KvcForensic first_entry_offset
 		LogonSessionListCount:   32,
 		MSVLayout:               msvLayoutKiwiList63,
+		WdigestListPattern:      wdigestSignaturePre11,
+		WdigestListOffset:       -4,
+		WdigestLayout:           wdigestLayoutCommon,
+		DPAPIListPattern:        dpapiSignatureWin10Plus,
+		DPAPIListOffset:         11,
+		DPAPILayout:             dpapiLayoutCommon,
 	},
 	{
-		// ◎ Server 2022 (build 20348). Same NT 10.0 family as Win 11
-		// 21H2 but with its own build window.
+		// ◎ Server 2022 + Win 11 21H2 (builds 20348-22099).
+		// KvcForensic `MSV_x64_11_2022`. NT 10.0 family, but the MSV
+		// signature swaps to the `45 89 34 24` prefix.
 		BuildMin:                20348,
-		BuildMax:                20348,
+		BuildMax:                22099,
 		IVPattern:               lsaSignatureCommon,
 		IVOffset:                0x43,
 		Key3DESPattern:          lsaSignatureCommon,
 		Key3DESOffset:           -0x59,
 		KeyAESPattern:           lsaSignatureCommon,
 		KeyAESOffset:            0x10,
-		LogonSessionListPattern: msvSignatureCommon,
-		LogonSessionListOffset:  23,
-		LogonSessionListCount:   32,
-		MSVLayout:               msvLayoutKiwiList63,
-	},
-	{
-		// ◎ Win 11 21H2 → 22H2 pre-22622 (builds 22000 – 22621).
-		BuildMin:                22000,
-		BuildMax:                22621,
-		IVPattern:               lsaSignatureCommon,
-		IVOffset:                0x43,
-		Key3DESPattern:          lsaSignatureCommon,
-		Key3DESOffset:           -0x59,
-		KeyAESPattern:           lsaSignatureCommon,
-		KeyAESOffset:            0x10,
-		LogonSessionListPattern: msvSignatureCommon,
-		LogonSessionListOffset:  23,
-		LogonSessionListCount:   32,
-		MSVLayout:               msvLayoutKiwiList63,
-	},
-	{
-		// ◎ Win 11 22622+ / 23H2 (builds 22622 – 22631). New MSV
-		// signature (msvSignatureWin11Late); LSA crypto stays on
-		// lsaSignatureCommon. NodeSize grew to 0x190 — KIWI_MSV1_0_LIST_64.
-		BuildMin:                22622,
-		BuildMax:                22631,
-		IVPattern:               lsaSignatureCommon,
-		IVOffset:                0x43,
-		Key3DESPattern:          lsaSignatureCommon,
-		Key3DESOffset:           -0x59,
-		KeyAESPattern:           lsaSignatureCommon,
-		KeyAESOffset:            0x10,
-		LogonSessionListPattern: msvSignatureWin11Late,
-		LogonSessionListOffset:  24,
+		LogonSessionListPattern: msvSignatureWin11Rtm,
+		LogonSessionListOffset:  24, // KvcForensic first_entry_offset
 		LogonSessionListCount:   32,
 		MSVLayout:               msvLayoutKiwiList64,
+		WdigestListPattern:      wdigestSignaturePre11, // pre-22000 still
+		WdigestListOffset:       -4,
+		WdigestLayout:           wdigestLayoutCommon,
+		DPAPIListPattern:        dpapiSignatureWin10Plus,
+		DPAPIListOffset:         11,
+		DPAPILayout:             dpapiLayoutCommon,
 	},
 	{
-		// ▲ Win 11 24H2 / Server 2025 (builds 26100+). Layout 65 is
-		// best-effort — Microsoft has been incrementally appending
-		// fields without a public ABI commitment. Operators with a
-		// real 24H2 dump should validate + RegisterTemplate(...) any
-		// corrected offsets.
-		BuildMin:                26100,
-		BuildMax:                26999,
+		// ◎ Win 11 22H2 / 23H2 (builds 22100-26099). KvcForensic
+		// `MSV_x64_11_2023` + Wdigest `WDigest_x64_11plus`.
+		BuildMin:                22100,
+		BuildMax:                26099,
 		IVPattern:               lsaSignatureCommon,
 		IVOffset:                0x43,
 		Key3DESPattern:          lsaSignatureCommon,
 		Key3DESOffset:           -0x59,
 		KeyAESPattern:           lsaSignatureCommon,
 		KeyAESOffset:            0x10,
-		LogonSessionListPattern: msvSignatureWin11Late,
-		LogonSessionListOffset:  24,
+		LogonSessionListPattern: msvSignatureWin1122H2,
+		LogonSessionListOffset:  27, // KvcForensic first_entry_offset
+		LogonSessionListCount:   32,
+		MSVLayout:               msvLayoutKiwiList64,
+		WdigestListPattern:      wdigestSignatureWin11Plus,
+		WdigestListOffset:       -4,
+		WdigestLayout:           wdigestLayoutCommon,
+		DPAPIListPattern:        dpapiSignatureWin10Plus,
+		DPAPIListOffset:         11,
+		DPAPILayout:             dpapiLayoutCommon,
+	},
+	{
+		// ◎ Win 11 24H2 / 25H2 / Server 2025 (builds 26100+).
+		// KvcForensic `MSV_x64_11_24H2` + parser_support: true layout.
+		// LSA IV offset shifts from 0x43 to 0x47 per KvcForensic
+		// `LSA_24H2_plus`.
+		BuildMin:                26100,
+		BuildMax:                4294967295, // KvcForensic uses uint32 max
+		IVPattern:               lsaSignatureCommon,
+		IVOffset:                0x47, // KvcForensic offset_to_iv_ptr = 71
+		Key3DESPattern:          lsaSignatureCommon,
+		Key3DESOffset:           -0x59,
+		KeyAESPattern:           lsaSignatureCommon,
+		KeyAESOffset:            0x10,
+		LogonSessionListPattern: msvSignatureWin1124H2,
+		LogonSessionListOffset:  25, // KvcForensic first_entry_offset
 		LogonSessionListCount:   32,
 		MSVLayout:               msvLayoutKiwiList65,
+		WdigestListPattern:      wdigestSignatureWin11Plus,
+		WdigestListOffset:       -4,
+		WdigestLayout:           wdigestLayoutCommon,
+		DPAPIListPattern:        dpapiSignatureWin10Plus,
+		DPAPIListOffset:         11,
+		DPAPILayout:             dpapiLayoutCommon,
 	},
 }

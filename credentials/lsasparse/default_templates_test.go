@@ -20,7 +20,9 @@ func TestDefaultTemplates_RegisteredAtInit(t *testing.T) {
 		build uint32
 		want  bool
 	}{
-		// v0.25.1 covers Win 7 SP1 → Win 11 24H2 / Server 2025.
+		// v0.25.2 reproduces KvcForensic's 9 build ranges plus pypykatz
+		// LSA crypto offsets for Win 7 SP1 + Win 8.
+		{"Win7 RTM", 7600, true},
 		{"Win7 SP1 / Server 2008 R2", 7601, true},
 		{"Win8 / Server 2012", 9200, true},
 		{"Win8.1 / Server 2012 R2", 9600, true},
@@ -41,12 +43,13 @@ func TestDefaultTemplates_RegisteredAtInit(t *testing.T) {
 		{"Win11 22622", 22622, true},
 		{"Win11 23H2", 22631, true},
 		{"Win11 24H2 / Server 2025", 26100, true},
+		{"Win11 25H2 (future)", 26200, true},
+		{"far future", 999999, true},
 
-		// Out-of-range: pre-Win7 SP1 NT5 era + far-future builds.
+		// Out-of-range: pre-NT6.1 (Vista, XP, Server 2003).
 		{"Win XP / Server 2003 (NT 5.x)", 2600, false},
 		{"Win Vista / Server 2008 (NT 6.0)", 6002, false},
-		{"Win 7 RTM (NT 6.1 pre-SP1)", 7600, false},
-		{"future", 99999, false},
+		{"NT4 (just under 7600)", 7599, false},
 	}
 
 	for _, tc := range cases {

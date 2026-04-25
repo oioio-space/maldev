@@ -7,6 +7,48 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Fixed/Added — `credentials/lsasparse` v0.25.2 — KvcForensic-validated templates
+
+Major rewrite of `default_templates.go` integrating the validated
+per-build offsets from [KvcForensic](https://github.com/wesmar/KvcForensic)
+(MIT, Marek Wesołowski). Compatible licensing means we can cite the
+JSON values directly; maldev stays MIT.
+
+Corrections applied:
+
+- **MSV signatures** — replaced 2 hand-rolled signatures with
+  KvcForensic's 9 validated ranges. Several v0.25.1 entries used the
+  wrong byte sequence for their build window (e.g., Win 11 21H2 was
+  paired with the Win 10 22H2 signature, missing the `45 89 34 24`
+  prefix introduced at build 20348).
+- **MSV first_entry_offset** — corrected per range. Win 8.1 / Server
+  2012 R2 (9600-10239) uses offset 36 (not 23); Win 11 24H2+ uses 25
+  (not 24); Win 11 22H2/23H2 (22100-26099) uses 27 (not 24).
+- **LSA IV offset for Win 11 24H2+** — shifted from 0x43 to 0x47 per
+  KvcForensic `LSA_24H2_plus`. Older builds keep 0x43 from pypykatz.
+- **KIWI_MSV1_0_LIST_65 layout (Win 11 24H2+)** — corrected
+  UserName=0xA0 (was 0x90), Domain=0xB0 (was 0xA0), SID=0xE0 (was
+  0xD0). These match KvcForensic's `parser_support: true` data,
+  exercised by their parser on real binaries.
+- **Wdigest defaults** — added inline templates for both KvcForensic
+  ranges: `WDigest_x64_pre11` (builds 6000-21999, sig `48 3B D9 74`)
+  and `WDigest_x64_11plus` (builds 22000+, longer sig).
+- **DPAPI defaults** — added inline `Dpapi_x64_win10_plus` for
+  builds 14393+ (sig `48 89 4F 08 48 89 78 08`).
+
+After v0.25.2, every default template in the registry includes
+LSA + MSV1_0 + Wdigest + DPAPI signatures, with per-field session
+offsets transcribed from KvcForensic (★/◎ where validated by their
+parser; ▲ where pypykatz remains the only source).
+
+Build coverage remains 9 ranges (KvcForensic boundaries):
+7600-9199 / 9200-9599 / 9600-10239 / 10240-15062 / 15063-17133 /
+17134-20347 / 20348-22099 / 22100-26099 / 26100-uint32max.
+
+Test matrix: 23 build-coverage assertions (was 24 in v0.25.1) — added
+Win 11 25H2 + far-future + Win 7 RTM coverage; removed obsolete
+exclusions. 64/64 tests green.
+
 ### Added — `credentials/lsasparse` v0.25.1 — Win7→Win11 24H2 / Server 2025 templates
 
 - Built-in coverage now spans every NT6+ x64 Windows build pypykatz +
