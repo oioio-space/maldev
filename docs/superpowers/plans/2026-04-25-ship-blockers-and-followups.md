@@ -10,6 +10,21 @@
 
 ---
 
+## Status snapshot — 2026-04-25 session
+
+| Chantier | State | Tag/SHA | Notes |
+|---|---|---|---|
+| **F** — pe/clr env | ✅ Partial (pt 1/2) | `092ce14` | TOOLS v2 CLSID baseline + HRESULT diag in clrhost. Pt 2/2 (full ISO sources/sxs) still requires a Win10 ISO. |
+| **A** — BYOVD foundation | ✅ A.1 (scaffold) | `66d80d5` | `kernel/driver` + `kernel/driver/rtcore64` shipped; driver binary embedding behind `byovd_rtcore64` build tag (not in default repo). A.2-A.5 (real e2e, embedded driver, IOCTL stress) deferred. |
+| **B** — kcallback Remove | ✅ Shipped | `1c93d87` (tag `v0.17.1`) | Remove/Restore/RemoveToken + 12 mock tests; VM e2e waits on `byovd_rtcore64` build path. |
+| **C** — lsassdump PPL | ✅ Shipped | `0d31c50` (tag `v0.15.1`) | Unprotect/Reprotect/PPLToken/PPLOffsetTable + 8 mock tests; VM e2e on RunAsPPL=1 lsass waits on `byovd_rtcore64`. |
+| **E** — realsc Fiber | ✅ Diagnosed + documented | `f915563` | ConvertThreadToFiber consumes the OS thread; Go runtime fights it; correct integration is `kernel32!CreateThread`-spawned OS thread, not a goroutine. Skip message + README warning ship the diagnosis. |
+| **G** — dllhijack KindProcess | ✅ Design sketch | `e07bdd8` | Sandboxed-spawn pattern designed (clean-env spawn + bounded timeout + signed-canary + AllowSpawn opt-in); implementation deferred. |
+| **D** — callstack v0.16.1 | ⏸ Deferred | — | Plan9-asm pivot vs. Go's M:N scheduler is HIGH risk; needs its own session with the GOTRACEBACK=crash + WER LocalDumps debug loop. See chantier D below. |
+| **H** — sleepmask roadmap | ⏸ Deferred | — | Multi-feature, 800-1200 LOC; no single piece is small enough for this session. See chantier H below. |
+
+---
+
 ## Ordering rationale
 
 We tackle in three waves, ordered by dependency and unblocking value:

@@ -9,6 +9,73 @@ introduce breaking API changes.
 
 ### Added
 
+- `kernel/driver`: new Layer-1 package defining `Reader` /
+  `ReadWriter` / `Lifecycle` interfaces consumed by EDR-bypass
+  packages that need arbitrary kernel reads or writes (kcallback,
+  lsassdump PPL-bypass, …). Sentinel errors `ErrNotImplemented`,
+  `ErrNotLoaded`, `ErrPrivilegeRequired`. **Chantier A.1.**
+- `kernel/driver/rtcore64`: BYOVD primitive scaffold for MSI Afterburner
+  RTCore64.sys (CVE-2019-16098). Ships SCM service install / start /
+  stop / uninstall, `\\.\RTCore64` device handle management, and
+  IOCTL `0x80002048` read / `0x8000204C` write wrappers (cap
+  `MaxPrimitiveBytes = 4096` per IOCTL). Driver binary intentionally
+  NOT embedded by default — callers opt-in via the `byovd_rtcore64`
+  build tag and ship a sibling embed file. Default builds surface
+  `ErrDriverBytesMissing`. Technique page
+  `docs/techniques/evasion/byovd-rtcore64.md`. **Chantier A.1.**
+- `evasion/kcallback`: `Remove` + `Restore` + `RemoveToken` (v0.17.1).
+  Captures the slot's tagged-pointer value before zeroing 8 bytes;
+  `Reprotect` writes the original back. `Callback.SlotAddr` is now
+  populated by `Enumerate` so `Remove` can key on the per-slot
+  kernel VA. 12 mock-reader unit tests cover happy path, race
+  windows, nil-writer guards, deferred-cleanup zero-token idiom.
+  **Chantier B (v0.17.1).**
+- `collection/lsassdump`: `Unprotect` + `Reprotect` + `PPLToken` +
+  `PPLOffsetTable` (v0.15.1). EPROCESS-unprotect path mirroring
+  mimikatz's mimidrv strategy: caller plugs in a
+  `kernel/driver.ReadWriter`, passes lsass's EPROCESS kernel VA +
+  build-specific `PS_PROTECTION` byte offset, and Unprotect zeros
+  the byte so a userland `OpenLSASS` succeeds even when
+  `RunAsPPL=1`. 8 mock-reader unit tests. **Chantier C (v0.15.1).**
+
+### Changed
+
+- `pe/clr`: `corBindToRuntimeEx` now wraps `REGDB_E_CLASSNOTREG`
+  (HRESULT `0x80040154`) with `%w` + the raw HRESULT, so SKIP
+  messages on the win10 TOOLS snapshot now read
+  `"CorBindToRuntimeEx(v2.0.50727): HRESULT 0x80040154 (REGDB_E_CLASSNOTREG): clr: ICorRuntimeHost unavailable …"`
+  — the next investigator sees the actual code without rebuilding.
+  **Chantier F (pt 1/2).**
+- `scripts/vm-provision.sh`: TOOLS v2 — registers the
+  `{CB2F6722-AB3A-11D2-9C40-00C04FA30A3E}` (CorRuntimeHost) CLSID
+  every provisioning pass. Confirmed 2026-04-25 that this alone is
+  insufficient to unblock `pe/clr` tests — mscoree's binding chain
+  needs more than the CLSID (interface, typelib, Fusion entries),
+  which only the full .NET 3.5 Redistributable / Win10-ISO
+  `sources/sxs` payload runs. The CLSID baseline stays so future
+  ISO-based reprovisioning starts from a stable point. **Chantier F
+  (pt 1/2).**
+
+### Documented
+
+- `inject/realsc`: `MethodCreateFiber + Go runtime` incompatibility.
+  `ConvertThreadToFiber` permanently transforms the calling OS thread
+  into a fiber-control thread; Go's M:N scheduler does not understand
+  fibers. Real shellcode ending in `ExitThread`/`ret` kills the host
+  runtime mid-execution; goroutines + `runtime.LockOSThread` are NOT
+  enough. Documented integration pattern: spawn a true
+  `kernel32!CreateThread` OS thread (not a goroutine) and let the
+  fiber die there. `TestFiber_RealShellcode` SKIP message + header
+  comment + `docs/techniques/injection/README.md` warning. **Chantier
+  E.**
+- `evasion/dllhijack`: KindProcess Validate sandboxed-spawn design
+  sketch in `docs/techniques/evasion/dll-hijack.md`. Pattern: spawn a
+  fresh copy of the same binary in a sandboxed working directory
+  reproducing the production DLL search path, drop canary, wait
+  for marker / bounded timeout, terminate child. Implementation
+  pending — needs sandboxed-spawn helper, signed-canary support,
+  `opts.AllowSpawn` operator opt-in. **Chantier G.**
+
 - `evasion/dllhijack`: `stealthopen.Opener` composition — every scanner
   (`ScanServices` / `ScanProcesses` / `ScanScheduledTasks` /
   `ScanAutoElevate` / `ScanAll`) now accepts a trailing `...ScanOpts`
