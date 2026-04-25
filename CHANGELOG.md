@@ -7,6 +7,29 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Fixed — `credentials/lsasparse` v0.23.1
+
+- `extractMSV1_0` now scans the LogonSessionList head pattern in
+  `lsasrv.dll` (correct host) instead of `msv1_0.dll`. The list head
+  is an lsasrv global; msv1_0 only defines the per-session struct
+  layout. v0.23.0 wouldn't have found a real-Windows session list
+  even with a registered template — the synthetic Phase-4 test
+  passed because it pretended msv1_0 was a single-module dump and
+  fed the pattern there.
+- `Parse` still presence-checks msv1_0.dll in the dump's MODULE_LIST
+  (returns `ErrMSV1_0NotFound` if missing) but no longer reads its
+  bytes. Future provider extensions (NetLogon, …) may branch on
+  which auth-package DLLs are loaded.
+
+### Added — `docs/credentials.md` template-reference table
+
+Public Win10/Win11 baseline byte patterns + offsets from pypykatz +
+mimikatz, with explicit licensing note: byte patterns extracted from
+public Microsoft binaries are factual observations, not redistributed
+GPL/CC-NC code. Operators paste the values into a `Template` literal
+at `init()` and call `RegisterTemplate(t)` — framework + values stay
+separately licensed.
+
 ### Added — `credentials/lsasparse` v0.23.0: pure-Go LSASS minidump parser
 
 Consumer counterpart to `credentials/lsassdump`. Parses a MINIDUMP

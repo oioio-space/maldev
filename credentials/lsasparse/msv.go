@@ -127,18 +127,25 @@ func isAllZero(b []byte) bool {
 // at least a parseable username — fully-zero / decryption-failed
 // nodes accumulate as warnings.
 //
-// msv1_0Module is the resolved module from the parser; lsaKey is the
-// key chain from extractLSAKeys; t.MSVLayout supplies the per-build
-// node offsets.
-func extractMSV1_0(r *reader, msv1_0Module Module, t *Template, lsaKey *lsaKey) ([]LogonSession, []string) {
+// The LogonSessionList global is exported by lsasrv.dll (which hosts
+// the MSV provider). msv1_0.dll defines the per-session struct
+// layout but the array head + Flink chain live in lsasrv. Hence the
+// pattern scan runs over lsasrv's image; msv1_0 is unused here today
+// but kept in the signature so future providers (NetLogon, …) can
+// share the API shape.
+//
+// lsasrvModule is the resolved lsasrv.dll Module from the parser;
+// lsaKey is the key chain from extractLSAKeys; t.MSVLayout supplies
+// the per-build node offsets.
+func extractMSV1_0(r *reader, lsasrvModule Module, t *Template, lsaKey *lsaKey) ([]LogonSession, []string) {
 	var (
 		sessions []LogonSession
 		warnings []string
 	)
 
 	listHead, err := derefRel32(
-		mustReadModuleBody(r, msv1_0Module),
-		msv1_0Module.BaseOfImage,
+		mustReadModuleBody(r, lsasrvModule),
+		lsasrvModule.BaseOfImage,
 		t.LogonSessionListPattern,
 		t.LogonSessionListWildcards,
 		t.LogonSessionListOffset,

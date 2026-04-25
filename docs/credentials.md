@@ -73,13 +73,49 @@ LSA crypto layer, MSV1_0 walker, and `Parse(reader, size)` public
 entry-point all ship and round-trip end-to-end against synthetic
 fixtures.
 
-What does **not** ship in v0.23.0: per-build `Template` values
+What does **not** ship in v0.23.x: per-build `Template` values
 (IV/3DES/AES key globals + LogonSessionList head pattern + offset).
-These require reading lsasrv.dll and msv1_0.dll for each Windows
-build with a disassembler (IDA/Ghidra), locating the global-load
-instruction sequence, and recording the surrounding byte pattern
-+ rel32 offset. Templates are facts about Microsoft's compiled
-binaries and contributions are welcome under any license.
+These require reading lsasrv.dll for each Windows build with a
+disassembler (IDA/Ghidra), locating the global-load instruction
+sequence, and recording the surrounding byte pattern + rel32
+offsets. Templates are facts about Microsoft's compiled binaries
+and contributions are welcome under any license.
+
+**Canonical references** for the byte patterns + offsets:
+
+- [`pypykatz`](https://github.com/skelsec/pypykatz) (GPL-3) —
+  `pypykatz/lsadecryptor/lsa_template_nt6.py` for the LSA
+  IV/3DES/AES patterns; `pypykatz/lsadecryptor/packages/msv/templates.py`
+  for the MSV1_0 LogonSessionList signature + per-build node
+  layouts (`KIWI_MSV1_0_LIST_62/63/64/65`).
+- [`mimikatz`](https://github.com/gentilkiwi/mimikatz) (CC-NC) —
+  `mimikatz/modules/sekurlsa/kuhl_m_sekurlsa_*.c` for the same
+  patterns from the original research source.
+
+Licensing: pypykatz is GPL-3, mimikatz is CC-BY-NC-SA. We don't
+redistribute their code. Byte patterns extracted from public
+Microsoft binaries are factual observations, not copyrightable in
+themselves — every credential-extraction tool reuses them because
+they're empirical. Operators register templates via
+`RegisterTemplate(t)` at init time; the byte values stay in
+operator hands, the framework stays in the repo.
+
+For the v0.23.x Win10/Win11 baseline, the published values are:
+
+| Region | Signature (lsasrv.dll) | IV off | 3DES off | AES off |
+|---|---|---|---|---|
+| Win10 1809–22H2 / Win11 21H2–22H2 (build 17763–22621) | `83 64 24 30 00 48 8D 45 E0 44 8B 4D D8 48 8D 15` | +0x43 | -0x59 | +0x10 |
+| Win11 23H2 (22631) | (different signature — see references) | | | |
+
+| MSV signature (lsasrv.dll) | first_entry | bucket_count |
+|---|---|---|
+| Win10 1903 – Win11 22621 | `33 FF 41 89 37 4C 8B F3 45 85 C0 74` | +23 | -4 |
+| Win11 22622 – 22631 | `45 89 34 24 4C 8B FF 8B F3 45 85 C0 74` | +24 | -4 |
+
+The `KIWI_MSV1_0_LIST_63` node layout (Win10 22H2) computes to:
+LUID=0x70, UserName=0x90, Domain=0xA0, LogonServer=0xF8,
+LogonType=0xD8, LogonTime=0xF0, SID=0xD0, Credentials=0x108,
+NodeSize≥0x180.
 
 ### Surface
 

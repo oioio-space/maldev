@@ -244,13 +244,15 @@ func TestExtractMSV1_0_HappyPath(t *testing.T) {
 	}
 
 	mods := []lsassdump.Module{
-		{BaseOfImage: msvBase, SizeOfImage: msvSize, Name: "msv1_0.dll"},
+		{BaseOfImage: msvBase, SizeOfImage: msvSize, Name: "lsasrv.dll"},
 	}
 	blob := buildFixture(t, mods, regions)
 
-	// Build the reader, walk MSV1_0 directly (skipping lsasrv extraction
-	// because the synthetic dump only contains msv1_0.dll bytes — the
-	// real lsasrv path is exercised in phase 5 against a VM fixture).
+	// Build the reader, walk MSV1_0 directly (skipping the
+	// extractLSAKeys pattern scan — that path is exercised by Phase 3
+	// crypto tests; here we hand-build a known-good lsaKey above so
+	// the focus is on session-list walking + UNICODE_STRING decoding +
+	// PrimaryCredentials decryption).
 	r, err := openReader(bytes.NewReader(blob), int64(len(blob)))
 	if err != nil {
 		t.Fatalf("openReader: %v", err)
@@ -276,7 +278,7 @@ func TestExtractMSV1_0_HappyPath(t *testing.T) {
 			CredentialsOffset: 0x50,
 		},
 	}
-	mod, _ := Module{Name: "msv1_0.dll", BaseOfImage: msvBase, SizeOfImage: msvSize}, true
+	mod, _ := Module{Name: "lsasrv.dll", BaseOfImage: msvBase, SizeOfImage: msvSize}, true
 
 	sessions, warnings := extractMSV1_0(r, mod, tmpl, keys)
 

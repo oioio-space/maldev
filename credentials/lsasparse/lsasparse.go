@@ -186,8 +186,11 @@ func Parse(reader io.ReaderAt, size int64) (*Result, error) {
 	if !ok {
 		return res, ErrLSASRVNotFound
 	}
-	msv, ok := res.ModuleByName("msv1_0.dll")
-	if !ok {
+	if _, ok := res.ModuleByName("msv1_0.dll"); !ok {
+		// msv1_0.dll presence-check stays — it tells the caller the dump
+		// covers the MSV provider even though the LogonSessionList head
+		// itself lives in lsasrv. Future providers (NetLogon, …) may
+		// branch on which auth-package DLLs are loaded.
 		return res, ErrMSV1_0NotFound
 	}
 
@@ -196,7 +199,7 @@ func Parse(reader io.ReaderAt, size int64) (*Result, error) {
 		return res, err
 	}
 
-	sessions, warnings := extractMSV1_0(r, msv, tmpl, keys)
+	sessions, warnings := extractMSV1_0(r, lsasrv, tmpl, keys)
 	res.Sessions = sessions
 	res.Warnings = append(res.Warnings, warnings...)
 
