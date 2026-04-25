@@ -154,7 +154,7 @@ and makes path-based EDR file hooks blind to the operation.
 | `evasion/stealthopen` | `opener_windows_test.go` (VM) | VolumeFromPath (drive/UNC/Win32/relative/empty), NewStealth round-trip via OpenFileById, Stealth.Open state validation, Stealth ignores caller's path argument |
 | `evasion/unhook` | `opener_windows_test.go` (VM, intrusive) | spyOpener counts: ClassicUnhook/FullUnhook each call `Open` exactly once on `ntdll.dll`; real Stealth round-trip proves full unhook still succeeds |
 | `inject` | `phantomdll_opener_test.go` (Windows build, host-safe) | spyOpener asserts PhantomDLLInject makes 2 opens on the same System32 DLL path (PE parse + NtCreateSection HANDLE) |
-| `evasion/herpaderping` | `opener_windows_test.go` (Windows build, host-safe) | spyOpener asserts payload+decoy reads both go through the Opener; empty DecoyPath → single call |
+| `process/tamper/herpaderping` | `opener_windows_test.go` (Windows build, host-safe) | spyOpener asserts payload+decoy reads both go through the Opener; empty DecoyPath → single call |
 
 Run just the Opener paths:
 
@@ -162,7 +162,7 @@ Run just the Opener paths:
 ./scripts/vm-run-tests.sh windows "./evasion/stealthopen/..." "-v -count=1"
 ./scripts/vm-run-tests.sh windows "./evasion/unhook/..." "-v -count=1 -run Opener"
 ./scripts/vm-run-tests.sh windows "./inject/..." "-v -count=1 -run PhantomDLLInject_UsesProvidedOpener"
-./scripts/vm-run-tests.sh windows "./evasion/herpaderping/..." "-v -count=1 -run Opener"
+./scripts/vm-run-tests.sh windows "./process/tamper/herpaderping/..." "-v -count=1 -run Opener"
 ```
 
 ### Other Evasion
@@ -483,7 +483,7 @@ untyped-constant range in Go. The runtime sum loop `for j { sum += teaDelta }`
 replaces it. `matDet` needs an explicit `n == 1` case for 2×2 matrix
 inversion (recursive cofactor minors land at 1×1).
 
-### evasion/fakecmd — SpoofPID remote PEB overwrite
+### process/tamper/fakecmd — SpoofPID remote PEB overwrite
 
 Extends the existing self-spoof to a remote process. Opens the target
 with `PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION |

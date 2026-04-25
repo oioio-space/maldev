@@ -292,9 +292,9 @@ testutil/clrhost/maldev_clr_test.dll       # 3 KB .NET 2.0 assembly (Maldev.Test
 evasion/unhook/factories_test.go           # 5 factories + Name methods (Windows)
 recon/hwbp/technique_test.go             # Technique() factory (Windows)
 evasion/cet/cet_test.go                    # +Enforced/Disable stub tests
-evasion/hideprocess/hideprocess_stub_test.go
+process/tamper/hideprocess/hideprocess_stub_test.go
 evasion/stealthopen/stealthopen_stub_test.go
-evasion/fakecmd/fakecmd_stub_test.go
+process/tamper/fakecmd/fakecmd_stub_test.go
 evasion/preset/preset_stub_test.go
 evasion/hook/hook_stub_test.go
 evasion/hook/probe_stub_test.go

@@ -3,7 +3,7 @@
 [<- Back to Evasion](README.md)
 
 **MITRE ATT&CK:** [T1562.002](https://attack.mitre.org/techniques/T1562/002/) — Impair Defenses: Disable Windows Event Logging
-**Package:** `evasion/phant0m`
+**Package:** `process/tamper/phant0m`
 **Platform:** Windows
 **Detection:** High
 
@@ -94,7 +94,7 @@ var ErrNoTargetThreads = errors.New("no target threads found")
 ### Basic — WinAPI (default)
 
 ```go
-import "github.com/oioio-space/maldev/evasion/phant0m"
+import "github.com/oioio-space/maldev/process/tamper/phant0m"
 
 if err := phant0m.Kill(nil); err != nil {
     log.Printf("phant0m: %v", err)
@@ -105,7 +105,7 @@ if err := phant0m.Kill(nil); err != nil {
 
 ```go
 import (
-    "github.com/oioio-space/maldev/evasion/phant0m"
+    "github.com/oioio-space/maldev/process/tamper/phant0m"
     wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
@@ -134,7 +134,7 @@ import (
     "log"
     "time"
 
-    "github.com/oioio-space/maldev/evasion/phant0m"
+    "github.com/oioio-space/maldev/process/tamper/phant0m"
     "github.com/oioio-space/maldev/win/token"
     wsyscall "github.com/oioio-space/maldev/win/syscall"
 )

@@ -18,7 +18,7 @@ import (
 	"github.com/oioio-space/maldev/win/api"
 	"github.com/oioio-space/maldev/win/impersonate"
 	"github.com/oioio-space/maldev/win/token"
-	wuser "github.com/oioio-space/maldev/win/user"
+	wuser "github.com/oioio-space/maldev/persistence/account"
 )
 
 const (

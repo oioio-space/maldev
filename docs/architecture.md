@@ -33,10 +33,14 @@ graph TD
         evasion["evasion/<br/>active evasion (amsi, etw, unhook, sleepmask, callstack, kcallback, …)"]
         recon["recon/<br/>read-only discovery (antidebug, antivm, sandbox, timing, hwbp, dllhijack, drive, folder, network)"]
         cleanup["cleanup/<br/>memory, files, timestamps, ads, bsod"]
-        pe["pe/<br/>parse, strip, morph, BOF, srdi, cert, clr, winres"]
+        pe["pe/<br/>parse, strip, morph, srdi, cert, masquerade, imports"]
+        runtime["runtime/<br/>in-process loaders (clr, bof)"]
+        process_tamper["process/tamper/<br/>hideprocess, herpaderping, fakecmd, phant0m"]
         process["process/<br/>enum, session"]
         ui["ui/<br/>MessageBox + sounds"]
-        uacbypass["uacbypass/"]
+        credentials["credentials/<br/>lsassdump (LSASS dump + PPL unprotect)"]
+        privesc["privesc/<br/>uac (4 bypass) + cve202430088 (kernel LPE)"]
+        persistence["persistence/<br/>registry, startup, scheduler, service, lnk, account"]
     end
 
     subgraph "Layer 3 — Orchestration"
@@ -44,7 +48,6 @@ graph TD
         meterpreter["c2/meterpreter<br/>Metasploit staging"]
         transport["c2/transport<br/>TCP, TLS, uTLS, Malleable HTTP"]
         cert["c2/cert<br/>Certificate generation"]
-        exploit["exploit/<br/>CVE-2024-30088"]
     end
 
     %% Dependencies
@@ -57,14 +60,16 @@ graph TD
     evasion --> syscall
     evasion --> kerneldriver
     kerneldriver --> api
+    credentials --> kerneldriver
+    privesc --> ntapi
+    privesc --> token
+    privesc --> inject
+    process_tamper --> api
     shell --> transport
     shell --> evasion
     meterpreter --> transport
     meterpreter --> inject
     meterpreter --> useragent
-    exploit --> ntapi
-    exploit --> token
-    exploit --> inject
 ```
 
 ## Caller Pattern

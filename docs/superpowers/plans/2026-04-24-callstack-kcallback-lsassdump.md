@@ -15,7 +15,7 @@
 We tackle them cheapest-to-hardest so each chantier can be interrupted or
 shipped in isolation:
 
-1. **`collection/lsassdump`** (v0.15.0) — bounded scope, purely user-mode,
+1. **`credentials/lsassdump`** (v0.15.0) — bounded scope, purely user-mode,
    clear MITRE mapping, well-studied primitives. Lowest risk.
 2. **`evasion/callstack`** (v0.16.0) — requires x64 unwind-metadata
    manipulation (plan9 asm + `RtlLookupFunctionEntry` synthesis). Medium
@@ -27,7 +27,7 @@ shipped in isolation:
 
 ---
 
-## Package 1 — `collection/lsassdump` (target v0.15.0)
+## Package 1 — `credentials/lsassdump` (target v0.15.0)
 
 **MITRE ATT&CK:** T1003.001 — OS Credential Dumping: LSASS Memory.
 **Detection:** **High** (lsass.exe open + full memory read is one of the
@@ -55,11 +55,11 @@ technique composes with `wsyscall` direct/indirect syscalls.
 
 | Path | Action | Purpose |
 |---|---|---|
-| `collection/lsassdump/doc.go` | create | Package doc, MITRE, detection |
-| `collection/lsassdump/lsassdump.go` | create | Cross-platform types + stubs |
-| `collection/lsassdump/lsassdump_windows.go` | create | Real implementation |
-| `collection/lsassdump/minidump_windows.go` | create | MiniDump stream builder (pure Go; no dbghelp) |
-| `collection/lsassdump/lsassdump_windows_test.go` | create | VM test, admin-gated |
+| `credentials/lsassdump/doc.go` | create | Package doc, MITRE, detection |
+| `credentials/lsassdump/lsassdump.go` | create | Cross-platform types + stubs |
+| `credentials/lsassdump/lsassdump_windows.go` | create | Real implementation |
+| `credentials/lsassdump/minidump_windows.go` | create | MiniDump stream builder (pure Go; no dbghelp) |
+| `credentials/lsassdump/lsassdump_windows_test.go` | create | VM test, admin-gated |
 | `docs/techniques/collection/lsass-dump.md` | create | Technique page |
 | `docs/mitre.md` | modify | T1003.001 entry |
 | `README.md` | modify | collection table row |
@@ -214,7 +214,7 @@ freshness-vs-dependency tradeoff in the technique page.
 
 | Package | LOC (est.) | Commits | Phases | VM complexity |
 |---|---|---|---|---|
-| `collection/lsassdump` | 400 | 4 | straightforward | medium (admin+intrusive) |
+| `credentials/lsassdump` | 400 | 4 | straightforward | medium (admin+intrusive) |
 | `evasion/callstack` | 600 | 4 | asm-heavy | low (unit-testable) |
 | `evasion/kcallback` | 500 | 4 | PDB-heavy | medium (needs live kernel) |
 

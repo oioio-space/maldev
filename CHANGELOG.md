@@ -7,6 +7,73 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Reorganization — Pass 3 (v0.22.0): `privesc/` + `credentials/` + `process/tamper/` + `persistence/account`
+
+Final pass of the 2026-04-25 reorganization. Closes the privilege-
+escalation fragmentation, separates credential access from collection,
+groups process-state-mutation techniques together, and moves local-
+account management out of the `win/*` Layer-1 primitives where it never
+belonged.
+
+**Privilege escalation consolidated under `privesc/`:**
+
+- `uacbypass/` → `privesc/uac` (FODHelper, SLUI, SilentCleanup, EventVwr — T1548.002)
+- `exploit/cve202430088/` → `privesc/cve202430088` (Windows kernel TOCTOU LPE to SYSTEM)
+- `exploit/` directory **retired entirely**.
+
+**Credential access carved out of collection:**
+
+- `collection/lsassdump` → `credentials/lsassdump` (T1003.001 — distinct ATT&CK tactic from collection)
+
+**Process state mutation grouped under `process/tamper/`:**
+
+- `evasion/hideprocess` → `process/tamper/hideprocess` (NtQSI patch in victim process)
+- `evasion/herpaderping` → `process/tamper/herpaderping` (process creation deception)
+- `evasion/fakecmd` → `process/tamper/fakecmd` (PEB CommandLine spoof, self + remote)
+- `evasion/phant0m` → `process/tamper/phant0m` (kill EventLog svchost threads)
+
+These 4 packages don't fit "make-myself-invisible" evasion — they
+modify a target process's state. Grouping them under `process/tamper/`
+makes the operator-mental-model clearer: `evasion/` is now strictly
+about defending the implant's own process.
+
+**Local account management is persistence:**
+
+- `win/user` → `persistence/account` (NetUserAdd / NetLocalGroupAddMembers — T1136.001)
+
+`win/user` was the only `win/*` package that wasn't a low-level
+syscall/COM wrapper. T1136.001 (Local Account creation) is persistence
+by definition.
+
+**Breaking change for external consumers:** every import path that
+referenced `uacbypass`, `exploit/cve202430088`, `collection/lsassdump`,
+`evasion/{hideprocess,herpaderping,fakecmd,phant0m}`, or `win/user`
+must be rewritten. No type aliases ship.
+
+**Tests on Win10 VM:** all moved packages green (privesc/uac,
+privesc/cve202430088, credentials/lsassdump, process/tamper/{fakecmd,
+herpaderping,hideprocess,phant0m}, persistence/account, plus regression
+on inject/, process/{enum,session}).
+
+**Docs updated:** README capability table (split Collection /
+Credentials, added Process Tampering row, renamed "Privilege & Exploits"
+to "Privilege Escalation", trimmed Evasion + Windows Primitives rows),
+`docs/architecture.md` Layer-2 subgraph rewritten with all the new
+groups + dependency edges, CLAUDE.md package-structure block updated to
+reflect the post-Pass-3 layering.
+
+**Final post-reorganization tree (top-level dirs, alphabetical):**
+
+```
+c2/  cleanup/  cmd/  collection/  credentials/  crypto/
+docs/  encode/  evasion/  hash/  inject/  internal/
+kernel/  pe/  persistence/  privesc/  process/  random/
+recon/  runtime/  testutil/  ui/  useragent/  win/
+```
+
+23 top-level dirs (was 18 pre-Pass-1, with `system/` 7-deep + `exploit/`
++ `uacbypass/` flat). Each parent has a clear 1-line purpose.
+
 ### Reorganization — Pass 2 (v0.21.0): `runtime/` carve-out + `inject/` file split
 
 Top-level package restructure separating **in-process code loaders**
@@ -116,7 +183,7 @@ Layer-2 subgraph, `docs/system.md` renamed to `docs/recon.md`,
   kernel VA. 12 mock-reader unit tests cover happy path, race
   windows, nil-writer guards, deferred-cleanup zero-token idiom.
   **Chantier B (v0.17.1).**
-- `collection/lsassdump`: `Unprotect` + `Reprotect` + `PPLToken` +
+- `credentials/lsassdump`: `Unprotect` + `Reprotect` + `PPLToken` +
   `PPLOffsetTable` (v0.15.1). EPROCESS-unprotect path mirroring
   mimikatz's mimidrv strategy: caller plugs in a
   `kernel/driver.ReadWriter`, passes lsass's EPROCESS kernel VA +
@@ -369,7 +436,7 @@ Layer-2 subgraph, `docs/system.md` renamed to `docs/recon.md`,
 
 ### Added
 
-- `collection/lsassdump`: LSASS credential dump package (MITRE
+- `credentials/lsassdump`: LSASS credential dump package (MITRE
   T1003.001). `OpenLSASS` walks the process list via
   `NtGetNextProcess` with `PROCESS_QUERY_LIMITED_INFORMATION` (cheap
   access even protected processes grant), identifies `lsass.exe` via
@@ -383,7 +450,7 @@ Layer-2 subgraph, `docs/system.md` renamed to `docs/recon.md`,
   region at a time, never via `MiniDumpWriteDump` (heavily
   EDR-hooked). Every `Nt*` call accepts an optional
   `*wsyscall.Caller` for direct/indirect syscall routing.
-- `collection/lsassdump.Build` is exported so callers can assemble a
+- `credentials/lsassdump.Build` is exported so callers can assemble a
   MINIDUMP from arbitrary memory regions (test fixtures, replayed
   snapshots). Pure-Go byte-packing; no dbghelp.
 - VM e2e (admin + MALDEV_INTRUSIVE, Win10 TOOLS snapshot): dumps
@@ -415,7 +482,7 @@ Layer-2 subgraph, `docs/system.md` renamed to `docs/recon.md`,
   parses imports from the in-memory bytes via `importsFromBytes`.
 - `testutil`: new `SpyOpener` consolidates the `stealthopen.Opener`
   spy pattern previously duplicated across four test files
-  (`recon/dllhijack`, `evasion/herpaderping`, `evasion/unhook`,
+  (`recon/dllhijack`, `process/tamper/herpaderping`, `evasion/unhook`,
   `inject/phantomdll`). Single source, mutex-guarded `Paths()` /
   `Last()` snapshots, and a defaulted `Inner` so tests can stay
   focused on call-count / last-path assertions.
@@ -520,7 +587,7 @@ coverage workflow.
   swaps a path-based `os.Open` for `OpenFileById` via NTFS Object ID so
   path-keyed EDR file hooks never observe the open. Wired into
   `evasion/unhook`, `inject.PhantomDLLInject`, and
-  `evasion/herpaderping.Config.Opener` (new field). (e674462)
+  `process/tamper/herpaderping.Config.Opener` (new field). (e674462)
 - `cleanup/memory.DoSecret(func())` and `SecretEnabled()` — opt-in wrapper
   around Go 1.26's experimental `runtime/secret.Do` for erasing registers,
   stack locals, and heap temporaries of a sensitive computation. Selected
@@ -547,7 +614,7 @@ coverage workflow.
 - Opener-wiring tests: `evasion/stealthopen/opener{_,_windows_}test.go`,
   `evasion/unhook/opener_windows_test.go`,
   `inject/phantomdll_opener_test.go`,
-  `evasion/herpaderping/opener_windows_test.go`. Cover both the
+  `process/tamper/herpaderping/opener_windows_test.go`. Cover both the
   `Standard`/`Use(nil)` fallback and the real `NewStealth` round-trip
   through `OpenFileById`, plus spy-opener assertions that each consumer
   consults the Opener the expected number of times. (e674462)
@@ -797,7 +864,7 @@ TOTAL   1133 passed / 0 failed / 61 skipped
 - `win/token`: `EnableAll`/`DisableAll` now no-op when every eligible privilege already matches (was `ErrNoPrivilegesSpecified`).
 - `process/enum`: `TestSessionIDPopulated` compares against `ProcessIdToSessionId`, no longer assumes interactive session.
 - `cleanup/service`: SCM DACL tests gated behind `MALDEV_SCM=1` + elevation probe (crashed silently under OpenSSH).
-- `evasion/herpaderping`: manual temp dir + `taskkill` cleanup (image-lock race on spawned cmd.exe).
+- `process/tamper/herpaderping`: manual temp dir + `taskkill` cleanup (image-lock race on spawned cmd.exe).
 - `evasion/hook/bridge`: `skipIfNonWindowsController` on 11 tests needing the real Windows Controller.
 - `pe/masquerade`: fall back to `explorer.exe` when `notepad.exe` UWP-shim ships without icon resources.
 - `persistence/scheduler`: skip `TestList` in session 0 (OpenSSH).

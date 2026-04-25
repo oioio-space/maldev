@@ -3,7 +3,7 @@
 [<- Back to Collection](README.md)
 
 **MITRE ATT&CK:** [T1003.001 — OS Credential Dumping: LSASS Memory](https://attack.mitre.org/techniques/T1003/001/)
-**Package:** `collection/lsassdump`
+**Package:** `credentials/lsassdump`
 **Platform:** Windows
 **Detection:** High
 
@@ -23,7 +23,7 @@ is blocked or alerted by every modern EDR: `MiniDumpWriteDump` is
 heavily hooked, and so is `OpenProcess(PROCESS_VM_READ, lsass.pid)` on
 its own.
 
-`collection/lsassdump` ships a quieter variant:
+`credentials/lsassdump` ships a quieter variant:
 
 1. **Stealthier process discovery**: `NtGetNextProcess` walks the
    running-process list with `PROCESS_QUERY_LIMITED_INFORMATION` only
@@ -102,7 +102,7 @@ sequenceDiagram
 
 ```go
 import (
-    "github.com/oioio-space/maldev/collection/lsassdump"
+    "github.com/oioio-space/maldev/credentials/lsassdump"
 )
 
 func main() {

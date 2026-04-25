@@ -3,7 +3,7 @@
 [<- Back to Evasion](README.md)
 
 **MITRE ATT&CK:** [T1564.001 - Hide Artifacts](https://attack.mitre.org/techniques/T1564/001/)
-**Package:** `evasion/hideprocess`
+**Package:** `process/tamper/hideprocess`
 **Platform:** Windows (x64)
 **Detection:** Medium
 
@@ -69,7 +69,7 @@ sequenceDiagram
 import (
     "log"
 
-    "github.com/oioio-space/maldev/evasion/hideprocess"
+    "github.com/oioio-space/maldev/process/tamper/hideprocess"
     "github.com/oioio-space/maldev/process/enum"
 )
 
@@ -114,7 +114,7 @@ import (
     "log"
     "time"
 
-    "github.com/oioio-space/maldev/evasion/hideprocess"
+    "github.com/oioio-space/maldev/process/tamper/hideprocess"
     "github.com/oioio-space/maldev/process/enum"
 )
 
@@ -159,4 +159,4 @@ ever touching the kernel.
 
 ## API Reference
 
-See [evasion.md](../../evasion.md) (table row: `evasion/hideprocess`)
+See [evasion.md](../../evasion.md) (table row: `process/tamper/hideprocess`)

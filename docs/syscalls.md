@@ -13,8 +13,8 @@ The `win/syscall` package provides a `Caller` that routes NT function calls thro
   mirrored as Go structs with correct x64 layout + offsets.
 - **Helpers** — PEB walk (`CurrentPEB`, `ModuleBaseFromPEB`), unicode-string
   builders (`NewUnicodeString`), status-code mapping (`NTSTATUS.Error`).
-- **Used by** — `evasion/unhook`, `evasion/phant0m`, `inject/phantomdll`,
-  `inject/modulestomp`, `evasion/fakecmd`, `evasion/hideprocess`,
+- **Used by** — `evasion/unhook`, `process/tamper/phant0m`, `inject/phantomdll`,
+  `inject/modulestomp`, `process/tamper/fakecmd`, `process/tamper/hideprocess`,
   `evasion/stealthopen`, `runtime/clr`.
 
 `win/ntapi` does **not** execute syscalls — it supplies the data

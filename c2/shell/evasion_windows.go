@@ -8,7 +8,7 @@ import (
 
 	"github.com/oioio-space/maldev/evasion"
 	"github.com/oioio-space/maldev/evasion/preset"
-	"github.com/oioio-space/maldev/win/user"
+	"github.com/oioio-space/maldev/persistence/account"
 )
 
 // applyEvasion applies the provided evasion techniques on Windows.

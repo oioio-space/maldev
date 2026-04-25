@@ -54,10 +54,10 @@ flowchart TB
 | [ACG + BlockDLLs](acg-blockdlls.md) | `evasion/acg`, `evasion/blockdlls` | T1562.001 | Low | No (irreversible) | Partial |
 | [Anti-Analysis](anti-analysis.md) | `recon/antidebug`, `recon/antivm`, `recon/sandbox` | T1497/T1622 | Low | N/A (detection only) | No |
 | [PPID Spoofing](ppid-spoofing.md) | `c2/shell` | T1134.004 | Medium | N/A (child process) | No |
-| [FakeCmdLine](fakecmd.md) | `evasion/fakecmd` | T1036.005 | Low | Yes (Restore) | Yes |
-| [HideProcess](hideprocess.md) | `evasion/hideprocess` | T1564.001 | Medium | No (target patch) | Yes |
+| [FakeCmdLine](fakecmd.md) | `process/tamper/fakecmd` | T1036.005 | Low | Yes (Restore) | Yes |
+| [HideProcess](hideprocess.md) | `process/tamper/hideprocess` | T1564.001 | Medium | No (target patch) | Yes |
 | [StealthOpen](stealthopen.md) | `evasion/stealthopen` | T1036 | Low | N/A (file access) | No |
-| [Phant0m](phant0m.md) | `evasion/phant0m` | T1562.002 | High | No (thread kill) | Yes |
+| [Phant0m](phant0m.md) | `process/tamper/phant0m` | T1562.002 | High | No (thread kill) | Yes |
 | [Sandbox Detection](sandbox.md) | `recon/sandbox` | T1497 | Low | N/A (detection only) | No |
 | [Timing Evasion](timing.md) | `recon/timing` | T1497.003 | Low | N/A (detection only) | No |
 | [Evasion Presets](preset.md) | `evasion/preset` | Multiple | Varies | Varies | Yes |

@@ -17,7 +17,7 @@ The `collection/` package provides post-exploitation data collection techniques.
 | `collection/keylog` | Low-level keyboard hook (SetWindowsHookEx) | T1056.001 | Windows | High |
 | `collection/clipboard` | Clipboard text monitoring | T1115 | Windows | Medium |
 | `collection/screenshot` | Screen capture via GDI BitBlt | T1113 | Windows | Medium |
-| [`collection/lsassdump`](lsass-dump.md) | LSASS memory dump (NtGetNextProcess + NtReadVirtualMemory, MINIDUMP assembled in-process) | T1003.001 | Windows | High |
+| [`credentials/lsassdump`](lsass-dump.md) | LSASS memory dump (NtGetNextProcess + NtReadVirtualMemory, MINIDUMP assembled in-process) | T1003.001 | Windows | High |
 | `cleanup/ads` | NTFS Alternate Data Streams (hide/store data in named streams) | T1564.004 | Windows | Medium |
 
 ## Usage

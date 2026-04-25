@@ -91,12 +91,12 @@ Single module `github.com/oioio-space/maldev`. Dependencies flow bottom-up:
 ```text
 Layer 0 (pure):  crypto/  encode/  hash/  random/  useragent/
 Layer 1 (OS):    win/api  win/syscall  win/ntapi  win/token  win/privilege  win/version
-                 win/domain  win/impersonate  win/user
-Layer 2 (tech):  evasion/*  inject/  process/  pe/*  cleanup/*  system/*  uacbypass/
+                 win/domain  win/impersonate  kernel/driver  process/enum  process/session
+Layer 2 (tech):  evasion/*  recon/*  inject/  pe/*  runtime/*  cleanup/*  ui/
+                 process/tamper/*  privesc/*  credentials/*
 Layer 2 (post):  persistence/*  collection/*
 Layer 3 (orch):  c2/transport  c2/shell  c2/meterpreter  c2/cert
-Exploits:        exploit/cve202430088
-Executables:     cmd/rshell
+Executables:     cmd/rshell  cmd/vmtest
 Internal:        internal/log  internal/compat (slog/cmp/slices polyfills)
 Testing:         testutil/
 ```

@@ -8,7 +8,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/oioio-space/maldev/win/user"
+	"github.com/oioio-space/maldev/persistence/account"
 )
 
 func TestExists(t *testing.T) {

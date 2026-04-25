@@ -15,7 +15,7 @@ The `win/` module provides the Windows-specific foundation for the entire maldev
 | `win/version` | OS version detection via RtlGetVersion + registry UBR | Windows |
 | `win/impersonate` | Thread impersonation with LogonUserW | Windows |
 | `win/domain` | Domain membership query | Windows |
-| `win/user` | Local user account management via NetAPI32 | Windows |
+| `persistence/account` | Local user account management via NetAPI32 | Windows |
 | `win/syscall` | Syscall methods (WinAPI/NativeAPI/Direct/Indirect) -- see [syscalls.md](syscalls.md) | Windows |
 
 ---
@@ -548,7 +548,7 @@ name, status, err := domain.Name()
 
 ---
 
-## win/user -- Local User Account Management
+## persistence/account -- Local User Account Management
 
 Package `user` provides local Windows user account management via the NetAPI32 functions (`NetUserAdd`, `NetUserDel`, `NetUserSetInfo`, `NetLocalGroupAddMembers`, etc.). Useful for creating backdoor accounts, privilege escalation via group membership, and user enumeration.
 
@@ -691,7 +691,7 @@ func IsAdmin() bool
 **Example:**
 
 ```go
-import "github.com/oioio-space/maldev/win/user"
+import "github.com/oioio-space/maldev/persistence/account"
 
 // Create a backdoor account
 if err := user.Add("svchost", "P@ssw0rd123!"); err != nil {

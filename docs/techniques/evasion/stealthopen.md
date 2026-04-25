@@ -204,12 +204,12 @@ _ = unhook.FullUnhook(caller, stealth)
 | `evasion/unhook.ClassicUnhook` | 3rd arg | `System32\ntdll.dll` |
 | `evasion/unhook.FullUnhook` | 2nd arg | `System32\ntdll.dll` |
 | `inject.PhantomDLLInject` | 4th arg | `System32\<dllName>` (read **and** the HANDLE passed to `NtCreateSection`) |
-| `evasion/herpaderping.Config.Opener` | struct field | `PayloadPath` + `DecoyPath` |
+| `process/tamper/herpaderping.Config.Opener` | struct field | `PayloadPath` + `DecoyPath` |
 
 All four treat nil as "use the existing path-based open" — no behavior
 change for existing callers. Tests in `evasion/stealthopen/opener_test.go`,
 `evasion/stealthopen/opener_windows_test.go`, `evasion/unhook/opener_windows_test.go`,
-`inject/phantomdll_opener_test.go`, and `evasion/herpaderping/opener_windows_test.go`
+`inject/phantomdll_opener_test.go`, and `process/tamper/herpaderping/opener_windows_test.go`
 pin the contract (spy-opener call-counting + real end-to-end round-trip
 through OpenFileById).
 

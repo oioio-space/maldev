@@ -2,7 +2,7 @@
 
 [<- Back to README](../../../README.md)
 
-The `win/token`, `win/impersonate`, `win/privilege`, and `uacbypass` packages provide Windows token manipulation: stealing tokens from other processes, thread impersonation, privilege escalation, and UAC bypass.
+The `win/token`, `win/impersonate`, `win/privilege`, and `privesc/uac` packages provide Windows token manipulation: stealing tokens from other processes, thread impersonation, privilege escalation, and UAC bypass.
 
 ---
 
@@ -41,7 +41,7 @@ graph TD
         RUNAS["ShellExecuteRunAs()"]
     end
 
-    subgraph "uacbypass"
+    subgraph "privesc/uac"
         FOD["FODHelper()"]
         SLUI["SLUI()"]
         SILENT["SilentCleanup()"]

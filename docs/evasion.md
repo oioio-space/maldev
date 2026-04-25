@@ -13,16 +13,16 @@ The `evasion/` module provides composable defense evasion techniques for Windows
 | `evasion/unhook` | ntdll.dll restoration | T1562.001 -- Impair Defenses | High | Windows |
 | `evasion/acg` | Arbitrary Code Guard policy | T1562.001 -- Impair Defenses | Low | Windows 10+ |
 | `evasion/blockdlls` | Block non-Microsoft DLLs | T1562.001 -- Impair Defenses | Low | Windows 10+ |
-| `evasion/phant0m` | Event Log thread termination | T1562.002 -- Disable Event Logging | High | Windows |
-| `evasion/herpaderping` | Process image tampering via kernel section cache | T1055 -- Process Injection | Medium | Windows 10+ |
+| `process/tamper/phant0m` | Event Log thread termination | T1562.002 -- Disable Event Logging | High | Windows |
+| `process/tamper/herpaderping` | Process image tampering via kernel section cache | T1055 -- Process Injection | Medium | Windows 10+ |
 | `recon/hwbp` | Hardware breakpoint detection and clearing | T1622 -- Debugger Evasion | Low | Windows |
 | `evasion/sleepmask` | Encrypt memory regions during sleep | T1027 -- Obfuscated Files | Medium | Windows |
 | `recon/antidebug` | Debugger detection | T1622 -- Debugger Evasion | Low | Cross-platform |
 | `recon/antivm` | VM/hypervisor detection | T1497.001 -- System Checks | Low | Cross-platform |
 | `recon/timing` | CPU-burning delays | T1497.003 -- Time Based Evasion | Low | Cross-platform |
 | `recon/sandbox` | Multi-factor sandbox detection | T1497 -- Sandbox Evasion | Low | Cross-platform |
-| `evasion/fakecmd` | PEB CommandLine overwrite | T1036.005 -- Masquerading | Low | Windows |
-| `evasion/hideprocess` | Patch `NtQuerySystemInformation` in a target process | T1564.001 -- Hidden Process | Medium | Windows |
+| `process/tamper/fakecmd` | PEB CommandLine overwrite | T1036.005 -- Masquerading | Low | Windows |
+| `process/tamper/hideprocess` | Patch `NtQuerySystemInformation` in a target process | T1564.001 -- Hidden Process | Medium | Windows |
 | `evasion/stealthopen` | Open files by NTFS Object ID (bypass path-based EDR hooks) | T1036 -- Masquerading | Low | Windows |
 | `evasion/cet` | Detect / relax Intel CET shadow-stack + emit ENDBR64 marker | T1562.001 -- Impair Defenses | High | Windows 11 |
 | `evasion/hook` | x64 inline hooking with trampoline (Go callbacks) | T1574.012 -- Hijack Execution Flow: Inline Hooking | High | Windows (x64) |
@@ -31,7 +31,7 @@ The `evasion/` module provides composable defense evasion techniques for Windows
 | `evasion/preset` | Composable technique presets | -- | -- | Windows |
 
 Full technique walk-throughs:
-[fakecmd](techniques/evasion/fakecmd.md) · [hideprocess](techniques/evasion/hideprocess.md) · [stealthopen](techniques/evasion/stealthopen.md) · [inline-hook](techniques/evasion/inline-hook.md) · [ntdll-unhooking](techniques/evasion/ntdll-unhooking.md) · [amsi-bypass](techniques/evasion/amsi-bypass.md) · [etw-patching](techniques/evasion/etw-patching.md)
+[fakecmd](techniques/process/tamper/fakecmd.md) · [hideprocess](techniques/process/tamper/hideprocess.md) · [stealthopen](techniques/evasion/stealthopen.md) · [inline-hook](techniques/evasion/inline-hook.md) · [ntdll-unhooking](techniques/evasion/ntdll-unhooking.md) · [amsi-bypass](techniques/evasion/amsi-bypass.md) · [etw-patching](techniques/evasion/etw-patching.md)
 
 ## Core Interface (`evasion`)
 
@@ -563,7 +563,7 @@ The Windows Event Log service writes security-critical events (logons, process c
 
 **Example:**
 ```go
-import "github.com/oioio-space/maldev/evasion/phant0m"
+import "github.com/oioio-space/maldev/process/tamper/phant0m"
 
 if err := phant0m.Kill(nil); err != nil {
     log.Printf("phant0m failed: %v", err)
@@ -620,7 +620,7 @@ Process Herpaderping exploits a fundamental timing gap in the Windows process cr
 
 **Example:**
 ```go
-import "github.com/oioio-space/maldev/evasion/herpaderping"
+import "github.com/oioio-space/maldev/process/tamper/herpaderping"
 
 err := herpaderping.Run(herpaderping.Config{
     PayloadPath: "implant.exe",
@@ -1333,7 +1333,7 @@ for {
 
 ## fakecmd -- PEB CommandLine Spoof
 
-**Package:** `evasion/fakecmd`
+**Package:** `process/tamper/fakecmd`
 **MITRE:** T1036.005 -- Masquerading: Match Legitimate Name or Location
 **Detection:** Low — in-memory only; kernel `EPROCESS` retains the original command line.
 
@@ -1346,7 +1346,7 @@ The original UNICODE_STRING fields are saved on the first `Spoof` call and resto
 ### Usage
 
 ```go
-import "github.com/oioio-space/maldev/evasion/fakecmd"
+import "github.com/oioio-space/maldev/process/tamper/fakecmd"
 
 // Overwrite PEB CommandLine — callers see svchost from now on.
 if err := fakecmd.Spoof(`C:\Windows\System32\svchost.exe -k netsvcs`, nil); err != nil {
