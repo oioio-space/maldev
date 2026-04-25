@@ -34,8 +34,27 @@
 // Win 10/11 lsass is x64 by default so the operational value is
 // limited.
 //
-// Out of scope today: WoW64 (x86) extraction, live-process attach.
-// Each is a follow-up chantier on top of the existing walker layers.
+// Real-binary validation findings (v0.30.0, vs Win 10 22H2 build
+// 19045 dump):
+//
+//   - MSV1_0 NTLM hashes: validated end-to-end (interactive user's
+//     NT hash round-trips through Parse).
+//   - Wdigest: signature matches; cache empty as expected
+//     (UseLogonCredential=0 default).
+//   - DPAPI master keys: signature lives in dpapisrv.dll (NOT
+//     lsasrv.dll). Parse() now falls back to dpapisrv when the
+//     lsasrv scan misses — first cache-population path validated.
+//   - Kerberos: signature matches in kerberos.dll, but the v0.26.1
+//     walker uses a flat doubly-linked list and Vista+ Kerberos
+//     uses an RTL_AVL_TABLE instead — walker returns zero sessions
+//     silently. AVL refactor queued for v0.30.x.
+//   - TSPkg: KvcForensic signature `48 83 EC 20 48 8B 0D` doesn't
+//     match in tspkg.dll on build 19045. Same AVL-tree caveat as
+//     Kerberos applies once the signature lands.
+//
+// Out of scope today: WoW64 (x86) extraction, live-process attach,
+// RTL_AVL_TABLE walker for Kerberos + TSPkg sessions on Vista+
+// (v0.30.x follow-up).
 //
 // Each provider auto-disables when its Layout.NodeSize is zero — the
 // walker is skipped at no runtime cost. The v0.25.2+ default

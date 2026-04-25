@@ -7,6 +7,32 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added/Fixed — `credentials/sekurlsa` v0.30.0 — DPAPI fallback to dpapisrv.dll + diagnostic infrastructure
+
+Real-binary validation continued. Findings documented in package
+doc + diagnostic test infrastructure shipped.
+
+- **DPAPI fallback**: `Parse()` now scans `lsasrv.dll` for the
+  master-key cache list head, then falls back to `dpapisrv.dll`
+  when the lsasrv scan yields no keys. Mirrors pypykatz's `for
+  modulename in ['lsasrv.dll','dpapisrv.dll']:` loop.
+- **TestRealDumpDiagnostics**: env-gated diagnostic
+  (MALDEV_REALDUMP=<path>) that scans every default template's
+  signature in its candidate module(s) and reports per-module
+  match counts + first-match VAs. Used to triage which templates
+  match and which need refinement against a real binary.
+- **Documented v0.30.0 findings** in package doc:
+  - MSV1_0: validated end-to-end on Win 10 22H2 build 19045 dump.
+  - Wdigest: signature matches, cache empty (UseLogonCredential=0
+    default — expected).
+  - DPAPI: lives in dpapisrv.dll on this build; fallback validated.
+  - Kerberos: signature matches in kerberos.dll BUT Vista+ uses an
+    RTL_AVL_TABLE instead of a flat doubly-linked list — current
+    walker returns zero silently. AVL refactor queued.
+  - TSPkg: signature mismatched on build 19045; same AVL-tree
+    caveat as Kerberos.
+- 108/108 tests green (was 107; +1 diagnostic test).
+
 ### Fixed — `credentials/sekurlsa` v0.29.2 — real-binary validation surfaced two critical bugs
 
 **First end-to-end run against a real Win 10 22H2 lsass dump (build

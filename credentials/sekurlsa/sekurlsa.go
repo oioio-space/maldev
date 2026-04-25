@@ -230,11 +230,22 @@ func Parse(reader io.ReaderAt, size int64) (*Result, error) {
 		res.Warnings = append(res.Warnings, wdigWarnings...)
 	}
 
-	// DPAPI master-key cache lives in lsasrv.dll (already resolved
-	// above for the LSA crypto step). Cached keys are pre-decrypted
-	// — no lsaKey needed for this path. Same merge-by-LUID +
-	// orphan-surface semantics as Wdigest.
+	// DPAPI master-key cache: pypykatz scans both lsasrv.dll and
+	// dpapisrv.dll for the cache list-head global — different builds
+	// put it in different modules. We try lsasrv first (most common
+	// post-Win 8.1) and fall back to dpapisrv when the lsasrv scan
+	// yields no keys. Cached keys are pre-decrypted — no lsaKey
+	// needed for this path.
 	dpapiKeys, dpapiWarnings := extractDPAPI(r, lsasrv, tmpl)
+	if len(dpapiKeys) == 0 {
+		if dpapisrv, ok := res.ModuleByName("dpapisrv.dll"); ok {
+			fallback, fallbackWarn := extractDPAPI(r, dpapisrv, tmpl)
+			if len(fallback) > 0 {
+				dpapiKeys = fallback
+				dpapiWarnings = fallbackWarn
+			}
+		}
+	}
 	sessions = mergeDPAPI(sessions, dpapiKeys)
 	res.Warnings = append(res.Warnings, dpapiWarnings...)
 
