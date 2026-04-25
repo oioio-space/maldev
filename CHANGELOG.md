@@ -56,6 +56,22 @@ introduce breaking API changes.
   ISO-based reprovisioning starts from a stable point. **Chantier F
   (pt 1/2).**
 
+- `evasion/callstack`: `SpoofCall(target, chain, args...)` + plan9 asm
+  pivot (`spoof_windows_amd64.s`). Allocates a 64 KiB side stack via
+  VirtualAlloc, plants the chain, and JMPs to target with RSP swapped
+  to the chain top; `spoofTrampoline` lands on the chain bottom and
+  restores Go's RSP/R14 before returning the target's RAX. **Scaffold
+  only** — 6 caller-side unit tests are green but the end-to-end
+  pivot crashes Go's runtime (`lastcontinuehandler`) under
+  `MALDEV_SPOOFCALL_E2E=1`. Promotion to a tagged release waits on
+  the e2e crash being root-caused. **Chantier D.**
+- `evasion/sleepmask`: `MultiRegionRotation` wrapper — applies any
+  single-region strategy (notably `EkkoStrategy`) sequentially across
+  N regions, sleeping `d/N` per region. Total wall-clock matches `d`;
+  trade-off is staggered protection. 7 unit tests cover the dispatch
+  contract, error propagation, context-cancel, and short-duration
+  fallback. **Chantier H.**
+
 ### Documented
 
 - `inject/realsc`: `MethodCreateFiber + Go runtime` incompatibility.

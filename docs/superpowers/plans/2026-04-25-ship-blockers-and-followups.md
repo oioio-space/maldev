@@ -20,8 +20,9 @@
 | **C** — lsassdump PPL | ✅ Shipped | `0d31c50` (tag `v0.15.1`) | Unprotect/Reprotect/PPLToken/PPLOffsetTable + 8 mock tests; VM e2e on RunAsPPL=1 lsass waits on `byovd_rtcore64`. |
 | **E** — realsc Fiber | ✅ Diagnosed + documented | `f915563` | ConvertThreadToFiber consumes the OS thread; Go runtime fights it; correct integration is `kernel32!CreateThread`-spawned OS thread, not a goroutine. Skip message + README warning ship the diagnosis. |
 | **G** — dllhijack KindProcess | ✅ Design sketch | `e07bdd8` | Sandboxed-spawn pattern designed (clean-env spawn + bounded timeout + signed-canary + AllowSpawn opt-in); implementation deferred. |
-| **D** — callstack v0.16.1 | ⏸ Deferred | — | Plan9-asm pivot vs. Go's M:N scheduler is HIGH risk; needs its own session with the GOTRACEBACK=crash + WER LocalDumps debug loop. See chantier D below. |
-| **H** — sleepmask roadmap | ⏸ Deferred | — | Multi-feature, 800-1200 LOC; no single piece is small enough for this session. See chantier H below. |
+| **D** — callstack v0.16.1 | ✅ Scaffold | `674c661` | SpoofCall + asm pivot wired; 6 unit tests green; e2e (`MALDEV_SPOOFCALL_E2E=1`) crashes via Go's `lastcontinuehandler` — root-cause analysis required before tagging v0.16.1. |
+| **F pt 2/2** — ISO sources/sxs | ✅ Partial | `674c661` | DISM `/Add-Package` of the ISO's NetFx3 OnDemand cab + Win7-era `dotnetfx35.exe` redist both insufficient. `vm-provision.sh` now stages the cab when `MALDEV_NETFX3_CAB` is set; full unblock still needs `install.wim` mount. |
+| **H** — sleepmask multi-region | ✅ Shipped | `294acad` | `MultiRegionRotation` wrapper unblocks Ekko for N-region scenarios via sequential per-region rotation. Foliage L3 fake-RA, BOF L4, Hunt-Sleeping-Beacons stack-mask remain queued for v0.19.0. |
 
 ---
 
