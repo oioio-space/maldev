@@ -18,10 +18,18 @@
 // implant's own address space with pure-Go primitives — no further
 // detection surface.
 //
-// v1 scope: MSV1_0 NTLM hash extraction (NT/LM/SHA1) for every active
-// logon session. Out of scope: WDigest plaintext, Kerberos tickets,
-// DPAPI master keys, LiveSSP / TSPkg / CloudAP secrets, live-process
-// attach. Each is a follow-up chantier on top of the v1 crypto layer.
+// Scope:
+//   - MSV1_0 NTLM hashes (NT / LM / SHA1) — v0.23.x
+//   - Wdigest plaintext passwords — v0.24.x (opt-in per template)
+// Out of scope today: Kerberos tickets, DPAPI master keys, LiveSSP /
+// TSPkg / CloudAP secrets, live-process attach. Each is a follow-up
+// chantier on top of the existing crypto + walker layers.
+//
+// The Wdigest provider auto-disables when the registered Template
+// has WdigestLayout.NodeSize == 0 (the default for the v0.23.x
+// templates). Operators with a verified Win10/Win11 wdigest.dll
+// signature register an extended Template that fills the Wdigest
+// fields — see WdigestLayout doc for the field-by-field meaning.
 //
 // Templates ship inline for Win10 19H1 → 22H2 (builds 18362–19045)
 // and Win11 21H2 → 22H2 pre-22622 (builds 22000–22621). A dump from

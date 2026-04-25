@@ -7,6 +7,26 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added — `credentials/lsasparse` v0.24.0 — Wdigest provider
+
+- New `WdigestCredential` type implementing the `Credential` interface
+  (alongside `MSV1_0Credential`). Carries the plaintext password
+  decrypted from `wdigest.dll` when `UseLogonCredential=1`.
+- New `WdigestLayout` struct + `WdigestList{Pattern,Wildcards,Offset}`
+  fields on `Template`. Set `WdigestLayout.NodeSize=0` and the
+  Wdigest walker is skipped at no runtime cost — the v0.23.x default
+  templates default to disabled until offsets are verified against a
+  real binary.
+- `Parse()` now scans `wdigest.dll` (when present in MODULE_LIST)
+  after the MSV1_0 walk. Wdigest credentials are merged onto matching
+  MSV `LogonSession` entries by LUID; orphan Wdigest LUIDs surface as
+  new sessions so callers don't lose any extracted credential.
+- `WdigestCredential.String()` renders as `Domain\User:Password`;
+  `wipe()` zeros the plaintext field for `Result.Wipe()` callers.
+- 9 new unit tests including a synthetic-fixture round-trip covering
+  pattern → rel32 deref → list walk → AES-CBC decrypt → UTF-16LE
+  decode → LUID-merge.
+
 ### Added — `credentials/lsasparse` v0.23.2 — inline default Templates
 
 - Win10 19H1 → 22H2 (builds 18362–19045) and Win11 21H2 → 22H2

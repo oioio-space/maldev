@@ -200,9 +200,20 @@ func Parse(reader io.ReaderAt, size int64) (*Result, error) {
 	}
 
 	sessions, warnings := extractMSV1_0(r, lsasrv, tmpl, keys)
-	res.Sessions = sessions
 	res.Warnings = append(res.Warnings, warnings...)
 
+	// Wdigest is opt-in per Template (NodeSize=0 disables it). The
+	// walker scans wdigest.dll, decrypts each session's password with
+	// the same lsaKey chain, and merges results onto MSV sessions by
+	// LUID. Sessions without an MSV match still surface — the caller
+	// keeps everything it can extract.
+	if wdigest, ok := res.ModuleByName("wdigest.dll"); ok {
+		wdigCreds, wdigWarnings := extractWdigest(r, wdigest, tmpl, keys)
+		sessions = mergeWdigest(sessions, wdigCreds)
+		res.Warnings = append(res.Warnings, wdigWarnings...)
+	}
+
+	res.Sessions = sessions
 	return res, nil
 }
 

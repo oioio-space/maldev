@@ -61,6 +61,22 @@ type Template struct {
 	// MSVLayout captures per-build _MSV1_0_LOGON_SESSION node offsets.
 	// See MSVLayout type doc for the field-by-field meaning.
 	MSVLayout MSVLayout
+
+	// Wdigest fields. The Wdigest provider lives in wdigest.dll (not
+	// lsasrv.dll), exposes a single doubly-linked list of session
+	// nodes (no bucket array), and stores plaintext passwords
+	// encrypted with the same LSA key chain. A template that doesn't
+	// support Wdigest leaves these zero — the Wdigest walker is
+	// skipped.
+	WdigestListPattern   []byte
+	WdigestListWildcards []int
+	// WdigestListOffset is the signed byte distance from the
+	// WdigestListPattern match to the rel32 that points at the list
+	// head global inside wdigest.dll's .data segment.
+	WdigestListOffset int32
+	// WdigestLayout captures per-build KIWI_WDIGEST_LIST_ENTRY node
+	// offsets. Set NodeSize=0 to disable the Wdigest walker.
+	WdigestLayout WdigestLayout
 }
 
 // validate sanity-checks a template before it enters the registry.

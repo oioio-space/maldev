@@ -146,11 +146,13 @@ type Result struct {
 func (r *Result) ModuleByName(name string) (Module, bool)
 func (r *Result) Wipe()
 
-// Credentials. v1 ships exactly one variant; future Wdigest /
-// Kerberos / TSPkg variants implement the same interface.
+// Credentials. Each provider implements the same interface so callers
+// can range over Session.Credentials uniformly.
 type Credential interface {
     AuthPackage() string
 }
+
+// MSV1_0Credential — NT/LM/SHA1 hashes (the pass-the-hash pivot).
 type MSV1_0Credential struct {
     UserName    string
     LogonDomain string
@@ -162,6 +164,16 @@ type MSV1_0Credential struct {
 }
 func (MSV1_0Credential) AuthPackage() string  // → "MSV1_0"
 func (MSV1_0Credential) String() string       // → pwdump format
+
+// WdigestCredential — plaintext password (when UseLogonCredential=1).
+type WdigestCredential struct {
+    UserName    string
+    LogonDomain string
+    Password    string
+    Found       bool
+}
+func (WdigestCredential) AuthPackage() string  // → "Wdigest"
+func (WdigestCredential) String() string       // → "Domain\User:Password"
 
 // Per-build templates. Operators register their own at init when
 // the dump's BuildNumber doesn't match a built-in.
@@ -181,6 +193,22 @@ type Template struct {
     LogonSessionListOffset    int32
     LogonSessionListCount     int
     MSVLayout                 MSVLayout
+
+    // Wdigest fields — opt-in. Set NodeSize=0 (zero value) and the
+    // Wdigest walker is skipped at no runtime cost.
+    WdigestListPattern   []byte
+    WdigestListWildcards []int
+    WdigestListOffset    int32
+    WdigestLayout        WdigestLayout
+}
+
+// WdigestLayout — KIWI_WDIGEST_LIST_ENTRY node offsets per build.
+type WdigestLayout struct {
+    NodeSize       uint32
+    LUIDOffset     uint32
+    UserNameOffset uint32
+    DomainOffset   uint32
+    PasswordOffset uint32
 }
 func RegisterTemplate(*Template) error
 
@@ -234,11 +262,80 @@ operations are the dump itself (covered in
 [lsass-dump.md](techniques/collection/lsass-dump.md)) and any
 optional driver-assisted PPL bypass.
 
+### Wdigest provider (v0.24.0+)
+
+The Wdigest provider lives in `wdigest.dll` and stores a doubly-linked
+list of session nodes whose `Password` field holds an LSA-encrypted
+UTF-16LE plaintext. When `HKLM\System\CurrentControlSet\Control
+\SecurityProviders\WDigest\UseLogonCredential = 1` (Microsoft set the
+default to `0` in Windows 8.1 / KB2871997), every active interactive
+logon caches its plaintext in this list — the dump returns the
+attacker's cleartext credential, no hash-cracking required.
+
+The walker auto-disables when the registered Template has
+`WdigestLayout.NodeSize == 0`. The v0.23.x default templates do not
+yet enable Wdigest — auto-enable awaits offset verification against
+a real Win10/Win11 wdigest.dll. Operators with verified offsets
+register an extended Template:
+
+```go
+import "github.com/oioio-space/maldev/credentials/lsasparse"
+
+func init() {
+    _ = lsasparse.RegisterTemplate(&lsasparse.Template{
+        BuildMin: 19045, BuildMax: 19045, // Win10 22H2
+
+        // LSA crypto fields (same as the MSV-only template).
+        IVPattern:      []byte{ /* … */ },
+        IVOffset:       0x43,
+        Key3DESPattern: []byte{ /* … */ },
+        Key3DESOffset:  -0x59,
+        KeyAESPattern:  []byte{ /* … */ },
+        KeyAESOffset:   0x10,
+
+        // MSV1_0 fields.
+        LogonSessionListPattern: []byte{ /* … */ },
+        LogonSessionListOffset:  23,
+        LogonSessionListCount:   32,
+        MSVLayout: lsasparse.MSVLayout{ /* … */ },
+
+        // Wdigest fields — new.
+        WdigestListPattern: []byte{ /* per-build wdigest signature */ },
+        WdigestListOffset:  -4, // pypykatz uses -4 from the cmp/je sequence
+        WdigestLayout: lsasparse.WdigestLayout{
+            NodeSize:       0x80,  // KIWI_WDIGEST_LIST_ENTRY size
+            LUIDOffset:     0x28,
+            UserNameOffset: 0x38,
+            DomainOffset:   0x48,
+            PasswordOffset: 0x58,
+        },
+    })
+}
+```
+
+After Parse: a Wdigest credential whose LUID matches an MSV session
+joins that session's `Credentials` slice (NT hash + plaintext side
+by side). Wdigest sessions whose LUID has no MSV match surface as
+new sessions with only the WdigestCredential — no MSV-only fields
+populated (LogonType, SID).
+
+### Detection
+
+**Low**. `lsasparse.Parse` runs entirely in the implant's own
+address space with pure-Go primitives — no Win32 calls, no
+filesystem access, no further detection surface. The loud
+operations are the dump itself (covered in
+[lsass-dump.md](techniques/collection/lsass-dump.md)) and any
+optional driver-assisted PPL bypass.
+
 ### Limitations
 
-- v1 ships MSV1_0 only. WDigest plaintexts, Kerberos tickets, DPAPI
-  master keys, and the LiveSSP / TSPkg / CloudAP secrets are each
-  separate ~300-500 LOC follow-ups on top of the v1 crypto layer.
+- v0.24.x ships MSV1_0 + Wdigest. Kerberos tickets, DPAPI master
+  keys, and LiveSSP / TSPkg / CloudAP secrets are each separate
+  ~300-500 LOC follow-ups on top of the v0.23.x crypto layer.
+- Wdigest defaults are not yet inlined — operators register
+  per-build offsets manually. Default-template auto-enable is
+  expected in v0.24.1 once verified against a real binary.
 - x64 only. The `Architecture` enum reserves `ArchX86` for a future
   WoW64 variant.
 - Credential Guard / LSAISO trustlet sessions surface as warnings —
