@@ -7,6 +7,56 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added — `credentials/lsasparse` v0.23.0: pure-Go LSASS minidump parser
+
+Consumer counterpart to `credentials/lsassdump`. Parses a MINIDUMP
+blob (the format `MiniDumpWriteDump(MiniDumpWithFullMemory)` and our
+own `lsassdump.Build` produce), walks the LSA crypto globals in
+lsasrv.dll, decrypts the MSV1_0 logon-session list, and surfaces NTLM
+hashes ready for pass-the-hash workflows. Pure Go — an analyst Linux
+box can parse a Windows dump without Python or pypykatz/mimikatz.
+
+Public surface:
+
+- `Parse(reader io.ReaderAt, size int64) (*Result, error)` — primary entry; consumes any seekable byte source.
+- `ParseFile(path string) (*Result, error)` — convenience wrapper.
+- `Result` carries `BuildNumber`, `Architecture`, `Modules`, `Sessions`, `Warnings`. `Result.ModuleByName` for case-insensitive module lookup; `Result.Wipe()` zeroizes every hash buffer post-extract.
+- `Credential` interface with v1 implementation `MSV1_0Credential` (UserName, LogonDomain, NTHash[16], LMHash[16], SHA1Hash[20], DPAPIKey[16], Found bool). `String()` emits pwdump format `Domain\User:0:LM:NT:::` directly consumable by pth tools, with standard placeholders when LM/NT are empty.
+- `Architecture` (x86/x64/Unknown) + `LogonType` (Interactive/Network/Service/...) enums with friendly `String()` matching Windows event-log conventions.
+- `Template` per-build offset table with wildcard-mask pattern scanner support; `RegisterTemplate(t *Template) error` for runtime opt-in. Templates ship as community contributions verified against real dumps.
+- `MSVLayout` per-build _MSV1_0_LOGON_SESSION node offsets (NodeSize, LUIDOffset, UserNameOffset, LogonDomainOffset, LogonServerOffset, LogonTypeOffset, CredentialsOffset, SIDOffset, LogonTimeOffset).
+- 5 sentinel errors: `ErrNotMinidump`, `ErrUnsupportedBuild`, `ErrLSASRVNotFound`, `ErrMSV1_0NotFound`, `ErrKeyExtractFailed`.
+
+Implementation:
+
+- MINIDUMP reader handles SystemInfo, ModuleList, Memory64List streams; `ReadVA(va, n)` translates lsass virtual addresses to dump bytes via the Memory64 descriptors with descriptor-spanning support.
+- LSA crypto: BCRYPT_KEY_DATA_BLOB header parser (magic 0x4D42444B + version 1 + cbKeyData), AES (16-byte payload) / 3DES (24-byte payload) import via Go stdlib, CBC decrypt with cipher-by-alignment heuristic (16 → AES, 8-but-not-16 → 3DES).
+- Pattern scanner: linear-scan with sorted-wildcard-mask, RIP-relative rel32 dereference for x64 globals.
+- MSV walker: bucket × Flink-chain traversal bounded at 1024 nodes/bucket, UNICODE_STRING decode, PrimaryCredentials decryption, MSV1_0_PRIMARY_CREDENTIAL projection (Win10 0x40-byte and Win11 0x54-byte layouts both supported).
+
+39 unit tests cover every public path: `Parse_NotMinidump`, `Parse_TruncatedHeader`, `Parse_RoundTripBuildAndArch` (no-template path), `ParseFile_NotFound`, `Reader_ParsesModuleNames`, `Reader_ReadVA_RoundTrip`, `Reader_ReadVA_AcrossRegions`, `Reader_ReadVA_NotInDump`, `Architecture_String`, `LogonType_String`, `Result_Wipe`, `Module_ByName_FoundCaseInsensitive`, `Module_ByName_NotFound`, `Parse_PopulatesModulesField`, `RegisterTemplate_AcceptsValid` + RejectsNil + RejectsInvalid (×5 sub-cases) + `OrderedByBuildMin`, `TemplateFor_ReturnsNilForUnknownBuild`, `FindPattern_ExactMatch` + `WildcardMatch` + `NoMatch` + `PatternLongerThanHaystack`, `ParseBCryptKeyDataBlob_AES` + `_3DES` + `_InvalidMagic` + `_ShortBlob` + `_UnsupportedKeyLength`, `DecryptLSA_AESRoundTrip` + `_3DESRoundTrip` + `_NilKey` + `_BadAlignment`, `MSV1_0Credential_AuthPackage` + `_String_Pwdump` + `_Wipe`, `ParseMSV1_0Primary_FullStruct` + `_Win10Layout` + `_AllZero`, `ExtractMSV1_0_HappyPath` (full synthetic-dump end-to-end). Cross-platform: every test runs on Linux without VM dependency thanks to lsassdump.Build-generated synthetic fixtures.
+
+What does not ship in v0.23.0: per-build `Template` values
+(IV/3DES/AES key globals + LogonSessionList head pattern + offset).
+These require lsasrv.dll/msv1_0.dll disassembly — they're facts about
+Microsoft's compiled binaries and ship as community contributions
+verified against real dumps. Operators on a build without coverage
+get `ErrUnsupportedBuild` + a partial Result, register their own
+Template via `RegisterTemplate` at init, and retry. Same workflow
+as pypykatz's sigfile contributions.
+
+Out-of-scope follow-ups (each is its own ~300-500 LOC chantier on
+top of v1's crypto layer): WDigest plaintext, Kerberos tickets,
+DPAPI master keys, LiveSSP / TSPkg / CloudAP, x86 / WoW64 dumps,
+live-process attach.
+
+Docs: `docs/credentials.md` (new area-doc covering producer +
+consumer as a matched pair), `docs/techniques/credentials/lsasparse.md`
+(technique page with primer + simple/advanced/composed examples),
+README capability-table extension, `docs/mitre.md` T1003.001 row
+extension. Plan + 5-phase roadmap captured at
+`docs/superpowers/plans/2026-04-25-lsasparse-minimum-viable.md`.
+
 ### Reorganization — Pass 3 (v0.22.0): `privesc/` + `credentials/` + `process/tamper/` + `persistence/account`
 
 Final pass of the 2026-04-25 reorganization. Closes the privilege-

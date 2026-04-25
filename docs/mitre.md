@@ -12,7 +12,7 @@
 | T1036 | Masquerading | `evasion/stealthopen`, `evasion/callstack` (call-stack spoof metadata) | D3-FHA (File Hash Analysis) |
 | T1036.005 | Masquerading: Match Legitimate Name or Location | `process/tamper/fakecmd` (self + remote via `SpoofPID`), `pe/masquerade` | D3-PLA (Process Listing Analysis) |
 | T1047.001 | Boot or Logon Autostart Execution: Registry Run Keys | `persistence/registry` | D3-SBV (Service Binary Verification) |
-| T1003.001 | OS Credential Dumping: LSASS Memory | `credentials/lsassdump` | D3-PSA (Process Spawn Analysis), D3-SICA (System Image Change Analysis) |
+| T1003.001 | OS Credential Dumping: LSASS Memory | `credentials/lsassdump` (producer — dump + PPL unprotect), `credentials/lsasparse` (consumer — pure-Go MSV1_0 parser) | D3-PSA (Process Spawn Analysis), D3-SICA (System Image Change Analysis) |
 | T1053.005 | Scheduled Task/Job: Scheduled Task | `persistence/scheduler` | D3-SBV (Service Binary Verification) |
 | T1055 | Process Injection | `inject` (15 methods), `process/tamper/herpaderping` | D3-PSA (Process Spawn Analysis) |
 | T1055.001 | DLL Injection | `pe/srdi`, `inject/phantomdll` | D3-SICA (System Image Change Analysis) |

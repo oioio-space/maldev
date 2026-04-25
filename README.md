@@ -56,7 +56,7 @@ injector.Inject(shellcode)
 | **Process Tampering** | `process/tamper/hideprocess/` `process/tamper/herpaderping/` `process/tamper/fakecmd/` `process/tamper/phant0m/` | Patch a victim process's NtQSI to hide a PID, Herpaderping (run payload while displaying decoy on disk), PEB CommandLine spoofing (self + remote), kill EventLog svchost threads to suppress logging |
 | **Persistence** | `persistence/registry/` `persistence/startup/` `persistence/scheduler/` `persistence/service/` `persistence/lnk/` `persistence/account/` | Run/RunOnce keys, Startup folder LNK, Task Scheduler (COM ITaskService), Windows service, LNK file creation, local account creation (NetUserAdd / NetLocalGroupAddMembers — T1136.001) |
 | **Collection** | `collection/keylog/` `collection/clipboard/` `collection/screenshot/` | Keyboard hook with process context, clipboard monitoring, multi-monitor screen capture |
-| **Credentials** | `credentials/lsassdump/` | LSASS memory dump via NtGetNextProcess + in-process MINIDUMP assembly (T1003.001) + EPROCESS unprotect path for PPL bypass via `kernel/driver.ReadWriter` |
+| **Credentials** | `credentials/lsassdump/` `credentials/lsasparse/` | **Producer:** LSASS memory dump via NtGetNextProcess + in-process MINIDUMP assembly (T1003.001) + EPROCESS unprotect path for PPL bypass. **Consumer:** pure-Go MINIDUMP parser, LSA crypto (BCRYPT 3DES/AES blob import), MSV1_0 logon-session walker, NTLM hash extraction with pwdump-format output for pth tools. Pair the two for in-process "dump → extract → wipe" with no on-disk artefact. |
 | **Cleanup** | `cleanup/selfdelete/` `cleanup/memory/` `cleanup/service/` `cleanup/timestomp/` `cleanup/wipe/` `cleanup/ads/` `cleanup/bsod/` | Self-deletion (ADS rename + batch + reboot), secure memory wipe, service DACL hiding, timestomping, NTFS Alternate Data Streams CRUD + hidden files, controlled BSOD trigger |
 | **Privilege Escalation** | `privesc/uac/` `privesc/cve202430088/` | 4 UAC bypass methods (FODHelper, SLUI, SilentCleanup, EventVwr — T1548.002), CVE-2024-30088 Windows kernel TOCTOU LPE to SYSTEM |
 | **Kernel Driver (BYOVD)** | `kernel/driver/` `kernel/driver/rtcore64/` | Layer-1 BYOVD primitive interfaces (Reader / ReadWriter / Lifecycle), RTCore64.sys (CVE-2019-16098) service-install + IOCTL `0x80002048` read / `0x8000204C` write scaffold; consumed by `evasion/kcallback`'s Remove API and `credentials/lsassdump`'s PPL Unprotect path. Driver binary embedding is opt-in via the `byovd_rtcore64` build tag. |
@@ -116,6 +116,7 @@ Each technique has a dedicated page with beginner explanation, technical details
 | Crypto & Encoding | [docs/crypto.md](docs/crypto.md) |
 | Cleanup APIs | [docs/cleanup.md](docs/cleanup.md) |
 | Recon / UI / Misc | [docs/recon.md](docs/recon.md) |
+| Credentials (dump + parse) | [docs/credentials.md](docs/credentials.md) |
 | In-process Runtimes | [docs/runtime.md](docs/runtime.md) |
 | Privilege & Exploits | [docs/privilege.md](docs/privilege.md) |
 | Process Management | [docs/process.md](docs/process.md) |
