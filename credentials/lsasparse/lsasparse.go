@@ -129,6 +129,7 @@ type LogonSession struct {
 type Result struct {
 	BuildNumber  uint32
 	Architecture Architecture
+	Modules      []Module
 	Sessions     []LogonSession
 	Warnings     []string
 }
@@ -170,6 +171,7 @@ func Parse(reader io.ReaderAt, size int64) (*Result, error) {
 	res := &Result{
 		BuildNumber:  r.systemInfo.BuildNumber,
 		Architecture: archFromMinidump(r.systemInfo.ProcessorArchitecture),
+		Modules:      modulesFromReader(r),
 	}
 
 	// Phase 4 plugs the MSV1_0 walker in here. The pre-Phase-4 parser
