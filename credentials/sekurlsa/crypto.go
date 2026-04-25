@@ -11,81 +11,123 @@ import (
 // LSA crypto reference: lsasrv.dll initialises three relevant CNG
 // objects at startup — InitializationVector (16-byte IV), h3DesKey
 // (BCRYPT_KEY_HANDLE wrapping a 3DES session key), hAesKey
-// (BCRYPT_KEY_HANDLE wrapping an AES session key). Each handle's
-// underlying key bytes are stashed in a BCRYPT_KEY_DATA_BLOB header
-// + raw key payload immediately reachable from the handle pointer.
+// (BCRYPT_KEY_HANDLE wrapping an AES session key). Each handle is a
+// pointer chain through two Microsoft-internal structs:
 //
-// We don't load CNG; we mimic BCryptKeyDataBlobImport in Go by
-// parsing the blob header + feeding the key bytes into crypto/aes
-// or crypto/des. This is the same approach pypykatz takes via PyCA
-// cryptography.
+//   KIWI_BCRYPT_HANDLE_KEY:
+//	   +0x00  size      uint32
+//	   +0x04  tag       uint32   // "UUUR" / "RUUU" magic
+//	   +0x08  hAlgorithm pointer
+//	   +0x10  key       *KIWI_BCRYPT_KEY  ← chase here
+//	   +0x18  unk0      pointer
+//
+//   KIWI_BCRYPT_KEY:
+//	   +0x00  size, tag, type, unk0..unk2 (8 fields × 4 bytes each)
+//	   +0x38  cbSecret  uint32   // length of the raw key bytes
+//	   +0x3C  data      [cbSecret]byte
+//
+// We follow the chain:
+//   - derefRel32 lands at &g_hKeyGlobal (a .data slot holding the BCRYPT_KEY_HANDLE).
+//   - readPointer reads the BCRYPT_KEY_HANDLE = pointer to KIWI_BCRYPT_HANDLE_KEY.
+//   - readPointer at HANDLE_KEY + 0x10 reads the KIWI_BCRYPT_KEY pointer.
+//   - We then read cbSecret + data from that struct and feed the raw
+//     bytes to crypto/aes or crypto/des.
+//
+// Earlier (v0.23.x) the parser expected a flat BCRYPT_KEY_DATA_BLOB
+// at the rel32 target; that worked against synthetic fixtures but
+// blew up on real lsass dumps because lsass doesn't store keys as
+// the BCryptKeyDataBlobImport-compatible form — Microsoft uses its
+// own KIWI_* layout inside the LSA process. Real-binary validation
+// against a Win 10 22H2 dump (build 19045) surfaced the bug.
 //
 // References:
-//   https://learn.microsoft.com/en-us/windows/win32/api/bcrypt/ns-bcrypt-bcrypt_key_data_blob_header
 //   pypykatz: pypykatz/lsadecryptor/lsa_decryptor_x64.py
+//             (KIWI_BCRYPT_HANDLE_KEY + KIWI_BCRYPT_KEY classes)
+//   KvcForensic: KvcForensic.json `LSA_24H2_plus`
+//             (handle_ptr_key_offset / key_cb_secret_offset / key_data_offset)
 
-// bcryptKeyDataBlobMagic is the signature CNG writes at the head of a
-// BCRYPT_KEY_DATA_BLOB. Bytes "KDBM" (0x4B, 0x44, 0x42, 0x4D) read as a
-// little-endian uint32 = 0x4D42444B (MSDN BCRYPT_KEY_DATA_BLOB_MAGIC).
-const bcryptKeyDataBlobMagic uint32 = 0x4D42444B
-
-// bcryptKeyDataBlobVersion is the only version CNG ships today. If
-// Microsoft ever bumps it the parser will surface ErrKeyExtractFailed
-// rather than silently mis-import the bytes.
-const bcryptKeyDataBlobVersion uint32 = 1
-
-// bcryptKeyDataBlobHeaderSize is sizeof(BCRYPT_KEY_DATA_BLOB_HEADER) —
-// 12 bytes: dwMagic(4) + dwVersion(4) + cbKeyData(4).
-const bcryptKeyDataBlobHeaderSize = 12
+// Offsets inside the KIWI_BCRYPT_* structs. Stable Vista → Win 11 25H2.
+const (
+	kiwiHandleKeyKeyPtrOffset uint64 = 0x10 // KIWI_BCRYPT_HANDLE_KEY.key
+	kiwiKeyCbSecretOffset     uint64 = 0x38 // KIWI_BCRYPT_KEY.cbSecret
+	kiwiKeyDataOffset         uint64 = 0x3C // KIWI_BCRYPT_KEY.data[]
+)
 
 // lsaKey carries the three LSA crypto globals after a successful
-// pattern + dereference + import sequence. Used by the MSV1_0 walker
-// in phase 4 to decrypt PrimaryCredentials_data blobs.
+// pattern + dereference + chain-walk. Used by the MSV1_0 / Wdigest /
+// Kerberos / etc. walkers to decrypt PrimaryCredentials_data blobs.
 type lsaKey struct {
-	IV     []byte // 16-byte BCrypt IV (literal bytes, not a blob)
-	AES    cipher.Block
+	IV        []byte // 16-byte BCrypt IV (literal bytes, not a struct)
+	AES       cipher.Block
 	TripleDES cipher.Block
 }
 
-// parseBCryptKeyDataBlob decodes a BCRYPT_KEY_DATA_BLOB_HEADER + the
-// trailing raw key payload, returning the imported cipher.Block.
+// readKiwiKey walks the KIWI_BCRYPT_HANDLE_KEY → KIWI_BCRYPT_KEY
+// chain starting from a `&g_hKeyGlobal` LEA target. Returns the raw
+// key bytes (cbSecret bytes long) ready for cipher.NewCipher import.
 //
-// On a 16-byte payload we instantiate AES; on a 24-byte payload we
-// instantiate 3DES. Other lengths are ErrKeyExtractFailed because the
-// caller's pattern + offset must be wrong.
-//
-// The header layout (winnt.h):
-//   ULONG dwMagic;       // BCRYPT_KEY_DATA_BLOB_MAGIC
-//   ULONG dwVersion;     // BCRYPT_KEY_DATA_BLOB_VERSION1
-//   ULONG cbKeyData;     // raw key length immediately after header
-func parseBCryptKeyDataBlob(blob []byte) (cipher.Block, error) {
-	if len(blob) < bcryptKeyDataBlobHeaderSize {
-		return nil, fmt.Errorf("%w: blob shorter than BCRYPT_KEY_DATA_BLOB_HEADER (%d < %d)",
-			ErrKeyExtractFailed, len(blob), bcryptKeyDataBlobHeaderSize)
+// The chain:
+//   1. *(handleGlobalVA)        = handle_ptr  (BCRYPT_KEY_HANDLE)
+//   2. *(handle_ptr + 0x10)     = key_ptr     (KIWI_BCRYPT_KEY*)
+//   3. *(uint32)(key_ptr+0x38)  = cbSecret    (key length)
+//   4. (key_ptr + 0x3C)[cbSecret] = key bytes
+func readKiwiKey(r *reader, handleGlobalVA uint64) ([]byte, error) {
+	handlePtr, err := readPointer(r, handleGlobalVA)
+	if err != nil {
+		return nil, fmt.Errorf("HANDLE_KEY ptr: %w", err)
 	}
-	magic := binary.LittleEndian.Uint32(blob[0:4])
-	if magic != bcryptKeyDataBlobMagic {
-		return nil, fmt.Errorf("%w: blob magic 0x%08X (want KDBM=0x%08X)",
-			ErrKeyExtractFailed, magic, bcryptKeyDataBlobMagic)
+	if handlePtr == 0 {
+		return nil, fmt.Errorf("%w: HANDLE_KEY ptr is nil", ErrKeyExtractFailed)
 	}
-	version := binary.LittleEndian.Uint32(blob[4:8])
-	if version != bcryptKeyDataBlobVersion {
-		return nil, fmt.Errorf("%w: unsupported BCRYPT_KEY_DATA_BLOB version %d", ErrKeyExtractFailed, version)
+
+	keyPtr, err := readPointer(r, handlePtr+kiwiHandleKeyKeyPtrOffset)
+	if err != nil {
+		return nil, fmt.Errorf("KIWI_BCRYPT_KEY ptr: %w", err)
 	}
-	keyLen := binary.LittleEndian.Uint32(blob[8:12])
-	if uint32(len(blob)) < bcryptKeyDataBlobHeaderSize+keyLen {
-		return nil, fmt.Errorf("%w: blob declares %d-byte key but only %d bytes after header",
-			ErrKeyExtractFailed, keyLen, len(blob)-bcryptKeyDataBlobHeaderSize)
+	if keyPtr == 0 {
+		return nil, fmt.Errorf("%w: KIWI_BCRYPT_KEY ptr is nil", ErrKeyExtractFailed)
 	}
-	key := blob[bcryptKeyDataBlobHeaderSize : bcryptKeyDataBlobHeaderSize+keyLen]
-	switch keyLen {
+
+	cbSecretBytes, err := r.ReadVA(keyPtr+kiwiKeyCbSecretOffset, 4)
+	if err != nil {
+		return nil, fmt.Errorf("%w: cbSecret @0x%X: %v", ErrKeyExtractFailed,
+			keyPtr+kiwiKeyCbSecretOffset, err)
+	}
+	cbSecret := binary.LittleEndian.Uint32(cbSecretBytes)
+	// Cap at 64 bytes — DES is 8, 3DES is 24, AES is 16/32. Anything
+	// larger signals a corrupted layout.
+	if cbSecret == 0 || cbSecret > 64 {
+		return nil, fmt.Errorf("%w: cbSecret %d out of range (1..64)",
+			ErrKeyExtractFailed, cbSecret)
+	}
+
+	key, err := r.ReadVA(keyPtr+kiwiKeyDataOffset, int(cbSecret))
+	if err != nil {
+		return nil, fmt.Errorf("%w: key data @0x%X (%d bytes): %v",
+			ErrKeyExtractFailed, keyPtr+kiwiKeyDataOffset, cbSecret, err)
+	}
+	out := make([]byte, len(key))
+	copy(out, key)
+	return out, nil
+}
+
+// instantiateCipher creates a cipher.Block for the supplied raw key
+// bytes. AES accepts 16 / 24 / 32 — we only see 16 (LSA uses
+// AES-128). 3DES accepts 24 byte (16 results in a single-DES block,
+// which lsass doesn't use). DES accepts 8.
+func instantiateCipher(key []byte) (cipher.Block, error) {
+	switch len(key) {
+	case 8:
+		return des.NewCipher(key)
 	case 16:
 		return aes.NewCipher(key)
 	case 24:
 		return des.NewTripleDESCipher(key)
+	case 32:
+		return aes.NewCipher(key)
 	default:
-		return nil, fmt.Errorf("%w: unexpected key length %d (want 16 for AES or 24 for 3DES)",
-			ErrKeyExtractFailed, keyLen)
+		return nil, fmt.Errorf("%w: unexpected key length %d (want 8/16/24/32)",
+			ErrKeyExtractFailed, len(key))
 	}
 }
 

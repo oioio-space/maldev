@@ -108,8 +108,8 @@ func TestExtractCredMan_HappyPath(t *testing.T) {
 	binary.LittleEndian.PutUint64(listHeadBytes[8:16], nodeVA)
 
 	// Encrypt password.
-	keyBlob := buildKDBM(t, []byte("0123456789abcdef"))
-	aes, err := parseBCryptKeyDataBlob(keyBlob)
+	var _ = "" // KDBM removed
+	aes, err := instantiateCipher([]byte("0123456789abcdef"))
 	if err != nil {
 		t.Fatalf("aes import: %v", err)
 	}

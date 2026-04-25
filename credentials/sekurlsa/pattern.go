@@ -260,42 +260,35 @@ func extractLSAKeys(r *reader, lsasrv Module, t *Template) (*lsaKey, error) {
 		return nil, fmt.Errorf("%w: read IV bytes @0x%X: %v", ErrKeyExtractFailed, iv, err)
 	}
 
+	// 3DES + AES chain: derefRel32 → &g_handle_global; readKiwiKey
+	// chases handle_ptr → KIWI_BCRYPT_KEY → cbSecret/data and returns
+	// the raw key bytes. instantiateCipher wraps them in a
+	// cipher.Block. See crypto.go for the layout details.
+
 	desVA, err := derefRel32(body, lsasrv.BaseOfImage, t.Key3DESPattern, t.Key3DESWildcards, t.Key3DESOffset, r)
 	if err != nil {
 		return nil, fmt.Errorf("3DES: %w", err)
 	}
-	// The chain is: rel32 → BCRYPT_KEY_HANDLE pointer → KDBM blob
-	// pointer. lsasrv stores the handle's underlying blob 16 bytes
-	// past the handle struct head. Read the 8-byte pointer to the
-	// blob, then the blob itself.
-	desBlobPtr, err := readPointer(r, desVA)
+	desKey, err := readKiwiKey(r, desVA)
 	if err != nil {
-		return nil, fmt.Errorf("3DES handle: %w", err)
+		return nil, fmt.Errorf("3DES key chain: %w", err)
 	}
-	desBlob, err := r.ReadVA(desBlobPtr, bcryptKeyDataBlobHeaderSize+24)
+	desCipher, err := instantiateCipher(desKey)
 	if err != nil {
-		return nil, fmt.Errorf("%w: read 3DES blob: %v", ErrKeyExtractFailed, err)
-	}
-	desCipher, err := parseBCryptKeyDataBlob(desBlob)
-	if err != nil {
-		return nil, fmt.Errorf("3DES blob: %w", err)
+		return nil, fmt.Errorf("3DES cipher: %w", err)
 	}
 
 	aesVA, err := derefRel32(body, lsasrv.BaseOfImage, t.KeyAESPattern, t.KeyAESWildcards, t.KeyAESOffset, r)
 	if err != nil {
 		return nil, fmt.Errorf("AES: %w", err)
 	}
-	aesBlobPtr, err := readPointer(r, aesVA)
+	aesKey, err := readKiwiKey(r, aesVA)
 	if err != nil {
-		return nil, fmt.Errorf("AES handle: %w", err)
+		return nil, fmt.Errorf("AES key chain: %w", err)
 	}
-	aesBlob, err := r.ReadVA(aesBlobPtr, bcryptKeyDataBlobHeaderSize+16)
+	aesCipher, err := instantiateCipher(aesKey)
 	if err != nil {
-		return nil, fmt.Errorf("%w: read AES blob: %v", ErrKeyExtractFailed, err)
-	}
-	aesCipher, err := parseBCryptKeyDataBlob(aesBlob)
-	if err != nil {
-		return nil, fmt.Errorf("AES blob: %w", err)
+		return nil, fmt.Errorf("AES cipher: %w", err)
 	}
 
 	return &lsaKey{

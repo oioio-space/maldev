@@ -208,8 +208,8 @@ func TestExtractMSV1_0_HappyPath(t *testing.T) {
 
 	// Build a known-good lsaKey + encrypt the MSV1_0_PRIMARY_CREDENTIAL
 	// payload so the walker's decrypt round-trips back to the plaintext.
-	keyBlob := buildKDBM(t, []byte("0123456789abcdef"))
-	aes, err := parseBCryptKeyDataBlob(keyBlob)
+	var _ = "" // KDBM removed
+	aes, err := instantiateCipher([]byte("0123456789abcdef"))
 	if err != nil {
 		t.Fatalf("aes import: %v", err)
 	}

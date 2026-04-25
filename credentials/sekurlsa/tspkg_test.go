@@ -110,8 +110,8 @@ func TestExtractTSPkg_HappyPath(t *testing.T) {
 	binary.LittleEndian.PutUint64(node[layout.PrimaryPtrOffset:layout.PrimaryPtrOffset+8], primaryVA)
 
 	// Encrypt the plaintext password with a known LSA AES key.
-	keyBlob := buildKDBM(t, []byte("0123456789abcdef"))
-	aes, err := parseBCryptKeyDataBlob(keyBlob)
+	var _ = "" // KDBM removed
+	aes, err := instantiateCipher([]byte("0123456789abcdef"))
 	if err != nil {
 		t.Fatalf("aes import: %v", err)
 	}

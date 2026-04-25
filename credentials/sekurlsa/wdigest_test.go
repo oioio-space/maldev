@@ -117,8 +117,8 @@ func TestExtractWdigest_HappyPath(t *testing.T) {
 
 	// Encrypt a known plaintext with the LSA AES key. The walker calls
 	// decryptLSA which picks AES on 16-byte alignment.
-	keyBlob := buildKDBM(t, []byte("0123456789abcdef"))
-	aes, err := parseBCryptKeyDataBlob(keyBlob)
+	var _ = "" // KDBM removed
+	aes, err := instantiateCipher([]byte("0123456789abcdef"))
 	if err != nil {
 		t.Fatalf("aes import: %v", err)
 	}

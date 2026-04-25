@@ -7,6 +7,47 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Fixed — `credentials/sekurlsa` v0.29.2 — real-binary validation surfaced two critical bugs
+
+**First end-to-end run against a real Win 10 22H2 lsass dump (build
+19045) surfaced two bugs the synthetic-fixture suite couldn't see.
+Both are fixed; MSV1_0 NT-hash extraction now round-trips on real
+binaries.**
+
+1. **`ModuleByName` matched full paths verbatim.** Real Win 10/11
+   dumps store full paths in MODULE_LIST (`C:\Windows\system32\
+   lsasrv.dll`); the synthetic tests passed bare basenames. The
+   matcher now reduces both sides to the basename via a new
+   `basename` helper before case-insensitive comparison. Callers
+   may pass either form.
+2. **The LSA crypto chain skipped one indirection.** The previous
+   parser expected a flat BCRYPT_KEY_DATA_BLOB at the rel32 target;
+   real lsass uses a 3-level pointer chain instead:
+   `LEA → BCRYPT_KEY_HANDLE → KIWI_BCRYPT_HANDLE_KEY (+0x10) →
+   KIWI_BCRYPT_KEY (cbSecret @+0x38, data @+0x3C)`. The synthetic
+   test passed because it built a fake KDBM blob at the handle's
+   first indirection — a tautology. v0.29.2 walks the real chain
+   via the new `readKiwiKey` helper and `instantiateCipher` (which
+   wraps raw key bytes 8/16/24/32 → DES/AES-128/3DES/AES-256).
+   Constants `kiwiHandleKeyKeyPtrOffset = 0x10` /
+   `kiwiKeyCbSecretOffset = 0x38` / `kiwiKeyDataOffset = 0x3C` are
+   stable Vista → Win 11 25H2 per pypykatz + KvcForensic JSON.
+
+The synthetic test helper `buildKDBM` + the now-unused
+`parseBCryptKeyDataBlob` are removed; tests across the package use
+`instantiateCipher(rawKey)` directly which is the actual production
+path.
+
+**Real-binary validation result** on a Win 10 22H2 dump (build 19045):
+- 10 logon sessions surfaced
+- 1 real NT/LM hash extracted (interactive `test` user)
+- 9 SYSTEM / service accounts with empty hashes (placeholder)
+- DPAPI + TSPkg signatures don't match this build's lsasrv.dll —
+  follow-up in v0.30.0 to derive the per-build offsets.
+
+Also includes the path-based ModuleByName regression test +
+TestBasename. 107/107 tests green.
+
 ### Added — `credentials/sekurlsa` v0.29.0 — x86 dump detection + rejection
 
 WoW64 / legacy x86 lsass dumps are now detected at Parse() entry and

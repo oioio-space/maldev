@@ -34,15 +34,31 @@ type Module struct {
 // case-insensitively. Returns (zero, false) when no match — callers
 // surface that as ErrLSASRVNotFound or ErrMSV1_0NotFound.
 //
-// Linear scan — typical lsass dumps have <80 modules and we look up
-// each provider exactly once per parse.
+// Real Win 10/11 dumps store the full module path
+// (`C:\Windows\system32\lsasrv.dll`) in MODULE_LIST.MODULE_STRING;
+// the matcher reduces both sides to the basename (last `\` or `/`
+// segment) so callers can pass either `lsasrv.dll` or the full
+// path. Linear scan — typical lsass dumps have <100 modules and we
+// look up each provider exactly once per parse.
 func (r *Result) ModuleByName(name string) (Module, bool) {
+	target := basename(name)
 	for _, m := range r.Modules {
-		if strings.EqualFold(m.Name, name) {
+		if strings.EqualFold(basename(m.Name), target) {
 			return m, true
 		}
 	}
 	return Module{}, false
+}
+
+// basename returns the trailing `\` or `/`-delimited segment of p.
+// Used by ModuleByName to reduce a full Windows path
+// (`C:\Windows\system32\lsasrv.dll`) to its basename for case-
+// insensitive matching against well-known DLL names.
+func basename(p string) string {
+	if i := strings.LastIndexAny(p, `\/`); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }
 
 // modulesFromReader projects the parser's internal rawModule slice

@@ -138,52 +138,55 @@ func TestFindPattern_PatternLongerThanHaystack(t *testing.T) {
 	}
 }
 
-// TestParseBCryptKeyDataBlob_AES covers the 16-byte (AES) path.
-func TestParseBCryptKeyDataBlob_AES(t *testing.T) {
-	blob := buildKDBM(t, []byte("0123456789abcdef")) // 16 bytes
-	c, err := parseBCryptKeyDataBlob(blob)
+// TestInstantiateCipher_AES covers the 16-byte path (AES-128).
+func TestInstantiateCipher_AES(t *testing.T) {
+	c, err := instantiateCipher([]byte("0123456789abcdef")) // 16 bytes
 	if err != nil {
-		t.Fatalf("parse: %v", err)
+		t.Fatalf("instantiate: %v", err)
 	}
 	if c.BlockSize() != 16 {
 		t.Errorf("AES block size = %d, want 16", c.BlockSize())
 	}
 }
 
-// TestParseBCryptKeyDataBlob_3DES covers the 24-byte (3DES) path.
-func TestParseBCryptKeyDataBlob_3DES(t *testing.T) {
-	blob := buildKDBM(t, []byte("012345670123456701234567")) // 24 bytes — 3 distinct 8-byte halves required by 3DES key check
-	c, err := parseBCryptKeyDataBlob(blob)
+// TestInstantiateCipher_3DES covers the 24-byte (3DES) path.
+func TestInstantiateCipher_3DES(t *testing.T) {
+	c, err := instantiateCipher([]byte("012345670123456701234567")) // 24 bytes
 	if err != nil {
-		t.Fatalf("parse: %v", err)
+		t.Fatalf("instantiate: %v", err)
 	}
 	if c.BlockSize() != 8 {
 		t.Errorf("3DES block size = %d, want 8", c.BlockSize())
 	}
 }
 
-// TestParseBCryptKeyDataBlob_InvalidMagic surfaces ErrKeyExtractFailed.
-func TestParseBCryptKeyDataBlob_InvalidMagic(t *testing.T) {
-	blob := []byte{0xDE, 0xAD, 0xBE, 0xEF, 1, 0, 0, 0, 16, 0, 0, 0}
-	blob = append(blob, make([]byte, 16)...)
-	_, err := parseBCryptKeyDataBlob(blob)
-	if !errors.Is(err, ErrKeyExtractFailed) {
-		t.Errorf("err = %v, want ErrKeyExtractFailed", err)
+// TestInstantiateCipher_DES covers the 8-byte single-DES path
+// (legacy, lsass rarely uses).
+func TestInstantiateCipher_DES(t *testing.T) {
+	c, err := instantiateCipher([]byte("12345678"))
+	if err != nil {
+		t.Fatalf("instantiate: %v", err)
+	}
+	if c.BlockSize() != 8 {
+		t.Errorf("DES block size = %d, want 8", c.BlockSize())
 	}
 }
 
-// TestParseBCryptKeyDataBlob_ShortBlob is the truncated-input guard.
-func TestParseBCryptKeyDataBlob_ShortBlob(t *testing.T) {
-	if _, err := parseBCryptKeyDataBlob([]byte{1, 2, 3}); !errors.Is(err, ErrKeyExtractFailed) {
-		t.Errorf("err = %v, want ErrKeyExtractFailed", err)
+// TestInstantiateCipher_AES256 covers the 32-byte AES-256 path.
+func TestInstantiateCipher_AES256(t *testing.T) {
+	c, err := instantiateCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatalf("instantiate: %v", err)
+	}
+	if c.BlockSize() != 16 {
+		t.Errorf("AES-256 block size = %d, want 16", c.BlockSize())
 	}
 }
 
-// TestParseBCryptKeyDataBlob_UnsupportedKeyLength rejects sizes other
-// than 16 / 24.
-func TestParseBCryptKeyDataBlob_UnsupportedKeyLength(t *testing.T) {
-	blob := buildKDBM(t, []byte("only-eight-bytes")[:8])
-	if _, err := parseBCryptKeyDataBlob(blob); !errors.Is(err, ErrKeyExtractFailed) {
+// TestInstantiateCipher_UnsupportedKeyLength rejects sizes that
+// don't match a known cipher.
+func TestInstantiateCipher_UnsupportedKeyLength(t *testing.T) {
+	if _, err := instantiateCipher(make([]byte, 7)); !errors.Is(err, ErrKeyExtractFailed) {
 		t.Errorf("err = %v, want ErrKeyExtractFailed", err)
 	}
 }
@@ -191,10 +194,9 @@ func TestParseBCryptKeyDataBlob_UnsupportedKeyLength(t *testing.T) {
 // TestDecryptLSA_AESRoundTrip exercises the AES-CBC happy path with
 // a known key and IV.
 func TestDecryptLSA_AESRoundTrip(t *testing.T) {
-	keyBlob := buildKDBM(t, []byte("0123456789abcdef"))
-	aes, err := parseBCryptKeyDataBlob(keyBlob)
+	aes, err := instantiateCipher([]byte("0123456789abcdef"))
 	if err != nil {
-		t.Fatalf("import AES: %v", err)
+		t.Fatalf("instantiate AES: %v", err)
 	}
 	k := &lsaKey{IV: []byte("ABCDEFGH01234567"), AES: aes}
 
@@ -214,10 +216,9 @@ func TestDecryptLSA_AESRoundTrip(t *testing.T) {
 // TestDecryptLSA_3DESRoundTrip is the 8-byte-aligned-but-not-16-byte
 // branch.
 func TestDecryptLSA_3DESRoundTrip(t *testing.T) {
-	keyBlob := buildKDBM(t, []byte("012345670123456701234567"))
-	des, err := parseBCryptKeyDataBlob(keyBlob)
+	des, err := instantiateCipher([]byte("012345670123456701234567"))
 	if err != nil {
-		t.Fatalf("import 3DES: %v", err)
+		t.Fatalf("instantiate 3DES: %v", err)
 	}
 	k := &lsaKey{IV: []byte("ABCDEFGH"), TripleDES: des}
 
@@ -244,30 +245,11 @@ func TestDecryptLSA_NilKey(t *testing.T) {
 // TestDecryptLSA_BadAlignment rejects ciphertext that's not 8- or
 // 16-byte aligned.
 func TestDecryptLSA_BadAlignment(t *testing.T) {
-	keyBlob := buildKDBM(t, []byte("0123456789abcdef"))
-	aes, _ := parseBCryptKeyDataBlob(keyBlob)
+	aes, _ := instantiateCipher([]byte("0123456789abcdef"))
 	k := &lsaKey{IV: make([]byte, 16), AES: aes}
 	if _, err := decryptLSA([]byte{1, 2, 3}, k); !errors.Is(err, ErrKeyExtractFailed) {
 		t.Errorf("err = %v, want ErrKeyExtractFailed", err)
 	}
-}
-
-// buildKDBM hand-crafts a BCRYPT_KEY_DATA_BLOB blob — header + raw
-// key payload — for round-trip tests.
-func buildKDBM(t *testing.T, key []byte) []byte {
-	t.Helper()
-	out := make([]byte, bcryptKeyDataBlobHeaderSize+len(key))
-	// dwMagic = "KDBM" little-endian
-	out[0], out[1], out[2], out[3] = 'K', 'D', 'B', 'M'
-	out[4] = 1 // dwVersion
-	// cbKeyData little-endian
-	klen := uint32(len(key))
-	out[8] = byte(klen)
-	out[9] = byte(klen >> 8)
-	out[10] = byte(klen >> 16)
-	out[11] = byte(klen >> 24)
-	copy(out[12:], key)
-	return out
 }
 
 // encryptCBC is a test-side helper to produce ciphertext we then
