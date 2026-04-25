@@ -174,9 +174,32 @@ func Parse(reader io.ReaderAt, size int64) (*Result, error) {
 		Modules:      modulesFromReader(r),
 	}
 
-	// Phase 4 plugs the MSV1_0 walker in here. The pre-Phase-4 parser
-	// already returns a non-nil Result with module list + build, so
-	// callers depending on detection (build/architecture) work today.
+	// Find a template for this build. Missing template is non-fatal —
+	// callers get build/architecture/modules and can RegisterTemplate
+	// + Parse again.
+	tmpl := templateFor(r.systemInfo.BuildNumber)
+	if tmpl == nil {
+		return res, fmt.Errorf("%w: build %d", ErrUnsupportedBuild, r.systemInfo.BuildNumber)
+	}
+
+	lsasrv, ok := res.ModuleByName("lsasrv.dll")
+	if !ok {
+		return res, ErrLSASRVNotFound
+	}
+	msv, ok := res.ModuleByName("msv1_0.dll")
+	if !ok {
+		return res, ErrMSV1_0NotFound
+	}
+
+	keys, err := extractLSAKeys(r, lsasrv, tmpl)
+	if err != nil {
+		return res, err
+	}
+
+	sessions, warnings := extractMSV1_0(r, msv, tmpl, keys)
+	res.Sessions = sessions
+	res.Warnings = append(res.Warnings, warnings...)
+
 	return res, nil
 }
 

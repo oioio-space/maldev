@@ -57,6 +57,10 @@ type Template struct {
 	// LogonSessionListCount is the number of hash buckets — Win10
 	// has 32, Win11 has 64. The walker enumerates each bucket head.
 	LogonSessionListCount int
+
+	// MSVLayout captures per-build _MSV1_0_LOGON_SESSION node offsets.
+	// See MSVLayout type doc for the field-by-field meaning.
+	MSVLayout MSVLayout
 }
 
 // validate sanity-checks a template before it enters the registry.
