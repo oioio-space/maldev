@@ -131,7 +131,7 @@ func extractKerberos(r *reader, kerbModule Module, t *Template, lsaKey *lsaKey) 
 		return nil, []string{fmt.Sprintf("Kerberos: read kerberos.dll body: %v", err)}
 	}
 
-	tableVA, err := derefRel32(
+	globalVA, err := derefRel32(
 		body,
 		kerbModule.BaseOfImage,
 		t.KerberosListPattern,
@@ -143,8 +143,21 @@ func extractKerberos(r *reader, kerbModule Module, t *Template, lsaKey *lsaKey) 
 		return nil, []string{fmt.Sprintf("Kerberos list head: %v", err)}
 	}
 
-	// The rel32 lands on the RTL_AVL_TABLE's BalancedRoot sentinel.
-	// The actual tree root is BalancedRoot.RightChild (offset +0x10).
+	// Kerberos has one indirection more than Wdigest/DPAPI/MSV: the
+	// LEA target is the address of a *pointer* to the RTL_AVL_TABLE,
+	// not the table itself. Pypykatz's
+	//   ptr_entry_loc = get_ptr_with_offset(...)   # derefRel32 result
+	//   ptr_entry     = get_ptr(ptr_entry_loc)     # extra dereference
+	// flow makes this explicit. Without the extra readPointer we
+	// walk a tree rooted at the .data slot's bytes, which produces
+	// junk LUIDs and unaligned-looking sessions.
+	tableVA, err := readPointer(r, globalVA)
+	if err != nil || tableVA == 0 {
+		return nil, nil
+	}
+
+	// The table's BalancedRoot sentinel sits at offset 0; the actual
+	// tree root is BalancedRoot.RightChild (offset +0x10).
 	treeRoot := readAVLTreeRoot(r, tableVA)
 	if treeRoot == 0 {
 		return nil, nil

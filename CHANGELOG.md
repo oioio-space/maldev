@@ -7,6 +7,48 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Fixed — `credentials/sekurlsa` v0.30.2 — Kerberos pointer chain + field offsets per pypykatz Win 10 1607+
+
+Continued real-binary refinement of the Kerberos walker. Two fixes:
+
+1. **Extra pointer indirection.** Pypykatz's `find_first_entry`
+   does `ptr_entry_loc = get_ptr_with_offset(...)` (= our derefRel32)
+   THEN `ptr_entry = get_ptr(ptr_entry_loc)` — i.e., the LEA target
+   is the address of a *pointer* to the RTL_AVL_TABLE, not the
+   table itself. The v0.30.1 walker skipped that second deref and
+   walked the wrong tree root. Fixed by adding `readPointer` between
+   `derefRel32` and `readAVLTreeRoot`.
+
+2. **KIWI_KERBEROS_LOGON_SESSION_10_1607 field offsets.** Manually
+   walked the pypykatz Python struct definitions for Win 10 1607+
+   (the same layout family our build 19045 dump targets). Updated:
+   - LUIDOffset 0x48 (was 0x48 — already correct)
+   - UserNameOffset 0x78 → **0x88** (credentials sub-struct moved)
+   - DomainOffset 0x88 → **0x98**
+   - PasswordOffset 0xA8 → **0xB8**
+   - TicketEncTypeOffset 0x134 → **0x124**
+   - TicketKvnoOffset 0x138 → **0x128**
+   - TicketBufferLenOffset 0x140 → **0x130**
+   - TicketBufferPtrOffset 0x148 → **0x138**
+
+   KvcForensic JSON values were 16 bytes higher (0x134/0x138/0x140/
+   0x148) — they appear to target a later build with one extra
+   16-byte field inserted in the back half. We ship pypykatz's
+   Win 10 1607+ values as primary defaults; KvcForensic-style
+   builds need an operator override.
+
+3. NodeSize bumped from 0x180 → 0x200 to cover the longer session
+   struct (credentials sub-struct + ticket-list pointers + extras).
+
+**Real-binary status on Win 10 22H2 build 19045:** the AVL walker
+fires through the corrected indirection chain, but session-struct
+offsets on this specific build still produce non-aligned LUIDs and
+empty UserName/Domain UNICODE_STRING reads — suggests our LEA's
+target on this binary lands somewhere other than `g_kerb_table_ptr`,
+or the build has a layout variant pypykatz doesn't yet document.
+Disassembly walk on a real kerberos.dll image is the next step;
+queued for v0.30.3.
+
 ### Added — `credentials/sekurlsa` v0.30.1 — RTL_AVL_TABLE walker for Kerberos
 
 Vista+ Kerberos uses an `RTL_AVL_TABLE` (balanced binary tree) for

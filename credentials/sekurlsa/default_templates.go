@@ -385,23 +385,55 @@ var kerberosSignatureCommon = []byte{
 // fires when the primary read has its upper-32 bits set, which
 // indicates a stray pointer rather than a real LUID).
 var kerberosLayoutCommon = KerberosLayout{
-	NodeSize:                0x180, // largest field at 0x148+8 = 0x150
-	LUIDOffset:              0x48,  // pypykatz LOGON_SESSION_10_1607.LocallyUniqueIdentifier
-	UserNameOffset:          0x78,  // pypykatz / KvcForensic session_username_offset = 120
-	DomainOffset:            0x88,  // session_domain_offset = 136
-	PasswordOffset:          0xA8,  // session_password_ustr_offset = 168
-	LUIDFallbackOffsets:     []uint32{0x48, 0x40, 0x38, 0x30, 0x20},
-	TicketListOffsets:       []uint32{280, 304, 328}, // 0x118, 0x130, 0x148
-	TicketServiceNameOffset: 0x20,                    // 32
-	TicketTargetNameOffset:  0x28,                    // 40
-	TicketClientNameOffset:  0x90,                    // 144
-	TicketFlagsOffset:       0xA0,                    // 160
-	TicketKeyTypeOffset:     0xB4,                    // 180
-	TicketEncTypeOffset:     0x134,                   // 308
-	TicketKvnoOffset:        0x138,                   // 312
-	TicketBufferLenOffset:   0x140,                   // 320
-	TicketBufferPtrOffset:   0x148,                   // 328
-	TicketNodeSize:          0x180,                   // covers up to ptr+8
+	// Session-struct offsets per pypykatz KIWI_KERBEROS_LOGON_SESSION_10_1607.
+	// Walking the struct manually:
+	//   +0x00 UsageCount (4) + align → 0x08
+	//   +0x08 unk0 (LIST_ENTRY, 16)
+	//   +0x18 unk1 (PVOID, 8)
+	//   +0x20 unk1b (ULONG, 4) + align → 0x28
+	//   +0x28 unk2 (FILETIME, 8)
+	//   +0x30 unk4..unk6 (3×PVOID, 24)
+	//   +0x48 LocallyUniqueIdentifier ← LUID
+	//   +0x50 unk7 (FILETIME, 8)
+	//   +0x58 unk8 (PVOID, 8)
+	//   +0x60 unk8b (ULONG, 4) + align → 0x68
+	//   +0x68 unk9 (FILETIME, 8)
+	//   +0x70 unk11..unk13 (3×PVOID, 24)
+	//   +0x88 credentials (KIWI_KERBEROS_10_PRIMARY_CREDENTIAL_1607):
+	//        +0x00 UserName (UNICODE_STRING, 16) → +0x88 absolute
+	//        +0x10 Domaine  (UNICODE_STRING, 16) → +0x98
+	//        +0x20 unkFunction (PVOID, 8)
+	//        +0x28 type (DWORD, 4) + align → 0x30
+	//        +0x30 Password (UNICODE_STRING, 16) → +0xB8
+	NodeSize:            0x200, // session struct extends past 0x100; cover slack
+	LUIDOffset:          0x48,
+	UserNameOffset:      0x88,
+	DomainOffset:        0x98,
+	PasswordOffset:      0xB8,
+	LUIDFallbackOffsets: []uint32{0x48, 0x40, 0x38, 0x30, 0x20},
+
+	// Ticket-cache pointers inside the session struct — 3 LIST_ENTRY
+	// slots after the credentials sub-struct. Real-binary verification
+	// queued; KvcForensic's 280/304/328 (0x118/0x130/0x148) is the
+	// best public reference and matches pypykatz LIST_ENTRY layout
+	// for Win 10 1607+.
+	TicketListOffsets: []uint32{0x118, 0x130, 0x148},
+
+	// Per-ticket offsets per pypykatz KIWI_KERBEROS_INTERNAL_TICKET_10_1607.
+	// Note: KvcForensic JSON's enc/kvno/buffer offsets are 16 bytes
+	// HIGHER than pypykatz's — KvcForensic appears to target a
+	// build where one 16-byte field was inserted in the back half.
+	// We ship pypykatz Win 10 1607+ values as primary defaults.
+	TicketServiceNameOffset: 0x20,
+	TicketTargetNameOffset:  0x28,
+	TicketClientNameOffset:  0x90,
+	TicketFlagsOffset:       0xA0, // ULONG, big-endian per Microsoft
+	TicketKeyTypeOffset:     0xB0,
+	TicketEncTypeOffset:     0x124,
+	TicketKvnoOffset:        0x128,
+	TicketBufferLenOffset:   0x130,
+	TicketBufferPtrOffset:   0x138,
+	TicketNodeSize:          0x180, // covers Ticket buffer ptr+8
 }
 
 // ===== builtinTemplates ==============================================
