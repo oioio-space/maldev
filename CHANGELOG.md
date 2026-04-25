@@ -7,6 +7,24 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added — `credentials/lsasparse` v0.23.2 — inline default Templates
+
+- Win10 19H1 → 22H2 (builds 18362–19045) and Win11 21H2 → 22H2
+  pre-22622 (builds 22000–22621) Templates now register at package
+  load via `init()`. A dump from one of those builds parses without
+  any operator `RegisterTemplate(...)` boilerplate — out-of-the-box
+  NTLM-hash extraction.
+- Patterns + offsets are facts about Microsoft's compiled lsasrv.dll;
+  the framework remains MIT (no GPL-3 / CC-NC code reuse). pypykatz
+  and mimikatz are cited as research source in `default_templates.go`
+  per Feist v. Rural — facts are not copyrightable.
+- `resetTemplates()` continues to clear the registry for tests that
+  need a clean slate; new helper `registerDefaultTemplates()` lets
+  tests re-prime the registry after a reset without re-importing.
+- 4 new unit tests covering: init-time registration coverage,
+  validate() pass for every shipping template, NodeSize ≥ max-offset
+  invariant, no-overlap between BuildMin/BuildMax windows.
+
 ### Fixed — `credentials/lsasparse` v0.23.1
 
 - `extractMSV1_0` now scans the LogonSessionList head pattern in

@@ -68,18 +68,28 @@ making `lsassdump`'s output directly compatible with mimikatz's
 
 ## `credentials/lsasparse`
 
-The consumer is **scaffold-complete** at v0.23.0: the MINIDUMP reader,
-LSA crypto layer, MSV1_0 walker, and `Parse(reader, size)` public
-entry-point all ship and round-trip end-to-end against synthetic
-fixtures.
+The consumer is **complete with inline default Templates** at
+v0.23.2: the MINIDUMP reader, LSA crypto layer, MSV1_0 walker,
+`Parse(reader, size)` public entry-point, and built-in Win10/Win11
+templates all ship and round-trip end-to-end against synthetic
+fixtures. A dump from one of the documented builds parses **without
+any operator setup**.
 
-What does **not** ship in v0.23.x: per-build `Template` values
-(IV/3DES/AES key globals + LogonSessionList head pattern + offset).
-These require reading lsasrv.dll for each Windows build with a
-disassembler (IDA/Ghidra), locating the global-load instruction
-sequence, and recording the surrounding byte pattern + rel32
-offsets. Templates are facts about Microsoft's compiled binaries
-and contributions are welcome under any license.
+Templates that ship inline (registered automatically via `init()`):
+
+| Build range | Coverage |
+|---|---|
+| 18362 – 19045 | Win10 19H1 (1903) → Win10 22H2 |
+| 22000 – 22621 | Win11 21H2 → Win11 22H2 (pre-22622) |
+
+Builds outside those ranges (Win10 1809 / 1607 / RTM, Win11 22622+ /
+23H2 / 24H2, Server 2019 / 2022 / 2025) return `ErrUnsupportedBuild`
+from Parse. For those, operators call `RegisterTemplate(...)` at
+init time with the per-build offsets — see [Registering a
+Template](#registering-a-template) below. Adding a build means
+walking lsasrv.dll for that LCU with IDA/Ghidra, locating the
+global-load instruction sequence, and recording the surrounding
+byte pattern + rel32 offsets.
 
 **Canonical references** for the byte patterns + offsets:
 

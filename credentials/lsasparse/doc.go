@@ -23,10 +23,16 @@
 // DPAPI master keys, LiveSSP / TSPkg / CloudAP secrets, live-process
 // attach. Each is a follow-up chantier on top of the v1 crypto layer.
 //
-// Templates ship for Win10 22H2 (build 19045) + Win11 22H2 (22621)
-// + Win11 23H2 (22631). Other builds return ErrUnsupportedBuild from
-// Parse — operators register additional templates via RegisterTemplate
-// at runtime.
+// Templates ship inline for Win10 19H1 → 22H2 (builds 18362–19045)
+// and Win11 21H2 → 22H2 pre-22622 (builds 22000–22621). A dump from
+// any of those builds parses out of the box — no operator setup. See
+// default_templates.go for the canonical set; pypykatz (GPL-3) and
+// mimikatz (CC-BY-NC-SA) are the published research sources for the
+// byte patterns + offsets, which are facts about Microsoft binaries
+// rather than copyrightable expression.
+//
+// Other builds return ErrUnsupportedBuild from Parse — operators
+// register additional templates via RegisterTemplate at runtime.
 //
 // Layering: Layer 2 alongside credentials/lsassdump. Pure Go; no
 // dependency on win/api or kernel/driver.
