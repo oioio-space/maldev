@@ -101,6 +101,28 @@ _ = mask.Sleep(context.Background(), 45*time.Second)
 
 Each region keeps its own original protection. An RX region is restored to RX; an RWX region is restored to RWX. See [`TestSleepMaskE2E_MultiRegionIndependentEncryption`](../../../evasion/sleepmask/sleepmask_e2e_windows_test.go) and [`TestSleepMaskE2E_RestoresOriginalRWXProtection`](../../../evasion/sleepmask/sleepmask_e2e_windows_test.go).
 
+#### Multi-region with Ekko
+
+`EkkoStrategy`'s ROP chain is single-region by construction (the
+NtContinue chain has hardcoded gadget slots for one VirtualProtect /
+SystemFunction032 / VirtualProtect triplet). For multi-region masking
+under the Ekko model, wrap it in `MultiRegionRotation`:
+
+```go
+mask := sleepmask.New(regionA, regionB, regionC).
+    WithStrategy(&sleepmask.MultiRegionRotation{Inner: &sleepmask.EkkoStrategy{}}).
+    WithCipher(sleepmask.NewRC4Cipher())
+_ = mask.Sleep(context.Background(), 30*time.Second)
+```
+
+`MultiRegionRotation` runs `Inner.Cycle` once per region for `d/N`
+seconds each. The total wall-clock duration matches `d`. **Trade-off:**
+only one region is encrypted at any given moment — `regionA` is masked
+during seconds [0, 10), `regionB` during [10, 20), `regionC` during
+[20, 30). For simultaneous protection of all regions across the full
+duration, use `InlineStrategy` or `TimerQueueStrategy`, both of which
+already iterate over the regions slice up-front.
+
 ### Choosing a strategy
 
 ```go
