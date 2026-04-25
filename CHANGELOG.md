@@ -7,6 +7,59 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added — `credentials/lsassdump` v0.31.4 — `FindLsassEProcess` walker
+
+Closes the kvc-inspired chantier with a Windows-only high-level
+helper that resolves lsass.exe's kernel EPROCESS VA from a PID,
+without requiring upstream tooling.
+
+`FindLsassEProcess(rw driver.ReadWriter, lsassPID uint32) (uintptr, error)`
+ties together every v0.31.x discovery primitive:
+
+1. Resolve ntoskrnl.exe's kernel-mode base via
+   `NtQuerySystemInformation(SystemModuleInformation)` (admin
+   required, same baseline as the BYOVD path).
+2. Resolve the runtime-disk offsets:
+   - `DiscoverInitialSystemProcessRVA` — RVA of the
+     `PsInitialSystemProcess` global pointer inside ntoskrnl.
+   - `DiscoverUniqueProcessIdOffset` — EPROCESS.UniqueProcessId.
+   - `DiscoverActiveProcessLinksOffset` — = upid + 8.
+3. Read 8 bytes at `kernel_base + InitialSystemProcessRVA` via
+   `rw.ReadKernel` → System EPROCESS (PID 4, head of the
+   PsActiveProcessLinks chain).
+4. Walk the doubly-linked LIST_ENTRY chain via
+   `walkProcessChain` (extracted into a separately-testable helper).
+   Each `ActiveProcessLinks.Flink` is the address of the next
+   process's embedded list-entry; subtracting `apLinksOff` recovers
+   the EPROCESS containing-struct base. Bounded at 4096 iterations,
+   loop-back detected against the head.
+
+`walkProcessChain` is unexported but exposed through synthetic
+mock-RW tests (4 walk scenarios: target-found, head-match,
+not-found, nil-Flink-break) plus 2 guard tests on
+`FindLsassEProcess` itself (nil rw, zero PID). Real-kernel
+validation requires admin + a live Windows host — out of scope
+for unit tests but trivially exercised once an operator runs the
+high-level path against their target.
+
+`ErrLsassEProcessNotFound` sentinel for callers needing to retry
+after a lsass restart (PID changes between dump and walk).
+
+After v0.31.4 the full PPL-bypass + dump flow looks like:
+
+	rw := byovd.LoadRTCore64()                       // 1. BYOVD reader/writer
+	defer byovd.Unload()
+	pid := process.LookupByName("lsass.exe")         // 2. PID from PEB walk
+	eprocess, _ := lsassdump.FindLsassEProcess(rw, pid) // 3. Auto-find EPROCESS
+	tok, _ := lsassdump.Unprotect(rw, eprocess, lsassdump.PPLOffsetTable{}) // 4. Auto-discover offset
+	defer lsassdump.Reprotect(tok, rw)
+	h, _ := lsassdump.OpenLSASS(nil)                 // 5. NtOpenProcess(VM_READ)
+	defer lsassdump.CloseLSASS(h)
+	lsassdump.Dump(h, &buf, nil)                     // 6. Capture minidump
+
+— no hand-curated PPLOffsetTable, no upstream EPROCESS lookup.
+Just a PID and a kernel ReadWriter.
+
 ### Added — `credentials/lsassdump` v0.31.3 — extended kvc-style OffsetFinder
 
 Three new discovery helpers that mirror kvc's full OffsetFinder
