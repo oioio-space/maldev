@@ -165,11 +165,19 @@ the stream layout matches `MiniDumpWriteDump(MiniDumpWithFullMemory)`.
 ## Limitations
 
 - **PPL-protected lsass** (default on Win11, opt-in on Win10 via
-  `RunAsPPL=1` or Credential Guard) returns `ErrPPL`. Bypassing PPL
-  requires a separate primitive — signed-driver unprotect
-  (mimidrv / RTCore), kernel-write chain, or a userland trick like
-  `PROCESS_CREATE_PROCESS` protected-process inheritance. **Future
-  chantier.**
+  `RunAsPPL=1` or Credential Guard) refuses VM_READ to userland. The
+  package now ships an **EPROCESS-unprotect** path
+  (`Unprotect(rw driver.ReadWriter, eprocess uintptr, tab PPLOffsetTable)`):
+  caller plugs in a `kernel/driver.ReadWriter` (RTCore64, GDRV, custom),
+  passes lsass's EPROCESS kernel VA + the build's
+  `PS_PROTECTION` byte offset, and Unprotect zeros the byte. A
+  subsequent `OpenLSASS` succeeds normally; `Reprotect(tok, rw)` puts
+  the byte back. Caller is responsible for resolving lsass's EPROCESS
+  upstream (PsActiveProcessHead walk / handle-table parse / bring
+  your own primitive) — different attack chains use different
+  walks, so wrapping that lookup is not part of the surface. See
+  [BYOVD — RTCore64](../evasion/byovd-rtcore64.md) for the
+  driver-side primitive and `kernel/driver/rtcore64`'s SCM lifecycle.
 - **Module enumeration** uses `K32EnumProcessModulesEx` (psapi), which
   is path-hooked by some EDRs. A PEB-walk variant (`InMemoryOrderModuleList`)
   is tracked as **future work**.
