@@ -15,4 +15,15 @@
 //
 // Every public entry point accepts an optional *wsyscall.Caller. Passing
 // nil falls back to the standard Nt* WinAPI calls.
+//
+// PPL bypass via RTCore64 BYOVD: when lsass.exe runs with RunAsPPL=1
+// (Win 11 default), userland NtOpenProcess(VM_READ) is denied
+// regardless of token privileges. Unprotect/Reprotect zero the
+// EPROCESS.Protection byte via a kernel/driver.ReadWriter (typically
+// RTCore64) and restore it afterwards. The build-specific
+// PS_PROTECTION offset can be discovered at runtime via
+// DiscoverProtectionOffset(path) (v0.31.0+) — parses ntoskrnl.exe
+// in user mode and extracts the offset from
+// PsIsProtectedProcess's prologue. Avoids hand-curated
+// PPLOffsetTable values per cumulative update.
 package lsassdump

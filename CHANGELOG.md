@@ -7,6 +7,57 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added — `credentials/lsassdump` v0.31.0 — dynamic EPROCESS offset discovery
+
+Ports the offset-finding technique from
+[wesmar/kvc](https://github.com/wesmar/kvc) (MIT) into
+`credentials/lsassdump`. Eliminates the need for a hand-curated
+`PPLOffsetTable` per Windows build — the EPROCESS.Protection byte
+offset can now be derived at runtime by parsing ntoskrnl.exe in
+user mode.
+
+How it works: every Win 10/11 ntoskrnl.exe exports
+`PsIsProtectedProcess` and `PsIsProtectedProcessLight`, both of
+which compile to a trivial wrapper:
+
+	movzx eax, byte ptr [rcx + EPROCESS.Protection_offset]
+	test  eax, eax
+	setnz al
+	ret
+
+The first instruction is always `0F B6 81 disp32` (5 bytes — the
+movzx opcode + ModR/M for `[RAX, [RCX+disp32]]`). The disp32 IS
+the EPROCESS.Protection field offset. Reading 7 bytes from the
+function's RVA in the file and decoding the disp32 gives the
+offset; cross-validating against PsIsProtectedProcessLight catches
+malformed extracts.
+
+**v0.31.0 surface:**
+
+- `DiscoverProtectionOffset(path string) (uint32, error)` — the
+  main entry point. Pass an empty path to default to
+  `%SystemRoot%\System32\ntoskrnl.exe`; pass an explicit path on
+  Linux/CI to point at a captured ntoskrnl.
+- `SignatureLevelOffset(protection uint32) uint32` — derives
+  EPROCESS.SignatureLevel offset (= protection - 2) per kvc.
+- `SectionSignatureLevelOffset(protection uint32) uint32` —
+  EPROCESS.SectionSignatureLevel offset (= protection - 1).
+- `ErrProtectionOffsetNotFound` sentinel for `errors.Is` dispatch.
+
+**Why we didn't port kvc's full PPL bypass.** kvc's bypass uses
+a CUSTOM signed driver and requires defeating Driver Signature
+Enforcement (DSE) first. Our existing
+`credentials/lsassdump.Unprotect` uses RTCore64 BYOVD — already
+signed by Microsoft (vulnerable but signed), no DSE bypass needed.
+kvc is operationally heavier; we keep RTCore64 as the primary
+path and port only the offset-discovery technique.
+
+5 new tests: arithmetic identities for the two Signature*Level
+helpers, error paths for non-existent / non-PE inputs, plus an
+env-gated end-to-end test (`MALDEV_NTOSKRNL=<path>`) that pulls a
+real ntoskrnl.exe through the discovery and asserts a plausible
+offset range.
+
 ### Fixed — `credentials/sekurlsa` v0.30.4 — TSPkg AVL refactor + signature/layout fix
 
 Continued real-binary refinement, this time TSPkg. Three problems
