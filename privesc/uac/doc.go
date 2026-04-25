@@ -15,4 +15,4 @@
 //   - EventVwr: abuses eventvwr.exe mscfile shell open command
 //
 // EventVwrLogon variant uses CreateProcessWithLogonW for alternate credentials.
-package uacbypass
+package uac

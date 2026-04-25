@@ -67,7 +67,6 @@ import (
     "github.com/oioio-space/maldev/evasion/etw"
     "github.com/oioio-space/maldev/recon/hwbp"
     "github.com/oioio-space/maldev/recon/sandbox"
-    "github.com/oioio-space/maldev/evasion/sleepmask"
     "github.com/oioio-space/maldev/recon/timing"
     "github.com/oioio-space/maldev/evasion/unhook"
     "github.com/oioio-space/maldev/inject"

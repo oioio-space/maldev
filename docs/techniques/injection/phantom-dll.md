@@ -71,9 +71,12 @@ package main
 
 import (
     "log"
+    "os"
+    "path/filepath"
 
     "github.com/oioio-space/maldev/evasion"
     "github.com/oioio-space/maldev/evasion/preset"
+    "github.com/oioio-space/maldev/evasion/stealthopen"
     "github.com/oioio-space/maldev/inject"
     "github.com/oioio-space/maldev/process/enum"
 )

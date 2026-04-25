@@ -184,7 +184,30 @@ func main() {
 
 ## API Reference
 
-- [`recon/antidebug`](../../evasion.md) — `IsDebuggerPresent() bool`
-- [`recon/antivm`](../../evasion.md) — `Detect(Config) (string, error)`, `DetectAll(Config) ([]string, error)`
-- [`recon/sandbox`](../../evasion.md) — `New(Config) *Checker`, `IsSandboxed(ctx) (bool, string, error)`, `CheckAll(ctx) []Result`
-- [`recon/timing`](../../evasion.md) — `BusyWait(d)`, `BusyWaitPrimality()`, `BusyWaitPrimalityN(n)`, `BusyWaitTrig(d)`
+```go
+// recon/antidebug
+func IsDebuggerPresent() bool                              // PEB.BeingDebugged on Windows; /proc/self/status TracerPid on Linux
+
+// recon/antivm
+type Config struct{ /* CheckRegistry, CheckFiles, CheckMAC, CheckCPUID, CheckDMI, CheckProcesses bool */ }
+func DefaultConfig() Config                                // all checks enabled
+func Detect(cfg Config) (vendor string, err error)         // first match wins; returns "" if clean
+func DetectAll(cfg Config) (vendors []string, err error)   // every match across all enabled checks
+
+// recon/sandbox
+type Config struct{ /* MinDiskGB, MinRAMGB, MinCPUs, MinProcessCount uint64; AnalystUsernames []string; FakeDomains []string */ }
+type Result struct{ Name string; Passed bool; Detail string }
+type Checker struct{ /* opaque */ }
+func DefaultConfig() Config
+func New(cfg Config) *Checker
+func (c *Checker) IsSandboxed(ctx context.Context) (sandboxed bool, reason string, err error)
+func (c *Checker) CheckAll(ctx context.Context) []Result   // every probe with per-result detail
+
+// recon/timing — CPU-burning busy waits (no Sleep, defeats sandbox time-acceleration)
+func BusyWait(d time.Duration)                             // tight loop (cheapest)
+func BusyWaitPrimality()                                   // single primality pass
+func BusyWaitPrimalityN(n int)                             // N primality passes (longer)
+func BusyWaitTrig(d time.Duration)                         // sin/cos accumulator until d elapsed
+```
+
+Documented at the area-doc level: [`docs/recon.md`](../../recon.md) covers all four packages with longer per-API walkthroughs.

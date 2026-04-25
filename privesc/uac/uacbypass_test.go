@@ -1,6 +1,6 @@
 //go:build windows
 
-package uacbypass
+package uac
 
 import (
 	"os"

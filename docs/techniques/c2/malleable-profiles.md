@@ -187,8 +187,8 @@ func main() {
         MaxBackoff:    5 * time.Minute,
         JitterFactor:  0.3,
         Evasion: []evasion.Technique{
-            amsi.Technique(),
-            etw.Technique(),
+            amsi.ScanBufferPatch(),
+            etw.All(),
         },
         Caller: caller,
     })

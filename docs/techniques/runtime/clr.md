@@ -327,4 +327,7 @@ spot it; a signature-only stack typically won't.
 
 ## API Reference
 
-See [pe.md](../../pe.md#peclr----in-process-net-clr-hosting)
+The full inline signature block lives in the [API](#api) section above.
+The area-doc walkthrough (longer narrative on AppDomain lifecycle, AMSI
+interaction, the `<exe>.config` activation chain) lives in
+[`docs/runtime.md`](../../runtime.md).

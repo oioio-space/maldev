@@ -1,7 +1,7 @@
 //go:build windows
 
 // Package uacbypass implements UAC bypass techniques for Windows.
-package uacbypass
+package uac
 
 import (
 	"fmt"

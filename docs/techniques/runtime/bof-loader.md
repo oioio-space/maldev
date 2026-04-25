@@ -140,7 +140,7 @@ func main() {
     defer caller.Close()
 
     // Patch AMSI + ETW before running BOF
-    evasion.Apply(caller, amsi.Technique(), etw.Technique())
+    evasion.ApplyAll([]evasion.Technique{amsi.ScanBufferPatch(), etw.All()}, caller)
 
     // Load and execute BOF
     data, _ := os.ReadFile("sa-whoami.x64.o")

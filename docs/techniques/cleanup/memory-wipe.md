@@ -4,6 +4,9 @@
 
 **MITRE ATT&CK:** [T1070 - Indicator Removal on Host](https://attack.mitre.org/techniques/T1070/)
 **D3FEND:** [D3-SMRA - System Memory Resident Analysis](https://d3fend.mitre.org/technique/d3f:SystemMemoryResidentAnalysis/)
+**Package:** `cleanup/memory`
+**Platform:** Cross-platform (Linux + Windows)
+**Detection:** N/A — purely defensive (runs on the implant's own memory; has no observable surface to a defender)
 
 ---
 

