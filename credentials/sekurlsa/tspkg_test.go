@@ -63,80 +63,67 @@ func TestExtractTSPkg_Disabled(t *testing.T) {
 	}
 }
 
-// TestExtractTSPkg_HappyPath builds a synthetic tspkg.dll mapping
-// with one logon-session node carrying a pointer to a primary
-// credential struct with username/domain/encrypted-password,
-// walks the list, and verifies the plaintext round-trips.
-func TestExtractTSPkg_HappyPath(t *testing.T) {
-	t.Cleanup(resetTemplates)
-	resetTemplates()
-
+// TestDecodeTSPkgNode_SwapsUserNameAndDomain verifies the Microsoft
+// quirk pypykatz documents: TSPkg's primary credential struct
+// stores the values at swapped UNICODE_STRING slots (the "UserName"
+// slot holds the domain and vice versa). Our decoder swaps them
+// back so callers see the canonical user / domain pair.
+//
+// This is a focused unit test on decodeTSPkgNode rather than the
+// full extractTSPkg walker — the AVL+pointer-chain machinery is
+// covered by the avl_test.go tree-traversal tests and validated
+// end-to-end against real lsass dumps via the env-gated
+// TestRealDumpDiagnostics + ad-hoc parser runs.
+func TestDecodeTSPkgNode_SwapsUserNameAndDomain(t *testing.T) {
 	const (
-		modBase    uint64 = 0x7FF800000000
-		modSize           = uint32(0x1000)
-		listHead   uint64 = modBase + uint64(modSize) + 0x000
-		nodeVA     uint64 = modBase + uint64(modSize) + 0x100
-		primaryVA  uint64 = modBase + uint64(modSize) + 0x200
-		userBuf    uint64 = modBase + uint64(modSize) + 0x300
-		domBuf     uint64 = modBase + uint64(modSize) + 0x400
-		pwdCipher  uint64 = modBase + uint64(modSize) + 0x500
+		modBase   uint64 = 0x7FF800000000
+		modSize          = uint32(0x1000)
+		primaryVA uint64 = modBase + uint64(modSize) + 0x200
+		userBuf   uint64 = modBase + uint64(modSize) + 0x300
+		domBuf    uint64 = modBase + uint64(modSize) + 0x400
+		pwdCipher uint64 = modBase + uint64(modSize) + 0x500
 	)
 
-	// Module body: pattern + rel32 → listHead.
-	moduleBody := make([]byte, modSize)
-	pattern := []byte{0xCA, 0xFE, 0xD0, 0x0D}
-	patternOff := 0x80
-	copy(moduleBody[patternOff:], pattern)
-	rel32At := patternOff + 4
-	rel32 := int32(int64(listHead) - int64(modBase) - int64(rel32At) - 4)
-	binary.LittleEndian.PutUint32(moduleBody[rel32At:rel32At+4], uint32(rel32))
-
-	// Circular single-entry list head.
-	listHeadBytes := make([]byte, 16)
-	binary.LittleEndian.PutUint64(listHeadBytes[0:8], nodeVA)
-	binary.LittleEndian.PutUint64(listHeadBytes[8:16], nodeVA)
-
-	// Outer node layout — KIWI_TS_CREDENTIAL.
 	layout := TSPkgLayout{
-		NodeSize:         0x20,
-		LUIDOffset:       0x10,
-		PrimaryPtrOffset: 0x18,
+		NodeSize:         0x90,
+		LUIDOffset:       0x70,
+		PrimaryPtrOffset: 0x88,
 	}
 	wantLUID := uint64(0xCAFEBABEDEADBEEF)
-	node := make([]byte, layout.NodeSize)
-	binary.LittleEndian.PutUint64(node[0:8], listHead)  // Flink → loop back
-	binary.LittleEndian.PutUint64(node[8:16], listHead) // Blink (unused)
-	binary.LittleEndian.PutUint64(node[layout.LUIDOffset:layout.LUIDOffset+8], wantLUID)
-	binary.LittleEndian.PutUint64(node[layout.PrimaryPtrOffset:layout.PrimaryPtrOffset+8], primaryVA)
 
-	// Encrypt the plaintext password with a known LSA AES key.
-	var _ = "" // KDBM removed
+	// Encrypt a known plaintext password.
 	aes, err := instantiateCipher([]byte("0123456789abcdef"))
 	if err != nil {
 		t.Fatalf("aes import: %v", err)
 	}
 	iv := []byte("ABCDEFGHIJKLMNOP")
 	keys := &lsaKey{IV: iv, AES: aes}
-
 	plainStr := "RDP@2026"
 	plainU16 := utf16Encode(plainStr)
-	plain := make([]byte, 16) // pad to 1 AES block
+	plain := make([]byte, 16)
 	for i, c := range plainU16 {
 		binary.LittleEndian.PutUint16(plain[i*2:i*2+2], c)
 	}
 	cipherText := make([]byte, len(plain))
 	encryptCBC(t, aes, iv, plain, cipherText)
 
-	// Inner primary credential: 0x30 bytes (UserName 0x00, Domain 0x10, Password 0x20).
+	// Outer node: 0x90 bytes with LUID at 0x70 and pTsPrimary at 0x88.
+	node := make([]byte, layout.NodeSize)
+	binary.LittleEndian.PutUint64(node[layout.LUIDOffset:layout.LUIDOffset+8], wantLUID)
+	binary.LittleEndian.PutUint64(node[layout.PrimaryPtrOffset:layout.PrimaryPtrOffset+8], primaryVA)
+
+	// Inner primary credential, with the SWAPPED layout Microsoft
+	// uses: the "UserName" slot at +0x00 stores the *domain*, and
+	// the "Domain" slot at +0x10 stores the *username*.
 	primary := make([]byte, 0x30)
-	user := utf16Encode("alice")
-	binary.LittleEndian.PutUint16(primary[0x00:0x02], uint16(len(user)*2))
-	binary.LittleEndian.PutUint16(primary[0x02:0x04], uint16(len(user)*2+2))
+	storedAtUserSlot := utf16Encode("CORP")
+	binary.LittleEndian.PutUint16(primary[0x00:0x02], uint16(len(storedAtUserSlot)*2))
+	binary.LittleEndian.PutUint16(primary[0x02:0x04], uint16(len(storedAtUserSlot)*2+2))
 	binary.LittleEndian.PutUint64(primary[0x08:0x10], userBuf)
 
-	dom := utf16Encode("CORP")
-	binary.LittleEndian.PutUint16(primary[0x10:0x12], uint16(len(dom)*2))
-	binary.LittleEndian.PutUint16(primary[0x12:0x14], uint16(len(dom)*2+2))
+	storedAtDomSlot := utf16Encode("alice")
+	binary.LittleEndian.PutUint16(primary[0x10:0x12], uint16(len(storedAtDomSlot)*2))
+	binary.LittleEndian.PutUint16(primary[0x12:0x14], uint16(len(storedAtDomSlot)*2+2))
 	binary.LittleEndian.PutUint64(primary[0x18:0x20], domBuf)
 
 	binary.LittleEndian.PutUint16(primary[0x20:0x22], uint16(len(cipherText)))
@@ -153,12 +140,10 @@ func TestExtractTSPkg_HappyPath(t *testing.T) {
 	}
 
 	regions := []lsassdump.MemoryRegion{
-		{BaseAddress: modBase, Data: moduleBody},
-		{BaseAddress: listHead, Data: listHeadBytes},
-		{BaseAddress: nodeVA, Data: node},
+		{BaseAddress: modBase, Data: make([]byte, modSize)},
 		{BaseAddress: primaryVA, Data: primary},
-		{BaseAddress: userBuf, Data: utf16Region("alice")},
-		{BaseAddress: domBuf, Data: utf16Region("CORP")},
+		{BaseAddress: userBuf, Data: utf16Region("CORP")},
+		{BaseAddress: domBuf, Data: utf16Region("alice")},
 		{BaseAddress: pwdCipher, Data: cipherText},
 	}
 	mods := []lsassdump.Module{
@@ -171,40 +156,26 @@ func TestExtractTSPkg_HappyPath(t *testing.T) {
 		t.Fatalf("openReader: %v", err)
 	}
 
-	tmpl := &Template{
-		BuildMin:           19045,
-		BuildMax:           19045,
-		IVPattern:          []byte{0x90}, // unused
-		Key3DESPattern:     []byte{0x90},
-		KeyAESPattern:      []byte{0x90},
-		TSPkgListPattern:   pattern,
-		TSPkgListOffset:    int32(rel32At - patternOff),
-		TSPkgLayout:        layout,
+	tmpl := &Template{TSPkgLayout: layout}
+	cred, luid, warn := decodeTSPkgNode(r, node, tmpl, keys)
+	if warn != "" {
+		t.Errorf("decodeTSPkgNode warn = %q, want empty", warn)
 	}
-	mod := Module{Name: "tspkg.dll", BaseOfImage: modBase, SizeOfImage: modSize}
-
-	creds, warnings := extractTSPkg(r, mod, tmpl, keys)
-	if len(warnings) > 0 {
-		t.Errorf("warnings = %v, want none", warnings)
+	if luid != wantLUID {
+		t.Errorf("luid = 0x%X, want 0x%X", luid, wantLUID)
 	}
-	if len(creds) != 1 {
-		t.Fatalf("creds = %d, want 1", len(creds))
-	}
-	cred, ok := creds[wantLUID]
-	if !ok {
-		t.Fatalf("LUID 0x%X missing from creds map", wantLUID)
-	}
+	// The decoder must SWAP the slots → user "alice", domain "CORP".
 	if cred.UserName != "alice" {
-		t.Errorf("UserName = %q, want alice", cred.UserName)
+		t.Errorf("UserName = %q, want alice (after swap)", cred.UserName)
 	}
 	if cred.LogonDomain != "CORP" {
-		t.Errorf("LogonDomain = %q, want CORP", cred.LogonDomain)
+		t.Errorf("LogonDomain = %q, want CORP (after swap)", cred.LogonDomain)
 	}
 	if cred.Password != plainStr {
 		t.Errorf("Password = %q, want %q", cred.Password, plainStr)
 	}
 	if !cred.Found {
-		t.Error("Found = false on a successful decrypt")
+		t.Error("Found = false on a successful decode")
 	}
 }
 

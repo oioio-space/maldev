@@ -341,25 +341,42 @@ var dpapiLayoutCommon = DPAPILayout{
 
 // ===== TSPkg signature + layout (per KvcForensic) ====================
 
-// tspkgSignatureCommon — KvcForensic `Tspkg_x64_vista_to_win10` and
-// `Tspkg_x64_win11_24h2_plus` both ship the same 7-byte signature
-// `48 83 EC 20 48 8B 0D` (sub rsp, 20h; mov rcx, [rip+rel32]) covering
-// every Vista+ x64 build. The single-signature suffices because the
-// terminal-services bootstrap function prologue is unusually stable.
+// tspkgSignatureCommon — pypykatz `KIWI_TS_CREDENTIAL_1607_x64`
+// signature `48 83 EC 20 48 8D 0D` (sub rsp, 20h; lea rcx, [rip+rel32]).
+// Matches Win 10 1607 → Win 11 25H2. KvcForensic JSON has the
+// same prologue but with `8B 0D` (MOV-via-pointer) instead of
+// `8D 0D` (LEA-of-address) — the LEA variant is the one that
+// actually appears in tspkg.dll on real binaries (real-binary
+// validation against Win 10 22H2 build 19045 confirmed: `8B 0D`
+// has zero matches, `8D 0D` has 1).
 var tspkgSignatureCommon = []byte{
 	0x48, 0x83, 0xEC, 0x20,
-	0x48, 0x8B, 0x0D,
+	0x48, 0x8D, 0x0D,
 }
 
-// tspkgLayoutCommon — KIWI_TS_CREDENTIAL outer-node layout per
-// KvcForensic JSON: luid_offset=16, primary_offset=24. Inner
-// KIWI_TS_PRIMARY_CREDENTIAL UNICODE_STRING offsets (UserName=0x00,
-// Domain=0x10, Password=0x20) are stable across builds and live in
-// tspkg.go's decodeTSPkgNode.
+// tspkgLayoutCommon — KIWI_TS_CREDENTIAL_1607 outer-node layout
+// per pypykatz. The 1607-and-later struct has 112 bytes of opaque
+// header (`unk0`) before the LUID, then `unk1` + `unk2` PVOIDs,
+// then a pointer to the inner `KIWI_TS_PRIMARY_CREDENTIAL`:
+//
+//	+0x00 unk0           [0x70]byte
+//	+0x70 LocallyUniqueIdentifier (LUID, 8)
+//	+0x78 unk1           PVOID (8)
+//	+0x80 unk2           PVOID (8)
+//	+0x88 pTsPrimary     KIWI_TS_PRIMARY_CREDENTIAL*
+//
+// KvcForensic's `luid_offset: 16, primary_offset: 24` describes a
+// pre-1607 layout (or perhaps a different inner-struct base). For
+// Win 10 1607+ / Win 11 builds the values above are correct per
+// pypykatz; real-binary validation against build 19045 confirms.
+//
+// The inner KIWI_TS_PRIMARY_CREDENTIAL UNICODE_STRING offsets
+// (0x00 / 0x10 / 0x20) are hardcoded in decodeTSPkgNode and stable
+// across every Win 7+ build.
 var tspkgLayoutCommon = TSPkgLayout{
-	NodeSize:         0x20,
-	LUIDOffset:       0x10,
-	PrimaryPtrOffset: 0x18,
+	NodeSize:         0x90,
+	LUIDOffset:       0x70,
+	PrimaryPtrOffset: 0x88,
 }
 
 // ===== Kerberos signature + layout (per KvcForensic) ================

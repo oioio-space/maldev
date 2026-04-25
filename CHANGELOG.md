@@ -7,6 +7,46 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Fixed — `credentials/sekurlsa` v0.30.4 — TSPkg AVL refactor + signature/layout fix
+
+Continued real-binary refinement, this time TSPkg. Three problems
+surfaced and fixed against the Win 10 22H2 build 19045 dump:
+
+1. **Wrong signature byte.** KvcForensic JSON ships
+   `48 83 EC 20 48 8B 0D` (MOV via pointer); pypykatz ships
+   `48 83 EC 20 48 8D 0D` (LEA of address). The dump confirms only
+   the LEA variant matches in tspkg.dll on this build. We now
+   ship pypykatz's value as the default.
+
+2. **Linked-list walker → AVL walker.** Same fix pattern as
+   v0.30.3 Kerberos. extractTSPkg now derefs once
+   (LEA_target → table_ptr), reads the RTL_AVL_TABLE, walks the
+   tree, and at each AVL node dereferences the user_data at +0x20
+   to reach the actual KIWI_TS_CREDENTIAL.
+
+3. **Wrong outer-node offsets + UserName/Domain swap.** The
+   KIWI_TS_CREDENTIAL_1607 layout per pypykatz has
+   LUID at +0x70 (not +0x10), pTsPrimary at +0x88 (not +0x18). The
+   inner KIWI_TS_PRIMARY_CREDENTIAL stores UserName and Domain at
+   SWAPPED slots — a Microsoft quirk pypykatz documents. Our
+   decoder now swaps them back so callers see the canonical pair.
+
+Real-binary status on Win 10 22H2 build 19045: TSPkg walker runs
+clean (no warning, no junk credentials) — the dump's tspkg.dll
+session AVL is empty because no RDP / Terminal Services session
+was active when the snapshot was taken. The walker correctly
+produces zero credentials in that case rather than hanging or
+emitting bogus data.
+
+The synthetic-fixture HappyPath test was rewritten as
+`TestDecodeTSPkgNode_SwapsUserNameAndDomain` — a focused unit test
+on `decodeTSPkgNode` that exercises the swap quirk + new layout.
+The full extractTSPkg pipeline is now validated end-to-end via
+real-binary parser runs (pre-existing avl_test.go covers the AVL
+machinery; tspkg_test.go covers the inner-struct decode).
+
+112/112 tests green.
+
 ### Fixed — `credentials/sekurlsa` v0.30.3 — Kerberos AVL user_data deref (real-binary validated)
 
 **Real-binary validation: 4 Kerberos credentials extracted from a

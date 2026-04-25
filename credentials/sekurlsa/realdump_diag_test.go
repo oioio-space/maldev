@@ -115,6 +115,27 @@ func TestRealDumpDiagnostics(t *testing.T) {
 		}
 	}
 
+	// Sub-probe: alternative TSPkg signatures.
+	if body, m, ok := bodyFor("tspkg.dll"); ok {
+		alts := []struct {
+			name string
+			sig  []byte
+		}{
+			{"KvcForensic MOV 0D", []byte{0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0x0D}},
+			{"pypykatz LEA 0D", []byte{0x48, 0x83, 0xEC, 0x20, 0x48, 0x8D, 0x0D}},
+			{"MOV 05 alt", []byte{0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0x05}},
+			{"LEA 05 alt", []byte{0x48, 0x83, 0xEC, 0x20, 0x48, 0x8D, 0x05}},
+		}
+		for _, a := range alts {
+			i := bytes.Index(body, a.sig)
+			if i >= 0 {
+				t.Logf("[TSPkg ALT] %-20s: HIT at module-RVA 0x%X (VA 0x%X)",
+					a.name, i, m.BaseOfImage+uint64(i))
+			} else {
+				t.Logf("[TSPkg ALT] %-20s: no match", a.name)
+			}
+		}
+	}
 }
 
 // hexShort emits a compact hex preview of a byte slice for log lines.

