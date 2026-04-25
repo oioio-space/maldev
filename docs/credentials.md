@@ -175,6 +175,19 @@ type WdigestCredential struct {
 func (WdigestCredential) AuthPackage() string  // → "Wdigest"
 func (WdigestCredential) String() string       // → "Domain\User:Password"
 
+// DPAPIMasterKey — pre-decrypted master key from g_MasterKeyCacheList.
+// Feed KeyBytes to BCryptDecrypt to unwrap Chrome cookies / Vault
+// credentials / WinRM saved sessions / etc.
+type DPAPIMasterKey struct {
+    LUID     uint64
+    KeyGUID  [16]byte
+    KeyBytes []byte
+    Found    bool
+}
+func (DPAPIMasterKey) AuthPackage() string  // → "DPAPI"
+func (DPAPIMasterKey) String() string       // → "{guid}:hex"
+func (DPAPIMasterKey) GUIDString() string   // → "8-4-4-4-12" canonical form
+
 // Per-build templates. Operators register their own at init when
 // the dump's BuildNumber doesn't match a built-in.
 type Template struct {
@@ -200,6 +213,12 @@ type Template struct {
     WdigestListWildcards []int
     WdigestListOffset    int32
     WdigestLayout        WdigestLayout
+
+    // DPAPI master-key cache fields — opt-in.
+    DPAPIListPattern   []byte
+    DPAPIListWildcards []int
+    DPAPIListOffset    int32
+    DPAPILayout        DPAPILayout
 }
 
 // WdigestLayout — KIWI_WDIGEST_LIST_ENTRY node offsets per build.
@@ -209,6 +228,15 @@ type WdigestLayout struct {
     UserNameOffset uint32
     DomainOffset   uint32
     PasswordOffset uint32
+}
+
+// DPAPILayout — KIWI_MASTERKEY_CACHE_ENTRY node offsets per build.
+type DPAPILayout struct {
+    NodeSize       uint32
+    LUIDOffset     uint32
+    KeyGUIDOffset  uint32
+    KeySizeOffset  uint32
+    KeyBytesOffset uint32
 }
 func RegisterTemplate(*Template) error
 
@@ -252,15 +280,6 @@ func init() {
     })
 }
 ```
-
-### Detection
-
-**Low**. `lsasparse.Parse` runs entirely in the implant's own
-address space with pure-Go primitives — no Win32 calls, no
-filesystem access, no further detection surface. The loud
-operations are the dump itself (covered in
-[lsass-dump.md](techniques/collection/lsass-dump.md)) and any
-optional driver-assisted PPL bypass.
 
 ### Wdigest provider (v0.24.0+)
 
@@ -319,6 +338,53 @@ by side). Wdigest sessions whose LUID has no MSV match surface as
 new sessions with only the WdigestCredential — no MSV-only fields
 populated (LogonType, SID).
 
+### DPAPI master-key cache (v0.25.0+)
+
+DPAPI master keys live in `lsasrv.dll`'s `g_MasterKeyCacheList`
+global as a doubly-linked list of `KIWI_MASTERKEY_CACHE_ENTRY`
+nodes. Each entry carries a LUID, a 16-byte GUID identifying the
+master key, and the inline key bytes — typically 64 bytes,
+**already decrypted** in the cache. No LSA crypto round-trip is
+needed for this path; the walker reads the bytes as-is.
+
+Downstream use: feed the key bytes to `BCryptDecrypt` (or
+`CryptUnprotectData`) to unwrap any DPAPI-protected blob bound to
+that LUID — Chrome / Edge / Firefox saved cookies and passwords,
+Windows Vault credentials, WinRM saved sessions, RDP saved
+credentials, Outlook PSTs, etc.
+
+The walker auto-disables when the registered Template has
+`DPAPILayout.NodeSize == 0`. Operators with verified offsets
+extend the Template at registration time:
+
+```go
+import "github.com/oioio-space/maldev/credentials/lsasparse"
+
+func init() {
+    _ = lsasparse.RegisterTemplate(&lsasparse.Template{
+        BuildMin: 19045, BuildMax: 19045, // Win10 22H2
+
+        // … LSA + MSV + (optional) Wdigest fields …
+
+        DPAPIListPattern: []byte{ /* per-build dpapi signature */ },
+        DPAPIListOffset:  /* signed bytes from match start to rel32 */ 0,
+        DPAPILayout: lsasparse.DPAPILayout{
+            NodeSize:       0x80,
+            LUIDOffset:     0x10, // KIWI_MASTERKEY_CACHE_ENTRY.LogonId
+            KeyGUIDOffset:  0x18, // .KeyUid (GUID)
+            KeySizeOffset:  0x28, // .keySize (uint32)
+            KeyBytesOffset: 0x30, // inline key payload
+        },
+    })
+}
+```
+
+After Parse: a master key whose LUID matches an existing session
+joins that session's `Credentials` slice. Master keys whose LUID
+has no match surface as new sessions carrying only the
+`DPAPIMasterKey` credential — same orphan-surface semantics as
+Wdigest.
+
 ### Detection
 
 **Low**. `lsasparse.Parse` runs entirely in the implant's own
@@ -330,12 +396,13 @@ optional driver-assisted PPL bypass.
 
 ### Limitations
 
-- v0.24.x ships MSV1_0 + Wdigest. Kerberos tickets, DPAPI master
-  keys, and LiveSSP / TSPkg / CloudAP secrets are each separate
-  ~300-500 LOC follow-ups on top of the v0.23.x crypto layer.
-- Wdigest defaults are not yet inlined — operators register
-  per-build offsets manually. Default-template auto-enable is
-  expected in v0.24.1 once verified against a real binary.
+- v0.25.x ships MSV1_0 + Wdigest + DPAPI. Kerberos tickets and
+  LiveSSP / TSPkg / CloudAP secrets are each separate ~300-500 LOC
+  follow-ups on top of the v0.23.x crypto layer.
+- Wdigest and DPAPI defaults are not yet inlined — operators
+  register per-build offsets manually. Default-template auto-enable
+  is expected in subsequent point releases once each provider's
+  signatures are verified against a real binary.
 - x64 only. The `Architecture` enum reserves `ArchX86` for a future
   WoW64 variant.
 - Credential Guard / LSAISO trustlet sessions surface as warnings —

@@ -7,6 +7,42 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added — `credentials/lsasparse` v0.25.0 — DPAPI master-key cache
+
+- New `DPAPIMasterKey` type implementing the `Credential` interface
+  alongside `MSV1_0Credential` + `WdigestCredential`. Carries the
+  LUID + 16-byte GUID + inline key bytes from a single
+  KIWI_MASTERKEY_CACHE_ENTRY in lsasrv.dll's `g_MasterKeyCacheList`.
+- `DPAPIMasterKey.GUIDString()` returns the canonical 8-4-4-4-12
+  Microsoft hyphenated GUID format (LE on the first three
+  components, BE on the last two — the same convention every
+  Windows-targeting tool uses).
+- `DPAPIMasterKey.String()` returns `{guid}:hex-bytes` for
+  downstream consumption by blob decryptors.
+- `DPAPIMasterKey.wipe()` zeros key bytes, GUID, and resets Found —
+  pre-decrypted master keys are the highest-value extracted secret
+  (they unlock everything DPAPI-protected for that LUID).
+- New `DPAPILayout` struct + `DPAPIList{Pattern,Wildcards,Offset}`
+  fields on `Template`. Set `DPAPILayout.NodeSize=0` and the walker
+  is skipped at no runtime cost — DPAPI support is opt-in per
+  template (defaults stay disabled until a real-binary verification
+  pass).
+- `Parse()` now walks `g_MasterKeyCacheList` after Wdigest, merging
+  master keys onto matching MSV/Wdigest LogonSessions by LUID;
+  orphan LUIDs surface as new sessions.
+- 12 new unit tests including a synthetic-fixture round-trip
+  exercising pattern → rel32 deref → list walk → GUID/key extract →
+  LUID-merge, plus oversized-key-size + node-overrun guards. 64/64
+  tests green.
+
+DPAPI cache entries are stored **already decrypted** in lsasrv.dll
+on every Win10/Win11 path observed today, so no LSA crypto chain is
+walked for this provider. Downstream callers feed `KeyBytes` to
+`BCryptDecrypt` to unwrap Chrome/Edge/Firefox cookies, Windows
+Vault credentials, WinRM saved sessions, RDP saved credentials,
+Outlook PSTs, and any other DPAPI-protected blob bound to that
+LUID.
+
 ### Added — `credentials/lsasparse` v0.24.0 — Wdigest provider
 
 - New `WdigestCredential` type implementing the `Credential` interface

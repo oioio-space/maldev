@@ -213,6 +213,14 @@ func Parse(reader io.ReaderAt, size int64) (*Result, error) {
 		res.Warnings = append(res.Warnings, wdigWarnings...)
 	}
 
+	// DPAPI master-key cache lives in lsasrv.dll (already resolved
+	// above for the LSA crypto step). Cached keys are pre-decrypted
+	// — no lsaKey needed for this path. Same merge-by-LUID +
+	// orphan-surface semantics as Wdigest.
+	dpapiKeys, dpapiWarnings := extractDPAPI(r, lsasrv, tmpl)
+	sessions = mergeDPAPI(sessions, dpapiKeys)
+	res.Warnings = append(res.Warnings, dpapiWarnings...)
+
 	res.Sessions = sessions
 	return res, nil
 }

@@ -77,6 +77,17 @@ type Template struct {
 	// WdigestLayout captures per-build KIWI_WDIGEST_LIST_ENTRY node
 	// offsets. Set NodeSize=0 to disable the Wdigest walker.
 	WdigestLayout WdigestLayout
+
+	// DPAPI master-key cache fields. The g_MasterKeyCacheList global
+	// lives in lsasrv.dll (.data) and is rooted by a doubly-linked
+	// LIST_ENTRY pair; each KIWI_MASTERKEY_CACHE_ENTRY carries a LUID
+	// + GUID + inline key bytes (ALREADY decrypted in cache — no LSA
+	// crypto needed for this path). Set NodeSize=0 (zero value) to
+	// disable the DPAPI walker.
+	DPAPIListPattern   []byte
+	DPAPIListWildcards []int
+	DPAPIListOffset    int32
+	DPAPILayout        DPAPILayout
 }
 
 // validate sanity-checks a template before it enters the registry.

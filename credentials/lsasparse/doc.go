@@ -21,15 +21,23 @@
 // Scope:
 //   - MSV1_0 NTLM hashes (NT / LM / SHA1) — v0.23.x
 //   - Wdigest plaintext passwords — v0.24.x (opt-in per template)
-// Out of scope today: Kerberos tickets, DPAPI master keys, LiveSSP /
-// TSPkg / CloudAP secrets, live-process attach. Each is a follow-up
-// chantier on top of the existing crypto + walker layers.
+//   - DPAPI master-key cache — v0.25.x (opt-in per template)
+// Out of scope today: Kerberos tickets, LiveSSP / TSPkg / CloudAP
+// secrets, live-process attach. Each is a follow-up chantier on top
+// of the existing crypto + walker layers.
 //
-// The Wdigest provider auto-disables when the registered Template
-// has WdigestLayout.NodeSize == 0 (the default for the v0.23.x
-// templates). Operators with a verified Win10/Win11 wdigest.dll
-// signature register an extended Template that fills the Wdigest
-// fields — see WdigestLayout doc for the field-by-field meaning.
+// Wdigest and DPAPI providers auto-disable when the registered
+// Template has WdigestLayout.NodeSize == 0 / DPAPILayout.NodeSize ==
+// 0 (the default for the v0.23.x templates). Operators with verified
+// Win10/Win11 signatures register an extended Template that fills
+// the relevant fields — see Wdigest/DPAPILayout docs for the
+// field-by-field meaning.
+//
+// DPAPI master keys are stored pre-decrypted in lsasrv.dll's
+// g_MasterKeyCacheList; the walker reads them as-is and grafts them
+// onto MSV LogonSessions by LUID. Operators downstream feed the key
+// bytes to BCryptDecrypt to unwrap Chrome cookies, Vault credentials,
+// WinRM saved sessions, and other DPAPI-protected blobs.
 //
 // Templates ship inline for Win10 19H1 → 22H2 (builds 18362–19045)
 // and Win11 21H2 → 22H2 pre-22622 (builds 22000–22621). A dump from
