@@ -48,6 +48,21 @@ type MSVLayout struct {
 	// PrimaryCredentials list head. The walker decrypts each
 	// PrimaryCredentials_data blob with the lsaKey.
 	CredentialsOffset uint32
+
+	// CredManListPtrOffset is the byte offset INSIDE the session
+	// node where a pointer to the per-session Credential Manager
+	// (CredMan / Vault) list head sits. CredMan stores RDP saved
+	// sessions, IE/Edge form passwords, network-share credentials,
+	// etc. — extracted with the same lsaKey crypto as MSV primary.
+	//
+	// Set CredManListPtrOffset = 0 to disable the CredMan walker.
+	// KvcForensic ships session_credman_ptr_offset for Win 11 24H2+
+	// only (= 0x168); older builds need operator-supplied values.
+	CredManListPtrOffset uint32
+
+	// CredManLayout is the per-entry layout for the CredMan list
+	// nodes. Required when CredManListPtrOffset != 0.
+	CredManLayout CredManLayout
 }
 
 // MSV1_0Credential is the credential payload extracted from an
@@ -236,13 +251,32 @@ func decodeLogonSession(r *reader, node []byte, t *Template, lsaKey *lsaKey) (*L
 	cred.UserName = username
 	cred.LogonDomain = domain
 
+	credentials := []Credential{cred}
+
+	// Optional CredMan walk — when MSVLayout.CredManListPtrOffset is
+	// non-zero, the session node carries a per-session pointer to
+	// the Credential Manager (Vault) list. Each entry produces a
+	// CredManCredential alongside the MSV1_0Credential in the same
+	// session.
+	if t.MSVLayout.CredManListPtrOffset != 0 &&
+		t.MSVLayout.CredManListPtrOffset+8 <= t.MSVLayout.NodeSize {
+		credManPtr := binary.LittleEndian.Uint64(
+			node[t.MSVLayout.CredManListPtrOffset : t.MSVLayout.CredManListPtrOffset+8])
+		if credManPtr != 0 {
+			cmCreds, _ := extractCredMan(r, credManPtr, t.MSVLayout.CredManLayout, lsaKey)
+			for _, c := range cmCreds {
+				credentials = append(credentials, c)
+			}
+		}
+	}
+
 	return &LogonSession{
 		LUID:        luid,
 		LogonType:   logonType,
 		UserName:    username,
 		LogonDomain: domain,
 		LogonServer: logonServer,
-		Credentials: []Credential{cred},
+		Credentials: credentials,
 	}, ""
 }
 

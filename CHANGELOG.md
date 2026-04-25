@@ -7,6 +7,49 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Added — `credentials/lsasparse` v0.27.0 — CredMan / Vault provider (framework)
+
+Sixth credential provider — Windows Credential Manager (Vault).
+CredMan stores RDP saved sessions, IE/Edge form passwords,
+network-share credentials, git/HTTP token entries, and any
+`CredentialAdd` (advapi32) entry whose persistence type is
+`CRED_PERSIST_LOGON_SESSION`.
+
+Structurally different from the other providers: CredMan entries
+are attached to an MSV LogonSession via a per-session pointer, not
+a separate dll-global list. The walker is invoked from inside the
+MSV walk via the new `MSVLayout.CredManListPtrOffset` field — when
+non-zero, the session node carries a list-head pointer that the
+CredMan walker follows.
+
+What ships:
+
+- `CredManCredential` implementing the `Credential` interface with
+  `UserName` + `LogonDomain` + `Password` + `ResourceName`.
+  `String()` renders `Resource | Domain\User:Password` so log lines
+  show *what* the credential unlocks.
+- `CredManLayout` struct + new fields on `MSVLayout`:
+  `CredManListPtrOffset` (pointer to list head, 0 = disabled) +
+  `CredManLayout` (per-node layout when the walker runs).
+- The walker hooks into `decodeLogonSession` so CredMan credentials
+  appear directly in `Session.Credentials` alongside the matching
+  `MSV1_0Credential` — no separate merge-by-LUID step.
+- `readUnicodeStringIfFits` bounds-check helper guards against a
+  layout whose offset would extend past `NodeSize`.
+- 7 new unit tests including a synthetic-fixture round-trip
+  exercising pattern → list walk → AES-CBC decrypt → UTF-16LE decode
+  for a `TERMSRV/dc01` resource.
+
+**v0.27.0 ships framework-only.** Default templates leave
+`CredManListPtrOffset = 0` (disabled). KvcForensic's JSON ships the
+pointer offset for Win 11 24H2+ (`session_credman_ptr_offset = 0x168`)
+but no per-node layout values; operators with verified offsets
+register an extended `MSVLayout` that fills both fields. Default
+auto-enable for Win 11 24H2 will ship in v0.27.1 once the per-node
+offsets are validated against a real binary.
+
+88/88 tests green (was 81; +7 from CredMan).
+
 ### Added — `credentials/lsasparse` v0.26.1 — Kerberos provider
 
 Fifth credential provider — the most complex of the post-MSV

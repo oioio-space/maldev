@@ -22,10 +22,12 @@
 //   - MSV1_0 NTLM hashes (NT / LM / SHA1) — v0.23.x
 //   - Wdigest plaintext passwords — v0.24.x
 //   - DPAPI master-key cache — v0.25.x
-//   - TSPkg (Terminal Services / RDP) plaintext — v0.26.x
-// Out of scope today: Kerberos tickets, CredMan, LiveSSP / CloudAP
-// secrets, live-process attach. Each is a follow-up chantier on top
-// of the existing crypto + walker layers.
+//   - TSPkg (Terminal Services / RDP) plaintext — v0.26.0
+//   - Kerberos password + tickets — v0.26.1
+//   - CredMan / Vault — v0.27.x (framework only; per-node layout opt-in)
+// Out of scope today: LiveSSP / CloudAP secrets, live-process attach.
+// Each is a follow-up chantier on top of the existing crypto + walker
+// layers.
 //
 // Each provider auto-disables when its Layout.NodeSize is zero — the
 // walker is skipped at no runtime cost. The v0.25.2+ default
