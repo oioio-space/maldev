@@ -65,6 +65,7 @@ flowchart TB
 | [DLL Hijack Discovery](dll-hijack.md) | `evasion/dllhijack` | T1574.001 | Medium | N/A (discovery only) | No |
 | [Call-Stack Spoof (metadata)](callstack-spoof.md) | `evasion/callstack` | T1036 | Medium | N/A (primitives) | Future (pivot) |
 | [Kernel Callback Enumeration](kernel-callback-removal.md) | `evasion/kcallback` | T1562.001 | Low (read) / High (BYOVD load) | N/A (enum) | Future (Remove) |
+| [BYOVD — RTCore64](byovd-rtcore64.md) | `kernel/driver/rtcore64` | T1014, T1543.003 | High (driver load) / Medium (steady-state) | Yes (Uninstall) | N/A (foundation) |
 
 ## Presets
 

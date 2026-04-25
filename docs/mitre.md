@@ -41,7 +41,8 @@
 | T1497.001 | System Checks | `evasion/antivm` | D3-DA |
 | T1497.003 | Time Based Evasion | `evasion/timing` | D3-DA |
 | T1529 | System Shutdown/Reboot | `system/bsod` | D3-DA (Dynamic Analysis) |
-| T1543.003 | Create or Modify System Process: Windows Service | `persistence/service`, `cleanup/service` | D3-SBV (Service Binary Verification) |
+| T1014 | Rootkit | `kernel/driver/rtcore64` (BYOVD — RTCore64 / CVE-2019-16098) | D3-DLIC (Driver Load Integrity Checking) |
+| T1543.003 | Create or Modify System Process: Windows Service | `persistence/service`, `cleanup/service`, `kernel/driver/rtcore64` (signed-driver service install) | D3-SBV (Service Binary Verification) |
 | T1547.009 | Shortcut Modification | `system/lnk`, `persistence/startup` | D3-FDA (File Discovery Analysis) |
 | T1548.002 | Bypass UAC | `uacbypass`, `evasion/dllhijack` (AutoElevate scanner) | D3-UAP (User Account Profiling) |
 | T1553.002 | Subvert Trust Controls: Code Signing | `pe/cert` | D3-SEA (Static Executable Analysis) |
