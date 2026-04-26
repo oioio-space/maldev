@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # test-all.sh — full-coverage test runner for maldev, with per-test reporting.
 #
-# Three layers, sequential, with per-test JSON ingested into cmd/test-report:
-#   1. memscan static verification matrix  (77+ byte-pattern checks in Windows VM)
-#   2. Linux VM   — go test -json ./... with MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1
-#   3. Windows VM — go test -json ./... with MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1
+# Up to four layers, sequential, with per-test JSON ingested into cmd/test-report:
+#   1. memscan static verification matrix    (77+ byte-pattern checks in Windows VM)
+#   2. Linux VM     — go test -json ./... with MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1
+#   3. Windows VM   — go test -json ./... with MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1
+#   4. Windows11 VM — go test -json ./... with MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1
+#                     (skipped silently when the windows11 entry is absent from
+#                     scripts/vm-test/config.local.yaml)
 #
 # Side-effects:
 #   - Sources scripts/vm-test/kali-env.sh if present, so MALDEV_KALI_* reach
@@ -32,6 +35,7 @@ fi
 do_memscan=1
 do_linux=1
 do_windows=1
+do_windows11=1
 stop_on_fail=1
 only=""
 pkgs="./..."
@@ -39,27 +43,35 @@ flags="-json -count=1 -timeout 600s"
 
 for arg in "$@"; do
     case "$arg" in
-        --no-memscan)  do_memscan=0 ;;
-        --no-linux)    do_linux=0 ;;
-        --no-windows)  do_windows=0 ;;
-        --only=*)      only="${arg#--only=}" ;;
-        --continue)    stop_on_fail=0 ;;
-        --pkgs=*)      pkgs="${arg#--pkgs=}" ;;
-        --flags=*)     flags="${arg#--flags=}" ;;
+        --no-memscan)    do_memscan=0 ;;
+        --no-linux)      do_linux=0 ;;
+        --no-windows)    do_windows=0 ;;
+        --no-windows11)  do_windows11=0 ;;
+        --only=*)        only="${arg#--only=}" ;;
+        --continue)      stop_on_fail=0 ;;
+        --pkgs=*)        pkgs="${arg#--pkgs=}" ;;
+        --flags=*)       flags="${arg#--flags=}" ;;
         -h|--help)
-            sed -n '3,22p' "$0"
+            sed -n '3,25p' "$0"
             exit 0
             ;;
     esac
 done
 if [ -n "$only" ]; then
-    do_memscan=0; do_linux=0; do_windows=0
+    do_memscan=0; do_linux=0; do_windows=0; do_windows11=0
     case "$only" in
-        memscan) do_memscan=1 ;;
-        linux)   do_linux=1 ;;
-        windows) do_windows=1 ;;
+        memscan)   do_memscan=1 ;;
+        linux)     do_linux=1 ;;
+        windows)   do_windows=1 ;;
+        windows11) do_windows11=1 ;;
         *) echo "unknown --only target: $only" >&2; exit 2 ;;
     esac
+fi
+
+# windows11 is opt-in via config.local.yaml — auto-skip when not configured
+# so the script keeps working on hosts that only have win10 + ubuntu + kali.
+if [ "$do_windows11" -eq 1 ] && ! grep -qE '^\s*windows11:' scripts/vm-test/config.local.yaml 2>/dev/null; then
+    do_windows11=0
 fi
 
 GREEN=$(printf '\033[32m')
@@ -209,10 +221,16 @@ run_vm_layer() {
     local name="$1"; shift
     local packages="$1"; shift
     local jsonFlags="$1"; shift
+    # Normalize layer name → platform: windows11 inherits all the Windows wiring
+    # (MSF payload, NTFS-ACL'd kali key push). Only the libvirt domain differs.
+    local platform="$name"
+    case "$name" in
+        windows11) platform="windows" ;;
+    esac
     banner "[$name] go test $packages $jsonFlags (MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1)"
     # Spin up a per-platform MSF handler so TestMeterpreterRealSession{,Linux}
     # runs for real instead of skipping on "no listener".
-    start_msf_handler "$name"
+    start_msf_handler "$platform"
     trap stop_msf_handler EXIT
 
     # Provision the Kali SSH key into the guest so tests that use
@@ -224,13 +242,14 @@ run_vm_layer() {
     local kali_key_guest=""
     local dom
     case "$name" in
-        linux)   dom="ubuntu20.04-" ;;
-        windows) dom="win10" ;;
+        linux)     dom="ubuntu20.04-" ;;
+        windows)   dom="win10" ;;
+        windows11) dom="win11-2" ;;
     esac
     if [ -n "$dom" ] && [ -n "${MALDEV_KALI_SSH_KEY:-}" ]; then
         guest_ip=$(resolve_vm_ip "$dom")
         if [ -n "$guest_ip" ]; then
-            if [ "$name" = "windows" ]; then
+            if [ "$platform" = "windows" ]; then
                 kali_key_guest=$(push_kali_key_windows "$guest_ip" 2>/dev/null || true)
             else
                 kali_key_guest=$(push_kali_key_linux "$guest_ip" 2>/dev/null || true)
@@ -292,7 +311,7 @@ run_vm_layer() {
 summary() {
     banner "SUMMARY"
     local overall=0
-    for name in memscan linux windows; do
+    for name in memscan linux windows windows11; do
         if [ -z "${layer_rc[$name]+x}" ]; then continue; fi
         local rc=${layer_rc[$name]}
         local mark
@@ -302,8 +321,9 @@ summary() {
 
     # Run cmd/test-report over the JSON files we produced (linux + windows).
     local rargs=()
-    [ -f /tmp/maldev-test-linux.json ]   && [ -s /tmp/maldev-test-linux.json ]   && rargs+=(-in "linux=/tmp/maldev-test-linux.json")
-    [ -f /tmp/maldev-test-windows.json ] && [ -s /tmp/maldev-test-windows.json ] && rargs+=(-in "windows=/tmp/maldev-test-windows.json")
+    [ -f /tmp/maldev-test-linux.json ]     && [ -s /tmp/maldev-test-linux.json ]     && rargs+=(-in "linux=/tmp/maldev-test-linux.json")
+    [ -f /tmp/maldev-test-windows.json ]   && [ -s /tmp/maldev-test-windows.json ]   && rargs+=(-in "windows=/tmp/maldev-test-windows.json")
+    [ -f /tmp/maldev-test-windows11.json ] && [ -s /tmp/maldev-test-windows11.json ] && rargs+=(-in "windows11=/tmp/maldev-test-windows11.json")
     if [ ${#rargs[@]} -gt 0 ]; then
         banner "PER-TEST REPORT (cmd/test-report)"
         go run ./cmd/test-report "${rargs[@]}" -out /tmp/maldev-test-report.txt || true
@@ -342,10 +362,17 @@ if [ "$do_windows" -eq 1 ]; then
     fi
 fi
 
+if [ "$do_windows11" -eq 1 ]; then
+    run_vm_layer windows11 "$pkgs" "$flags"
+    if [ "${layer_rc[windows11]}" -ne 0 ] && [ "$stop_on_fail" -eq 1 ]; then
+        summary; exit "${layer_rc[windows11]}"
+    fi
+fi
+
 summary
 
 # Exit non-zero if any layer failed.
-for name in memscan linux windows; do
+for name in memscan linux windows windows11; do
     if [ -n "${layer_rc[$name]+x}" ] && [ "${layer_rc[$name]}" -ne 0 ]; then
         exit "${layer_rc[$name]}"
     fi

@@ -4,21 +4,27 @@
 # MALDEV_MANUAL, MALDEV_KALI_*) set so gated tests run instead of skipping.
 #
 # Produces:
-#   ignore/coverage/cover-linux-host.out           — host profile
+#   ignore/coverage/cover-linux-host.out             — host profile
 #   ignore/coverage/ubuntu20.04-/{cover.out,test.log} — Linux VM artifacts
 #   ignore/coverage/win10/{cover.out,test.log}        — Windows VM artifacts
-#   ignore/coverage/cover-merged-full.out          — merged profile
-#   ignore/coverage/report-full.md                 — final Markdown report
+#   ignore/coverage/win11-2/{cover.out,test.log}      — Windows11 VM artifacts (optional)
+#   ignore/coverage/cover-merged-full.out            — merged profile
+#   ignore/coverage/report-full.md                   — final Markdown report
 #
 # Idempotent: can be re-run after code changes. VMs are always restored to
 # their INIT snapshot when done (no persistent side effects).
 #
 # Usage:
-#   scripts/full-coverage.sh                    # defaults — full run
-#   scripts/full-coverage.sh --no-restore       # leave VMs running after
-#   scripts/full-coverage.sh --skip-host        # skip host coverage pass
-#   scripts/full-coverage.sh --skip-linux-vm    # skip linux VM
-#   scripts/full-coverage.sh --skip-windows-vm  # skip windows VM
+#   scripts/full-coverage.sh                       # defaults — full run
+#   scripts/full-coverage.sh --no-restore          # leave VMs running after
+#   scripts/full-coverage.sh --skip-host           # skip host coverage pass
+#   scripts/full-coverage.sh --skip-linux-vm       # skip linux VM
+#   scripts/full-coverage.sh --skip-windows-vm     # skip windows (win10) VM
+#   scripts/full-coverage.sh --skip-windows11-vm   # skip windows11 VM
+#
+# The Windows11 phase auto-skips when scripts/vm-test/config.local.yaml has
+# no `windows11:` block, so this script keeps working on hosts with only the
+# stock win10 + ubuntu + kali setup.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -27,9 +33,11 @@ cd "$(dirname "$0")/.."
 # Config — overridable via env
 # ---------------------------------------------------------------------------
 WIN_IP="${MALDEV_VM_WINDOWS_SSH_HOST:-192.168.122.122}"
+WIN11_IP="${MALDEV_VM_WINDOWS11_SSH_HOST:-192.168.122.71}"
 LINUX_IP="${MALDEV_VM_LINUX_SSH_HOST:-192.168.122.63}"
 KALI_IP="${MALDEV_KALI_SSH_HOST:-192.168.122.246}"
 WIN_DOMAIN="${MALDEV_VM_WINDOWS_LIBVIRT_NAME:-win10}"
+WIN11_DOMAIN="${MALDEV_VM_WINDOWS11_LIBVIRT_NAME:-win11-2}"
 LINUX_DOMAIN="${MALDEV_VM_LINUX_LIBVIRT_NAME:-ubuntu20.04-}"
 KALI_DOMAIN="${MALDEV_KALI_LIBVIRT_NAME:-debian13}"
 LIBVIRT_URI="${MALDEV_LIBVIRT_URI:-qemu:///session}"
@@ -39,20 +47,29 @@ RESTORE=1
 SKIP_HOST=0
 SKIP_LINUX_VM=0
 SKIP_WINDOWS_VM=0
+SKIP_WINDOWS11_VM=0
 SNAPSHOT="${MALDEV_VM_SNAPSHOT:-INIT}"
 for arg in "$@"; do
     case "$arg" in
-        --no-restore)      RESTORE=0 ;;
-        --skip-host)       SKIP_HOST=1 ;;
-        --skip-linux-vm)   SKIP_LINUX_VM=1 ;;
-        --skip-windows-vm) SKIP_WINDOWS_VM=1 ;;
-        --snapshot=*)      SNAPSHOT="${arg#--snapshot=}" ;;
-        *)                 echo "unknown flag: $arg"; exit 2 ;;
+        --no-restore)        RESTORE=0 ;;
+        --skip-host)         SKIP_HOST=1 ;;
+        --skip-linux-vm)     SKIP_LINUX_VM=1 ;;
+        --skip-windows-vm)   SKIP_WINDOWS_VM=1 ;;
+        --skip-windows11-vm) SKIP_WINDOWS11_VM=1 ;;
+        --snapshot=*)        SNAPSHOT="${arg#--snapshot=}" ;;
+        *)                   echo "unknown flag: $arg"; exit 2 ;;
     esac
 done
 
+# Auto-skip windows11 phase when the host has no windows11: block in
+# config.local.yaml — keeps the script no-op for stock single-Windows hosts.
+if [ "$SKIP_WINDOWS11_VM" -eq 0 ] && ! grep -qE '^\s*windows11:' scripts/vm-test/config.local.yaml 2>/dev/null; then
+    SKIP_WINDOWS11_VM=1
+fi
+
 # Propagate snapshot to vmtest so it restores to the same one we're pinning.
 export MALDEV_VM_WINDOWS_SNAPSHOT="$SNAPSHOT"
+export MALDEV_VM_WINDOWS11_SNAPSHOT="$SNAPSHOT"
 export MALDEV_VM_LINUX_SNAPSHOT="$SNAPSHOT"
 
 mkdir -p "$COVER_DIR"
@@ -118,6 +135,7 @@ export MALDEV_KALI_SSH_KEY="$HOME/.ssh/vm_kali_key"
 export MALDEV_KALI_USER=test
 export MALDEV_KALI_HOST="$KALI_IP"
 export MALDEV_VM_WINDOWS_SSH_HOST="$WIN_IP"
+export MALDEV_VM_WINDOWS11_SSH_HOST="$WIN11_IP"
 export MALDEV_VM_LINUX_SSH_HOST="$LINUX_IP"
 
 # ---------------------------------------------------------------------------
@@ -166,16 +184,29 @@ if [ "$SKIP_WINDOWS_VM" -eq 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Phase 4b — Windows11 VM coverage (cross-version run, optional)
+# ---------------------------------------------------------------------------
+if [ "$SKIP_WINDOWS11_VM" -eq 0 ]; then
+    log "Windows11 VM coverage pass (MALDEV_INTRUSIVE=1, MALDEV_MANUAL=1)"
+    go run ./cmd/vmtest -report-dir="$COVER_DIR" windows11 "./..." \
+        "-count=1 -v -p 2 -timeout=30m" 2>&1 | \
+        tee "$COVER_DIR/vm-windows11-full.log" || \
+        warn "Windows11 VM tests returned non-zero (expected when a gated test fails)"
+fi
+
+# ---------------------------------------------------------------------------
 # Phase 5 — merge + report
 # ---------------------------------------------------------------------------
 log "Merging profiles + rendering report"
 profiles=()
-[ -f "$COVER_DIR/cover-linux-host.out" ]          && profiles+=("$COVER_DIR/cover-linux-host.out")
-[ -f "$COVER_DIR/$LINUX_DOMAIN/cover.out" ]       && profiles+=("$COVER_DIR/$LINUX_DOMAIN/cover.out")
-[ -f "$COVER_DIR/$WIN_DOMAIN/cover.out" ]         && profiles+=("$COVER_DIR/$WIN_DOMAIN/cover.out")
+[ -f "$COVER_DIR/cover-linux-host.out" ]            && profiles+=("$COVER_DIR/cover-linux-host.out")
+[ -f "$COVER_DIR/$LINUX_DOMAIN/cover.out" ]         && profiles+=("$COVER_DIR/$LINUX_DOMAIN/cover.out")
+[ -f "$COVER_DIR/$WIN_DOMAIN/cover.out" ]           && profiles+=("$COVER_DIR/$WIN_DOMAIN/cover.out")
+[ -f "$COVER_DIR/$WIN11_DOMAIN/cover.out" ]         && profiles+=("$COVER_DIR/$WIN11_DOMAIN/cover.out")
 # clrhost subprocess profile — emitted by testutil.RunCLROperation when
 # .NET 3.5 is present. Missing silently if the CLR tests skipped.
-[ -f "$COVER_DIR/$WIN_DOMAIN/clrhost-cover.out" ] && profiles+=("$COVER_DIR/$WIN_DOMAIN/clrhost-cover.out")
+[ -f "$COVER_DIR/$WIN_DOMAIN/clrhost-cover.out" ]   && profiles+=("$COVER_DIR/$WIN_DOMAIN/clrhost-cover.out")
+[ -f "$COVER_DIR/$WIN11_DOMAIN/clrhost-cover.out" ] && profiles+=("$COVER_DIR/$WIN11_DOMAIN/clrhost-cover.out")
 
 if [ "${#profiles[@]}" -eq 0 ]; then
     warn "No profiles to merge — aborting"
@@ -190,34 +221,47 @@ go run scripts/coverage-merge.go \
 # Phase 6 — tally (native go test format)
 # ---------------------------------------------------------------------------
 log "Per-run tallies"
+# count_lines $file $pattern — counts matching lines, returns "0" on no
+# match or missing file. Wrapping `grep -ac` in `|| true` shields the
+# outer set -e, since grep exits 1 when there are zero matches.
+count_lines() {
+    local n
+    n=$(grep -ac "$2" "$1" 2>/dev/null || true)
+    echo "${n:-0}"
+}
+cover_pct() {
+    local out
+    out=$(go tool cover -func="$1" 2>/dev/null | tail -1 | awk '{print $NF}')
+    echo "${out:-?}"
+}
 {
     echo "=== maldev full-coverage tallies ==="
-    for d in "$COVER_DIR"/cover-linux-host.out; do
-        [ -f "$d" ] || continue
-        cov=$(go tool cover -func="$d" 2>/dev/null | tail -1 | awk '{print $NF}')
-        printf "  %-40s cov=%s (linux host)\n" "${d#$COVER_DIR/}" "$cov"
-    done
-    for d in "$COVER_DIR/$LINUX_DOMAIN" "$COVER_DIR/$WIN_DOMAIN"; do
+    if [ -f "$COVER_DIR/cover-linux-host.out" ]; then
+        printf "  %-40s cov=%s (linux host)\n" "cover-linux-host.out" \
+            "$(cover_pct "$COVER_DIR/cover-linux-host.out")"
+    fi
+    for d in "$COVER_DIR/$LINUX_DOMAIN" "$COVER_DIR/$WIN_DOMAIN" "$COVER_DIR/$WIN11_DOMAIN"; do
         [ -d "$d" ] || continue
         # -a: the Windows test.log has mixed CR/LF/CRLF line endings; without
         # -a grep detects it as binary and returns 0 for every pattern.
-        p=$(grep -ac '^--- PASS:' "$d/test.log" 2>/dev/null); p=${p:-0}
-        f=$(grep -ac '^--- FAIL:' "$d/test.log" 2>/dev/null); f=${f:-0}
-        s=$(grep -ac '^--- SKIP:' "$d/test.log" 2>/dev/null); s=${s:-0}
-        cov=$(go tool cover -func="$d/cover.out" 2>/dev/null | tail -1 | awk '{print $NF}')
-        printf "  %-40s cov=%s P=%-4s F=%-3s S=%-3s\n" "${d#$COVER_DIR/}" "$cov" "$p" "$f" "$s"
+        p=$(count_lines "$d/test.log" '^--- PASS:')
+        f=$(count_lines "$d/test.log" '^--- FAIL:')
+        s=$(count_lines "$d/test.log" '^--- SKIP:')
+        printf "  %-40s cov=%s P=%-4s F=%-3s S=%-3s\n" "${d#$COVER_DIR/}" \
+            "$(cover_pct "$d/cover.out")" "$p" "$f" "$s"
     done
-    merged_cov=$(go tool cover -func="$COVER_DIR/cover-merged-full.out" 2>/dev/null | tail -1 | awk '{print $NF}')
     echo
     echo "  ----------------------------------------"
-    printf "  %-40s cov=%s (merged)\n" "cover-merged-full.out" "$merged_cov"
+    printf "  %-40s cov=%s (merged)\n" "cover-merged-full.out" \
+        "$(cover_pct "$COVER_DIR/cover-merged-full.out")"
 } | tee "$COVER_DIR/tallies.txt"
 
 # ---------------------------------------------------------------------------
 # Phase 7 — teardown (deferred-ish)
 # ---------------------------------------------------------------------------
-[ "$SKIP_WINDOWS_VM" -eq 0 ] && vm_stop_and_restore "$WIN_DOMAIN" "$SNAPSHOT"
-[ "$SKIP_LINUX_VM" -eq 0 ]   && vm_stop_and_restore "$LINUX_DOMAIN" "$SNAPSHOT"
+[ "$SKIP_WINDOWS_VM" -eq 0 ]   && vm_stop_and_restore "$WIN_DOMAIN"   "$SNAPSHOT"
+[ "$SKIP_WINDOWS11_VM" -eq 0 ] && vm_stop_and_restore "$WIN11_DOMAIN" "$SNAPSHOT"
+[ "$SKIP_LINUX_VM" -eq 0 ]     && vm_stop_and_restore "$LINUX_DOMAIN" "$SNAPSHOT"
 vm_stop_and_restore "$KALI_DOMAIN" "$SNAPSHOT"
 
 log "DONE — report: $COVER_DIR/report-full.md"

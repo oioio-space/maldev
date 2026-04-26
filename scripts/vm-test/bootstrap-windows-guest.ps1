@@ -110,6 +110,45 @@ if ((Test-Path 'C:\Go\bin\go.exe') -and (& 'C:\Go\bin\go.exe' version) -match "g
     }
 }
 
+# 6. Defender exclusions for the test tree + Go build cache so AV does
+#    not quarantine test binaries (Win11 Defender flags evasion/hook,
+#    inject, kcallback, sleepmask test executables as malware). The
+#    point of the lab VM is to *run* this code unmolested; production
+#    operators of course will not have these exclusions.
+#
+#    Idempotent: Add-MpPreference -ExclusionPath silently no-ops when
+#    the path is already excluded.
+if (Get-Command Add-MpPreference -ErrorAction SilentlyContinue) {
+    $exclusions = @(
+        'C:\maldev',                                    # vmtest project_copy_path
+        "$env:TEMP",                                    # go-buildXXX scratch dirs
+        "$env:LOCALAPPDATA\Temp",                       # alt TEMP for elevated SSH session
+        'C:\Go',                                        # toolchain (linker scans output)
+        "$env:USERPROFILE\AppData\Local\go-build"       # GOCACHE default
+    )
+    foreach ($p in $exclusions) {
+        try {
+            Add-MpPreference -ExclusionPath $p -ErrorAction Stop
+            Log "Defender exclusion added: $p"
+        } catch {
+            Log "Defender exclusion skipped (already present or RTP off): $p"
+        }
+    }
+    # go.exe + the test binaries it spawns: process exclusions stop
+    # Defender from scanning them as they execute (catches the
+    # quarantine-on-write-then-exec window).
+    foreach ($exe in @('go.exe', 'gcc.exe', 'ld.exe', 'cc1.exe')) {
+        try {
+            Add-MpPreference -ExclusionProcess $exe -ErrorAction Stop
+            Log "Defender process exclusion added: $exe"
+        } catch {
+            Log "Defender process exclusion skipped: $exe"
+        }
+    }
+} else {
+    Log 'Defender cmdlets not available — skipping AV exclusions'
+}
+
 Log 'verifying'
 & 'C:\Go\bin\go.exe' version
 Get-Service sshd | Format-Table Name, Status -AutoSize
