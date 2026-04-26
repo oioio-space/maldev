@@ -92,6 +92,7 @@ var (
 	ProcNtGetNextProcess                 = Ntdll.NewProc("NtGetNextProcess")
 	ProcNtOpenProcess                    = Ntdll.NewProc("NtOpenProcess")
 	ProcNtReadVirtualMemory              = Ntdll.NewProc("NtReadVirtualMemory")
+	ProcNtResumeProcess                  = Ntdll.NewProc("NtResumeProcess")
 	ProcNtQueryVirtualMemory             = Ntdll.NewProc("NtQueryVirtualMemory")
 	ProcRtlCreateProcessParametersEx    = Ntdll.NewProc("RtlCreateProcessParametersEx")
 	ProcRtlInitUnicodeString             = Ntdll.NewProc("RtlInitUnicodeString")

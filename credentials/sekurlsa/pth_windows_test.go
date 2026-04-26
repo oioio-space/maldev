@@ -7,6 +7,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/oioio-space/maldev/testutil"
 	"golang.org/x/sys/windows"
 )
 
@@ -91,25 +92,30 @@ func TestPass_RejectsBadAES256Length(t *testing.T) {
 	}
 }
 
-// TestPass_StubReturnsNotImplementedAfterSpawn documents the
-// chantier-II partial-implementation contract: with valid Params,
-// Pass spawns a CREATE_SUSPENDED decoy under
-// LOGON_NETCREDENTIALS_ONLY, captures the spawned PID + LUID into
-// the returned PTHResult, and surfaces ErrPTHNotImplemented to
-// signal the LSA write-back step is still pending. The test
-// terminates the spawned process so it doesn't accumulate.
-func TestPass_StubReturnsNotImplementedAfterSpawn(t *testing.T) {
+// TestPass_LiveMSVWriteBack exercises the full MSV write-back path
+// against the live lsass on the test VM. Intrusive: opens lsass
+// with PROCESS_VM_READ + PROCESS_VM_WRITE and overwrites the
+// PrimaryCredentials cipher of the spawned process's logon
+// session. The test admin's own session is never touched (the
+// spawn creates a fresh LUID via LOGON_NETCREDENTIALS_ONLY). The
+// spawned process is terminated post-test.
+func TestPass_LiveMSVWriteBack(t *testing.T) {
+	testutil.RequireIntrusive(t)
+
 	res, err := Pass(validPTHParams())
 	defer terminatePID(res.PID)
 
-	if !errors.Is(err, ErrPTHNotImplemented) {
-		t.Fatalf("Pass with valid params: err = %v, want wrap of ErrPTHNotImplemented", err)
+	if err != nil {
+		t.Fatalf("Pass: %v (PID=%d LUID=0x%X)", err, res.PID, res.LogonID)
 	}
 	if res.PID == 0 {
-		t.Errorf("Pass spawn: PID = 0, want non-zero")
+		t.Errorf("PID = 0, want non-zero")
 	}
 	if res.LogonID == 0 {
-		t.Errorf("Pass spawn: LogonID = 0, want non-zero LUID")
+		t.Errorf("LogonID = 0, want non-zero LUID")
+	}
+	if !res.MSVOverwritten {
+		t.Errorf("MSVOverwritten = false, want true after successful write-back")
 	}
 }
 
@@ -122,18 +128,21 @@ func TestPassImpersonate_RejectsMissingDomain(t *testing.T) {
 	}
 }
 
-func TestPassImpersonate_StubReturnsNotImplementedAfterSpawn(t *testing.T) {
+// TestPassImpersonate_LiveMSVWriteBack — same as
+// TestPass_LiveMSVWriteBack since PassImpersonate currently
+// delegates to Pass (the SetThreadToken impersonation flow is the
+// final chantier-II slice).
+func TestPassImpersonate_LiveMSVWriteBack(t *testing.T) {
+	testutil.RequireIntrusive(t)
+
 	res, err := PassImpersonate(validPTHParams())
 	defer terminatePID(res.PID)
 
-	if !errors.Is(err, ErrPTHNotImplemented) {
-		t.Fatalf("PassImpersonate: err = %v, want wrap of ErrPTHNotImplemented", err)
+	if err != nil {
+		t.Fatalf("PassImpersonate: %v (PID=%d LUID=0x%X)", err, res.PID, res.LogonID)
 	}
-	if res.PID == 0 {
-		t.Errorf("PassImpersonate spawn: PID = 0, want non-zero")
-	}
-	if res.LogonID == 0 {
-		t.Errorf("PassImpersonate spawn: LogonID = 0, want non-zero LUID")
+	if !res.MSVOverwritten {
+		t.Errorf("MSVOverwritten = false, want true")
 	}
 }
 
