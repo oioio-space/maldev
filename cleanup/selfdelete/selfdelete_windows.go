@@ -40,9 +40,25 @@ type _FILE_RENAME_INFO struct {
 	FileName       [1]uint16
 }
 
-// _FILE_DISPOSITION_INFO is used for file deletion operations.
+// _FILE_DISPOSITION_INFO is the legacy disposition struct
+// (FileDispositionInfo class, value 4). Win11 24H2's
+// NtfsSetDispositionInfo redirects this to an alternate data stream
+// instead of unlinking the file — the rename succeeds, the disposition
+// returns success, but the file remains visible. Used as a fallback
+// for pre-1709 builds that don't support the Ex form.
 type _FILE_DISPOSITION_INFO struct {
 	DeleteFile bool
+}
+
+// _FILE_DISPOSITION_INFO_EX is the modern disposition struct
+// (FileDispositionInfoEx class, value 21; available Win10 1709+).
+// Combined with FILE_DISPOSITION_POSIX_SEMANTICS the kernel actually
+// unlinks the file even on Win11 24H2 where the legacy class gets
+// rerouted into a phantom ADS. See LloydLabs/delete-self-poc and
+// tkyn.dev "Deleting yourself in Windows" for the Win11 24H2
+// mitigation analysis.
+type _FILE_DISPOSITION_INFO_EX struct {
+	Flags uint32
 }
 
 func dsOpenHandle(pwPath *uint16) (windows.Handle, error) {
@@ -95,10 +111,45 @@ func dsRenameHandle(hHandle windows.Handle) error {
 	)
 }
 
+// dsDisposeHandle marks the file open on hHandle for deletion.
+//
+// Prefers FileDispositionInfoEx + (DELETE | POSIX_SEMANTICS) — the
+// only path that survives Win11 24H2's NtfsSetDispositionInfo ADS
+// redirect. POSIX_SEMANTICS tells NTFS to actually unlink the file
+// once the last handle closes, even when the legacy disposition
+// class would be silently rerouted.
+//
+// Falls back to the legacy FileDispositionInfo class on builds that
+// don't support Ex (pre-Win10 1709 / Server pre-1709 — STATUS_INVALID_INFO_CLASS,
+// surfaces as ERROR_INVALID_PARAMETER from SetFileInformationByHandle).
+// The fallback is the original ADS-rename pattern that worked on
+// every build down to Win 7 SP1.
 func dsDisposeHandle(hHandle windows.Handle) error {
+	infoEx := _FILE_DISPOSITION_INFO_EX{
+		Flags: windows.FILE_DISPOSITION_DELETE | windows.FILE_DISPOSITION_POSIX_SEMANTICS,
+	}
+	err := windows.SetFileInformationByHandle(
+		hHandle,
+		windows.FileDispositionInfoEx,
+		(*byte)(unsafe.Pointer(&infoEx)),
+		uint32(unsafe.Sizeof(infoEx)),
+	)
+	if err == nil {
+		return nil
+	}
+	// ERROR_INVALID_PARAMETER (87) on pre-1709 = info class not
+	// recognized. Anything else (sharing violation, access denied)
+	// would fail the legacy path too — but try it for parity with
+	// the original code path so old-build behavior is unchanged.
+	if !errors.Is(err, syscall.Errno(windows.ERROR_INVALID_PARAMETER)) {
+		// Different failure mode (sharing, access). Surface the Ex
+		// error so operators can debug — the legacy fallback would
+		// produce the same NTSTATUS for these.
+		return err
+	}
+
 	var fDelete _FILE_DISPOSITION_INFO
 	fDelete.DeleteFile = true
-
 	return windows.SetFileInformationByHandle(
 		hHandle,
 		windows.FileDispositionInfo,
