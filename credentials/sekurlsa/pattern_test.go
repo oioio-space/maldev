@@ -252,6 +252,82 @@ func TestDecryptLSA_BadAlignment(t *testing.T) {
 	}
 }
 
+// TestEncryptLSA_AESRoundTrip — encrypt + decrypt round-trip with
+// the same AES key/IV must return the original plaintext.
+func TestEncryptLSA_AESRoundTrip(t *testing.T) {
+	aes, err := instantiateCipher([]byte("0123456789abcdef"))
+	if err != nil {
+		t.Fatalf("instantiate AES: %v", err)
+	}
+	k := &lsaKey{IV: []byte("ABCDEFGH01234567"), AES: aes}
+
+	plain := []byte("the quick brown ") // 16 bytes — single AES block
+	ct, err := encryptLSA(plain, k)
+	if err != nil {
+		t.Fatalf("encryptLSA: %v", err)
+	}
+	got, err := decryptLSA(ct, k)
+	if err != nil {
+		t.Fatalf("decryptLSA: %v", err)
+	}
+	if string(got) != string(plain) {
+		t.Errorf("AES round-trip: got %q want %q", got, plain)
+	}
+}
+
+// TestEncryptLSA_3DESRoundTrip — same, for the 8-byte-aligned-but-
+// not-16-byte branch.
+func TestEncryptLSA_3DESRoundTrip(t *testing.T) {
+	des, err := instantiateCipher([]byte("012345670123456701234567"))
+	if err != nil {
+		t.Fatalf("instantiate 3DES: %v", err)
+	}
+	k := &lsaKey{IV: []byte("ABCDEFGH"), TripleDES: des}
+
+	plain := []byte("12345678") // 8 bytes — single 3DES block
+	ct, err := encryptLSA(plain, k)
+	if err != nil {
+		t.Fatalf("encryptLSA: %v", err)
+	}
+	got, err := decryptLSA(ct, k)
+	if err != nil {
+		t.Fatalf("decryptLSA: %v", err)
+	}
+	if string(got) != string(plain) {
+		t.Errorf("3DES round-trip: got %q want %q", got, plain)
+	}
+}
+
+// TestEncryptLSA_NilKey surfaces the documented sentinel.
+func TestEncryptLSA_NilKey(t *testing.T) {
+	if _, err := encryptLSA([]byte{1, 2, 3, 4}, nil); !errors.Is(err, ErrKeyExtractFailed) {
+		t.Errorf("err = %v, want ErrKeyExtractFailed", err)
+	}
+}
+
+// TestEncryptLSA_BadAlignment rejects plaintext that's not 8- or
+// 16-byte aligned.
+func TestEncryptLSA_BadAlignment(t *testing.T) {
+	aes, _ := instantiateCipher([]byte("0123456789abcdef"))
+	k := &lsaKey{IV: make([]byte, 16), AES: aes}
+	if _, err := encryptLSA([]byte{1, 2, 3}, k); !errors.Is(err, ErrKeyExtractFailed) {
+		t.Errorf("err = %v, want ErrKeyExtractFailed", err)
+	}
+}
+
+// TestEncryptLSA_EmptyPlaintext mirrors decryptLSA's nil/nil contract.
+func TestEncryptLSA_EmptyPlaintext(t *testing.T) {
+	aes, _ := instantiateCipher([]byte("0123456789abcdef"))
+	k := &lsaKey{IV: make([]byte, 16), AES: aes}
+	got, err := encryptLSA(nil, k)
+	if err != nil {
+		t.Errorf("err = %v, want nil", err)
+	}
+	if got != nil {
+		t.Errorf("got %v, want nil", got)
+	}
+}
+
 // encryptCBC is a test-side helper to produce ciphertext we then
 // decrypt — keeps round-trip tests self-contained without pinning
 // known-good vectors per platform.
