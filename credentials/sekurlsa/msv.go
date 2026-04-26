@@ -69,6 +69,14 @@ type MSVLayout struct {
 // — the dominant pivot for pass-the-hash workflows. SHA1 hash is the
 // AES256-DPAPI-derived key Microsoft introduced in Win11. LM hash is
 // typically empty since Vista.
+//
+// CipherVA + CipherLen describe where the encrypted blob this
+// credential was decoded from lives in the source process's memory.
+// On a minidump-backed Parse, both reflect the original (live) lsass
+// virtual address — the Pass-the-Hash write-back path consumes them
+// to NtWriteVirtualMemory new ciphertext at the same VA. CipherVA
+// is zero when the source was not a minidump or the layout walk
+// could not locate the cipher buffer.
 type MSVCredential struct {
 	UserName    string
 	LogonDomain string
@@ -77,6 +85,8 @@ type MSVCredential struct {
 	SHA1Hash    [20]byte
 	DPAPIKey    [16]byte
 	Found       bool // false if every hash field came back zero
+	CipherVA    uint64
+	CipherLen   uint16
 }
 
 // AuthPackage satisfies the Credential interface.
@@ -343,7 +353,10 @@ func decryptMSVPrimary(r *reader, node []byte, t *Template, lsaKey *lsaKey) (MSV
 		return MSVCredential{}, fmt.Sprintf("decrypt primary @0x%X: %v", credBufPtr, err)
 	}
 
-	return parseMSVPrimary(pt), ""
+	c := parseMSVPrimary(pt)
+	c.CipherVA = credBufPtr
+	c.CipherLen = credLen
+	return c, ""
 }
 
 // parseMSVPrimary projects a decrypted MSV1_0_PRIMARY_CREDENTIAL

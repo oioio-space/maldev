@@ -137,22 +137,6 @@ func TestPassImpersonate_StubReturnsNotImplementedAfterSpawn(t *testing.T) {
 	}
 }
 
-// TestPTHSentinels_AreDistinct guards against accidental aliasing
-// when adding new sentinels — each errors.Is check above relies on
-// the wrapped error being uniquely identifiable.
-func TestPTHSentinels_AreDistinct(t *testing.T) {
-	all := []error{
-		ErrPTHInvalidTarget,
-		ErrPTHSpawnFailed,
-		ErrPTHWriteFailed,
-		ErrPTHNoMatchingLUID,
-		ErrPTHNotImplemented,
-	}
-	for i, a := range all {
-		for j, b := range all {
-			if i != j && errors.Is(a, b) {
-				t.Errorf("sentinel %v unexpectedly Is %v", a, b)
-			}
-		}
-	}
-}
+// Cross-platform TestMutateMSVPrimary_* + TestPTHSentinels_AreDistinct
+// live in pth_msv_test.go (no build tag) since the symbols they cover
+// are defined in pth.go and pth_msv.go.

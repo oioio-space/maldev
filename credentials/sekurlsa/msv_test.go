@@ -311,6 +311,15 @@ func TestExtractMSV1_0_HappyPath(t *testing.T) {
 			break
 		}
 	}
+	// Cipher VA + length feed the Pass-the-Hash write-back path —
+	// must reflect the source-process VA + ciphertext length the
+	// walker decoded.
+	if cred.CipherVA != credBufVA {
+		t.Errorf("CipherVA = 0x%X, want 0x%X", cred.CipherVA, credBufVA)
+	}
+	if cred.CipherLen != encLen {
+		t.Errorf("CipherLen = %d, want %d", cred.CipherLen, encLen)
+	}
 }
 
 // utf16Encode is a thin wrapper for legibility in test setup.
