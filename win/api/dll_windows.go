@@ -111,6 +111,7 @@ var (
 	ProcRtlCaptureContext                = Ntdll.NewProc("RtlCaptureContext")
 	ProcRtlFillMemory                    = Ntdll.NewProc("RtlFillMemory")
 	ProcMemset                           = Ntdll.NewProc("memset")
+	ProcNtSetInformationFile             = Ntdll.NewProc("NtSetInformationFile")
 )
 
 // advapi32.dll procs

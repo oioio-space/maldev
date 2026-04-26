@@ -29,10 +29,11 @@
 // payload. Herpaderping operates at a lower level — the deception is in the
 // kernel section cache, not in user-space memory.
 //
-// Process Ghosting: creates a delete-pending file, maps it as SEC_IMAGE, then
-// lets the file deletion complete before creating the process. The file never
-// exists at the time of thread creation. Herpaderping differs in that the file
-// is always present on disk — it is simply overwritten with benign content.
+// Process Ghosting (ModeGhosting): creates a delete-pending file, maps it as
+// SEC_IMAGE, then lets the file deletion complete before creating the process.
+// The file never exists at the time of thread creation. This package implements
+// both variants; ModeGhosting is required on Win11 24H2+ where the kernel
+// rejects the herpaderping pattern in NtCreateProcessEx.
 // Both exploit the same kernel caching primitive but at different lifecycle
 // stages.
 //
