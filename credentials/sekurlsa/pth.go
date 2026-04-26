@@ -82,13 +82,11 @@ type PTHParams struct {
 	Target PTHTarget
 
 	// Caller routes the NtWriteVirtualMemory + NtReadVirtualMemory
-	// + NtResumeProcess calls through a stealth syscall strategy.
-	// Pass nil for the standard ntdll proc-table path; passing a
-	// configured *wsyscall.Caller routes through direct/indirect
-	// syscalls for EDR-hook evasion. Same convention as the rest
-	// of the credentials/* stack. Currently unused — wired in the
-	// next chantier-II commit when the LSA list-walk + write-back
-	// path lands.
+	// + NtAllocateVirtualMemory + NtResumeProcess calls through a
+	// stealth syscall strategy. Pass nil for the standard ntdll
+	// proc-table path; passing a configured *wsyscall.Caller routes
+	// through direct/indirect syscalls for EDR-hook evasion. Same
+	// convention as the rest of the credentials/* stack.
 	Caller *wsyscall.Caller
 
 	// LSAKeyOverride is an optional pre-extracted lsasrv key. When
@@ -142,11 +140,6 @@ var (
 	// usually means the decoy crashed early or LOGON_NETCREDENTIALS_ONLY
 	// failed silently.
 	ErrPTHNoMatchingLUID = errors.New("sekurlsa: PTH no matching LIST_ENTRY for spawned LUID")
-
-	// ErrPTHNotImplemented is the placeholder error returned by
-	// Pass and PassImpersonate while chantier II is still under
-	// construction. Will be removed when the implementation lands.
-	ErrPTHNotImplemented = errors.New("sekurlsa: Pass/PassImpersonate not yet implemented (chantier II in progress)")
 )
 
 // validatePTHParams enforces the contract for both entry points so

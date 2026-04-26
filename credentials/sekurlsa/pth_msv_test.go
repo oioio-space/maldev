@@ -114,7 +114,6 @@ func TestPTHSentinels_AreDistinct(t *testing.T) {
 		ErrPTHSpawnFailed,
 		ErrPTHWriteFailed,
 		ErrPTHNoMatchingLUID,
-		ErrPTHNotImplemented,
 	}
 	for i, a := range all {
 		for j, b := range all {

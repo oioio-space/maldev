@@ -32,8 +32,7 @@ import (
 // telemetry flags `reg.exe save HKLM\SAM` as one of the loudest
 // credential-dumping signals an EDR can watch. Operators wanting
 // to reduce that surface should call NtSaveKey directly through
-// win/ntapi (queued as a v0.1.x followup) or use VSS via
-// recon/shadowcopy.
+// win/ntapi or use VSS via recon/shadowcopy.
 
 // ErrLiveDump is returned when live acquisition fails — `reg save`
 // not on PATH, admin privileges missing, target hive locked by

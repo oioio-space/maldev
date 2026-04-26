@@ -6,11 +6,14 @@
 // MITRE ATT&CK: T1003.002 — OS Credential Dumping: Security Account
 // Manager.
 //
-// Detection level: MEDIUM-HIGH for the dump-acquisition step (file
-// reads of HKLM\SAM and HKLM\SYSTEM, or VSS shadow-copy enumeration
-// when the live hives are locked); LOW once the operator has the
-// hive bytes in hand (this package is pure-Go cell parsing + AES/RC4
-// + DES math, no syscalls).
+// Platform: cross-platform (pure Go) for the offline Dump path;
+// LiveDump is Windows-only (shells out to reg.exe save).
+//
+// Detection level: HIGH for LiveDump (reg.exe save HKLM\SAM is one
+// of the loudest credential-dumping signals an EDR can watch — the
+// queued NtSaveKey path under win/ntapi will lower this); LOW once
+// the operator has the hive bytes in hand (this package is pure-Go
+// cell parsing + AES/RC4 + DES math, no syscalls).
 //
 // Workflow:
 //
@@ -38,8 +41,4 @@
 //   5. For each user: derive per-user keys from hashed bootkey + RID,
 //      decrypt LM hash + NT hash (DES legacy or AES-128-CBC modern,
 //      Win10 1607+).
-//
-// Validation status: ▲ scaffolding only — Dump returns
-// ErrNotImplemented. Subsequent commits land the hive parser, syskey
-// extractor, SAM-key derivation, and per-user unwrap.
 package samdump

@@ -386,11 +386,10 @@ func (h *hive) readValue(nk *nkCell, name string) ([]byte, *vkCell, error) {
 		const inlineFlag = 0x80000000
 		realLen := vk.DataLen &^ inlineFlag
 		if vk.DataLen&inlineFlag != 0 {
-			out := make([]byte, realLen)
-			binary.LittleEndian.PutUint32(make([]byte, 4), uint32(vk.DataOff))
 			// vk.DataOff carries the 4 inline bytes as a little-endian uint32.
 			var raw [4]byte
 			binary.LittleEndian.PutUint32(raw[:], uint32(vk.DataOff))
+			out := make([]byte, realLen)
 			copy(out, raw[:realLen])
 			return out, vk, nil
 		}

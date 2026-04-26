@@ -23,15 +23,14 @@ import (
 // downstream Kerberos tooling (Rubeus describe, impacket
 // ticketConverter, gettgtpkinit) can parse.
 //
-// Encryption: this v0.1 emits an UNENCRYPTED EncKrbCredPart (etype 0,
+// Encryption: emits an UNENCRYPTED EncKrbCredPart (etype 0,
 // cipher = DER(EncKrbCredPart)). Mimikatz uses the same convention
 // for its export path so the resulting .kirbi files are immediately
 // readable by the same downstream tools without needing the
 // originating session key. Replay (reusing the ticket against a real
-// service) requires the session key — that's queued for the chantier
-// III v0.2 pass that adds session-key extraction to the ticket walker
-// (KIWI_KERBEROS_INTERNAL_TICKET embedded EncryptionKey + LSA
-// decrypt).
+// service) requires the session key, populated by the walker when
+// SessionKey is non-empty (KIWI_KERBEROS_INTERNAL_TICKET embedded
+// EncryptionKey + LSA decrypt).
 //
 // MITRE ATT&CK: T1558.003 (Kerberoasting / Use Alternate
 // Authentication Material — Pass the Ticket export side).
@@ -47,12 +46,10 @@ var ErrKirbiInvalidTicket = errors.New("sekurlsa: cannot export ticket to kirbi"
 //
 // The KRB-CRED carries a single Ticket (the one in t.Buffer) plus an
 // unencrypted EncKrbCredPart describing the ticket's metadata
-// (realms, principal names, flags, ticket lifetime — none of which
-// we currently extract from the lsass walk, so they're filled with
-// safe defaults that downstream parsers tolerate). Tools that only
+// (realms, principal names, flags, ticket lifetime). Tools that only
 // describe the ticket (Rubeus describe, impacket describeTicket)
-// will work; tools that need the session key for replay will fail
-// until v0.2 lands.
+// always work; tools that need the session key for replay require
+// SessionKey to be non-empty.
 func (t *KerberosTicket) ToKirbi() ([]byte, error) {
 	if len(t.Buffer) == 0 {
 		return nil, fmt.Errorf("%w: empty Buffer", ErrKirbiInvalidTicket)

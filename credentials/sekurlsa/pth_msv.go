@@ -54,9 +54,7 @@ func mutateMSVPrimary(plaintext []byte, target PTHTarget) ([]byte, error) {
 	// NT — required, validated upstream.
 	copy(out[msvPrimaryNTHashOffset:msvPrimaryLMHashOffset], target.NTLM)
 	// LM — write zeros (post-Vista default; mimikatz behavior).
-	for i := msvPrimaryLMHashOffset; i < msvPrimaryNTAndLMEnd; i++ {
-		out[i] = 0
-	}
+	clear(out[msvPrimaryLMHashOffset:msvPrimaryNTAndLMEnd])
 	// SHA1 — preserve existing bytes.
 	return out, nil
 }

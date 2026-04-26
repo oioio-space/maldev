@@ -56,10 +56,10 @@ const (
 )
 
 // Fixed positions inside the per-user F value (USER_F). impacket's
-// `USER_F` puts UserId at offset 0x30. We don't currently consume
+// `USER_F` puts UserID at offset 0x30. We don't currently consume
 // the other F fields.
 const (
-	userFOffUserId = 0x30
+	userFOffUserID = 0x30
 )
 
 // listUserRIDs returns the parsed RIDs of every subkey under
