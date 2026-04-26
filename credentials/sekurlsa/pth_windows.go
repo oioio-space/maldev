@@ -204,7 +204,16 @@ func writeBackMSV(res *PTHResult, p PTHParams) error {
 		}
 	}
 	if parsed.lsaKey == nil {
-		return errors.Join(ErrPTHWriteFailed, errors.New("Parse: no lsaKey extracted"))
+		// Propagate the underlying Parse error when we have one — the
+		// usual cause is ErrUnsupportedBuild (dump's build isn't in
+		// the Template registry) or ErrLSASRVNotFound. Include
+		// BuildNumber so operators register the missing template.
+		if parseErr != nil {
+			return errors.Join(ErrPTHWriteFailed,
+				fmt.Errorf("Parse: no lsaKey (build=%d): %w", parsed.BuildNumber, parseErr))
+		}
+		return errors.Join(ErrPTHWriteFailed,
+			fmt.Errorf("Parse: no lsaKey (build=%d)", parsed.BuildNumber))
 	}
 	res.Warnings = append(res.Warnings, parsed.Warnings...)
 

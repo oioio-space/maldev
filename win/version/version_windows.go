@@ -424,4 +424,30 @@ var (
 		ProductType:  _VER_NT_WORKSTATION,
 		BuildNumber:  22631,
 	}
+
+	WINDOWS_11_24H2 = &Version{
+		MajorVersion: 10,
+		MinorVersion: 0,
+		ProductType:  _VER_NT_WORKSTATION,
+		BuildNumber:  26100,
+	}
+
+	WINDOWS_SERVER_2025 = &Version{
+		MajorVersion: 10,
+		MinorVersion: 0,
+		ProductType:  0,
+		BuildNumber:  26100,
+	}
 )
+
+// IsAtLeast reports whether wv is greater than or equal to v.
+func (wv *Version) IsAtLeast(v *Version) bool {
+	return !wv.IsLower(v)
+}
+
+// AtLeast is the package-level shortcut for `Current().IsAtLeast(v)`.
+// Convenience for callers that just need a build threshold check
+// without keeping a *Version around.
+func AtLeast(v *Version) bool {
+	return Current().IsAtLeast(v)
+}
