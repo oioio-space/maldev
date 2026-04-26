@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // Account is one user record decrypted from the SAM hive. RID is the
@@ -42,31 +43,108 @@ func (a Account) Pwdump() string {
 	return fmt.Sprintf("%s:%d:%s:%s:::", a.Username, a.RID, lm, nt)
 }
 
-// ErrNotImplemented marks features still under construction. The
-// chantier-VII commit train fills these in:
-//
-//   v0.0.1 — hive parser + sentinel errors (this commit).
-//   v0.0.2 — syskey extractor (JD/Skew1/GBG/Data permutation).
-//   v0.0.3 — LSA key extractor (Policy\\PolEKList AES-256 unwrap).
-//   v0.0.4 — domain-key derivation + per-RID NT/LM unwrap.
-//   v0.0.5 — Dump end-to-end + intrusive Win VM smoke test.
-//   v0.1.0 — Live mode via recon/shadowcopy.
-var ErrNotImplemented = errors.New("samdump: feature not yet implemented (chantier VII in progress)")
+// ErrDump is returned when Dump can't complete — bad hive, missing
+// boot/domain key, no users found, or a per-user decrypt step fails.
+// Per-user warnings are accumulated on Result.Warnings rather than
+// aborting the whole dump.
+var ErrDump = errors.New("samdump: dump failed")
+
+// Result aggregates the output of a successful Dump. Accounts is the
+// per-user credentials list. Warnings carries non-fatal anomalies
+// (single-user parse failures, missing optional fields) so the
+// operator can audit incomplete dumps without losing the rest.
+type Result struct {
+	Accounts []Account
+	Warnings []string
+}
+
+// Pwdump renders r as a multi-line pwdump file (one Account per
+// line). Sorted by RID for stable output.
+func (r Result) Pwdump() string {
+	var sb strings.Builder
+	for i := range r.Accounts {
+		sb.WriteString(r.Accounts[i].Pwdump())
+		sb.WriteByte('\n')
+	}
+	return sb.String()
+}
 
 // Dump returns the per-user credentials in the SAM hive at samHive,
-// using the SYSTEM hive at systemHive to recover the boot key + LSA
-// key + per-domain hashed bootkey. Both readers must support
-// concurrent ReadAt for the entire hive bytes; samdump loads each
-// hive into memory once.
+// using the SYSTEM hive at systemHive to recover the boot key and
+// per-domain hashed bootkey. Both readers must support ReadAt over
+// the entire hive bytes; samdump loads each hive into memory once.
 //
-// Currently a scaffold — returns ErrNotImplemented. The chantier-VII
-// commit train (v0.0.2 → v0.1.0) wires the algorithm in slices.
-func Dump(systemHive io.ReaderAt, systemSize int64, samHive io.ReaderAt, samSize int64) ([]Account, error) {
-	if _, err := readHive(systemHive, systemSize); err != nil {
-		return nil, fmt.Errorf("read SYSTEM hive: %w", err)
+// Algorithm:
+//
+//   1. SYSTEM hive → extract 16-byte boot key (extractBootKey).
+//   2. SAM hive → read SAM\Domains\Account\F → derive domain hashed
+//      bootkey (deriveDomainKey, AES or legacy by revision tag).
+//   3. SAM hive → enumerate SAM\Domains\Account\Users\<RID>
+//      subkeys, parse each user's V value (parseUserV) and decrypt
+//      the NT + LM hash blobs (decryptUserNT / decryptUserLM).
+//
+// Per-user failures collect on Result.Warnings; only structural
+// failures (missing boot key, malformed F value, no Users key)
+// abort with ErrDump.
+func Dump(systemHive io.ReaderAt, systemSize int64, samHive io.ReaderAt, samSize int64) (Result, error) {
+	system, err := readHive(systemHive, systemSize)
+	if err != nil {
+		return Result{}, errors.Join(ErrDump, fmt.Errorf("read SYSTEM hive: %w", err))
 	}
-	if _, err := readHive(samHive, samSize); err != nil {
-		return nil, fmt.Errorf("read SAM hive: %w", err)
+	sam, err := readHive(samHive, samSize)
+	if err != nil {
+		return Result{}, errors.Join(ErrDump, fmt.Errorf("read SAM hive: %w", err))
 	}
-	return nil, ErrNotImplemented
+
+	bootkey, err := extractBootKey(system)
+	if err != nil {
+		return Result{}, errors.Join(ErrDump, err)
+	}
+
+	fValue, err := readDomainAccountF(sam)
+	if err != nil {
+		return Result{}, errors.Join(ErrDump, err)
+	}
+	hashedBootkey, err := deriveDomainKey(bootkey, fValue)
+	if err != nil {
+		return Result{}, errors.Join(ErrDump, err)
+	}
+
+	rids, err := listUserRIDs(sam)
+	if err != nil {
+		return Result{}, errors.Join(ErrDump, err)
+	}
+	res := Result{}
+	for _, rid := range rids {
+		v, err := readUserV(sam, rid)
+		if err != nil {
+			res.Warnings = append(res.Warnings,
+				fmt.Sprintf("RID %d: read V: %v", rid, err))
+			continue
+		}
+		parsed, err := parseUserV(v)
+		if err != nil {
+			res.Warnings = append(res.Warnings,
+				fmt.Sprintf("RID %d: parse V: %v", rid, err))
+			continue
+		}
+		acct := Account{
+			Username: parsed.Username,
+			RID:      rid,
+		}
+		if nt, err := decryptUserNT(hashedBootkey, rid, parsed.NTHashEnc); err != nil {
+			res.Warnings = append(res.Warnings,
+				fmt.Sprintf("RID %d (%s): NT decrypt: %v", rid, parsed.Username, err))
+		} else {
+			acct.NT = nt
+		}
+		if lm, err := decryptUserLM(hashedBootkey, rid, parsed.LMHashEnc); err != nil {
+			res.Warnings = append(res.Warnings,
+				fmt.Sprintf("RID %d (%s): LM decrypt: %v", rid, parsed.Username, err))
+		} else {
+			acct.LM = lm
+		}
+		res.Accounts = append(res.Accounts, acct)
+	}
+	return res, nil
 }

@@ -65,6 +65,21 @@ func decryptUserLM(hashedBootkey []byte, rid uint32, enc []byte) ([]byte, error)
 	return decryptUserHash(hashedBootkey, rid, enc, hashEncLMPassword)
 }
 
+// SAM_HASH wrapper layout (4-byte header at +0..+4):
+//
+//	+0x00 PekID    uint16 (=1; SAM key index, always one)
+//	+0x02 Revision uint16 (1 = legacy MD5+RC4, 2 = AES envelope)
+//
+// The V value carves a per-user NT-hash slot of 0x14 bytes (legacy:
+// 4-header + 16-byte cipher) or 0x38 bytes (AES: 4-header + 4
+// DataOffset + 16 Salt + 16 cipher) and stuffs this wrapper as the
+// blob — operators reading impacket's V parser see this layout.
+const (
+	hashWrapperOffPekID    = 0x00
+	hashWrapperOffRevision = 0x02
+	hashWrapperLen         = 0x04
+)
+
 func decryptUserHash(hashedBootkey []byte, rid uint32, enc, encMarker []byte) ([]byte, error) {
 	if len(hashedBootkey) != 16 {
 		return nil, fmt.Errorf("%w: hashedBootkey length %d, want 16", ErrUserHash, len(hashedBootkey))
@@ -72,40 +87,39 @@ func decryptUserHash(hashedBootkey []byte, rid uint32, enc, encMarker []byte) ([
 	if len(enc) == 0 {
 		return nil, nil
 	}
-	// Detect AES envelope by the revision-tag uint16 at the start.
-	// Revision low word: 1 = legacy, 2 = AES. Microsoft also stores
-	// it in big-endian-style { 0x01, 0x00, 0x02, 0x00 } little-endian
-	// = uint32(0x00020001) — but reading the low uint16 is sufficient
-	// to discriminate.
-	if len(enc) >= 4 {
-		revision := binary.LittleEndian.Uint16(enc[0:2])
-		if revision == 0x0002 {
-			// AES envelope: SAM_HASH_AES = {Revision uint16, Length
-			// uint16, Pad uint32, Salt[16], Data[...]}.
-			// Spec varies — impacket parses:
-			//   Revision (2) + Length (2) + DataOffset (4) + Salt[16] +
-			//   Data[]
-			//   Then Data is AES-128-CBC(key=hashedBootkey, iv=Salt).
-			intermediate, err := decryptHashAES(hashedBootkey, enc)
-			if err != nil {
-				return nil, err
-			}
-			return desUnwrap(rid, intermediate)
+	if len(enc) < hashWrapperLen {
+		return nil, fmt.Errorf("%w: blob shorter than 4-byte SAM_HASH wrapper (%d)",
+			ErrUserHash, len(enc))
+	}
+	revision := binary.LittleEndian.Uint16(enc[hashWrapperOffRevision : hashWrapperOffRevision+2])
+	switch revision {
+	case 0x0002:
+		// SAM_HASH_AES: {PekID(2), Revision(2), DataOffset(4),
+		// Salt[16], Data[...]}. Total payload is at least
+		// 4 + 4 + 16 + 16 = 40 bytes for one cipher block.
+		intermediate, err := decryptHashAES(hashedBootkey, enc)
+		if err != nil {
+			return nil, err
 		}
+		return desUnwrap(rid, intermediate)
+	case 0x0001:
+		// SAM_HASH (legacy): {PekID(2), Revision(2), Hash[16]}.
+		// Total = 0x14 bytes.
+		if len(enc) < hashWrapperLen+16 {
+			return nil, fmt.Errorf("%w: legacy hash blob shorter than 20 bytes (%d)",
+				ErrUserHash, len(enc))
+		}
+		rc4Key := deriveLegacyHashKey(hashedBootkey, rid, encMarker)
+		rc, err := rc4.NewCipher(rc4Key)
+		if err != nil {
+			return nil, fmt.Errorf("%w: rc4 NewCipher: %v", ErrUserHash, err)
+		}
+		intermediate := make([]byte, 16)
+		rc.XORKeyStream(intermediate, enc[hashWrapperLen:hashWrapperLen+16])
+		return desUnwrap(rid, intermediate)
+	default:
+		return nil, fmt.Errorf("%w: unknown SAM_HASH revision 0x%04X", ErrUserHash, revision)
 	}
-
-	// Legacy MD5+RC4 path. enc is the bare 16-byte ciphertext.
-	if len(enc) < 16 {
-		return nil, fmt.Errorf("%w: legacy hash blob shorter than 16 bytes (%d)", ErrUserHash, len(enc))
-	}
-	rc4Key := deriveLegacyHashKey(hashedBootkey, rid, encMarker)
-	rc, err := rc4.NewCipher(rc4Key)
-	if err != nil {
-		return nil, fmt.Errorf("%w: rc4 NewCipher: %v", ErrUserHash, err)
-	}
-	intermediate := make([]byte, 16)
-	rc.XORKeyStream(intermediate, enc[:16])
-	return desUnwrap(rid, intermediate)
 }
 
 // decryptHashAES handles the SAM_HASH_AES envelope. Layout:

@@ -13,7 +13,8 @@ import (
 
 // fixtureLegacyHashEnc encrypts wantHash through the legacy MD5+RC4
 // + DES-permute pipeline so a round-trip via decryptUserHash recovers
-// wantHash. Returns the on-disk encrypted blob ready to feed
+// wantHash. Returns the on-disk encrypted blob (SAM_HASH wrapper:
+// PekID(2)+Revision=1(2)+Hash[16] = 20 bytes total) ready to feed
 // decryptUserNT/decryptUserLM.
 func fixtureLegacyHashEnc(t *testing.T, hashedBootkey []byte, rid uint32, wantHash []byte, marker []byte) []byte {
 	t.Helper()
@@ -32,13 +33,22 @@ func fixtureLegacyHashEnc(t *testing.T, hashedBootkey []byte, rid uint32, wantHa
 	// Then RC4-encrypt with the legacy-derived key.
 	rc4Key := deriveLegacyHashKey(hashedBootkey, rid, marker)
 	rc, _ := rc4.NewCipher(rc4Key)
-	out := make([]byte, 16)
-	rc.XORKeyStream(out, intermediate)
+	cipherBytes := make([]byte, 16)
+	rc.XORKeyStream(cipherBytes, intermediate)
+
+	// Build the SAM_HASH wrapper: PekID=1, Revision=1, then 16-byte
+	// ciphertext.
+	out := make([]byte, 4+16)
+	binary.LittleEndian.PutUint16(out[0:2], 0x0001) // PekID
+	binary.LittleEndian.PutUint16(out[2:4], 0x0001) // Revision (legacy)
+	copy(out[4:], cipherBytes)
 	return out
 }
 
 // fixtureAESHashEnc builds a SAM_HASH_AES envelope that decrypts
 // through the modern AES + DES-permute pipeline back to wantHash.
+// Layout: PekID(2)+Revision=2(2)+DataOffset(4)+Salt[16]+Cipher[16]
+// = 40 bytes total for one AES block.
 func fixtureAESHashEnc(t *testing.T, hashedBootkey []byte, rid uint32, wantHash []byte) []byte {
 	t.Helper()
 	if len(wantHash) != 16 {
@@ -64,9 +74,9 @@ func fixtureAESHashEnc(t *testing.T, hashedBootkey []byte, rid uint32, wantHash 
 
 	// Wrap in the SAM_HASH_AES envelope.
 	out := make([]byte, 0x18+len(cipherText))
-	binary.LittleEndian.PutUint16(out[0:2], 0x0002) // Revision low word
-	binary.LittleEndian.PutUint16(out[2:4], uint16(len(out)))
-	// Reserved at +4..+8 stays zero.
+	binary.LittleEndian.PutUint16(out[0:2], 0x0001) // PekID
+	binary.LittleEndian.PutUint16(out[2:4], 0x0002) // Revision (AES)
+	binary.LittleEndian.PutUint32(out[4:8], 0x14)   // DataOffset (cipher start within struct)
 	copy(out[0x08:0x18], salt)
 	copy(out[0x18:], cipherText)
 	return out
@@ -141,7 +151,19 @@ func TestDecryptUserHash_RejectsShortHashedBootkey(t *testing.T) {
 }
 
 func TestDecryptUserHash_RejectsTruncatedAESEnvelope(t *testing.T) {
-	enc := []byte{0x02, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00} // revision=2 but no payload
+	// PekID=1, Revision=2 (AES), DataOffset=0x14 — but truncated
+	// before salt + data.
+	enc := []byte{0x01, 0x00, 0x02, 0x00, 0x14, 0x00, 0x00, 0x00}
+	_, err := decryptUserNT(make([]byte, 16), 1001, enc)
+	if !errors.Is(err, ErrUserHash) {
+		t.Fatalf("err = %v, want wrap of ErrUserHash", err)
+	}
+}
+
+func TestDecryptUserHash_RejectsUnknownRevision(t *testing.T) {
+	// PekID=1, Revision=0x99 (unknown) — should fall through to
+	// the default error path.
+	enc := []byte{0x01, 0x00, 0x99, 0x00}
 	_, err := decryptUserNT(make([]byte, 16), 1001, enc)
 	if !errors.Is(err, ErrUserHash) {
 		t.Fatalf("err = %v, want wrap of ErrUserHash", err)
