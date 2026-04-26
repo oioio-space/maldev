@@ -109,6 +109,15 @@ type Template struct {
 	KerberosListOffset    int32
 	KerberosLayout        KerberosLayout
 
+	// KerberosPrimaryCredLayout captures the inline
+	// KIWI_KERBEROS_10_PRIMARY_CREDENTIAL fields + the per-LUID
+	// KIWI_KERBEROS_KEYS_LIST_6 + KERB_HASHPASSWORD array layout
+	// the Pass-the-Hash write-back consumes. Set
+	// .HashEntrySize=0 to disable (NETCREDENTIALS_ONLY PTH won't
+	// reach the per-etype hash slots and will surface
+	// ErrPTHNoMatchingLUID).
+	KerberosPrimaryCredLayout KerberosPrimaryCredentialLayout
+
 	// CloudAP (Cloud Authentication Provider) fields. The
 	// KIWI_CLOUDAP_LOGON_SESSION list head lives in cloudap.dll
 	// (.data); each node carries LUID + Microsoft Account ID +

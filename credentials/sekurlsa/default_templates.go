@@ -392,6 +392,42 @@ var kerberosSignatureCommon = []byte{
 	0x48, 0x8D, 0x0D,
 }
 
+// kerberosPrimaryCredCommon — KIWI_KERBEROS_KEYS_LIST_6 +
+// KERB_HASHPASSWORD_6_1607 layout for every build from Win 10 1607
+// through Win 11 23H2 (`_10_1607` session variant). Per agent
+// research mining mimikatz + pypykatz + KvcForensic. Stable fields:
+//
+//	pKeyList @ session+0x118 (PVOID)
+//	KIWI_KERBEROS_KEYS_LIST_6 header = 40 bytes (cbItem at +0x04)
+//	KERB_HASHPASSWORD_6_1607 entry  = 56 bytes
+//	  └─ KERB_HASHPASSWORD_GENERIC at entry+0x20:
+//	     Type @ +0x00, Size @ +0x08, Checksump @ +0x10
+var kerberosPrimaryCredCommon = KerberosPrimaryCredentialLayout{
+	PKeyListOffset:        0x118,
+	KeysListHeaderSize:    40,
+	KeysListCbItemOffset:  0x04,
+	HashEntrySize:         56,
+	HashGenericOffset:     0x20,
+	GenericTypeOffset:     0x00,
+	GenericSizeOffset:     0x08,
+	GenericChecksumPtrOff: 0x10,
+}
+
+// kerberosPrimaryCred24H2 — Win 11 24H2 (build 26100+) shifts the
+// pKeyList offset because the LOGON_SESSION struct dropped unk13
+// and changed unk1 from LIST_ENTRY+PVOID to a single ULONG. The
+// per-entry KERB_HASHPASSWORD layout is unchanged.
+var kerberosPrimaryCred24H2 = KerberosPrimaryCredentialLayout{
+	PKeyListOffset:        0x0F8,
+	KeysListHeaderSize:    40,
+	KeysListCbItemOffset:  0x04,
+	HashEntrySize:         56,
+	HashGenericOffset:     0x20,
+	GenericTypeOffset:     0x00,
+	GenericSizeOffset:     0x08,
+	GenericChecksumPtrOff: 0x10,
+}
+
 // kerberosLayoutCommon — offsets blended from KvcForensic +
 // pypykatz per-build session structs. KvcForensic over-simplifies
 // (one entry for all of Vista+), and pypykatz's
@@ -600,6 +636,7 @@ var builtinTemplates = []*Template{
 		KerberosListPattern:     kerberosSignatureCommon,
 		KerberosListOffset:      6, // KvcForensic first_entry_offset
 		KerberosLayout:          kerberosLayoutCommon,
+		KerberosPrimaryCredLayout: kerberosPrimaryCredCommon,
 	},
 	{
 		// ◎ Win 10 1803 → 22H2 / Server 2019 (builds 17134-20347).
@@ -629,6 +666,7 @@ var builtinTemplates = []*Template{
 		KerberosListPattern:     kerberosSignatureCommon,
 		KerberosListOffset:      6, // KvcForensic first_entry_offset
 		KerberosLayout:          kerberosLayoutCommon,
+		KerberosPrimaryCredLayout: kerberosPrimaryCredCommon,
 	},
 	{
 		// ◎ Server 2022 + Win 11 21H2 (builds 20348-22099).
@@ -658,6 +696,7 @@ var builtinTemplates = []*Template{
 		KerberosListPattern:     kerberosSignatureCommon,
 		KerberosListOffset:      6, // KvcForensic first_entry_offset
 		KerberosLayout:          kerberosLayoutCommon,
+		KerberosPrimaryCredLayout: kerberosPrimaryCredCommon,
 	},
 	{
 		// ◎ Win 11 22H2 / 23H2 (builds 22100-26099). KvcForensic
@@ -686,6 +725,7 @@ var builtinTemplates = []*Template{
 		KerberosListPattern:     kerberosSignatureCommon,
 		KerberosListOffset:      6, // KvcForensic first_entry_offset
 		KerberosLayout:          kerberosLayoutCommon,
+		KerberosPrimaryCredLayout: kerberosPrimaryCredCommon,
 	},
 	{
 		// ◎ Win 11 24H2 / 25H2 / Server 2025 (builds 26100+).
@@ -716,5 +756,6 @@ var builtinTemplates = []*Template{
 		KerberosListPattern:     kerberosSignatureCommon,
 		KerberosListOffset:      6, // KvcForensic first_entry_offset
 		KerberosLayout:          kerberosLayoutCommon,
+		KerberosPrimaryCredLayout: kerberosPrimaryCred24H2,
 	},
 }

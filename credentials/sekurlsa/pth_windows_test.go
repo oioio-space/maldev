@@ -92,22 +92,26 @@ func TestPass_RejectsBadAES256Length(t *testing.T) {
 	}
 }
 
-// TestPass_LiveMSVWriteBack exercises the live MSV write-back path.
+// TestPass_LiveMSVWriteBack exercises the live write-back path.
 // Intrusive: opens lsass with VM_READ + VM_WRITE and overwrites the
-// spawned process's PrimaryCredentials cipher.
+// spawned process's per-LUID credential ciphers.
 //
-// LIMITATION (chantier-II current slice): NETCREDENTIALS_ONLY-spawned
-// sessions have an empty MSV PrimaryCredentials (CipherVA=0) — the
-// session exists in the MSV LIST_ENTRY but no encrypted credential
-// blob is attached because no local auth ran. Pass returns
-// ErrPTHNoMatchingLUID with a "empty MSV PrimaryCredentials" detail
-// in this case; the test t.Skip's so it stays informative until the
-// allocation-fallback / Kerberos write-back slice lands.
+// Pass now wires both write-back paths in parallel:
 //
-// On targets where the spawned session DOES have pre-existing MSV
-// creds (interactive logon, RDP, RunAs with valid password — none
-// of which our LOGON_NETCREDENTIALS_ONLY decoy provides), the test
-// asserts MSVOverwritten=true.
+//   - MSV path: in-place overwrite of MSV1_0_PRIMARY_CREDENTIAL when
+//     the LUID has a populated MSV LIST_ENTRY; allocation fallback
+//     when the entry exists but has no PrimaryCredentials attached.
+//   - Kerberos path: per-etype overwrite of KERB_HASHPASSWORD entries
+//     when the build's Template registers KerberosPrimaryCredLayout.
+//
+// NETCREDENTIALS_ONLY-spawned sessions typically land only in the
+// Kerberos AVL tree (no MSV LIST_ENTRY) — so success on this test
+// commonly looks like KerberosOverwritten=true, MSVOverwritten=false.
+// Either flag set proves the technique landed.
+//
+// Skips with ErrPTHNoMatchingLUID only when neither walker turned up
+// the spawned LUID (decoy crashed early, lsasrv missed the link, or
+// the build's templates don't enumerate the relevant lists).
 func TestPass_LiveMSVWriteBack(t *testing.T) {
 	testutil.RequireIntrusive(t)
 
@@ -115,15 +119,18 @@ func TestPass_LiveMSVWriteBack(t *testing.T) {
 	defer terminatePID(res.PID)
 
 	if errors.Is(err, ErrPTHNoMatchingLUID) {
-		t.Skipf("MSV write-back not applicable to NETCREDENTIALS_ONLY-spawned session (PID=%d LUID=0x%X): %v — allocation-fallback path queued for the next chantier-II slice",
-			res.PID, res.LogonID, err)
+		t.Skipf("PTH write-back: spawned LUID 0x%X not found by either MSV or Kerberos walker (PID=%d): %v",
+			res.LogonID, res.PID, err)
 	}
 	if err != nil {
 		t.Fatalf("Pass: %v (PID=%d LUID=0x%X)", err, res.PID, res.LogonID)
 	}
-	if !res.MSVOverwritten {
-		t.Errorf("MSVOverwritten = false, want true after successful write-back")
+	if !res.MSVOverwritten && !res.KerberosOverwritten {
+		t.Errorf("neither MSVOverwritten nor KerberosOverwritten set — Pass returned nil but no write landed (warnings=%v)",
+			res.Warnings)
 	}
+	t.Logf("PTH write-back PID=%d LUID=0x%X MSV=%v Kerb=%v warnings=%v",
+		res.PID, res.LogonID, res.MSVOverwritten, res.KerberosOverwritten, res.Warnings)
 }
 
 func TestPassImpersonate_RejectsMissingDomain(t *testing.T) {
@@ -135,10 +142,11 @@ func TestPassImpersonate_RejectsMissingDomain(t *testing.T) {
 	}
 }
 
-// TestPassImpersonate_LiveMSVWriteBack — same as
-// TestPass_LiveMSVWriteBack since PassImpersonate currently
-// delegates to Pass (the SetThreadToken impersonation flow is the
-// final chantier-II slice).
+// TestPassImpersonate_LiveMSVWriteBack — same dual-path success
+// criterion as TestPass_LiveMSVWriteBack plus the SetThreadToken
+// step. After the call returns nil, the calling thread holds the
+// duplicated impersonation token; teardown lets the test goroutine
+// exit which cleans the thread token.
 func TestPassImpersonate_LiveMSVWriteBack(t *testing.T) {
 	testutil.RequireIntrusive(t)
 
@@ -146,15 +154,17 @@ func TestPassImpersonate_LiveMSVWriteBack(t *testing.T) {
 	defer terminatePID(res.PID)
 
 	if errors.Is(err, ErrPTHNoMatchingLUID) {
-		t.Skipf("MSV write-back not applicable to NETCREDENTIALS_ONLY-spawned session (PID=%d LUID=0x%X): %v",
-			res.PID, res.LogonID, err)
+		t.Skipf("PTH write-back: spawned LUID 0x%X not found by either MSV or Kerberos walker (PID=%d): %v",
+			res.LogonID, res.PID, err)
 	}
 	if err != nil {
 		t.Fatalf("PassImpersonate: %v (PID=%d LUID=0x%X)", err, res.PID, res.LogonID)
 	}
-	if !res.MSVOverwritten {
-		t.Errorf("MSVOverwritten = false, want true")
+	if !res.MSVOverwritten && !res.KerberosOverwritten {
+		t.Errorf("neither MSVOverwritten nor KerberosOverwritten set (warnings=%v)", res.Warnings)
 	}
+	t.Logf("PTH+impersonate PID=%d LUID=0x%X MSV=%v Kerb=%v warnings=%v",
+		res.PID, res.LogonID, res.MSVOverwritten, res.KerberosOverwritten, res.Warnings)
 }
 
 // Cross-platform TestMutateMSVPrimary_* + TestPTHSentinels_AreDistinct
