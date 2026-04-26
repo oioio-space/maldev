@@ -12,7 +12,6 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/oioio-space/maldev/testutil"
-	"github.com/oioio-space/maldev/win/version"
 )
 
 // TestSpoofAndRestore verifies the full Spoof → Current → Restore cycle.
@@ -56,21 +55,8 @@ func TestRestoreNoOp(t *testing.T) {
 
 // TestSpoofPID verifies remote-process PEB CommandLine overwrite by
 // reading it back through the same PEB walk used by SpoofPID.
-//
-// Win11 24H2 known issue: Defender's MDE behavioral telemetry on the
-// 24H2 platform inline-blocks PROCESS_VM_WRITE on a freshly-spawned
-// notepad.exe (handle pairing flagged as suspicious). The technique
-// itself still works against operator-pre-existing targets and against
-// the operator's own process (TestSpoofAndRestore on the calling
-// process passes); only this specific decoy-spawn-and-write pattern
-// trips the inline detection. Skip on 24H2+ to keep CI signal clean;
-// re-evaluate when Defender platform behavior changes.
 func TestSpoofPID(t *testing.T) {
 	testutil.RequireAdmin(t)
-
-	if version.AtLeast(version.WINDOWS_11_24H2) {
-		t.Skip("Win11 24H2: Defender MDE inline-blocks PROCESS_VM_WRITE on freshly-spawned decoy targets; technique works against operator-pre-existing PIDs but the test pattern is unreliable here. Re-evaluate per Defender platform updates.")
-	}
 
 	proc := exec.Command("notepad.exe")
 	if err := proc.Start(); err != nil {

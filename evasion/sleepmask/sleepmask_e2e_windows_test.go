@@ -22,7 +22,6 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/oioio-space/maldev/testutil"
-	"github.com/oioio-space/maldev/win/version"
 )
 
 // e2eStrategies lists every strategy the e2e suite asserts the
@@ -88,18 +87,6 @@ func TestSleepMaskE2E_DefeatsExecutablePageScanner(t *testing.T) {
 	for _, strat := range e2eStrategies() {
 		strat := strat
 		t.Run(strat.name, func(t *testing.T) {
-			// Win11 24H2 known issue (inline only): the inline strategy
-			// returns control faster than the scheduler-driven strategies,
-			// and 24H2's tightened scheduling shrinks the window between
-			// "page is RW" snapshots so the scanner races a brief
-			// post-decrypt RX flip and matches the restored canary on a
-			// newly-RX page. The technique itself is unchanged — the
-			// scanner timing assertion is what's fragile here. Other
-			// strategies (timerqueue, ekko, foliage) sleep long enough
-			// to keep the invariant intact and continue to pass.
-			if strat.name == "inline" && version.AtLeast(version.WINDOWS_11_24H2) {
-				t.Skip("Win11 24H2 inline-strategy scanner-vs-mask race: tightened scheduler timing shrinks the masked window observation. Other strategies (timerqueue/ekko/foliage) still pass.")
-			}
 			testDefeatsExecutablePageScanner(t, strat.ctor(), strat.cipher)
 		})
 	}
