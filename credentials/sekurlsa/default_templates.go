@@ -486,8 +486,38 @@ var kerberosLayoutCommon = KerberosLayout{
 	TicketKvnoOffset:        0x128,
 	TicketBufferLenOffset:   0x130,
 	TicketBufferPtrOffset:   0x138,
-	TicketNodeSize:          0x180, // covers Ticket buffer ptr+8
+	// Per-ticket session-key buffer (chantier III v0.2): the embedded
+	// KIWI_KERBEROS_BUFFER for TICKET_10_1607 sits right after KeyType
+	// at 0xB0 + 4 (DWORD) + 4 (pad) = 0xB8 Length, 0xC0 Value-PBYTE.
+	// Source: pypykatz reader-style template + mimikatz C struct
+	// (independently corroborated by KvcForensic for TICKET_11).
+	TicketSessionKeyLenOffset: 0xB8,
+	TicketSessionKeyPtrOffset: 0xC0,
+	TicketNodeSize:            0x180, // covers Ticket buffer ptr+8
 }
+
+// kerberosLayoutWin11 — Win 11 21H2+ (build 22000+) ticket layout
+// from pypykatz' KIWI_KERBEROS_INTERNAL_TICKET_11. Differs from
+// TICKET_10_1607 by KeyType shifting from 0xB0 → 0xB4 (one extra
+// DWORD inserted before the session-key triple). The session-key
+// buffer offsets (Length/Value) stay at 0xB8/0xC0 because pypykatz'
+// natural-alignment layout absorbs the 4-byte shift into pre-Key
+// padding. Independently corroborated by KvcForensic's
+// `Kerberos_x64_vista_plus.ticket_key_type_offset = 180 (0xB4)`.
+//
+// All other session-struct + per-ticket fields stay at the
+// kerberosLayoutCommon positions — they're stable across the
+// pypykatz TICKET_10_1607 → TICKET_11 transition. We materialize
+// kerberosLayoutWin11 by copying the common layout and overriding
+// the diverging fields below.
+var kerberosLayoutWin11 = func() KerberosLayout {
+	l := kerberosLayoutCommon
+	l.TicketKeyTypeOffset = 0xB4
+	// Length/Value offsets stay at 0xB8 / 0xC0 per pypykatz TICKET_11.
+	l.TicketSessionKeyLenOffset = 0xB8
+	l.TicketSessionKeyPtrOffset = 0xC0
+	return l
+}()
 
 // ===== builtinTemplates ==============================================
 //
@@ -724,7 +754,7 @@ var builtinTemplates = []*Template{
 		TSPkgLayout:             tspkgLayoutCommon,
 		KerberosListPattern:     kerberosSignatureCommon,
 		KerberosListOffset:      6, // KvcForensic first_entry_offset
-		KerberosLayout:          kerberosLayoutCommon,
+		KerberosLayout:          kerberosLayoutWin11,
 		KerberosPrimaryCredLayout: kerberosPrimaryCredCommon,
 	},
 	{
@@ -755,7 +785,7 @@ var builtinTemplates = []*Template{
 		TSPkgLayout:             tspkgLayoutCommon,
 		KerberosListPattern:     kerberosSignatureCommon,
 		KerberosListOffset:      6, // KvcForensic first_entry_offset
-		KerberosLayout:          kerberosLayoutCommon,
+		KerberosLayout:          kerberosLayoutWin11,
 		KerberosPrimaryCredLayout: kerberosPrimaryCred24H2,
 	},
 }

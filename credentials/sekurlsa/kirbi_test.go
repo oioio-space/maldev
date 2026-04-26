@@ -205,6 +205,38 @@ func TestKerberosTicket_ToKirbiFile_WritesValidFile(t *testing.T) {
 	}
 }
 
+func TestKerberosTicket_ToKirbi_PopulatesSessionKey(t *testing.T) {
+	want := []byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22,
+		0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0x00}
+	tkt := KerberosTicket{
+		ServiceName: "krbtgt",
+		ClientName:  "alice@CORP.LOCAL",
+		KeyType:     17, // AES128
+		Buffer:      fixtureTicketBytes(t),
+		SessionKey:  want,
+	}
+
+	out, err := tkt.ToKirbi()
+	if err != nil {
+		t.Fatalf("ToKirbi: %v", err)
+	}
+	var cred messages.KRBCred
+	if err := cred.Unmarshal(out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	var enc messages.EncKrbCredPart
+	if err := enc.Unmarshal(cred.EncPart.Cipher); err != nil {
+		t.Fatalf("Unmarshal EncKrbCredPart: %v", err)
+	}
+	got := enc.TicketInfo[0].Key.KeyValue
+	if string(got) != string(want) {
+		t.Fatalf("Key.KeyValue = % X, want % X", got, want)
+	}
+	if enc.TicketInfo[0].Key.KeyType != 17 {
+		t.Errorf("Key.KeyType = %d, want 17", enc.TicketInfo[0].Key.KeyType)
+	}
+}
+
 func TestKerberosTicket_ToKirbi_FlagsBitStringIs32Bits(t *testing.T) {
 	tkt := KerberosTicket{
 		Flags:  0xDEADBEEF,

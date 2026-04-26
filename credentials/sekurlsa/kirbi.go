@@ -75,10 +75,18 @@ func (t *KerberosTicket) ToKirbi() ([]byte, error) {
 	servicePrincipal := splitServiceName(t.ServiceName)
 	serviceRealm := normalizeRealm(t.TargetName)
 
+	// SessionKey is populated by the walker when the build's
+	// KerberosLayout registers TicketSessionKey* offsets and the LSA
+	// decrypt succeeds. When empty, we still emit a valid kirbi but
+	// downstream tools can only describe (not replay) the ticket.
+	keyValue := t.SessionKey
+	if keyValue == nil {
+		keyValue = []byte{}
+	}
 	info := messages.KrbCredInfo{
 		Key: types.EncryptionKey{
 			KeyType:  int32(t.KeyType),
-			KeyValue: []byte{},
+			KeyValue: keyValue,
 		},
 		PRealm: clientRealm,
 		PName: types.PrincipalName{
