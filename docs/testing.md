@@ -320,6 +320,40 @@ MALDEV_MANUAL=1 go test -v -run "TestShellPTYLinux" ./c2/shell/ -timeout 60s
 | Windows 11 (VM `win11-2`) | TBD per run — see deltas below | varies | same matrix as win10; remote-thread methods bite on Win11 | TBD |
 | Ubuntu 25.10 (VM) | 26 | 0 | 4 methods (procmem, memfd, ptrace, purego) | 1 session (Linux meterpreter) |
 
+### Win10 → Win11 cross-version deltas (run captured 2026-04-26)
+
+The `windows11` test target (VM `win11-2`, build 26100 / Win11 24H2)
+exposes mitigations Win10 22H2 doesn't. Categories:
+
+| Site | Win10 | Win11-2 | Likely cause |
+|------|-------|---------|--------------|
+| `cleanup/selfdelete/TestDeleteFile{,Force}` | PASS | FAIL | Win11 changes to `MoveFileEx(MOVEFILE_DELAY_UNTIL_REBOOT)` rename-on-reboot semantics |
+| `evasion/hook` test binary | PASS\* | build failed (Defender quarantine) | Win11 Defender def signatures flag the test EXE — fixed via Defender exclusions in bootstrap-windows-guest.ps1 (re-snapshotted 2026-04-26) |
+| `pe/srdi` test binary | PASS\* | quarantined | Same Defender root cause; same fix |
+| `inject/TestCallerMatrix_RemoteInject` (CRT/RtlCUT/QUAPC/NtQAPCEx × WinAPI+Direct) | PASS | 8 sub-fails | Win11 hardening on cross-process write + thread-create primitives |
+| `process/tamper/fakecmd/TestSpoofPID` | PASS | FAIL | `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` tighter on Win11 (consistent with the `PPIDSpoofer` known-limitation already noted on Win10 22H2 — gap widened on Win11) |
+| `process/tamper/herpaderping/TestRunWithDecoy{,VerifyProcessCreated}` | PASS | FAIL | Win11 image-load notify changes break the herpaderping primitive |
+| `recon/dllhijack/TestValidate_OrchestrationEndToEnd` | FAIL (timing flake) | PASS | Orchestration timing — not a Win11 regression |
+
+\* On a clean Defender state. Defender signatures rotate; the `evasion/hook`
+and `pe/srdi` quarantines were observed on win10 in run 2 even though
+they passed on run 1. The bootstrap script now installs path +
+process exclusions on first provision (see
+`scripts/vm-test/bootstrap-windows-guest.ps1`).
+
+These deltas are real signal — exactly the reason the second Windows
+target exists. Mitigation work tracks per chantier:
+
+- Remote-injection deltas (CallerMatrix) → revisit in chantier IV
+  (Win11 sigs validation) and the v0.33.0+ Caller-routing follow-ups
+  in the lsass plan.
+- `fakecmd` / `herpaderping` → mark as Win11-aware skips with build
+  detection (`win/version.IsAtLeast(11)`); document ATT&CK detection
+  delta.
+- `selfdelete` → research the Win11 rename-on-reboot regression;
+  check whether the new `FILE_RENAME_INFO` + `FILE_DISPOSITION_INFO_EX`
+  path needs an alternate code path.
+
 ## PPID Spoofing
 
 The `c2/shell` package includes a PPID spoofer (`PPIDSpoofer`) that creates child processes under a fake parent via `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS`.
