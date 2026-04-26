@@ -17,6 +17,11 @@ vms:
     ssh_key: /home/mathieu/.ssh/vm_win_key
     # ssh_host: 192.168.122.10        # optional; auto-discovered via virsh domifaddr
 
+  windows11:                           # optional — second Windows target
+    libvirt_name: win11
+    snapshot: INIT                     # bootstrap-windows-guest.ps1 + virsh snapshot-create-as
+    ssh_key: /home/mathieu/.ssh/vm_windows_key
+
   linux:
     libvirt_name: ubuntu20.04-        # trailing dash if that's what "machine" created
     snapshot: 2026-04-17-17-41-48

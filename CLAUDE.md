@@ -56,8 +56,9 @@ GOOS=linux GOARCH=amd64 go build $(go list ./...)
 
 # VM tests — thin wrapper around cmd/vmtest (see docs/testing.md).
 ./scripts/vm-run-tests.sh windows "./..." "-v -count=1"
+./scripts/vm-run-tests.sh windows11 "./..." "-v -count=1"   # optional 2nd Windows build
 ./scripts/vm-run-tests.sh linux "./..." "-count=1"
-./scripts/vm-run-tests.sh all "./..." "-count=1"
+./scripts/vm-run-tests.sh all "./..." "-count=1"            # windows + windows11 + linux
 
 # End-to-end coverage collection (host + Linux VM + Windows VM + Kali,
 # all gates open, merged report). See docs/coverage-workflow.md.

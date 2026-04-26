@@ -4,11 +4,12 @@
 //
 // Usage:
 //
-//	vmtest [flags] <windows|linux|all> [packages] [test-flags]
+//	vmtest [flags] <windows|windows11|linux|all> [packages] [test-flags]
 //
 // Examples:
 //
 //	vmtest windows
+//	vmtest windows11 "./credentials/..." "-v"
 //	vmtest linux "./persistence/..." "-v"
 //	vmtest all "./..." "-count=1"
 //
@@ -90,12 +91,14 @@ func main() {
 	switch target {
 	case "windows", "win":
 		targets = []string{"windows"}
+	case "windows11", "win11":
+		targets = []string{"windows11"}
 	case "linux", "lin":
 		targets = []string{"linux"}
 	case "all":
-		targets = []string{"windows", "linux"}
+		targets = []string{"windows", "windows11", "linux"}
 	default:
-		die("unknown target %q (want windows|linux|all)", target)
+		die("unknown target %q (want windows|windows11|linux|all)", target)
 	}
 
 	projectRoot, err := filepath.Abs(".")
@@ -119,10 +122,11 @@ func main() {
 
 func usage() {
 	fmt.Fprintf(os.Stderr,
-		"usage: vmtest [flags] <windows|linux|all> [packages] [test-flags]\n\n"+
+		"usage: vmtest [flags] <windows|windows11|linux|all> [packages] [test-flags]\n\n"+
 			"Runs Go tests inside isolated VMs with snapshot restore between runs.\n\n"+
 			"Examples:\n"+
 			"  vmtest windows\n"+
+			"  vmtest windows11 \"./credentials/...\" \"-v\"\n"+
 			"  vmtest linux \"./persistence/...\" \"-v\"\n"+
 			"  vmtest all \"./...\" \"-count=1\"\n\n"+
 			"Flags:\n")

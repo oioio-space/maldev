@@ -24,8 +24,14 @@ The maldev project uses a multi-layered testing strategy:
 go build $(go list ./...)
 go test $(go list ./... | grep -v scripts) -count=1 -short
 
-# VM — all tests including intrusive
+# VM — all tests including intrusive (win10)
 ./scripts/vm-run-tests.sh windows "./..." "-v -count=1"
+
+# VM — same suite on a second Windows build (cross-version coverage)
+./scripts/vm-run-tests.sh windows11 "./..." "-v -count=1"
+
+# VM — sweep all targets (windows + windows11 + linux)
+./scripts/vm-run-tests.sh all "./..." "-count=1"
 
 # VM — with manual/dangerous tests
 MALDEV_INTRUSIVE=1 MALDEV_MANUAL=1 go test ./... -count=1 -timeout 300s
@@ -310,7 +316,8 @@ MALDEV_MANUAL=1 go test -v -run "TestShellPTYLinux" ./c2/shell/ -timeout 60s
 
 | Platform | Packages OK | FAIL | Injection Methods | Meterpreter |
 |----------|------------|------|-------------------|-------------|
-| Windows 10 (VM) | 64 | 0 | 9 methods × 4 callers + 12 standalone | 22 sessions |
+| Windows 10 (VM `win10`) | 64 | 0 | 9 methods × 4 callers + 12 standalone | 22 sessions |
+| Windows 11 (VM `win11-2`) | TBD per run — see deltas below | varies | same matrix as win10; remote-thread methods bite on Win11 | TBD |
 | Ubuntu 25.10 (VM) | 26 | 0 | 4 methods (procmem, memfd, ptrace, purego) | 1 session (Linux meterpreter) |
 
 ## PPID Spoofing

@@ -51,8 +51,15 @@ Per-host overrides in `scripts/vm-test/config.local.yaml` (gitignored).
 | Role | VirtualBox default name | libvirt default name | Snapshot | User | Purpose |
 |------|------------------------|---------------------|----------|------|---------|
 | Windows | `Windows10` | `win10` | `INIT` | `test` (admin) | unit + intrusive tests, memscan target |
+| Windows 11 (optional) | `Windows11` | `win11-2` | `INIT` | `test` (admin) | second Windows build for cross-version coverage |
 | Linux | `Ubuntu25.10` | `ubuntu20.04` | `INIT` | `test` | Linux unit tests, procmem/memfd/ptrace |
 | Kali | (not managed by vmtest) | `kali` | `INIT` | `test` | MSF msfconsole/msfvenom, Meterpreter end-to-end |
+
+The `windows11` target is optional — `vmtest all` runs all configured
+VMs but `vmtest windows` / `vmtest windows11` lets you target one
+build at a time. To add a second Windows VM after the first is set
+up, repeat the bootstrap steps with the libvirt domain name in
+config.local.yaml's `vms.windows11.libvirt_name`.
 
 `INIT` is a snapshot taken AFTER provisioning (Go installed, OpenSSH up,
 SSH key authorized, firewall opened). Every test run reverts to `INIT`.

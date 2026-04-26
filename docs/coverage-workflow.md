@@ -65,6 +65,13 @@ bash scripts/vm-provision.sh --only=windows
 # Quick iteration on a single package — skip the host + Linux VM phases.
 bash scripts/full-coverage.sh --snapshot=TOOLS --skip-host --skip-linux-vm
 
+# Cross-version coverage: include the optional second Windows build (win11-2).
+# Auto-skips when scripts/vm-test/config.local.yaml has no windows11: block.
+bash scripts/full-coverage.sh                    # win10 + win11-2 + linux + kali
+
+# Skip the second Windows build explicitly:
+bash scripts/full-coverage.sh --skip-windows11-vm
+
 # Narrow vmtest directly at one package (faster than the full wrapper).
 MALDEV_VM_WINDOWS_SSH_HOST=192.168.122.122 \
 MALDEV_VM_WINDOWS_SNAPSHOT=TOOLS \
@@ -90,6 +97,7 @@ Each VM has two snapshots dedicated to the test harness:
 | VM | `INIT` | `TOOLS` |
 |---|---|---|
 | `win10` | Go 1.26.2 + OpenSSH + authorized_keys | `INIT` + **.NET Framework 3.5 enabled** |
+| `win11-2` (optional) | Go 1.26.2 + OpenSSH + authorized_keys | not provisioned — second build for cross-version sanity, no TOOLS additions yet |
 | `debian13` (Kali) | Go + MSF + OpenSSH + authorized_keys | `INIT` + **postgresql enable --now** + **msfdb init** |
 | `ubuntu20.04-` | Go 1.26.2 + rsync + authorized_keys | (placeholder — identical to `INIT` for now) |
 
