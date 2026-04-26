@@ -18,7 +18,7 @@
 | T1550.003 | Use Alternate Authentication Material: Pass the Ticket | `credentials/sekurlsa` (`KerberosTicket.ToKirbi` / `ToKirbiFile` — emit mimikatz-format KRB-CRED with replayable session key); `credentials/goldenticket` (`Submit` — LsaCallAuthenticationPackage(KerbSubmitTicketMessage)) | D3-NTA (Network Traffic Analysis on Kerberos AP-REQ patterns) |
 | T1558.001 | Steal or Forge Kerberos Tickets: Golden Ticket | `credentials/goldenticket` (`Forge` — pure-Go PAC marshaling + KRB5 ticket signing with operator-supplied krbtgt key) | D3-NTA |
 | T1053.005 | Scheduled Task/Job: Scheduled Task | `persistence/scheduler` | D3-SBV (Service Binary Verification) |
-| T1055 | Process Injection | `inject` (15 methods), `process/tamper/herpaderping` | D3-PSA (Process Spawn Analysis) |
+| T1055 | Process Injection | `inject` (15 methods), `process/tamper/herpaderping` (ModeHerpaderping + ModeGhosting) | D3-PSA (Process Spawn Analysis) |
 | T1055.001 | DLL Injection | `pe/srdi`, `inject/phantomdll` | D3-SICA (System Image Change Analysis) |
 | T1055.003 | Thread Execution Hijacking | `inject` (ThreadHijack) | D3-PSA |
 | T1055.004 | Asynchronous Procedure Call | `inject` (QueueUserAPC, EarlyBirdAPC, NtQueueApcThreadEx) | D3-PSA |
