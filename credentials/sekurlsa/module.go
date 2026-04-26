@@ -32,7 +32,7 @@ type Module struct {
 
 // ModuleByName returns the first module whose basename matches name
 // case-insensitively. Returns (zero, false) when no match — callers
-// surface that as ErrLSASRVNotFound or ErrMSV1_0NotFound.
+// surface that as ErrLSASRVNotFound or ErrMSVNotFound.
 //
 // Real Win 10/11 dumps store the full module path
 // (`C:\Windows\system32\lsasrv.dll`) in MODULE_LIST.MODULE_STRING;

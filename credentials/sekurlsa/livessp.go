@@ -55,56 +55,29 @@ func (c *LiveSSPCredential) wipe() {
 // extractLiveSSP walks livessp.dll's KIWI_LIVESSP_LIST_ENTRY list
 // and returns one LiveSSPCredential per LUID. Returns (nil, nil)
 // without warning when the template lacks LiveSSP support.
-func extractLiveSSP(r *reader, mod Module, t *Template, lsaKey *lsaKey) (map[uint64]LiveSSPCredential, []string) {
+func extractLiveSSP(r *reader, mod Module, t *Template, lsaKey *lsaKey) (map[uint64]*LiveSSPCredential, []string) {
 	if t.LiveSSPLayout.NodeSize == 0 || len(t.LiveSSPListPattern) == 0 {
 		return nil, nil
 	}
-
-	body, err := r.ReadVA(mod.BaseOfImage, int(mod.SizeOfImage))
-	if err != nil {
-		return nil, []string{fmt.Sprintf("LiveSSP: read livessp.dll body: %v", err)}
-	}
-
-	listHead, err := derefRel32(
-		body,
-		mod.BaseOfImage,
-		t.LiveSSPListPattern,
-		t.LiveSSPListWildcards,
-		t.LiveSSPListOffset,
-		r,
-	)
+	listHead, err := resolveListHead(r, mod,
+		t.LiveSSPListPattern, t.LiveSSPListWildcards, t.LiveSSPListOffset)
 	if err != nil {
 		return nil, []string{fmt.Sprintf("LiveSSP list head: %v", err)}
 	}
-
-	flink, err := readPointer(r, listHead)
-	if err != nil || flink == 0 || flink == listHead {
-		return nil, nil
-	}
-
-	creds := make(map[uint64]LiveSSPCredential)
-	var warnings []string
-
+	creds := make(map[uint64]*LiveSSPCredential)
 	const maxNodes = 256
-	walked := 0
-	for cur := flink; cur != listHead && walked < maxNodes; walked++ {
-		node, err := r.ReadVA(cur, int(t.LiveSSPLayout.NodeSize))
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("LiveSSP node @0x%X: %v", cur, err))
-			break
-		}
-		if cred, luid, warn := decodeLiveSSPNode(r, node, t.LiveSSPLayout, lsaKey); warn != "" {
-			warnings = append(warnings, warn)
-		} else if cred.Found {
-			creds[luid] = cred
-		}
-		next, err := readPointer(r, cur)
-		if err != nil || next == 0 || next == cur {
-			break
-		}
-		cur = next
-	}
-
+	warnings := walkLinkedList(r, listHead, t.LiveSSPLayout.NodeSize, maxNodes,
+		func(node []byte, _ uint64) string {
+			cred, luid, warn := decodeLiveSSPNode(r, node, t.LiveSSPLayout, lsaKey)
+			if warn != "" {
+				return warn
+			}
+			if cred.Found {
+				c := cred
+				creds[luid] = &c
+			}
+			return ""
+		})
 	return creds, warnings
 }
 
@@ -124,16 +97,7 @@ func decodeLiveSSPNode(r *reader, node []byte, layout LiveSSPLayout, lsaKey *lsa
 
 	var password string
 	if layout.PasswordOffset+16 <= layout.NodeSize {
-		field := node[layout.PasswordOffset : layout.PasswordOffset+16]
-		pwdLen := binary.LittleEndian.Uint16(field[0:2])
-		pwdBufPtr := binary.LittleEndian.Uint64(field[8:16])
-		if pwdLen > 0 && pwdBufPtr != 0 {
-			if ct, err := r.ReadVA(pwdBufPtr, int(pwdLen)); err == nil {
-				if pt, err := decryptLSA(ct, lsaKey); err == nil {
-					password = decodeUTF16LEBytes(pt)
-				}
-			}
-		}
+		password, _ = readEncryptedPassword(r, node[layout.PasswordOffset:layout.PasswordOffset+16], lsaKey)
 	}
 
 	cred := LiveSSPCredential{
@@ -147,27 +111,13 @@ func decodeLiveSSPNode(r *reader, node []byte, layout LiveSSPLayout, lsaKey *lsa
 
 // mergeLiveSSP grafts LiveSSP credentials onto matching
 // LogonSessions by LUID, mirroring the other merge helpers.
-func mergeLiveSSP(sessions []LogonSession, live map[uint64]LiveSSPCredential) []LogonSession {
-	if len(live) == 0 {
-		return sessions
-	}
-	seen := make(map[uint64]bool, len(sessions))
-	for i := range sessions {
-		if c, ok := live[sessions[i].LUID]; ok {
-			sessions[i].Credentials = append(sessions[i].Credentials, c)
-			seen[sessions[i].LUID] = true
-		}
-	}
-	for luid, c := range live {
-		if seen[luid] {
-			continue
-		}
-		sessions = append(sessions, LogonSession{
+func mergeLiveSSP(sessions []LogonSession, live map[uint64]*LiveSSPCredential) []LogonSession {
+	return mergeByLUID(sessions, live, func(luid uint64, c *LiveSSPCredential) LogonSession {
+		return LogonSession{
 			LUID:        luid,
 			UserName:    c.UserName,
 			LogonDomain: c.LogonDomain,
 			Credentials: []Credential{c},
-		})
-	}
-	return sessions
+		}
+	})
 }

@@ -2,6 +2,7 @@ package sekurlsa
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 )
 
@@ -70,7 +71,7 @@ func (c CloudAPCredential) String() string {
 		if len(preview) > 16 {
 			preview = preview[:16]
 		}
-		prtPreview = fmt.Sprintf(" prt=%s…(%db)", hexLower(preview), len(c.PRT))
+		prtPreview = fmt.Sprintf(" prt=%s…(%db)", hex.EncodeToString(preview), len(c.PRT))
 	}
 	user := c.UserName
 	if c.AccountID != "" {
@@ -97,54 +98,25 @@ func (c *CloudAPCredential) wipe() {
 // and returns one CloudAPCredential per LUID. Returns (nil, nil)
 // without warning when the template lacks CloudAP support
 // (CloudAPLayout.NodeSize == 0).
-func extractCloudAP(r *reader, mod Module, t *Template) (map[uint64]CloudAPCredential, []string) {
+func extractCloudAP(r *reader, mod Module, t *Template) (map[uint64]*CloudAPCredential, []string) {
 	if t.CloudAPLayout.NodeSize == 0 || len(t.CloudAPListPattern) == 0 {
 		return nil, nil
 	}
-
-	body, err := r.ReadVA(mod.BaseOfImage, int(mod.SizeOfImage))
-	if err != nil {
-		return nil, []string{fmt.Sprintf("CloudAP: read cloudap.dll body: %v", err)}
-	}
-
-	listHead, err := derefRel32(
-		body,
-		mod.BaseOfImage,
-		t.CloudAPListPattern,
-		t.CloudAPListWildcards,
-		t.CloudAPListOffset,
-		r,
-	)
+	listHead, err := resolveListHead(r, mod,
+		t.CloudAPListPattern, t.CloudAPListWildcards, t.CloudAPListOffset)
 	if err != nil {
 		return nil, []string{fmt.Sprintf("CloudAP list head: %v", err)}
 	}
-
-	flink, err := readPointer(r, listHead)
-	if err != nil || flink == 0 || flink == listHead {
-		return nil, nil
-	}
-
-	creds := make(map[uint64]CloudAPCredential)
-	var warnings []string
-
+	creds := make(map[uint64]*CloudAPCredential)
 	const maxNodes = 256
-	walked := 0
-	for cur := flink; cur != listHead && walked < maxNodes; walked++ {
-		node, err := r.ReadVA(cur, int(t.CloudAPLayout.NodeSize))
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("CloudAP node @0x%X: %v", cur, err))
-			break
-		}
-		if cred, luid, ok := decodeCloudAPNode(r, node, t.CloudAPLayout); ok {
-			creds[luid] = cred
-		}
-		next, err := readPointer(r, cur)
-		if err != nil || next == 0 || next == cur {
-			break
-		}
-		cur = next
-	}
-
+	warnings := walkLinkedList(r, listHead, t.CloudAPLayout.NodeSize, maxNodes,
+		func(node []byte, _ uint64) string {
+			if cred, luid, ok := decodeCloudAPNode(r, node, t.CloudAPLayout); ok {
+				c := cred
+				creds[luid] = &c
+			}
+			return ""
+		})
 	return creds, warnings
 }
 
@@ -198,26 +170,12 @@ func decodeCloudAPNode(r *reader, node []byte, layout CloudAPLayout) (CloudAPCre
 
 // mergeCloudAP grafts CloudAP credentials onto matching
 // LogonSessions by LUID, mirroring the other merge helpers.
-func mergeCloudAP(sessions []LogonSession, cloud map[uint64]CloudAPCredential) []LogonSession {
-	if len(cloud) == 0 {
-		return sessions
-	}
-	seen := make(map[uint64]bool, len(sessions))
-	for i := range sessions {
-		if c, ok := cloud[sessions[i].LUID]; ok {
-			sessions[i].Credentials = append(sessions[i].Credentials, c)
-			seen[sessions[i].LUID] = true
-		}
-	}
-	for luid, c := range cloud {
-		if seen[luid] {
-			continue
-		}
-		sessions = append(sessions, LogonSession{
+func mergeCloudAP(sessions []LogonSession, cloud map[uint64]*CloudAPCredential) []LogonSession {
+	return mergeByLUID(sessions, cloud, func(luid uint64, c *CloudAPCredential) LogonSession {
+		return LogonSession{
 			LUID:        luid,
 			UserName:    c.UserName,
 			Credentials: []Credential{c},
-		})
-	}
-	return sessions
+		}
+	})
 }

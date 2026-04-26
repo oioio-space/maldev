@@ -121,7 +121,7 @@ func (c *KerberosCredential) wipe() {
 // actual tree root is `BalancedRoot.RightChild` (table+0x10). We
 // recursively in-order walk every node and project each through
 // the layout.
-func extractKerberos(r *reader, kerbModule Module, t *Template, lsaKey *lsaKey) (map[uint64]KerberosCredential, []string) {
+func extractKerberos(r *reader, kerbModule Module, t *Template, lsaKey *lsaKey) (map[uint64]*KerberosCredential, []string) {
 	if t.KerberosLayout.NodeSize == 0 || len(t.KerberosListPattern) == 0 {
 		return nil, nil
 	}
@@ -163,7 +163,7 @@ func extractKerberos(r *reader, kerbModule Module, t *Template, lsaKey *lsaKey) 
 		return nil, nil
 	}
 
-	creds := make(map[uint64]KerberosCredential)
+	creds := make(map[uint64]*KerberosCredential)
 	var warnings []string
 
 	const maxNodes = 1024
@@ -189,7 +189,8 @@ func extractKerberos(r *reader, kerbModule Module, t *Template, lsaKey *lsaKey) 
 			// longest ticket cache (multiple AVL paths can lead to
 			// the same session in malformed dumps).
 			if existing, ok := creds[luid]; !ok || len(cred.Tickets) > len(existing.Tickets) {
-				creds[luid] = cred
+				c := cred
+				creds[luid] = &c
 			}
 		}
 	})
@@ -423,27 +424,13 @@ func joinNonEmpty(parts []string, sep string) string {
 // LogonSessions by LUID, mirroring mergeWdigest / mergeDPAPI /
 // mergeTSPkg semantics. Orphan Kerberos LUIDs surface as new
 // sessions.
-func mergeKerberos(sessions []LogonSession, kerb map[uint64]KerberosCredential) []LogonSession {
-	if len(kerb) == 0 {
-		return sessions
-	}
-	seen := make(map[uint64]bool, len(sessions))
-	for i := range sessions {
-		if c, ok := kerb[sessions[i].LUID]; ok {
-			sessions[i].Credentials = append(sessions[i].Credentials, c)
-			seen[sessions[i].LUID] = true
-		}
-	}
-	for luid, c := range kerb {
-		if seen[luid] {
-			continue
-		}
-		sessions = append(sessions, LogonSession{
+func mergeKerberos(sessions []LogonSession, kerb map[uint64]*KerberosCredential) []LogonSession {
+	return mergeByLUID(sessions, kerb, func(luid uint64, c *KerberosCredential) LogonSession {
+		return LogonSession{
 			LUID:        luid,
 			UserName:    c.UserName,
 			LogonDomain: c.LogonDomain,
 			Credentials: []Credential{c},
-		})
-	}
-	return sessions
+		}
+	})
 }

@@ -63,7 +63,7 @@ func TestCredManCredential_Wipe(t *testing.T) {
 // TestExtractCredMan_DisabledLayout — NodeSize=0 short-circuit.
 func TestExtractCredMan_DisabledLayout(t *testing.T) {
 	creds, warn := extractCredMan(nil, 0xDEADBEEF, CredManLayout{}, nil)
-	if creds != nil || warn != "" {
+	if creds != nil || len(warn) != 0 {
 		t.Errorf("disabled-layout returned creds=%v warn=%q", creds, warn)
 	}
 }
@@ -71,7 +71,7 @@ func TestExtractCredMan_DisabledLayout(t *testing.T) {
 // TestExtractCredMan_NilHead — listHeadPtr=0 short-circuit.
 func TestExtractCredMan_NilHead(t *testing.T) {
 	creds, warn := extractCredMan(nil, 0, CredManLayout{NodeSize: 0x80}, nil)
-	if creds != nil || warn != "" {
+	if creds != nil || len(warn) != 0 {
 		t.Errorf("nil-head returned creds=%v warn=%q", creds, warn)
 	}
 }
@@ -178,7 +178,7 @@ func TestExtractCredMan_HappyPath(t *testing.T) {
 	}
 
 	creds, warn := extractCredMan(r, listHead, layout, keys)
-	if warn != "" {
+	if len(warn) != 0 {
 		t.Errorf("warn = %q, want empty", warn)
 	}
 	if len(creds) != 1 {

@@ -3,6 +3,7 @@ package sekurlsa
 import (
 	"bytes"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/oioio-space/maldev/credentials/lsassdump"
@@ -227,26 +228,86 @@ func TestLogonType_String(t *testing.T) {
 	}
 }
 
-// TestResult_Wipe is a smoke test that Wipe is safe to call on a nil
-// receiver, an empty Result, and a Result whose credentials don't
-// implement the optional wipe() interface.
+// TestResult_Wipe is a smoke test that Wipe is safe on a nil receiver
+// and an empty Result, and that it dispatches wipe() on each
+// Credential exactly once.
 func TestResult_Wipe(t *testing.T) {
 	(*Result)(nil).Wipe() // must not panic
 	r := &Result{}
 	r.Wipe()
-	r.Sessions = []LogonSession{{Credentials: []Credential{stubCred{}}}}
-	r.Wipe() // stubCred has no wipe(); must not panic
+	stub := &stubCred{}
+	r.Sessions = []LogonSession{{Credentials: []Credential{stub}}}
+	r.Wipe()
+	if stub.wipeCalls != 1 {
+		t.Errorf("Wipe called wipe() %d times, want 1", stub.wipeCalls)
+	}
 }
 
-type stubCred struct{}
+type stubCred struct {
+	wipeCalls int
+}
 
-func (stubCred) AuthPackage() string { return "stub" }
+func (*stubCred) AuthPackage() string { return "stub" }
+func (s *stubCred) wipe()             { s.wipeCalls++ }
 
 // TestParseFile_NotFound confirms ParseFile surfaces filesystem
 // errors rather than masking them as parse errors.
 func TestParseFile_NotFound(t *testing.T) {
-	_, err := ParseFile("/nonexistent/path/no_such_dump.bin")
+	_, err := ParseFile("/nonexistent/path/no_such_dump.bin", nil)
 	if err == nil {
 		t.Fatal("ParseFile on missing file: want error, got nil")
+	}
+}
+
+// TestParseFile_HappyPath confirms the open→read→delegate pipeline:
+// ParseFile writes the on-disk fixture through to Parse and returns
+// the same partial Result + error contract Parse itself promises.
+//
+// The fixture's BuildNumber matches a default template so Parse
+// proceeds past the build check, then trips on the synthetic
+// lsasrv.dll body (no real LSA crypto inside) — ErrKeyExtractFailed
+// is the documented mid-pipeline error, and Modules still populate.
+// What this test really verifies is that ParseFile didn't drop the
+// partial Result on the floor when an error fires from Parse.
+//
+// The default-template registry is reloaded explicitly because
+// other tests (TestExtractDPAPI_HappyPath, TestParse_RejectsX86Dump)
+// register t.Cleanup(resetTemplates) which clears the registry —
+// without the reload, our fixture's build 19045 wouldn't match.
+func TestParseFile_HappyPath(t *testing.T) {
+	resetTemplates()
+	registerDefaultTemplates()
+	t.Cleanup(func() {
+		resetTemplates()
+		registerDefaultTemplates()
+	})
+
+	mods := []lsassdump.Module{
+		{BaseOfImage: 0x7FF800000000, SizeOfImage: 0x100000, Name: "lsasrv.dll"},
+		{BaseOfImage: 0x7FF801000000, SizeOfImage: 0x080000, Name: "msv1_0.dll"},
+	}
+	blob := buildFixture(t, mods, nil)
+
+	tmp, err := os.CreateTemp(t.TempDir(), "parsefile-*.dmp")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	if _, err := tmp.Write(blob); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	tmp.Close()
+
+	res, err := ParseFile(tmp.Name(), nil)
+	if !errors.Is(err, ErrKeyExtractFailed) {
+		t.Fatalf("ParseFile: err = %v, want ErrKeyExtractFailed", err)
+	}
+	if res == nil {
+		t.Fatal("ParseFile: res == nil despite documented partial-Result contract")
+	}
+	if len(res.Modules) != 2 {
+		t.Errorf("Modules = %d, want 2", len(res.Modules))
+	}
+	if res.BuildNumber != 19045 {
+		t.Errorf("BuildNumber = %d, want 19045", res.BuildNumber)
 	}
 }

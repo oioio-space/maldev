@@ -183,9 +183,9 @@ func TestDecodeTSPkgNode_SwapsUserNameAndDomain(t *testing.T) {
 // existing MSV LogonSession by LUID get appended (not duplicated).
 func TestMergeTSPkg_Grafts(t *testing.T) {
 	sessions := []LogonSession{
-		{LUID: 0xAAAA, UserName: "alice", Credentials: []Credential{MSV1_0Credential{UserName: "alice", Found: true}}},
+		{LUID: 0xAAAA, UserName: "alice", Credentials: []Credential{&MSVCredential{UserName: "alice", Found: true}}},
 	}
-	ts := map[uint64]TSPkgCredential{
+	ts := map[uint64]*TSPkgCredential{
 		0xAAAA: {UserName: "alice", Password: "RDP123", Found: true},
 	}
 	out := mergeTSPkg(sessions, ts)
@@ -195,7 +195,7 @@ func TestMergeTSPkg_Grafts(t *testing.T) {
 	if len(out[0].Credentials) != 2 {
 		t.Fatalf("Credentials = %d, want MSV+TSPkg", len(out[0].Credentials))
 	}
-	if _, ok := out[0].Credentials[1].(TSPkgCredential); !ok {
+	if _, ok := out[0].Credentials[1].(*TSPkgCredential); !ok {
 		t.Errorf("Credentials[1] type = %T, want TSPkgCredential", out[0].Credentials[1])
 	}
 }
@@ -203,7 +203,7 @@ func TestMergeTSPkg_Grafts(t *testing.T) {
 // TestMergeTSPkg_Orphan — TSPkg LUID with no MSV match becomes a
 // new session.
 func TestMergeTSPkg_Orphan(t *testing.T) {
-	ts := map[uint64]TSPkgCredential{
+	ts := map[uint64]*TSPkgCredential{
 		0xBBBB: {UserName: "rdpuser", Password: "x", Found: true},
 	}
 	out := mergeTSPkg(nil, ts)

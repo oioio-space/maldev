@@ -49,7 +49,7 @@ type WdigestCredential struct {
 func (WdigestCredential) AuthPackage() string { return "Wdigest" }
 
 // String renders Domain\User:Password for log lines. Unlike the
-// pwdump-shaped MSV1_0Credential.String, Wdigest returns plaintext
+// pwdump-shaped MSVCredential.String, Wdigest returns plaintext
 // directly — there's no industry-standard "wdigest dump format" so
 // we use the simplest unambiguous one.
 func (c WdigestCredential) String() string {
@@ -82,56 +82,29 @@ func (c *WdigestCredential) wipe() {
 //
 // Returns (creds, warnings) where creds is keyed by LUID for cheap
 // merge-by-LUID into the MSV-derived LogonSession set.
-func extractWdigest(r *reader, wdigestModule Module, t *Template, lsaKey *lsaKey) (map[uint64]WdigestCredential, []string) {
+func extractWdigest(r *reader, wdigestModule Module, t *Template, lsaKey *lsaKey) (map[uint64]*WdigestCredential, []string) {
 	if t.WdigestLayout.NodeSize == 0 || len(t.WdigestListPattern) == 0 {
 		return nil, nil
 	}
-
-	body, err := r.ReadVA(wdigestModule.BaseOfImage, int(wdigestModule.SizeOfImage))
-	if err != nil {
-		return nil, []string{fmt.Sprintf("Wdigest: read wdigest.dll body: %v", err)}
-	}
-
-	listHead, err := derefRel32(
-		body,
-		wdigestModule.BaseOfImage,
-		t.WdigestListPattern,
-		t.WdigestListWildcards,
-		t.WdigestListOffset,
-		r,
-	)
+	listHead, err := resolveListHead(r, wdigestModule,
+		t.WdigestListPattern, t.WdigestListWildcards, t.WdigestListOffset)
 	if err != nil {
 		return nil, []string{fmt.Sprintf("Wdigest list head: %v", err)}
 	}
-
-	flink, err := readPointer(r, listHead)
-	if err != nil || flink == 0 || flink == listHead {
-		return nil, nil
-	}
-
-	creds := make(map[uint64]WdigestCredential)
-	var warnings []string
-
-	const maxNodes = 1024 // bound; defeats malformed dumps with looped Flink
-	walked := 0
-	for cur := flink; cur != listHead && walked < maxNodes; walked++ {
-		node, err := r.ReadVA(cur, int(t.WdigestLayout.NodeSize))
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("Wdigest node @0x%X: %v", cur, err))
-			break
-		}
-		if cred, luid, warn := decodeWdigestNode(r, node, t, lsaKey); warn != "" {
-			warnings = append(warnings, warn)
-		} else if cred.Found {
-			creds[luid] = cred
-		}
-		next, err := readPointer(r, cur) // Flink at offset 0
-		if err != nil || next == 0 {
-			break
-		}
-		cur = next
-	}
-
+	creds := make(map[uint64]*WdigestCredential)
+	const maxNodes = 1024
+	warnings := walkLinkedList(r, listHead, t.WdigestLayout.NodeSize, maxNodes,
+		func(node []byte, _ uint64) string {
+			cred, luid, warn := decodeWdigestNode(r, node, t, lsaKey)
+			if warn != "" {
+				return warn
+			}
+			if cred.Found {
+				c := cred
+				creds[luid] = &c
+			}
+			return ""
+		})
 	return creds, warnings
 }
 
@@ -149,24 +122,10 @@ func decodeWdigestNode(r *reader, node []byte, t *Template, lsaKey *lsaKey) (Wdi
 	username := readUnicodeString(r, node[l.UserNameOffset:l.UserNameOffset+16])
 	domain := readUnicodeString(r, node[l.DomainOffset:l.DomainOffset+16])
 
-	// The password UNICODE_STRING points at the encrypted blob. We
-	// read the cipher bytes ourselves, decrypt with lsaKey, then
-	// decode UTF-16LE → Go string.
-	pwdField := node[l.PasswordOffset : l.PasswordOffset+16]
-	pwdLen := binary.LittleEndian.Uint16(pwdField[0:2])
-	pwdBufPtr := binary.LittleEndian.Uint64(pwdField[8:16])
-	if pwdLen == 0 || pwdBufPtr == 0 {
-		return WdigestCredential{}, luid, ""
-	}
-	ct, err := r.ReadVA(pwdBufPtr, int(pwdLen))
+	password, err := readEncryptedPassword(r, node[l.PasswordOffset:l.PasswordOffset+16], lsaKey)
 	if err != nil {
-		return WdigestCredential{}, luid, fmt.Sprintf("Wdigest cipher @0x%X: %v", pwdBufPtr, err)
+		return WdigestCredential{}, luid, fmt.Sprintf("Wdigest %v", err)
 	}
-	pt, err := decryptLSA(ct, lsaKey)
-	if err != nil {
-		return WdigestCredential{}, luid, fmt.Sprintf("Wdigest decrypt @0x%X: %v", pwdBufPtr, err)
-	}
-	password := decodeUTF16LEBytes(pt)
 
 	cred := WdigestCredential{
 		UserName:    username,
@@ -199,34 +158,17 @@ func decodeUTF16LEBytes(b []byte) string {
 }
 
 // mergeWdigest grafts Wdigest credentials onto matching MSV
-// LogonSession entries by LUID. Sessions with a LUID present in
-// `wdig` get the WdigestCredential appended to their Credentials
-// slice. Wdigest sessions whose LUID is absent from `sessions` are
-// surfaced as new sessions so the caller doesn't lose them.
-func mergeWdigest(sessions []LogonSession, wdig map[uint64]WdigestCredential) []LogonSession {
-	if len(wdig) == 0 {
-		return sessions
-	}
-	seen := make(map[uint64]bool, len(sessions))
-	for i := range sessions {
-		if c, ok := wdig[sessions[i].LUID]; ok {
-			sessions[i].Credentials = append(sessions[i].Credentials, c)
-			seen[sessions[i].LUID] = true
-		}
-	}
-	for luid, c := range wdig {
-		if seen[luid] {
-			continue
-		}
-		// Fabricate a session for the orphan LUID. UserName/Domain
-		// come from the Wdigest node — we lose LogonType / SID, which
-		// only MSV1_0 carries.
-		sessions = append(sessions, LogonSession{
+// LogonSession entries by LUID. Wdigest sessions whose LUID is
+// absent from `sessions` are surfaced as new sessions — UserName /
+// Domain come from the Wdigest node so callers get a recognisable
+// session shell even without the matching MSV side.
+func mergeWdigest(sessions []LogonSession, wdig map[uint64]*WdigestCredential) []LogonSession {
+	return mergeByLUID(sessions, wdig, func(luid uint64, c *WdigestCredential) LogonSession {
+		return LogonSession{
 			LUID:        luid,
 			UserName:    c.UserName,
 			LogonDomain: c.LogonDomain,
 			Credentials: []Credential{c},
-		})
-	}
-	return sessions
+		}
+	})
 }

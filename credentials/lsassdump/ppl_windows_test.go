@@ -70,20 +70,20 @@ func TestUnprotect_ZeroEProcess(t *testing.T) {
 	}
 }
 
-// TestUnprotect_ZeroProtectionOffset rejects the unfilled-table
-// foot-gun.
 // TestUnprotect_ZeroProtectionOffsetTriggersAutoDiscovery verifies
-// that a zero offset triggers the v0.31.2+ auto-discovery fallback
-// (DiscoverProtectionOffset(%SystemRoot%\System32\ntoskrnl.exe))
-// — and that the error wraps ErrInvalidProtectionOffset when the
-// discovery itself fails. We force discovery to fail by pointing
-// SystemRoot at a non-existent path; the resulting open error
-// surfaces wrapped under ErrInvalidProtectionOffset.
+// that a zero ProtectionOffset triggers the v0.31.2+ auto-discovery
+// fallback (DiscoverProtectionOffset) and that the error wraps
+// ErrInvalidProtectionOffset when discovery itself fails.
+//
+// We force discovery to fail via PPLOffsetTable.NtoskrnlPath — the
+// v0.32.0 cleanup replaced os.Getenv("SystemRoot") with
+// folder.Get(CSIDL_SYSTEM), so an env-var override no longer reaches
+// the path resolver. The struct field is the canonical override.
 func TestUnprotect_ZeroProtectionOffsetTriggersAutoDiscovery(t *testing.T) {
-	t.Setenv("SystemRoot", `Z:\does-not-exist`)
-
 	rw := newPPLMockRW(nil)
-	_, err := Unprotect(rw, 0xFFFF000000001000, PPLOffsetTable{})
+	_, err := Unprotect(rw, 0xFFFF000000001000, PPLOffsetTable{
+		NtoskrnlPath: `Z:\does-not-exist\ntoskrnl.exe`,
+	})
 	if !errors.Is(err, ErrInvalidProtectionOffset) {
 		t.Errorf("Unprotect with zero offset + failing discovery: err = %v, want wrapped ErrInvalidProtectionOffset", err)
 	}
@@ -133,7 +133,7 @@ func TestReprotect_RoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unprotect: %v", err)
 	}
-	if err := Reprotect(tok, rw); err != nil {
+	if err := Reprotect(rw, tok); err != nil {
 		t.Fatalf("Reprotect: %v", err)
 	}
 	if region[offset] != original {
@@ -143,7 +143,7 @@ func TestReprotect_RoundTrips(t *testing.T) {
 
 // TestReprotect_ZeroTokenIsNoOp covers the deferred-cleanup idiom.
 func TestReprotect_ZeroTokenIsNoOp(t *testing.T) {
-	if err := Reprotect(PPLToken{}, newPPLMockRW(nil)); err != nil {
+	if err := Reprotect(newPPLMockRW(nil), PPLToken{}); err != nil {
 		t.Errorf("Reprotect(zero token) = %v, want nil", err)
 	}
 }
@@ -152,7 +152,7 @@ func TestReprotect_ZeroTokenIsNoOp(t *testing.T) {
 // nil-rw guard for non-zero tokens.
 func TestReprotect_NilReadWriterReturnsErrNotLoaded(t *testing.T) {
 	tok := PPLToken{EProcess: 0x1000, OriginalProtection: 0x41, ProtectionOffset: 0x87A}
-	if err := Reprotect(tok, nil); !errors.Is(err, driver.ErrNotLoaded) {
-		t.Errorf("Reprotect(_, nil) err = %v, want driver.ErrNotLoaded", err)
+	if err := Reprotect(nil, tok); !errors.Is(err, driver.ErrNotLoaded) {
+		t.Errorf("Reprotect(nil, _) err = %v, want driver.ErrNotLoaded", err)
 	}
 }

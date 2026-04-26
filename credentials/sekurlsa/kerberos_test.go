@@ -184,22 +184,22 @@ func TestJoinNonEmpty(t *testing.T) {
 // other merge tests.
 func TestMergeKerberos_Grafts(t *testing.T) {
 	sessions := []LogonSession{
-		{LUID: 0xAAAA, UserName: "alice", Credentials: []Credential{MSV1_0Credential{UserName: "alice", Found: true}}},
+		{LUID: 0xAAAA, UserName: "alice", Credentials: []Credential{&MSVCredential{UserName: "alice", Found: true}}},
 	}
-	kerb := map[uint64]KerberosCredential{
+	kerb := map[uint64]*KerberosCredential{
 		0xAAAA: {UserName: "alice", Password: "p", Found: true},
 	}
 	out := mergeKerberos(sessions, kerb)
 	if len(out) != 1 || len(out[0].Credentials) != 2 {
 		t.Fatalf("graft failed: %+v", out)
 	}
-	if _, ok := out[0].Credentials[1].(KerberosCredential); !ok {
+	if _, ok := out[0].Credentials[1].(*KerberosCredential); !ok {
 		t.Errorf("Credentials[1] type = %T, want KerberosCredential", out[0].Credentials[1])
 	}
 }
 
 func TestMergeKerberos_Orphan(t *testing.T) {
-	kerb := map[uint64]KerberosCredential{
+	kerb := map[uint64]*KerberosCredential{
 		0xBBBB: {UserName: "svc", Password: "x", Found: true},
 	}
 	out := mergeKerberos(nil, kerb)

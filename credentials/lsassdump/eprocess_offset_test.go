@@ -44,7 +44,7 @@ func TestSectionSignatureLevelOffset(t *testing.T) {
 // TestDiscoverProtectionOffset_NonexistentPath surfaces the open
 // error wrapped — callers errors.Is against fs.ErrNotExist.
 func TestDiscoverProtectionOffset_NonexistentPath(t *testing.T) {
-	_, err := DiscoverProtectionOffset("/no/such/ntoskrnl.exe")
+	_, err := DiscoverProtectionOffset("/no/such/ntoskrnl.exe", nil)
 	if err == nil {
 		t.Fatal("err = nil, want open error")
 	}
@@ -63,7 +63,7 @@ func TestDiscoverProtectionOffset_NotPE(t *testing.T) {
 	tmp.WriteString("not a PE — just text bytes that fill the header....")
 	tmp.Close()
 
-	_, err = DiscoverProtectionOffset(tmp.Name())
+	_, err = DiscoverProtectionOffset(tmp.Name(), nil)
 	if err == nil {
 		t.Fatal("err = nil, want PE parse error")
 	}
@@ -81,9 +81,9 @@ func TestDiscoverProtectionOffset_RealNtoskrnl(t *testing.T) {
 	if path == "" {
 		t.Skip("set MALDEV_NTOSKRNL=<path> to validate against a real ntoskrnl.exe")
 	}
-	off, err := DiscoverProtectionOffset(path)
+	off, err := DiscoverProtectionOffset(path, nil)
 	if err != nil {
-		t.Fatalf("DiscoverProtectionOffset(%s): %v", path, err)
+		t.Fatalf("DiscoverProtectionOffset(%s, nil): %v", path, err)
 	}
 	if off < 0x600 || off > 0x1000 {
 		t.Errorf("offset 0x%X outside [0x600, 0x1000] — likely wrong", off)
@@ -111,7 +111,7 @@ func TestDiscoverActiveProcessLinksOffset(t *testing.T) {
 
 // TestDiscoverUniqueProcessIdOffset_NonexistentPath — open error.
 func TestDiscoverUniqueProcessIdOffset_NonexistentPath(t *testing.T) {
-	_, err := DiscoverUniqueProcessIdOffset("/no/such/ntoskrnl.exe")
+	_, err := DiscoverUniqueProcessIdOffset("/no/such/ntoskrnl.exe", nil)
 	if err == nil {
 		t.Fatal("err = nil, want open error")
 	}
@@ -122,7 +122,7 @@ func TestDiscoverUniqueProcessIdOffset_NonexistentPath(t *testing.T) {
 
 // TestDiscoverInitialSystemProcessRVA_NonexistentPath — open error.
 func TestDiscoverInitialSystemProcessRVA_NonexistentPath(t *testing.T) {
-	_, err := DiscoverInitialSystemProcessRVA("/no/such/ntoskrnl.exe")
+	_, err := DiscoverInitialSystemProcessRVA("/no/such/ntoskrnl.exe", nil)
 	if err == nil {
 		t.Fatal("err = nil, want open error")
 	}
@@ -141,7 +141,7 @@ func TestDiscoverUniqueProcessIdOffset_RealNtoskrnl(t *testing.T) {
 	if path == "" {
 		t.Skip("set MALDEV_NTOSKRNL=<path> to validate")
 	}
-	off, err := DiscoverUniqueProcessIdOffset(path)
+	off, err := DiscoverUniqueProcessIdOffset(path, nil)
 	if err != nil {
 		t.Fatalf("DiscoverUniqueProcessIdOffset: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestDiscoverInitialSystemProcessRVA_RealNtoskrnl(t *testing.T) {
 	if path == "" {
 		t.Skip("set MALDEV_NTOSKRNL=<path> to validate")
 	}
-	rva, err := DiscoverInitialSystemProcessRVA(path)
+	rva, err := DiscoverInitialSystemProcessRVA(path, nil)
 	if err != nil {
 		t.Fatalf("DiscoverInitialSystemProcessRVA: %v", err)
 	}

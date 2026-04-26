@@ -225,9 +225,9 @@ func TestExtractWdigest_HappyPath(t *testing.T) {
 // Credentials slice (not a new session).
 func TestMergeWdigest_GraftsExisting(t *testing.T) {
 	sessions := []LogonSession{
-		{LUID: 0xAAAA, UserName: "alice", Credentials: []Credential{MSV1_0Credential{UserName: "alice", Found: true}}},
+		{LUID: 0xAAAA, UserName: "alice", Credentials: []Credential{&MSVCredential{UserName: "alice", Found: true}}},
 	}
-	wdig := map[uint64]WdigestCredential{
+	wdig := map[uint64]*WdigestCredential{
 		0xAAAA: {UserName: "alice", Password: "Hunter2", Found: true},
 	}
 	out := mergeWdigest(sessions, wdig)
@@ -237,7 +237,7 @@ func TestMergeWdigest_GraftsExisting(t *testing.T) {
 	if len(out[0].Credentials) != 2 {
 		t.Fatalf("Credentials = %d, want 2 (MSV + Wdigest)", len(out[0].Credentials))
 	}
-	if _, ok := out[0].Credentials[1].(WdigestCredential); !ok {
+	if _, ok := out[0].Credentials[1].(*WdigestCredential); !ok {
 		t.Errorf("Credentials[1] type = %T, want WdigestCredential", out[0].Credentials[1])
 	}
 }
@@ -245,7 +245,7 @@ func TestMergeWdigest_GraftsExisting(t *testing.T) {
 // TestMergeWdigest_OrphansSurface confirms a Wdigest LUID with no MSV
 // match becomes a new LogonSession instead of being silently dropped.
 func TestMergeWdigest_OrphansSurface(t *testing.T) {
-	wdig := map[uint64]WdigestCredential{
+	wdig := map[uint64]*WdigestCredential{
 		0xBBBB: {UserName: "svc", LogonDomain: "NT", Password: "x", Found: true},
 	}
 	out := mergeWdigest(nil, wdig)

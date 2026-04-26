@@ -255,9 +255,9 @@ func TestDecodeDPAPINode_KeyOverrunsNode(t *testing.T) {
 // matches an existing MSV session is appended (not duplicated).
 func TestMergeDPAPI_GraftsExisting(t *testing.T) {
 	sessions := []LogonSession{
-		{LUID: 0xAAAA, UserName: "alice", Credentials: []Credential{MSV1_0Credential{UserName: "alice", Found: true}}},
+		{LUID: 0xAAAA, UserName: "alice", Credentials: []Credential{&MSVCredential{UserName: "alice", Found: true}}},
 	}
-	keys := map[uint64]DPAPIMasterKey{
+	keys := map[uint64]*DPAPIMasterKey{
 		0xAAAA: {LUID: 0xAAAA, KeyBytes: []byte{0xDE}, Found: true},
 	}
 	out := mergeDPAPI(sessions, keys)
@@ -267,7 +267,7 @@ func TestMergeDPAPI_GraftsExisting(t *testing.T) {
 	if len(out[0].Credentials) != 2 {
 		t.Fatalf("Credentials = %d, want MSV+DPAPI", len(out[0].Credentials))
 	}
-	if _, ok := out[0].Credentials[1].(DPAPIMasterKey); !ok {
+	if _, ok := out[0].Credentials[1].(*DPAPIMasterKey); !ok {
 		t.Errorf("Credentials[1] type = %T, want DPAPIMasterKey", out[0].Credentials[1])
 	}
 }
@@ -275,7 +275,7 @@ func TestMergeDPAPI_GraftsExisting(t *testing.T) {
 // TestMergeDPAPI_OrphanSurfaces verifies a DPAPI LUID with no MSV
 // counterpart becomes a new LogonSession.
 func TestMergeDPAPI_OrphanSurfaces(t *testing.T) {
-	keys := map[uint64]DPAPIMasterKey{
+	keys := map[uint64]*DPAPIMasterKey{
 		0xBBBB: {LUID: 0xBBBB, KeyBytes: []byte{0x01, 0x02}, Found: true},
 	}
 	out := mergeDPAPI(nil, keys)
@@ -293,22 +293,3 @@ func TestMergeDPAPI_Empty(t *testing.T) {
 	}
 }
 
-// TestHexLower covers the local lowercase-hex helper.
-func TestHexLower(t *testing.T) {
-	cases := []struct {
-		name string
-		in   []byte
-		want string
-	}{
-		{"empty", nil, ""},
-		{"single", []byte{0xAB}, "ab"},
-		{"multi", []byte{0x00, 0xFF, 0xCA, 0xFE}, "00ffcafe"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := hexLower(tc.in); got != tc.want {
-				t.Errorf("hexLower(%v) = %q, want %q", tc.in, got, tc.want)
-			}
-		})
-	}
-}

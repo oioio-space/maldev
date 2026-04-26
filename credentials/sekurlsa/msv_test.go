@@ -10,17 +10,17 @@ import (
 	"github.com/oioio-space/maldev/credentials/lsassdump"
 )
 
-// TestMSV1_0Credential_AuthPackage covers the interface contract.
-func TestMSV1_0Credential_AuthPackage(t *testing.T) {
-	if got := (MSV1_0Credential{}).AuthPackage(); got != "MSV1_0" {
+// TestMSVCredential_AuthPackage covers the interface contract.
+func TestMSVCredential_AuthPackage(t *testing.T) {
+	if got := (MSVCredential{}).AuthPackage(); got != "MSV1_0" {
 		t.Errorf("AuthPackage = %q, want MSV1_0", got)
 	}
 }
 
-// TestMSV1_0Credential_String_Pwdump covers the three-by-three matrix
+// TestMSVCredential_String_Pwdump covers the three-by-three matrix
 // of (NT empty/present) × (LM empty/present) × (Domain empty/present).
-func TestMSV1_0Credential_String_Pwdump(t *testing.T) {
-	c := MSV1_0Credential{UserName: "alice", LogonDomain: "CORP"}
+func TestMSVCredential_String_Pwdump(t *testing.T) {
+	c := MSVCredential{UserName: "alice", LogonDomain: "CORP"}
 	copy(c.NTHash[:], []byte{0x31, 0xd6, 0xcf, 0xe0, 0xd1, 0x6a, 0xe9, 0x31,
 		0xb7, 0x3c, 0x59, 0xd7, 0xe0, 0xc0, 0x89, 0xc0})
 	got := c.String()
@@ -30,7 +30,7 @@ func TestMSV1_0Credential_String_Pwdump(t *testing.T) {
 	}
 
 	// Empty hashes — must emit standard placeholders.
-	empty := MSV1_0Credential{UserName: "bob"}
+	empty := MSVCredential{UserName: "bob"}
 	if !strings.Contains(empty.String(), "aad3b435b51404eeaad3b435b51404ee") {
 		t.Error("empty LM placeholder missing")
 	}
@@ -39,9 +39,9 @@ func TestMSV1_0Credential_String_Pwdump(t *testing.T) {
 	}
 }
 
-// TestMSV1_0Credential_Wipe is the in-place hash-buffer zeroizer.
-func TestMSV1_0Credential_Wipe(t *testing.T) {
-	c := &MSV1_0Credential{Found: true}
+// TestMSVCredential_Wipe is the in-place hash-buffer zeroizer.
+func TestMSVCredential_Wipe(t *testing.T) {
+	c := &MSVCredential{Found: true}
 	for i := range c.NTHash {
 		c.NTHash[i] = 0xFF
 	}
@@ -77,7 +77,7 @@ func TestParseMSV1_0Primary_FullStruct(t *testing.T) {
 	for i := 0x40; i < 0x54; i++ {
 		pt[i] = 0xCC // SHA1 hash
 	}
-	c := parseMSV1_0Primary(pt)
+	c := parseMSVPrimary(pt)
 	if !c.Found {
 		t.Fatal("Found = false on full struct")
 	}
@@ -102,7 +102,7 @@ func TestParseMSV1_0Primary_Win10Layout(t *testing.T) {
 	for i := 0x20; i < 0x30; i++ {
 		pt[i] = 0xAA
 	}
-	c := parseMSV1_0Primary(pt)
+	c := parseMSVPrimary(pt)
 	if !c.Found {
 		t.Fatal("Found = false on Win10 layout")
 	}
@@ -113,7 +113,7 @@ func TestParseMSV1_0Primary_Win10Layout(t *testing.T) {
 
 // TestParseMSV1_0Primary_AllZero — Found must stay false.
 func TestParseMSV1_0Primary_AllZero(t *testing.T) {
-	c := parseMSV1_0Primary(make([]byte, 0x54))
+	c := parseMSVPrimary(make([]byte, 0x54))
 	if c.Found {
 		t.Error("Found = true on all-zero blob")
 	}
@@ -280,7 +280,7 @@ func TestExtractMSV1_0_HappyPath(t *testing.T) {
 	}
 	mod, _ := Module{Name: "lsasrv.dll", BaseOfImage: msvBase, SizeOfImage: msvSize}, true
 
-	sessions, warnings := extractMSV1_0(r, mod, tmpl, keys)
+	sessions, warnings := extractMSV(r, mod, tmpl, keys)
 
 	if len(sessions) != 1 {
 		t.Fatalf("sessions = %d, want 1; warnings=%v", len(sessions), warnings)
@@ -298,9 +298,9 @@ func TestExtractMSV1_0_HappyPath(t *testing.T) {
 	if len(s.Credentials) != 1 {
 		t.Fatalf("Credentials = %d, want 1", len(s.Credentials))
 	}
-	cred, ok := s.Credentials[0].(MSV1_0Credential)
+	cred, ok := s.Credentials[0].(*MSVCredential)
 	if !ok {
-		t.Fatalf("Credentials[0] is not MSV1_0Credential: %T", s.Credentials[0])
+		t.Fatalf("Credentials[0] is not MSVCredential: %T", s.Credentials[0])
 	}
 	if !cred.Found {
 		t.Errorf("cred.Found = false; expected NT hash to be non-zero")

@@ -1,7 +1,6 @@
 package sekurlsa
 
 import (
-	"encoding/binary"
 	"fmt"
 )
 
@@ -71,41 +70,20 @@ func (c *CredManCredential) wipe() {
 //
 // Returns (nil, "") when the layout is disabled (NodeSize==0) or
 // when the listHeadPtr is zero (session has no CredMan entries).
-func extractCredMan(r *reader, listHeadPtr uint64, layout CredManLayout, lsaKey *lsaKey) ([]CredManCredential, string) {
+func extractCredMan(r *reader, listHeadPtr uint64, layout CredManLayout, lsaKey *lsaKey) ([]CredManCredential, []string) {
 	if layout.NodeSize == 0 || listHeadPtr == 0 {
-		return nil, ""
+		return nil, nil
 	}
-
-	// Read the LIST_ENTRY at listHeadPtr; Flink at +0 is the first
-	// CredMan node (or listHeadPtr itself if the list is empty).
-	flink, err := readPointer(r, listHeadPtr)
-	if err != nil || flink == 0 || flink == listHeadPtr {
-		return nil, ""
-	}
-
-	var (
-		out     []CredManCredential
-		warning string
-	)
-
+	var out []CredManCredential
 	const maxNodes = 256
-	walked := 0
-	for cur := flink; cur != listHeadPtr && walked < maxNodes; walked++ {
-		node, err := r.ReadVA(cur, int(layout.NodeSize))
-		if err != nil {
-			warning = fmt.Sprintf("CredMan node @0x%X: %v", cur, err)
-			break
-		}
-		if c, ok := decodeCredManNode(r, node, layout, lsaKey); ok {
-			out = append(out, c)
-		}
-		next, err := readPointer(r, cur)
-		if err != nil || next == 0 || next == cur {
-			break
-		}
-		cur = next
-	}
-	return out, warning
+	warnings := walkLinkedList(r, listHeadPtr, layout.NodeSize, maxNodes,
+		func(node []byte, _ uint64) string {
+			if c, ok := decodeCredManNode(r, node, layout, lsaKey); ok {
+				out = append(out, c)
+			}
+			return ""
+		})
+	return out, warnings
 }
 
 // decodeCredManNode projects a node-bytes blob through the layout
@@ -120,19 +98,9 @@ func decodeCredManNode(r *reader, node []byte, layout CredManLayout, lsaKey *lsa
 	domain := readUnicodeStringIfFits(r, node, layout.LogonDomainOffset, layout.NodeSize)
 	resource := readUnicodeStringIfFits(r, node, layout.ResourceNameOffset, layout.NodeSize)
 
-	// Password is encrypted; read length+ptr, fetch ciphertext, decrypt.
 	var password string
 	if layout.PasswordOffset+16 <= layout.NodeSize {
-		field := node[layout.PasswordOffset : layout.PasswordOffset+16]
-		pwdLen := binary.LittleEndian.Uint16(field[0:2])
-		pwdBufPtr := binary.LittleEndian.Uint64(field[8:16])
-		if pwdLen > 0 && pwdBufPtr != 0 {
-			if ct, err := r.ReadVA(pwdBufPtr, int(pwdLen)); err == nil {
-				if pt, err := decryptLSA(ct, lsaKey); err == nil {
-					password = decodeUTF16LEBytes(pt)
-				}
-			}
-		}
+		password, _ = readEncryptedPassword(r, node[layout.PasswordOffset:layout.PasswordOffset+16], lsaKey)
 	}
 
 	c := CredManCredential{
@@ -145,13 +113,3 @@ func decodeCredManNode(r *reader, node []byte, layout CredManLayout, lsaKey *lsa
 	return c, c.Found
 }
 
-// readUnicodeStringIfFits is a bounds-checked wrapper around
-// readUnicodeString — returns "" if the requested 16-byte field
-// would extend past the node's NodeSize. Avoids a slice-bounds
-// panic on a malformed Layout.
-func readUnicodeStringIfFits(r *reader, node []byte, offset, nodeSize uint32) string {
-	if offset == 0 || offset+16 > nodeSize {
-		return ""
-	}
-	return readUnicodeString(r, node[offset:offset+16])
-}

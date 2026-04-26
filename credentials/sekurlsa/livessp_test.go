@@ -52,22 +52,22 @@ func TestExtractLiveSSP_Disabled(t *testing.T) {
 // TestMergeLiveSSP — graft / orphan / empty paths.
 func TestMergeLiveSSP_Grafts(t *testing.T) {
 	sessions := []LogonSession{
-		{LUID: 0xAAAA, UserName: "alice", Credentials: []Credential{MSV1_0Credential{UserName: "alice", Found: true}}},
+		{LUID: 0xAAAA, UserName: "alice", Credentials: []Credential{&MSVCredential{UserName: "alice", Found: true}}},
 	}
-	live := map[uint64]LiveSSPCredential{
+	live := map[uint64]*LiveSSPCredential{
 		0xAAAA: {UserName: "alice", LogonDomain: "MSA", Password: "p", Found: true},
 	}
 	out := mergeLiveSSP(sessions, live)
 	if len(out) != 1 || len(out[0].Credentials) != 2 {
 		t.Fatalf("graft failed: %+v", out)
 	}
-	if _, ok := out[0].Credentials[1].(LiveSSPCredential); !ok {
+	if _, ok := out[0].Credentials[1].(*LiveSSPCredential); !ok {
 		t.Errorf("Credentials[1] type = %T, want LiveSSPCredential", out[0].Credentials[1])
 	}
 }
 
 func TestMergeLiveSSP_Orphan(t *testing.T) {
-	live := map[uint64]LiveSSPCredential{
+	live := map[uint64]*LiveSSPCredential{
 		0xBBBB: {UserName: "u", LogonDomain: "MSA", Password: "x", Found: true},
 	}
 	out := mergeLiveSSP(nil, live)

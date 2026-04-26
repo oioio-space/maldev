@@ -2,6 +2,7 @@ package sekurlsa
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 )
 
@@ -64,7 +65,7 @@ func (DPAPIMasterKey) AuthPackage() string { return "DPAPI" }
 // logging or as input to a downstream blob decryptor that expects
 // `{<GUID>}:<hex>` format.
 func (k DPAPIMasterKey) String() string {
-	return fmt.Sprintf("{%s}:%s", k.GUIDString(), hexLower(k.KeyBytes))
+	return fmt.Sprintf("{%s}:%s", k.GUIDString(), hex.EncodeToString(k.KeyBytes))
 }
 
 // GUIDString formats the 16-byte GUID as the canonical Microsoft
@@ -109,56 +110,29 @@ func (k *DPAPIMasterKey) wipe() {
 // decryptLSA. Future work can add a "MasterKey blob still encrypted"
 // path for the rare LCUs where the cache holds ciphertext, but every
 // Win10/Win11 path observed today caches plaintext.
-func extractDPAPI(r *reader, lsasrv Module, t *Template) (map[uint64]DPAPIMasterKey, []string) {
+func extractDPAPI(r *reader, lsasrv Module, t *Template) (map[uint64]*DPAPIMasterKey, []string) {
 	if t.DPAPILayout.NodeSize == 0 || len(t.DPAPIListPattern) == 0 {
 		return nil, nil
 	}
-
-	body, err := r.ReadVA(lsasrv.BaseOfImage, int(lsasrv.SizeOfImage))
-	if err != nil {
-		return nil, []string{fmt.Sprintf("DPAPI: read lsasrv.dll body: %v", err)}
-	}
-
-	listHead, err := derefRel32(
-		body,
-		lsasrv.BaseOfImage,
-		t.DPAPIListPattern,
-		t.DPAPIListWildcards,
-		t.DPAPIListOffset,
-		r,
-	)
+	listHead, err := resolveListHead(r, lsasrv,
+		t.DPAPIListPattern, t.DPAPIListWildcards, t.DPAPIListOffset)
 	if err != nil {
 		return nil, []string{fmt.Sprintf("DPAPI list head: %v", err)}
 	}
-
-	flink, err := readPointer(r, listHead)
-	if err != nil || flink == 0 || flink == listHead {
-		return nil, nil
-	}
-
-	keys := make(map[uint64]DPAPIMasterKey)
-	var warnings []string
-
+	keys := make(map[uint64]*DPAPIMasterKey)
 	const maxNodes = 1024
-	walked := 0
-	for cur := flink; cur != listHead && walked < maxNodes; walked++ {
-		node, err := r.ReadVA(cur, int(t.DPAPILayout.NodeSize))
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("DPAPI node @0x%X: %v", cur, err))
-			break
-		}
-		if mk, warn := decodeDPAPINode(node, t.DPAPILayout); warn != "" {
-			warnings = append(warnings, warn)
-		} else if mk.Found {
-			keys[mk.LUID] = mk
-		}
-		next, err := readPointer(r, cur) // Flink at offset 0
-		if err != nil || next == 0 {
-			break
-		}
-		cur = next
-	}
-
+	warnings := walkLinkedList(r, listHead, t.DPAPILayout.NodeSize, maxNodes,
+		func(node []byte, _ uint64) string {
+			mk, warn := decodeDPAPINode(node, t.DPAPILayout)
+			if warn != "" {
+				return warn
+			}
+			if mk.Found {
+				k := mk
+				keys[mk.LUID] = &k
+			}
+			return ""
+		})
 	return keys, warnings
 }
 
@@ -205,38 +179,11 @@ func decodeDPAPINode(node []byte, l DPAPILayout) (DPAPIMasterKey, string) {
 // LUIDs with no MSV match surface as new sessions carrying only the
 // DPAPIMasterKey credential; mirrors mergeWdigest's orphan handling
 // so no extracted secret is silently dropped.
-func mergeDPAPI(sessions []LogonSession, keys map[uint64]DPAPIMasterKey) []LogonSession {
-	if len(keys) == 0 {
-		return sessions
-	}
-	seen := make(map[uint64]bool, len(sessions))
-	for i := range sessions {
-		if k, ok := keys[sessions[i].LUID]; ok {
-			sessions[i].Credentials = append(sessions[i].Credentials, k)
-			seen[sessions[i].LUID] = true
-		}
-	}
-	for luid, k := range keys {
-		if seen[luid] {
-			continue
-		}
-		sessions = append(sessions, LogonSession{
+func mergeDPAPI(sessions []LogonSession, keys map[uint64]*DPAPIMasterKey) []LogonSession {
+	return mergeByLUID(sessions, keys, func(luid uint64, k *DPAPIMasterKey) LogonSession {
+		return LogonSession{
 			LUID:        luid,
 			Credentials: []Credential{k},
-		})
-	}
-	return sessions
-}
-
-// hexLower writes b as a lowercase hex string. Local helper to avoid
-// adding encoding/hex to this file's imports — every caller already
-// pulls encoding/binary which is enough.
-func hexLower(b []byte) string {
-	const tab = "0123456789abcdef"
-	out := make([]byte, len(b)*2)
-	for i, c := range b {
-		out[i*2] = tab[c>>4]
-		out[i*2+1] = tab[c&0x0F]
-	}
-	return string(out)
+		}
+	})
 }

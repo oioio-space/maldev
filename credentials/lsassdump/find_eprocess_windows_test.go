@@ -134,7 +134,7 @@ func TestWalkProcessChain_NilFlinkBreaks(t *testing.T) {
 
 // TestFindLsassEProcess_NilReadWriter — guard.
 func TestFindLsassEProcess_NilReadWriter(t *testing.T) {
-	if _, err := FindLsassEProcess(nil, 644); err == nil {
+	if _, err := FindLsassEProcess(nil, 644, nil, nil); err == nil {
 		t.Fatal("err = nil, want ErrNotLoaded")
 	}
 }
@@ -142,7 +142,7 @@ func TestFindLsassEProcess_NilReadWriter(t *testing.T) {
 // TestFindLsassEProcess_ZeroPID — guard.
 func TestFindLsassEProcess_ZeroPID(t *testing.T) {
 	rw := newPPLMockRW(nil)
-	if _, err := FindLsassEProcess(rw, 0); err == nil {
+	if _, err := FindLsassEProcess(rw, 0, nil, nil); err == nil {
 		t.Fatal("err = nil, want PID == 0 error")
 	}
 }

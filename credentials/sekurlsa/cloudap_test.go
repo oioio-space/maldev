@@ -83,22 +83,22 @@ func TestExtractCloudAP_Disabled(t *testing.T) {
 // TestMergeCloudAP_Grafts — graft onto existing MSV session by LUID.
 func TestMergeCloudAP_Grafts(t *testing.T) {
 	sessions := []LogonSession{
-		{LUID: 0xAAAA, UserName: "alice", Credentials: []Credential{MSV1_0Credential{UserName: "alice", Found: true}}},
+		{LUID: 0xAAAA, UserName: "alice", Credentials: []Credential{&MSVCredential{UserName: "alice", Found: true}}},
 	}
-	cloud := map[uint64]CloudAPCredential{
+	cloud := map[uint64]*CloudAPCredential{
 		0xAAAA: {AccountID: "alice@x", PRT: []byte{1}, Found: true},
 	}
 	out := mergeCloudAP(sessions, cloud)
 	if len(out) != 1 || len(out[0].Credentials) != 2 {
 		t.Fatalf("graft failed: %+v", out)
 	}
-	if _, ok := out[0].Credentials[1].(CloudAPCredential); !ok {
+	if _, ok := out[0].Credentials[1].(*CloudAPCredential); !ok {
 		t.Errorf("Credentials[1] type = %T, want CloudAPCredential", out[0].Credentials[1])
 	}
 }
 
 func TestMergeCloudAP_Orphan(t *testing.T) {
-	cloud := map[uint64]CloudAPCredential{
+	cloud := map[uint64]*CloudAPCredential{
 		0xBBBB: {AccountID: "svc@az", PRT: []byte{2}, Found: true},
 	}
 	out := mergeCloudAP(nil, cloud)

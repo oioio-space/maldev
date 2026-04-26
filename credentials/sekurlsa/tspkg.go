@@ -74,7 +74,7 @@ func (c *TSPkgCredential) wipe() {
 //
 // Returns (nil, nil) without warning when the template lacks TSPkg
 // support (TSPkgLayout.NodeSize == 0).
-func extractTSPkg(r *reader, tspkgModule Module, t *Template, lsaKey *lsaKey) (map[uint64]TSPkgCredential, []string) {
+func extractTSPkg(r *reader, tspkgModule Module, t *Template, lsaKey *lsaKey) (map[uint64]*TSPkgCredential, []string) {
 	if t.TSPkgLayout.NodeSize == 0 || len(t.TSPkgListPattern) == 0 {
 		return nil, nil
 	}
@@ -106,7 +106,7 @@ func extractTSPkg(r *reader, tspkgModule Module, t *Template, lsaKey *lsaKey) (m
 		return nil, nil
 	}
 
-	creds := make(map[uint64]TSPkgCredential)
+	creds := make(map[uint64]*TSPkgCredential)
 	var warnings []string
 
 	const maxNodes = 1024
@@ -127,7 +127,8 @@ func extractTSPkg(r *reader, tspkgModule Module, t *Template, lsaKey *lsaKey) (m
 			warnings = append(warnings, warn)
 		}
 		if cred.Found {
-			creds[luid] = cred
+			c := cred
+			creds[luid] = &c
 		}
 	})
 
@@ -204,27 +205,13 @@ func decodeTSPkgNode(r *reader, node []byte, t *Template, lsaKey *lsaKey) (TSPkg
 // LUID, mirroring mergeWdigest / mergeDPAPI semantics. Orphan TSPkg
 // LUIDs surface as new sessions so callers don't lose any extracted
 // secret.
-func mergeTSPkg(sessions []LogonSession, ts map[uint64]TSPkgCredential) []LogonSession {
-	if len(ts) == 0 {
-		return sessions
-	}
-	seen := make(map[uint64]bool, len(sessions))
-	for i := range sessions {
-		if c, ok := ts[sessions[i].LUID]; ok {
-			sessions[i].Credentials = append(sessions[i].Credentials, c)
-			seen[sessions[i].LUID] = true
-		}
-	}
-	for luid, c := range ts {
-		if seen[luid] {
-			continue
-		}
-		sessions = append(sessions, LogonSession{
+func mergeTSPkg(sessions []LogonSession, ts map[uint64]*TSPkgCredential) []LogonSession {
+	return mergeByLUID(sessions, ts, func(luid uint64, c *TSPkgCredential) LogonSession {
+		return LogonSession{
 			LUID:        luid,
 			UserName:    c.UserName,
 			LogonDomain: c.LogonDomain,
 			Credentials: []Credential{c},
-		})
-	}
-	return sessions
+		}
+	})
 }
