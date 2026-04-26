@@ -150,6 +150,14 @@ type LogonSession struct {
 	LogonTime   time.Time
 	SID         string
 	Credentials []Credential
+
+	// MSVNodeVA is the source-process virtual address of the MSV
+	// LIST_ENTRY node this session was decoded from. Zero on non-
+	// minidump-backed Parse paths. Used by the Pass-the-Hash write-
+	// back when the session has no existing MSV PrimaryCredentials
+	// to overwrite — Pass allocates fresh memory in lsass and patches
+	// the node's CredentialsOffset field at MSVNodeVA + offset.
+	MSVNodeVA uint64
 }
 
 // Result aggregates the parse output.

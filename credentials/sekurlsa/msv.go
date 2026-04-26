@@ -204,6 +204,7 @@ func extractMSV(r *reader, lsasrvModule Module, t *Template, lsaKey *lsaKey) ([]
 			session, decryptWarns := decodeLogonSession(r, node, t, lsaKey)
 			warnings = append(warnings, decryptWarns...)
 			if session != nil {
+				session.MSVNodeVA = cur
 				sessions = append(sessions, *session)
 			}
 			next, err := readPointer(r, cur) // Flink lives at offset 0
