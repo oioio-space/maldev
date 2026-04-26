@@ -1,0 +1,234 @@
+package samdump
+
+import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/des"
+	"crypto/md5"
+	"crypto/rc4"
+	"encoding/binary"
+	"errors"
+	"fmt"
+)
+
+// Per-user NT/LM hash decryption.
+//
+// Each user's F value carries one of two hash-encryption envelopes
+// for the NT and LM hashes:
+//
+//   - Legacy (pre-Win 10 1607): MD5(hashedBootkey || rid_le ||
+//     "NTPASSWORD\0") → RC4 key → 16 bytes; further DES-decrypt with
+//     two RID-derived DES keys.
+//   - Modern (Win 10 1607+): SAM_HASH_AES envelope (Revision, Salt,
+//     Data) → AES-128-CBC(hashedBootkey, IV=Salt) → 16 bytes; then
+//     same RID-derived DES de-permutation.
+//
+// The final DES de-permutation step is identical between the two
+// paths: split the 4-byte RID into two 8-byte DES keys via a fixed
+// rotation, transformKey-extends each to 8 bytes with parity, and
+// DES-ECB decrypts the two halves of the 16-byte intermediate.
+
+// ErrUserHash is returned when a user's hash blob in the F value is
+// truncated, the AES envelope is malformed, or the SAM_HASH revision
+// is unknown.
+var ErrUserHash = errors.New("samdump: user hash decrypt failed")
+
+// Hash encryption envelope constants. The two ASCII strings are
+// hard-coded into Microsoft's SAM hash derivation since NT 4.0;
+// every credential dumper (mimikatz, impacket, SharpKatz) reuses
+// them verbatim.
+var (
+	hashEncNTPassword = []byte("NTPASSWORD\x00")
+	hashEncLMPassword = []byte("LMPASSWORD\x00")
+)
+
+// SAM_HASH revision tags carried at the start of the per-user hash
+// envelope.
+const (
+	hashRevisionLegacy = 0x00010001 // legacy MD5+RC4 path
+	hashRevisionAES    = 0x00010002 // modern SAM_HASH_AES path
+)
+
+// decryptUserNT decrypts the NT hash blob `enc` of user `rid` using
+// the domain `hashedBootkey`. enc is the raw 16-byte (legacy) or
+// header+payload (AES) blob carved from the V/F values by the user
+// walker. Returns the 16-byte NT hash, or nil + nil on an empty
+// hash slot (account has no NT hash set), or nil + error on a real
+// failure.
+func decryptUserNT(hashedBootkey []byte, rid uint32, enc []byte) ([]byte, error) {
+	return decryptUserHash(hashedBootkey, rid, enc, hashEncNTPassword)
+}
+
+// decryptUserLM is the LM-hash counterpart. The constant differs but
+// every other step is identical.
+func decryptUserLM(hashedBootkey []byte, rid uint32, enc []byte) ([]byte, error) {
+	return decryptUserHash(hashedBootkey, rid, enc, hashEncLMPassword)
+}
+
+func decryptUserHash(hashedBootkey []byte, rid uint32, enc, encMarker []byte) ([]byte, error) {
+	if len(hashedBootkey) != 16 {
+		return nil, fmt.Errorf("%w: hashedBootkey length %d, want 16", ErrUserHash, len(hashedBootkey))
+	}
+	if len(enc) == 0 {
+		return nil, nil
+	}
+	// Detect AES envelope by the revision-tag uint16 at the start.
+	// Revision low word: 1 = legacy, 2 = AES. Microsoft also stores
+	// it in big-endian-style { 0x01, 0x00, 0x02, 0x00 } little-endian
+	// = uint32(0x00020001) — but reading the low uint16 is sufficient
+	// to discriminate.
+	if len(enc) >= 4 {
+		revision := binary.LittleEndian.Uint16(enc[0:2])
+		if revision == 0x0002 {
+			// AES envelope: SAM_HASH_AES = {Revision uint16, Length
+			// uint16, Pad uint32, Salt[16], Data[...]}.
+			// Spec varies — impacket parses:
+			//   Revision (2) + Length (2) + DataOffset (4) + Salt[16] +
+			//   Data[]
+			//   Then Data is AES-128-CBC(key=hashedBootkey, iv=Salt).
+			intermediate, err := decryptHashAES(hashedBootkey, enc)
+			if err != nil {
+				return nil, err
+			}
+			return desUnwrap(rid, intermediate)
+		}
+	}
+
+	// Legacy MD5+RC4 path. enc is the bare 16-byte ciphertext.
+	if len(enc) < 16 {
+		return nil, fmt.Errorf("%w: legacy hash blob shorter than 16 bytes (%d)", ErrUserHash, len(enc))
+	}
+	rc4Key := deriveLegacyHashKey(hashedBootkey, rid, encMarker)
+	rc, err := rc4.NewCipher(rc4Key)
+	if err != nil {
+		return nil, fmt.Errorf("%w: rc4 NewCipher: %v", ErrUserHash, err)
+	}
+	intermediate := make([]byte, 16)
+	rc.XORKeyStream(intermediate, enc[:16])
+	return desUnwrap(rid, intermediate)
+}
+
+// decryptHashAES handles the SAM_HASH_AES envelope. Layout:
+//
+//	+0x00 Revision uint16 (=2, validated by caller)
+//	+0x02 Length   uint16
+//	+0x04 Reserved uint32
+//	+0x08 Salt[16] — AES IV
+//	+0x18 Data[...] — AES-128-CBC ciphertext
+//
+// Returns the first 16 plaintext bytes.
+func decryptHashAES(hashedBootkey, enc []byte) ([]byte, error) {
+	const (
+		offSalt = 0x08
+		offData = 0x18
+	)
+	if len(enc) < offData+16 {
+		return nil, fmt.Errorf("%w: AES hash envelope shorter than %d bytes (%d)",
+			ErrUserHash, offData+16, len(enc))
+	}
+	salt := enc[offSalt : offSalt+16]
+	cipherBytes := enc[offData:]
+	if len(cipherBytes)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("%w: AES hash data length %d not aligned to AES block",
+			ErrUserHash, len(cipherBytes))
+	}
+	block, err := aes.NewCipher(hashedBootkey)
+	if err != nil {
+		return nil, fmt.Errorf("%w: aes NewCipher: %v", ErrUserHash, err)
+	}
+	mode := cipher.NewCBCDecrypter(block, salt)
+	plain := make([]byte, len(cipherBytes))
+	mode.CryptBlocks(plain, cipherBytes)
+	out := make([]byte, 16)
+	copy(out, plain[:16])
+	return out, nil
+}
+
+// deriveLegacyHashKey computes the RC4 key Microsoft uses to wrap a
+// per-user legacy NT/LM hash:
+//
+//	MD5(hashedBootkey || RID_le_uint32 || encMarker)
+//
+// where encMarker is "NTPASSWORD\0" or "LMPASSWORD\0".
+func deriveLegacyHashKey(hashedBootkey []byte, rid uint32, encMarker []byte) []byte {
+	var ridLE [4]byte
+	binary.LittleEndian.PutUint32(ridLE[:], rid)
+	h := md5.New()
+	h.Write(hashedBootkey)
+	h.Write(ridLE[:])
+	h.Write(encMarker)
+	return h.Sum(nil)
+}
+
+// desUnwrap applies the final RID-derived DES de-permutation. The
+// 16-byte intermediate (post-RC4 or post-AES) is split into two
+// 8-byte halves; each half is DES-ECB decrypted with one of the two
+// keys derived from RID. The concatenation is the final NT/LM hash.
+func desUnwrap(rid uint32, intermediate []byte) ([]byte, error) {
+	if len(intermediate) != 16 {
+		return nil, fmt.Errorf("%w: intermediate length %d, want 16", ErrUserHash, len(intermediate))
+	}
+	k1, k2 := desKeysForRID(rid)
+	c1, err := des.NewCipher(k1)
+	if err != nil {
+		return nil, fmt.Errorf("%w: des NewCipher #1: %v", ErrUserHash, err)
+	}
+	c2, err := des.NewCipher(k2)
+	if err != nil {
+		return nil, fmt.Errorf("%w: des NewCipher #2: %v", ErrUserHash, err)
+	}
+	out := make([]byte, 16)
+	c1.Decrypt(out[0:8], intermediate[0:8])
+	c2.Decrypt(out[8:16], intermediate[8:16])
+	return out, nil
+}
+
+// desKeysForRID derives the two 8-byte DES keys Microsoft uses to
+// permute a per-user hash. Layout (impacket `deriveKey`):
+//
+//	rid_le = uint32 little-endian
+//	raw1 = rid_le[0..4] || rid_le[0..3]   // 7 bytes
+//	raw2 = rid_le[3..4] || rid_le[0..4] || rid_le[0..2]
+//
+// Each 7-byte raw key is then expanded to 8 bytes with parity bits
+// via transformKey56to64.
+func desKeysForRID(rid uint32) ([]byte, []byte) {
+	var ridLE [4]byte
+	binary.LittleEndian.PutUint32(ridLE[:], rid)
+	raw1 := []byte{
+		ridLE[0], ridLE[1], ridLE[2], ridLE[3],
+		ridLE[0], ridLE[1], ridLE[2],
+	}
+	raw2 := []byte{
+		ridLE[3], ridLE[0], ridLE[1], ridLE[2],
+		ridLE[3], ridLE[0], ridLE[1],
+	}
+	return transformKey56to64(raw1), transformKey56to64(raw2)
+}
+
+// transformKey56to64 inserts parity bits into a 7-byte (56-bit) key
+// to produce the 8-byte DES key the standard library expects.
+// Cross-checked against impacket's `transformKey` and
+// SharpKatz `Sam.cs`.
+func transformKey56to64(in []byte) []byte {
+	if len(in) != 7 {
+		// Should never happen — internal caller guarantees length.
+		// Fall through with a zero pad to keep behavior defined.
+		padded := make([]byte, 7)
+		copy(padded, in)
+		in = padded
+	}
+	out := make([]byte, 8)
+	out[0] = in[0] >> 1
+	out[1] = ((in[0] & 0x01) << 6) | (in[1] >> 2)
+	out[2] = ((in[1] & 0x03) << 5) | (in[2] >> 3)
+	out[3] = ((in[2] & 0x07) << 4) | (in[3] >> 4)
+	out[4] = ((in[3] & 0x0F) << 3) | (in[4] >> 5)
+	out[5] = ((in[4] & 0x1F) << 2) | (in[5] >> 6)
+	out[6] = ((in[5] & 0x3F) << 1) | (in[6] >> 7)
+	out[7] = in[6] & 0x7F
+	for i := range out {
+		out[i] = (out[i] << 1)
+	}
+	return out
+}
