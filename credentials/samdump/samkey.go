@@ -48,12 +48,15 @@ var (
 // SAM hive layout settled.
 const samFOffsetKeyHeader = 0x68
 
-// SAM revision tags carried at samFOffsetKeyHeader+0..+3.
-// Big-endian Microsoft convention: high uint16 = major, low = minor.
+// SAM_KEY revision tags at samFOffsetKeyHeader+0..+3 (uint32 LE).
+// Cross-checked against impacket SAM_KEY / SAM_KEY_DATA_AES Structure
+// definitions: `Revision <L=1` (legacy) or `<L=2` (AES). The V3 form
+// observed on some recent Windows installs reports 0x00000003 but
+// shares the AES layout — included for forward compatibility.
 const (
-	samRevisionLegacy = 0x00010001 // pre-Win 10 1607 — MD5 + RC4 path
-	samRevisionAES    = 0x00010002 // Win 10 1607+ — SAM_KEY_DATA_AES
-	samRevisionAESV3  = 0x00010003 // newer AES variant; same layout
+	samRevisionLegacy uint32 = 1
+	samRevisionAES    uint32 = 2
+	samRevisionAESV3  uint32 = 3
 )
 
 // deriveDomainKey returns the 16-byte hashed bootkey derived from

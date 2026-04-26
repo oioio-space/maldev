@@ -151,12 +151,35 @@ func TestDecryptUserHash_RejectsShortHashedBootkey(t *testing.T) {
 }
 
 func TestDecryptUserHash_RejectsTruncatedAESEnvelope(t *testing.T) {
-	// PekID=1, Revision=2 (AES), DataOffset=0x14 — but truncated
-	// before salt + data.
-	enc := []byte{0x01, 0x00, 0x02, 0x00, 0x14, 0x00, 0x00, 0x00}
+	// PekID=1, Revision=2 (AES), DataOffset=0x14, partial Salt — but
+	// truncated before the Salt completes (and well before any Data
+	// would land). Length = 26 bytes = past the header-only boundary
+	// (24) but short of the 40-byte minimum-with-data envelope.
+	enc := make([]byte, 26)
+	enc[0] = 0x01 // PekID
+	enc[2] = 0x02 // Revision = AES
+	enc[4] = 0x14 // DataOffset
 	_, err := decryptUserNT(make([]byte, 16), 1001, enc)
 	if !errors.Is(err, ErrUserHash) {
 		t.Fatalf("err = %v, want wrap of ErrUserHash", err)
+	}
+}
+
+func TestDecryptUserHash_AESHeaderOnlyReturnsNil(t *testing.T) {
+	// 24-byte SAM_HASH_AES envelope with no Data field — Microsoft's
+	// "no hash set" encoding for accounts that never had a password
+	// (built-in Administrator on a fresh install, Guest, etc.).
+	// Should return (nil, nil) rather than failing.
+	enc := make([]byte, 0x18)
+	enc[0] = 0x01 // PekID
+	enc[2] = 0x02 // Revision = AES
+	enc[4] = 0x14 // DataOffset
+	got, err := decryptUserNT(make([]byte, 16), 500, enc)
+	if err != nil {
+		t.Fatalf("err = %v, want nil for header-only envelope (no hash)", err)
+	}
+	if got != nil {
+		t.Errorf("got = % X, want nil for header-only envelope", got)
 	}
 }
 

@@ -96,10 +96,15 @@ func decryptUserHash(hashedBootkey []byte, rid uint32, enc, encMarker []byte) ([
 	case 0x0002:
 		// SAM_HASH_AES: {PekID(2), Revision(2), DataOffset(4),
 		// Salt[16], Data[...]}. Total payload is at least
-		// 4 + 4 + 16 + 16 = 40 bytes for one cipher block.
+		// 4 + 4 + 16 + 16 = 40 bytes for one cipher block. Header-
+		// only envelopes (24 bytes) signal "no hash set" — return
+		// nil cleanly without raising a warning.
 		intermediate, err := decryptHashAES(hashedBootkey, enc)
 		if err != nil {
 			return nil, err
+		}
+		if intermediate == nil {
+			return nil, nil
 		}
 		return desUnwrap(rid, intermediate)
 	case 0x0001:
@@ -124,18 +129,28 @@ func decryptUserHash(hashedBootkey []byte, rid uint32, enc, encMarker []byte) ([
 
 // decryptHashAES handles the SAM_HASH_AES envelope. Layout:
 //
-//	+0x00 Revision uint16 (=2, validated by caller)
-//	+0x02 Length   uint16
-//	+0x04 Reserved uint32
+//	+0x00 PekID    uint16 (=1)
+//	+0x02 Revision uint16 (=2, validated by caller)
+//	+0x04 DataOffset uint32 (typically 0x14)
 //	+0x08 Salt[16] — AES IV
-//	+0x18 Data[...] — AES-128-CBC ciphertext
+//	+0x18 Data[...] — AES-128-CBC ciphertext (variable; may be 0)
 //
-// Returns the first 16 plaintext bytes.
+// Returns the first 16 plaintext bytes. When the envelope carries
+// only the header (no Data field — Microsoft's "hash not set"
+// encoding observed on built-in Administrator / Guest), returns
+// (nil, nil) so the orchestrator records an absent NT/LM hash
+// without raising a per-user warning.
 func decryptHashAES(hashedBootkey, enc []byte) ([]byte, error) {
 	const (
 		offSalt = 0x08
 		offData = 0x18
 	)
+	if len(enc) <= offData {
+		// Header-only envelope ⇒ hash absent. Common for accounts
+		// that never had a password set (Administrator on a fresh
+		// install, Guest, DefaultAccount).
+		return nil, nil
+	}
 	if len(enc) < offData+16 {
 		return nil, fmt.Errorf("%w: AES hash envelope shorter than %d bytes (%d)",
 			ErrUserHash, offData+16, len(enc))

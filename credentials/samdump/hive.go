@@ -169,14 +169,31 @@ func (h *hive) openCellNK(cellOff int32) (*nkCell, error) {
 	if string(body[0:2]) != cellTypeNK {
 		return nil, fmt.Errorf("%w: cell @0x%X has type %q, want nk", ErrHiveCorrupt, cellOff, body[0:2])
 	}
+	// CM_KEY_NODE layout (MS-RegFile + Microsoft kernel headers):
+	//
+	//	+0x00 Signature   'nk'
+	//	+0x02 Flags
+	//	+0x04 LastWriteTime  (8 bytes)
+	//	+0x0C Spare         (4 bytes)
+	//	+0x10 Parent        (4-byte HCELL_INDEX)
+	//	+0x14 StableSubKeyCount    ← what we want (saved hives)
+	//	+0x18 VolatileSubKeyCount  (always 0 in saved hives)
+	//	+0x1C StableSubKeyList     ← list offset
+	//	+0x20 VolatileSubKeyList   (always -1 in saved hives)
+	//	+0x24 ValueCount
+	//	+0x28 ValueList
+	//	+0x2C Security
+	//	+0x30 Class
+	//	... +0x48 NameLength uint16, +0x4A ClassLength uint16
+	//	+0x4C Name (variable)
 	nk := &nkCell{
-		Flags:          binary.LittleEndian.Uint16(body[2:4]),
-		SubkeyCount:    binary.LittleEndian.Uint32(body[0x18:0x1C]),
-		SubkeyListOff:  int32(binary.LittleEndian.Uint32(body[0x20:0x24])),
-		ValueCount:     binary.LittleEndian.Uint32(body[0x28:0x2C]),
-		ValueListOff:   int32(binary.LittleEndian.Uint32(body[0x2C:0x30])),
-		ClassNameOff:   int32(binary.LittleEndian.Uint32(body[0x30:0x34])),
-		ClassNameLen:   binary.LittleEndian.Uint16(body[0x4A:0x4C]),
+		Flags:         binary.LittleEndian.Uint16(body[2:4]),
+		SubkeyCount:   binary.LittleEndian.Uint32(body[0x14:0x18]),
+		SubkeyListOff: int32(binary.LittleEndian.Uint32(body[0x1C:0x20])),
+		ValueCount:    binary.LittleEndian.Uint32(body[0x24:0x28]),
+		ValueListOff:  int32(binary.LittleEndian.Uint32(body[0x28:0x2C])),
+		ClassNameOff:  int32(binary.LittleEndian.Uint32(body[0x30:0x34])),
+		ClassNameLen:  binary.LittleEndian.Uint16(body[0x4A:0x4C]),
 	}
 	nameLen := int(binary.LittleEndian.Uint16(body[0x48:0x4A]))
 	if 0x4C+nameLen > len(body) {
@@ -308,6 +325,16 @@ func (h *hive) openCellVK(cellOff int32) (*vkCell, error) {
 	if string(body[0:2]) != cellTypeVK {
 		return nil, fmt.Errorf("%w: cell @0x%X has type %q, want vk", ErrHiveCorrupt, cellOff, body[0:2])
 	}
+	// CM_KEY_VALUE layout (MS-RegFile):
+	//
+	//	+0x00 Signature 'vk'   (2)
+	//	+0x02 NameLength       (2)
+	//	+0x04 DataLength       (4, high bit set = inline data)
+	//	+0x08 DataOffset       (4, HCELL_INDEX)
+	//	+0x0C Type             (4)
+	//	+0x10 Flags            (2)
+	//	+0x12 Spare            (2)
+	//	+0x14 Name             (variable)
 	nameLen := int(binary.LittleEndian.Uint16(body[2:4]))
 	vk := &vkCell{
 		DataLen:  binary.LittleEndian.Uint32(body[4:8]),
@@ -315,10 +342,11 @@ func (h *hive) openCellVK(cellOff int32) (*vkCell, error) {
 		DataType: binary.LittleEndian.Uint32(body[12:16]),
 		Flags:    binary.LittleEndian.Uint16(body[16:18]),
 	}
-	if 0x18+nameLen > len(body) {
+	const nameOff = 0x14
+	if nameOff+nameLen > len(body) {
 		return nil, fmt.Errorf("%w: vk @0x%X name length %d overruns cell", ErrHiveCorrupt, cellOff, nameLen)
 	}
-	rawName := body[0x18 : 0x18+nameLen]
+	rawName := body[nameOff : nameOff+nameLen]
 	if vk.Flags&vkFlagCompressedName != 0 {
 		vk.Name = string(rawName)
 	} else {
