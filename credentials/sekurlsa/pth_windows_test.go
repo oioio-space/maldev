@@ -6,7 +6,25 @@ import (
 	"bytes"
 	"errors"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
+
+// terminatePID kills the process at pid and ignores errors. Used by
+// the partial-implementation tests that exercise the spawn path —
+// each must clean up its own suspended decoy so test runs don't
+// accumulate orphaned processes on the Win VM.
+func terminatePID(pid uint32) {
+	if pid == 0 {
+		return
+	}
+	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, pid)
+	if err != nil {
+		return
+	}
+	_ = windows.TerminateProcess(h, 1)
+	_ = windows.CloseHandle(h)
+}
 
 // validPTHParams is the minimal happy-path Params used as a base for
 // the rejection tests below — each test mutates exactly one field
@@ -73,16 +91,25 @@ func TestPass_RejectsBadAES256Length(t *testing.T) {
 	}
 }
 
-// TestPass_StubReturnsNotImplemented documents the chantier-II-in-
-// progress contract: with valid Params, Pass currently returns the
-// ErrPTHNotImplemented sentinel. This test will flip to assert real
-// Result fields once the implementation lands; until then it pins
-// the placeholder behavior so callers depending on the public API
-// shape know what to expect.
-func TestPass_StubReturnsNotImplemented(t *testing.T) {
-	_, err := Pass(validPTHParams())
+// TestPass_StubReturnsNotImplementedAfterSpawn documents the
+// chantier-II partial-implementation contract: with valid Params,
+// Pass spawns a CREATE_SUSPENDED decoy under
+// LOGON_NETCREDENTIALS_ONLY, captures the spawned PID + LUID into
+// the returned PTHResult, and surfaces ErrPTHNotImplemented to
+// signal the LSA write-back step is still pending. The test
+// terminates the spawned process so it doesn't accumulate.
+func TestPass_StubReturnsNotImplementedAfterSpawn(t *testing.T) {
+	res, err := Pass(validPTHParams())
+	defer terminatePID(res.PID)
+
 	if !errors.Is(err, ErrPTHNotImplemented) {
-		t.Fatalf("Pass with valid params: err = %v, want ErrPTHNotImplemented", err)
+		t.Fatalf("Pass with valid params: err = %v, want wrap of ErrPTHNotImplemented", err)
+	}
+	if res.PID == 0 {
+		t.Errorf("Pass spawn: PID = 0, want non-zero")
+	}
+	if res.LogonID == 0 {
+		t.Errorf("Pass spawn: LogonID = 0, want non-zero LUID")
 	}
 }
 
@@ -95,10 +122,18 @@ func TestPassImpersonate_RejectsMissingDomain(t *testing.T) {
 	}
 }
 
-func TestPassImpersonate_StubReturnsNotImplemented(t *testing.T) {
-	_, err := PassImpersonate(validPTHParams())
+func TestPassImpersonate_StubReturnsNotImplementedAfterSpawn(t *testing.T) {
+	res, err := PassImpersonate(validPTHParams())
+	defer terminatePID(res.PID)
+
 	if !errors.Is(err, ErrPTHNotImplemented) {
-		t.Fatalf("PassImpersonate: err = %v, want ErrPTHNotImplemented", err)
+		t.Fatalf("PassImpersonate: err = %v, want wrap of ErrPTHNotImplemented", err)
+	}
+	if res.PID == 0 {
+		t.Errorf("PassImpersonate spawn: PID = 0, want non-zero")
+	}
+	if res.LogonID == 0 {
+		t.Errorf("PassImpersonate spawn: LogonID = 0, want non-zero LUID")
 	}
 }
 
