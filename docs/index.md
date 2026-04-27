@@ -34,7 +34,9 @@ OPSEC / MITRE / Limitations / See also).
 | [cleanup](techniques/cleanup/README.md) | 7 | self-delete, secure wipe, timestomp, ADS, BSOD, service hide |
 | [collection](techniques/collection/README.md) | 5 | keylog, clipboard, screenshot, ADS, LSASS dump |
 | [credentials](techniques/credentials/README.md) | 4 | LSASS dump, sekurlsa parser, SAM offline, Golden Ticket |
-| [crypto / encode / hash](techniques/crypto/README.md) | 3 | payload encryption (AES-GCM, ChaCha20, XTEA, S-Box), Base64/UTF-16/PowerShell, fuzzy hashes (ssdeep/TLSH) |
+| [crypto](techniques/crypto/README.md) | 1 | payload encryption (AES-GCM, ChaCha20) and signature-breaking transforms (XTEA, S-Box, Matrix, ArithShift, XOR) |
+| [encode](techniques/encode/README.md) | 1 | Base64 (std + URL), UTF-16LE, ROT13, PowerShell `-EncodedCommand` |
+| [hash](techniques/hash/README.md) | 2 | cryptographic hashes (MD5/SHA-*), ROR13 API hashing, fuzzy hashes (ssdeep, TLSH) |
 | [evasion](techniques/evasion/README.md) | 19 | AMSI/ETW patches, ntdll unhook, sleep mask, ACG, BlockDLLs, callstack spoof, kernel callback removal, anti-VM/sandbox/timing |
 | [injection](techniques/injection/README.md) | 12 | CreateThread, EarlyBird APC, ThreadHijack, SectionMap, KernelCallback, Phantom DLL, ThreadPool, NtQueueApcThreadEx, EtwpCreateEtwThread, … |
 | [pe](techniques/pe/README.md) | 7 | strip & sanitize, BOF loader, morph, PE-to-shellcode, certificate theft, masquerade |
@@ -54,15 +56,13 @@ OPSEC / MITRE / Limitations / See also).
 | [T1036](https://attack.mitre.org/techniques/T1036/) | [`evasion/callstack`](../evasion/callstack) · [`evasion/stealthopen`](../evasion/stealthopen) |
 | [T1056.001](https://attack.mitre.org/techniques/T1056/001/) | [`collection`](../collection) · [`collection/keylog`](../collection/keylog) |
 | [T1070](https://attack.mitre.org/techniques/T1070/) | [`cleanup/memory`](../cleanup/memory) |
-| [T1070.004](https://attack.mitre.org/techniques/T1070/004/) | [`cleanup/selfdelete`](../cleanup/selfdelete) · [`cleanup/wipe`](../cleanup/wipe) |
+| [T1070.004](https://attack.mitre.org/techniques/T1070/004/) | [`cleanup/wipe`](../cleanup/wipe) |
 | [T1070.006](https://attack.mitre.org/techniques/T1070/006/) | [`cleanup/timestomp`](../cleanup/timestomp) |
 | [T1071.001](https://attack.mitre.org/techniques/T1071/001/) | [`useragent`](../useragent) |
-| [T1113](https://attack.mitre.org/techniques/T1113/) | [`collection`](../collection) · [`collection/screenshot`](../collection/screenshot) |
-| [T1115](https://attack.mitre.org/techniques/T1115/) | [`collection`](../collection) · [`collection/clipboard`](../collection/clipboard) |
+| [T1113](https://attack.mitre.org/techniques/T1113/) | [`collection`](../collection) |
+| [T1115](https://attack.mitre.org/techniques/T1115/) | [`collection`](../collection) |
 | [T1529](https://attack.mitre.org/techniques/T1529/) | [`cleanup/bsod`](../cleanup/bsod) |
-| [T1543.003](https://attack.mitre.org/techniques/T1543/003/) | [`cleanup/service`](../cleanup/service) |
-| [T1562.001](https://attack.mitre.org/techniques/T1562/001/) | [`evasion/acg`](../evasion/acg) · [`evasion/amsi`](../evasion/amsi) · [`evasion/blockdlls`](../evasion/blockdlls) · [`evasion/cet`](../evasion/cet) · [`evasion/etw`](../evasion/etw) · [`evasion/kcallback`](../evasion/kcallback) · [`evasion/preset`](../evasion/preset) · [`evasion/unhook`](../evasion/unhook) |
-| [T1564](https://attack.mitre.org/techniques/T1564/) | [`cleanup/service`](../cleanup/service) |
+| [T1562.001](https://attack.mitre.org/techniques/T1562/001/) | [`evasion/cet`](../evasion/cet) · [`evasion/kcallback`](../evasion/kcallback) · [`evasion/preset`](../evasion/preset) |
 | [T1564.004](https://attack.mitre.org/techniques/T1564/004/) | [`cleanup/ads`](../cleanup/ads) |
 | [T1574.012](https://attack.mitre.org/techniques/T1574/012/) | [`evasion/hook`](../evasion/hook) |
 
@@ -100,10 +100,6 @@ utilities used after an operation completes |
 last-resort cleanup primitive |
 | [`cleanup/memory`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/memory) | very-quiet | provides secure memory cleanup primitives for wiping
 sensitive data (shellcode, keys, credentials) from process memory |
-| [`cleanup/selfdelete`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/selfdelete) | moderate | deletes the running executable from disk while the
-process continues to execute from its mapped image |
-| [`cleanup/service`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/service) | noisy | hides Windows services from listing utilities by applying
-a restrictive DACL on the service object |
 | [`cleanup/timestomp`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/timestomp) | quiet | resets a file's NTFS `$STANDARD_INFORMATION` timestamps
 so a dropped artifact blends with surrounding files |
 | [`cleanup/wipe`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/wipe) | quiet | overwrites file contents with cryptographically random data
@@ -131,11 +127,8 @@ and emits a per-test / per-package / per-platform matrix report |
 snapshot restore between runs |
 | [`collection`](https://pkg.go.dev/github.com/oioio-space/maldev/collection) | varies | groups local data-acquisition primitives for
 post-exploitation: keystrokes, clipboard contents, screen captures |
-| [`collection/clipboard`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/clipboard) | quiet | reads and watches the Windows clipboard text |
 | [`collection/keylog`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/keylog) | noisy | captures keystrokes via a low-level keyboard hook
 (`SetWindowsHookEx(WH_KEYBOARD_LL)`) |
-| [`collection/screenshot`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/screenshot) | quiet | captures the screen via GDI `BitBlt` and returns
-PNG bytes |
 | [`credentials/goldenticket`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/goldenticket) | — | forges Kerberos Golden Tickets — long-lived
 TGTs minted with a stolen krbtgt account hash |
 | [`credentials/lsassdump`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/lsassdump) | — | produces a MiniDump blob of lsass.exe's memory so
@@ -153,14 +146,6 @@ strings), ROT13, and PowerShell `-EncodedCommand` format |
 | [`evasion`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion) | — | defines the Technique interface and shared primitives used
 by the sub-packages to bypass defensive software (AMSI, ETW, inline hooks,
 sandbox/debugger/VM checks) |
-| [`evasion/acg`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/acg) | quiet | enables Arbitrary Code Guard for the current process so
-the kernel refuses any further `VirtualAlloc(PAGE_EXECUTE)` /
-`VirtualProtect(PAGE_EXECUTE)` requests |
-| [`evasion/amsi`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/amsi) | noisy | disables the Antimalware Scan Interface in the current
-process via runtime memory patches on `amsi.dll` |
-| [`evasion/blockdlls`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/blockdlls) | quiet | applies the
-`PROCESS_CREATION_MITIGATION_POLICY_BLOCK_NON_MICROSOFT_BINARIES`
-mitigation so the loader refuses any DLL that isn't Microsoft-signed |
 | [`evasion/callstack`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/callstack) | quiet | synthesises a return-address chain so a stack
 walker at a protected-API call site sees frames that originate from
 a benign thread-init sequence rather than from the attacker module |
@@ -168,9 +153,6 @@ a benign thread-init sequence rather than from the attacker module |
 Technology) shadow-stack enforcement for the current process, and
 exposes the ENDBR64 marker required by CET-gated indirect call
 sites |
-| [`evasion/etw`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/etw) | moderate | blinds Event Tracing for Windows in the current process
-by patching the ETW write helpers in `ntdll.dll` with
-`xor rax,rax; ret` |
 | [`evasion/hook`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook) | noisy | installs x64 inline hooks on exported Windows functions:
 patch the prologue with a JMP to a Go callback, automatically generate
 a trampoline for calling the original, and fix up RIP-relative
@@ -190,8 +172,6 @@ shellcode bytes or PE headers |
 | [`evasion/stealthopen`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/stealthopen) | quiet | reads files via NTFS Object ID (the 128-bit GUID
 stored in the MFT) instead of by path, bypassing path-based EDR
 hooks on `NtCreateFile` / `CreateFileW` |
-| [`evasion/unhook`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook) | noisy | restores the original prologue bytes of `ntdll.dll`
-functions, removing inline hooks installed by EDR/AV products |
 | [`hash`](https://pkg.go.dev/github.com/oioio-space/maldev/hash) | very-quiet | provides cryptographic and fuzzy hash primitives for
 integrity verification, API hashing, and similarity detection |
 | [`inject`](https://pkg.go.dev/github.com/oioio-space/maldev/inject) | — | provides unified shellcode injection techniques
@@ -216,7 +196,6 @@ framework (github.com/Binject/go-donut) |
 metadata and compilation artifacts that fingerprint the toolchain |
 | [`persistence`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence) | — | provides system persistence techniques for maintaining
 access across reboots |
-| [`persistence/account`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account) | — | provides Windows local user account management via NetAPI32 |
 | [`persistence/lnk`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk) | — | creates Windows shortcut (.lnk) files via COM/OLE automation |
 | [`persistence/registry`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry) | — | provides Windows registry Run/RunOnce key persistence |
 | [`persistence/scheduler`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler) | — | creates, deletes, lists and runs Windows scheduled tasks
@@ -226,8 +205,6 @@ via the COM ITaskService API — no schtasks.exe child process |
 | [`privesc/cve202430088`](https://pkg.go.dev/github.com/oioio-space/maldev/privesc/cve202430088) | — | implements CVE-2024-30088, a Windows kernel TOCTOU
 race condition in AuthzBasepCopyoutInternalSecurityAttributes that allows
 local privilege escalation to SYSTEM |
-| [`privesc/uac`](https://pkg.go.dev/github.com/oioio-space/maldev/privesc/uac) | — | implements UAC (User Account Control) bypass techniques
-for executing programs with elevated privileges without a UAC prompt |
 | [`process`](https://pkg.go.dev/github.com/oioio-space/maldev/process) | — | provides cross-platform process enumeration and management |
 | [`process/enum`](https://pkg.go.dev/github.com/oioio-space/maldev/process/enum) | — | provides cross-platform process enumeration for listing
 and searching running processes by name or PID |
@@ -269,26 +246,12 @@ in-memory COFF execution |
 ICLRMetaHost / ICorRuntimeHost COM interfaces and executes .NET assemblies
 from memory without writing them to disk |
 | [`testutil`](https://pkg.go.dev/github.com/oioio-space/maldev/testutil) | — | provides shared test helpers for the maldev project |
-| [`ui`](https://pkg.go.dev/github.com/oioio-space/maldev/ui) | very-quiet | exposes minimal Windows UI primitives — `MessageBoxW` via
-`Show` and the system alert sound via `Beep` |
 | [`useragent`](https://pkg.go.dev/github.com/oioio-space/maldev/useragent) | very-quiet | provides a curated database of real-world browser
 User-Agent strings for HTTP traffic blending |
-| [`win`](https://pkg.go.dev/github.com/oioio-space/maldev/win) | — | is the parent umbrella for Windows-only primitives |
-| [`win/api`](https://pkg.go.dev/github.com/oioio-space/maldev/win/api) | — | is the single source of truth for all Windows DLL handles,
-procedure references, and shared structures used across the maldev library |
-| [`win/domain`](https://pkg.go.dev/github.com/oioio-space/maldev/win/domain) | — | provides helpers for querying Windows domain membership |
-| [`win/impersonate`](https://pkg.go.dev/github.com/oioio-space/maldev/win/impersonate) | — | provides Windows thread impersonation utilities
-for executing code under alternate user credentials |
 | [`win/ntapi`](https://pkg.go.dev/github.com/oioio-space/maldev/win/ntapi) | — | provides typed Go wrappers for Native API functions (ntdll.dll) |
-| [`win/privilege`](https://pkg.go.dev/github.com/oioio-space/maldev/win/privilege) | — | provides helpers for querying and obtaining elevated
-Windows privileges including administrator detection and RunAs execution |
 | [`win/syscall`](https://pkg.go.dev/github.com/oioio-space/maldev/win/syscall) | — | provides multiple strategies for invoking Windows NT syscalls,
 from standard WinAPI calls through kernel32 to stealthy direct/indirect
 syscall techniques that bypass userland hooks |
-| [`win/token`](https://pkg.go.dev/github.com/oioio-space/maldev/win/token) | — | provides Windows token manipulation utilities for
-querying and modifying process and thread security tokens |
-| [`win/version`](https://pkg.go.dev/github.com/oioio-space/maldev/win/version) | — | provides Windows version detection utilities for
-determining OS version, build number, and patch level |
 
 <!-- END AUTOGEN: package-index -->
 

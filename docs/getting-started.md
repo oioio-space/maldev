@@ -154,7 +154,7 @@ If you know the technique you want, jump straight to the matching package:
 | Named-pipe transport | `c2/transport/namedpipe` | [Named Pipe](techniques/c2/namedpipe.md) |
 | Wipe in-process buffers | `cleanup/memory` | [Memory Wipe](techniques/cleanup/memory-wipe.md) |
 | Self-delete on exit | `cleanup/selfdel` | [Self-Delete](techniques/cleanup/self-delete.md) |
-| Compute fuzzy hash similarity | `hash` | [Fuzzy Hashing](techniques/crypto/fuzzy-hashing.md) |
+| Compute fuzzy hash similarity | `hash` | [Fuzzy Hashing](techniques/hash/fuzzy-hashing.md) |
 
 For the full layered map, see [Architecture § Per-Package Quick-Reference](architecture.md#per-package-quick-reference).
 

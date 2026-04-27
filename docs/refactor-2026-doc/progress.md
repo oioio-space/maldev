@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-04-27
-reflects_commit: 6f14df0
+reflects_commit: f815d85
 ---
 
 # Documentation refactor — progress tracker
@@ -53,7 +53,7 @@ Each area gets:
 | `cleanup/*` | ✅ 7/7 | ✅ 7/7 + README | ✅ 8/8 | Done in Phase 2 (`11838e3`). Reference shape for everything below. |
 | `evasion/*` | ✅ 12/12 | 🟡 4/~10 | ✅ 12/12 | **Mostly done.** All doc.go aligned to template; every package has example_test.go covering the exported API. Tech-md template rewrites done for amsi-bypass, etw-patching, sleep-mask (rewritten in 4b? — check), cet (NEW). Tech-md still legacy on: acg-blockdlls, callstack-spoof, inline-hook, kernel-callback-removal, ntdll-unhooking, preset, sleep-mask, stealthopen — do them in a polish round if time, low priority since legacy content is reasonable. **Cross-categorised pages** still living under evasion/ but documenting non-evasion packages: anti-analysis (recon), byovd-rtcore64 (kernel/driver), dll-hijack (recon), fakecmd/hideprocess/phant0m (process/tamper), hw-breakpoints (recon), ppid-spoofing (c2/shell), sandbox/timing (recon) — to be reorganised in Phase 6. |
 | `inject` | ⬜ 0/1 | ⬜ 0/13 | ⬜ 0/1 | Single package, large API surface (15+ methods). 13 existing tech pages under `docs/techniques/injection/`. |
-| `crypto / encode / hash` | ⬜ 0/3 | ⬜ 0/4 | ⬜ 0/3 | Layer 0 — pure Go. Should be quick. |
+| `crypto / encode / hash` | ✅ 5/5 | ✅ 5/5 | ✅ 5/5 | Layer 0 done. doc.go + example_test.go landed earlier (`cf. f815d85`); tech md split into three areas this session: `docs/techniques/crypto/{README,payload-encryption}.md`, `docs/techniques/encode/{README,encode}.md`, `docs/techniques/hash/{README,cryptographic-hashes,fuzzy-hashing}.md` (fuzzy moved out of crypto/). Counts include `random` + `useragent` (Layer 0 helpers, doc.go + example_test.go templated; no dedicated tech md — both are utilities surfaced in their consumers' pages). |
 | `c2/*` | ⬜ 0/7 | ⬜ 0/6 | ⬜ 0/7 | Includes `c2/transport/namedpipe`. |
 | `collection/*` | ⬜ 0/3 | ⬜ 0/5 | ⬜ 0/3 | Existing pages cover keylog, clipboard, screenshot, alternate-data-streams, lsass-dump. The last two are mis-categorised — decide canonical home in Phase 6. |
 | `credentials/*` | ⬜ 0/4 | ⬜ 0/3 | ⬜ 0/4 | Big content — sekurlsa is 109-line doc.go already. Audit flagged 3 missing pages: goldenticket, samdump, plus the existing sekurlsa. |
@@ -66,7 +66,7 @@ Each area gets:
 | `kernel/driver/*` | ⬜ 0/2 | ⬜ 0/1 | ⬜ 0/2 | Single tech page (byovd-rtcore64.md) currently under `docs/techniques/evasion/`. |
 | `privesc/*` | ⬜ 0/2 | ⬜ 0/1 | ⬜ 0/2 | Audit flagged 1 missing page (cve202430088). uac is folded into docs/privilege.md only. |
 | `ui` | ⬜ 0/1 | ⬜ 0/0 | ⬜ 0/1 | Tiny — MessageBoxW + sounds. No tech page yet. |
-| `useragent`, `random` | ⬜ 0/2 | n/a | ⬜ 0/2 | Layer 0 helpers. May get folded into the crypto README. |
+| `useragent`, `random` | ✅ 2/2 | n/a | ✅ 2/2 | Folded into Layer 0 row above. `random/doc.go` + `useragent/doc.go` templated; example_test.go present. |
 
 ## Resuming after a break
 

