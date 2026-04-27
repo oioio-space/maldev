@@ -50,16 +50,16 @@ Cross-categorised pages currently living here (packages live elsewhere):
 
 | Page | Actual package | Note |
 |---|---|---|
-| [anti-analysis.md](anti-analysis.md) | `recon/antidebug`, `recon/antivm` | recon-class, kept here for the evasion-flow reader |
+| [../recon/anti-analysis.md](../recon/anti-analysis.md) | `recon/antidebug`, `recon/antivm` | moved to recon/ — debugger + VM detection |
 | [byovd-rtcore64.md](byovd-rtcore64.md) | `kernel/driver/rtcore64` | BYOVD primitive used by kcallback + lsassdump |
-| [dll-hijack.md](dll-hijack.md) | `recon/dllhijack` | discovery is recon, exploitation is evasion |
+| [../recon/dll-hijack.md](../recon/dll-hijack.md) | `recon/dllhijack` | moved to recon/ — discovery is recon, exploitation is evasion |
 | [../process/fakecmd.md](../process/fakecmd.md) | `process/tamper/fakecmd` | PEB CommandLine spoof — moved to process/ |
 | [../process/hideprocess.md](../process/hideprocess.md) | `process/tamper/hideprocess` | NtQSI patch to hide PIDs — moved to process/ |
-| [hw-breakpoints.md](hw-breakpoints.md) | `recon/hwbp` | DR0–DR7 inspection |
+| [../recon/hw-breakpoints.md](../recon/hw-breakpoints.md) | `recon/hwbp` | moved to recon/ — DR0–DR7 inspection |
 | [../process/phant0m.md](../process/phant0m.md) | `process/tamper/phant0m` | EventLog svchost thread kill — moved to process/ |
 | [ppid-spoofing.md](ppid-spoofing.md) | `c2/shell` (PPIDSpoofer) | spawn-time parent PID spoof |
-| [sandbox.md](sandbox.md) | `recon/sandbox` | sandbox detection |
-| [timing.md](timing.md) | `recon/timing` | timing-based sandbox bypass |
+| [../recon/sandbox.md](../recon/sandbox.md) | `recon/sandbox` | moved to recon/ — multi-factor orchestrator |
+| [../recon/timing.md](../recon/timing.md) | `recon/timing` | moved to recon/ — time-based evasion |
 
 ## Quick decision tree
 
