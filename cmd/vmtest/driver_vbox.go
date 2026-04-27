@@ -85,8 +85,16 @@ func (d *vboxDriver) Restore(ctx context.Context, vm *VMConfig) error {
 // VM-creation time; Linux VMs need a transient share added per run because
 // snapshot-restore drops transient definitions. hostRoot is the repo root on
 // the host.
+//
+// On VBox 7.2 + Ubuntu 25.10, sharedfolder add --transient with a name that
+// already exists silently succeeds and unmounts the prior mount with kernel
+// "Protocol error" — so we must skip the add when a share with that name is
+// already configured at machine level rather than relying on error handling.
 func (d *vboxDriver) Push(ctx context.Context, vm *VMConfig, hostRoot string) error {
 	if vm.Platform != "linux" || vm.SharedFolder == "" {
+		return nil
+	}
+	if d.sharedFolderExists(ctx, vm.VBoxName, vm.SharedFolder) {
 		return nil
 	}
 	cmd := exec.CommandContext(ctx, d.exe,
@@ -99,6 +107,31 @@ func (d *vboxDriver) Push(ctx context.Context, vm *VMConfig, hostRoot string) er
 	// Non-fatal: the share may already be attached from a prior session.
 	_ = cmd.Run()
 	return nil
+}
+
+// sharedFolderExists reports whether the given VM has a shared folder with the
+// requested name configured at machine level.
+func (d *vboxDriver) sharedFolderExists(ctx context.Context, vmName, share string) bool {
+	cmd := exec.CommandContext(ctx, d.exe, "showvminfo", vmName, "--machinereadable")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return containsSharedFolder(out, share)
+}
+
+// containsSharedFolder scans the output of `VBoxManage showvminfo
+// --machinereadable` for any SharedFolderNameMachineMapping<N>="share" line.
+// Pure helper extracted for unit testing.
+func containsSharedFolder(machineReadable []byte, share string) bool {
+	prefix := "SharedFolderNameMachineMapping"
+	suffix := fmt.Sprintf(`="%s"`, share)
+	for _, line := range strings.Split(string(machineReadable), "\n") {
+		if strings.HasPrefix(line, prefix) && strings.HasSuffix(line, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *vboxDriver) Exec(ctx context.Context, vm *VMConfig, packages, flags string, logWriter io.Writer) (int, error) {
@@ -180,13 +213,17 @@ func (d *vboxDriver) execLinux(ctx context.Context, vm *VMConfig, packages, flag
 			"echo VM_TEST_EXIT_CODE=$?",
 		share, dst, share, dst, dst, envPrefix, packages, flags,
 	)
+	// On VBox 7.2 the args after `--` become argv[1+] (the resolved --exe
+	// path is already argv[0]); repeating "bash" here makes the guest see
+	// argv[1]="bash" and try to execute it as a script ("cannot execute
+	// binary file"). Pass `-c <script>` directly.
 	args := []string{
 		"guestcontrol", vm.VBoxName, "run",
 		"--exe", "/bin/bash",
 		"--username", vm.User,
 		"--password", vm.Password,
 		"--wait-stdout", "--wait-stderr",
-		"--", "bash", "-c", script,
+		"--", "-c", script,
 	}
 	return runCapturingExit(ctx, d.exe, args, logWriter)
 }

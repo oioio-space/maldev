@@ -106,3 +106,51 @@ func TestGuestClrhostCoverPath(t *testing.T) {
 		t.Errorf("darwin clrhost path should be empty, got %q", got)
 	}
 }
+
+func TestContainsSharedFolder(t *testing.T) {
+	const realSample = `name="Ubuntu25.10"
+ostype="Ubuntu (64-bit)"
+VMState="poweroff"
+SharedFolderNameMachineMapping1="maldev"
+SharedFolderPathMachineMapping1="C:\\Users\\m.bachmann\\GolandProjects\\maldev"
+nic1="nat"
+hostonlyadapter2="VirtualBox Host-Only Ethernet Adapter"
+`
+	cases := []struct {
+		name   string
+		out    string
+		share  string
+		want   bool
+	}{
+		{name: "empty output", out: "", share: "maldev", want: false},
+		{name: "no share lines", out: "VMState=\"running\"\n", share: "maldev", want: false},
+		{name: "match at index 1", out: realSample, share: "maldev", want: true},
+		{name: "wrong name", out: realSample, share: "other", want: false},
+		{
+			name: "match at index 2 (multiple shares)",
+			out: `SharedFolderNameMachineMapping1="other"
+SharedFolderPathMachineMapping1="C:\\other"
+SharedFolderNameMachineMapping2="maldev"
+SharedFolderPathMachineMapping2="C:\\maldev"
+`,
+			share: "maldev", want: true,
+		},
+		{
+			name:  "substring of name must not match",
+			out:   `SharedFolderNameMachineMapping1="maldev-other"` + "\n",
+			share: "maldev", want: false,
+		},
+		{
+			name:  "path mapping line must not match (suffix differs)",
+			out:   `SharedFolderPathMachineMapping1="maldev"` + "\n",
+			share: "maldev", want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := containsSharedFolder([]byte(tc.out), tc.share); got != tc.want {
+				t.Errorf("containsSharedFolder(%q) = %v, want %v", tc.share, got, tc.want)
+			}
+		})
+	}
+}
