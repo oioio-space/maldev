@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -46,23 +48,76 @@ func (d *vboxDriver) run(ctx context.Context, args ...string) error {
 	return cmd.Run()
 }
 
+// Hypervisor lifecycle (VBoxManage). Intra-VM ops below use SSH so the same
+// driver works around the VBox 7.2 guestcontrol bugs (whitespace truncation in
+// `-Flags`, `--target-directory` rejection on existing dirs, transient share
+// kernel "Protocol error") and matches the libvirt driver's paradigm.
+
 func (d *vboxDriver) Start(ctx context.Context, vm *VMConfig) error {
 	fmt.Printf("Starting VBox VM %s...\n", vm.VBoxName)
 	return d.run(ctx, "startvm", vm.VBoxName, "--type", "headless")
 }
 
+// WaitReady resolves the guest IP via Guest Additions properties (host-only
+// adapter, NAT range filtered out), then polls SSH until reachable. The IP is
+// cached on vm.SSHHost so subsequent Push/Exec/Fetch reuse it.
 func (d *vboxDriver) WaitReady(ctx context.Context, vm *VMConfig) error {
-	secs := vm.WaitReadySeconds
-	if secs <= 0 {
-		secs = 45
+	port := sshPort(vm)
+	deadline := waitReadyDeadline(vm)
+	fmt.Printf("Waiting up to %s for SSH on %s...\n", deadline, vm.VBoxName)
+	ctx, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for SSH on %s", vm.VBoxName)
+		default:
+		}
+		host := vm.SSHHost
+		if host == "" {
+			host = d.discoverIP(ctx, vm.VBoxName)
+		}
+		if host != "" && tryDial(host, port, 2*time.Second) {
+			vm.SSHHost = host
+			fmt.Printf("SSH reachable at %s:%d\n", host, port)
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for SSH on %s", vm.VBoxName)
+		case <-time.After(3 * time.Second):
+		}
 	}
-	fmt.Printf("Waiting %ds for Guest Additions...\n", secs)
-	select {
-	case <-time.After(time.Duration(secs) * time.Second):
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+}
+
+// discoverIP walks /VirtualBox/GuestInfo/Net/<n>/V4/IP guest properties and
+// returns the first address that isn't on the NAT 10.0.x.x range. The
+// host-only adapter typically lives at index 1 (after NAT at index 0).
+func (d *vboxDriver) discoverIP(ctx context.Context, vmName string) string {
+	for i := 0; i < 8; i++ {
+		out, err := exec.CommandContext(ctx, d.exe, "guestproperty", "get", vmName,
+			fmt.Sprintf("/VirtualBox/GuestInfo/Net/%d/V4/IP", i)).Output()
+		if err != nil {
+			continue
+		}
+		ip := parseGuestPropertyValue(out)
+		if ip == "" || strings.HasPrefix(ip, "10.0.") {
+			continue
+		}
+		return ip
 	}
+	return ""
+}
+
+// parseGuestPropertyValue extracts "x" from `Value: x` output of
+// `VBoxManage guestproperty get`. Returns "" for "No value set!".
+func parseGuestPropertyValue(out []byte) string {
+	s := strings.TrimSpace(string(out))
+	const prefix = "Value:"
+	if !strings.HasPrefix(s, prefix) {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(s, prefix))
 }
 
 func (d *vboxDriver) Stop(ctx context.Context, vm *VMConfig) error {
@@ -81,151 +136,174 @@ func (d *vboxDriver) Restore(ctx context.Context, vm *VMConfig) error {
 	return d.run(ctx, "snapshot", vm.VBoxName, "restore", vm.Snapshot)
 }
 
-// Push for VBox: the Windows VM has a persistent shared folder configured at
-// VM-creation time; Linux VMs need a transient share added per run because
-// snapshot-restore drops transient definitions. hostRoot is the repo root on
-// the host.
-//
-// On VBox 7.2 + Ubuntu 25.10, sharedfolder add --transient with a name that
-// already exists silently succeeds and unmounts the prior mount with kernel
-// "Protocol error" — so we must skip the add when a share with that name is
-// already configured at machine level rather than relying on error handling.
+// Push synchronises hostRoot into the guest via tar piped over ssh. Cross-
+// platform: works from any host with tar+ssh (Git Bash on Windows ships both)
+// to any guest with tar (Linux ships it; Windows 10+ ships it via System32).
 func (d *vboxDriver) Push(ctx context.Context, vm *VMConfig, hostRoot string) error {
-	if vm.Platform != "linux" || vm.SharedFolder == "" {
-		return nil
+	key, err := resolveSSHKey(vm)
+	if err != nil {
+		return err
 	}
-	if d.sharedFolderExists(ctx, vm.VBoxName, vm.SharedFolder) {
-		return nil
+	if vm.SSHHost == "" {
+		return errors.New("vbox Push: no ssh_host (WaitReady must run first)")
 	}
-	cmd := exec.CommandContext(ctx, d.exe,
-		"sharedfolder", "add", vm.VBoxName,
-		"--name", vm.SharedFolder,
-		"--hostpath", hostRoot,
-		"--automount", "--transient")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	// Non-fatal: the share may already be attached from a prior session.
-	_ = cmd.Run()
+	dst := vm.ProjectCopyPath
+	if dst == "" {
+		if vm.Platform == "windows" {
+			dst = `C:\maldev`
+		} else {
+			dst = "/tmp/maldev"
+		}
+	}
+	return pushTar(ctx, vm, hostRoot, dst, key, sshPort(vm))
+}
+
+// pushTar streams `tar -czf - …` from the host into `tar -xzf - -C dst` on the
+// guest over an SSH pipe. Avoids the rsync dependency (not available in Git
+// Bash on Windows hosts) and the VBox shared-folder kernel races.
+func pushTar(ctx context.Context, vm *VMConfig, hostRoot, dst, key string, port int) error {
+	if err := sshRun(ctx, vm, key, port, remoteCleanCmd(vm.Platform, dst)); err != nil {
+		return fmt.Errorf("clean %s on guest: %w", dst, err)
+	}
+
+	tarSrc := exec.CommandContext(ctx, "tar",
+		"-czf", "-",
+		"--exclude=.git",
+		"--exclude=ignore",
+		"--exclude=.claude",
+		"--exclude=.idea",
+		"--exclude=.vscode",
+		"--exclude=logs",
+		"-C", hostRoot, ".",
+	)
+	tarSrc.Stderr = os.Stderr
+
+	sshArgs := []string{
+		"-i", key, "-p", strconv.Itoa(port),
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "BatchMode=yes",
+		fmt.Sprintf("%s@%s", vm.User, vm.SSHHost),
+		remoteExtractCmd(vm.Platform, dst),
+	}
+	sshDst := exec.CommandContext(ctx, "ssh", sshArgs...)
+	sshDst.Stderr = os.Stderr
+
+	pipe, err := tarSrc.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+	sshDst.Stdin = pipe
+
+	if err := sshDst.Start(); err != nil {
+		return fmt.Errorf("start ssh: %w", err)
+	}
+	if err := tarSrc.Run(); err != nil {
+		_ = sshDst.Wait()
+		return fmt.Errorf("tar source: %w", err)
+	}
+	if err := sshDst.Wait(); err != nil {
+		return fmt.Errorf("ssh extract: %w", err)
+	}
 	return nil
 }
 
-// sharedFolderExists reports whether the given VM has a shared folder with the
-// requested name configured at machine level.
-func (d *vboxDriver) sharedFolderExists(ctx context.Context, vmName, share string) bool {
-	cmd := exec.CommandContext(ctx, d.exe, "showvminfo", vmName, "--machinereadable")
-	out, err := cmd.Output()
-	if err != nil {
-		return false
+// remoteCleanCmd returns a one-liner that wipes and recreates dst inside the
+// guest, parameterised on guest OS.
+func remoteCleanCmd(platform, dst string) string {
+	if platform == "windows" {
+		return fmt.Sprintf(`cmd.exe /c "if exist %s rmdir /s /q %s & mkdir %s"`, dst, dst, dst)
 	}
-	return containsSharedFolder(out, share)
+	return fmt.Sprintf("rm -rf %s && mkdir -p %s", dst, dst)
 }
 
-// containsSharedFolder scans the output of `VBoxManage showvminfo
-// --machinereadable` for any SharedFolderNameMachineMapping<N>="share" line.
-// Pure helper extracted for unit testing.
-func containsSharedFolder(machineReadable []byte, share string) bool {
-	prefix := "SharedFolderNameMachineMapping"
-	suffix := fmt.Sprintf(`="%s"`, share)
-	for _, line := range strings.Split(string(machineReadable), "\n") {
-		if strings.HasPrefix(line, prefix) && strings.HasSuffix(line, suffix) {
-			return true
+// remoteExtractCmd returns the tar-extract command run inside the guest as the
+// destination of the ssh-piped tar stream.
+func remoteExtractCmd(platform, dst string) string {
+	if platform == "windows" {
+		// tar.exe ships in System32 since Windows 10 1803.
+		return fmt.Sprintf(`tar -xzf - -C %s`, dst)
+	}
+	return fmt.Sprintf("tar -xzf - -C %s", dst)
+}
+
+// Exec runs `go test` inside the guest over ssh.
+func (d *vboxDriver) Exec(ctx context.Context, vm *VMConfig, packages, flags string, logWriter io.Writer) (int, error) {
+	key, err := resolveSSHKey(vm)
+	if err != nil {
+		return 1, err
+	}
+	if vm.SSHHost == "" {
+		return 1, errors.New("vbox Exec: no ssh_host (WaitReady must run first)")
+	}
+	dst := vm.ProjectCopyPath
+	if dst == "" {
+		if vm.Platform == "windows" {
+			dst = `C:\maldev`
+		} else {
+			dst = "/tmp/maldev"
 		}
 	}
-	return false
+	remote, err := remoteGoTest(vm.Platform, dst, packages, flags, collectMaldevEnv())
+	if err != nil {
+		return 1, err
+	}
+	args := []string{
+		"-i", key, "-p", strconv.Itoa(sshPort(vm)),
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "BatchMode=yes",
+		fmt.Sprintf("%s@%s", vm.User, vm.SSHHost),
+		remote,
+	}
+	return runCapturingExit(ctx, "ssh", args, logWriter)
 }
 
-func (d *vboxDriver) Exec(ctx context.Context, vm *VMConfig, packages, flags string, logWriter io.Writer) (int, error) {
-	switch vm.Platform {
+// remoteGoTest builds the cd+env+go-test command line for the guest. envs is
+// the slice returned by collectMaldevEnv() ("KEY=VALUE" entries).
+func remoteGoTest(platform, dst, packages, flags string, envs []string) (string, error) {
+	switch platform {
 	case "windows":
-		return d.execWindows(ctx, vm, packages, flags, logWriter)
+		var setCmds bytes.Buffer
+		for _, kv := range envs {
+			fmt.Fprintf(&setCmds, "set %s&& ", kv)
+		}
+		return fmt.Sprintf(`cmd.exe /c "cd /d %s && %sgo test %s %s"`, dst, setCmds.String(), packages, flags), nil
 	case "linux":
-		return d.execLinux(ctx, vm, packages, flags, logWriter)
+		envPrefix := strings.Join(envs, " ")
+		if envPrefix != "" {
+			envPrefix += " "
+		}
+		return fmt.Sprintf("cd %s && %sgo test %s %s", dst, envPrefix, packages, flags), nil
 	default:
-		return 1, fmt.Errorf("vbox: unsupported platform %q", vm.Platform)
+		return "", fmt.Errorf("vbox Exec: unsupported platform %q", platform)
 	}
 }
 
-// Fetch pulls a single file from the guest via VBoxManage guestcontrol copyfrom.
+// Fetch pulls a single file from the guest back to the host via scp.
 func (d *vboxDriver) Fetch(ctx context.Context, vm *VMConfig, guestPath, hostPath string) error {
+	key, err := resolveSSHKey(vm)
+	if err != nil {
+		return err
+	}
+	if vm.SSHHost == "" {
+		return errors.New("vbox Fetch: no ssh_host (WaitReady must run first)")
+	}
 	if err := os.MkdirAll(filepath.Dir(hostPath), 0o755); err != nil {
 		return fmt.Errorf("mkdir host dir: %w", err)
 	}
+	src := fmt.Sprintf("%s@%s:%s", vm.User, vm.SSHHost, guestPath)
 	args := []string{
-		"guestcontrol", vm.VBoxName, "copyfrom",
-		"--username", vm.User,
-		"--password", vm.Password,
-		"--target-directory", filepath.Dir(hostPath),
-		guestPath,
+		"-i", key, "-P", strconv.Itoa(sshPort(vm)),
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "BatchMode=yes",
+		src, hostPath,
 	}
-	cmd := exec.CommandContext(ctx, d.exe, args...)
+	cmd := exec.CommandContext(ctx, "scp", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
-}
-
-func (d *vboxDriver) execWindows(ctx context.Context, vm *VMConfig, packages, flags string, logWriter io.Writer) (int, error) {
-	runner := vm.GuestRunner
-	if runner == "" {
-		runner = `Z:\scripts\vm-test.ps1`
-	}
-	args := []string{
-		"guestcontrol", vm.VBoxName, "run",
-		"--exe", `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
-		"--username", vm.User,
-		"--password", vm.Password,
-		"--wait-stdout", "--wait-stderr",
-	}
-	// Forward host MALDEV_* env vars via VBoxManage --putenv so gated tests
-	// (MALDEV_INTRUSIVE, MALDEV_MANUAL) propagate into the guest process.
-	for _, kv := range collectMaldevEnv() {
-		args = append(args, "--putenv", kv)
-	}
-	args = append(args,
-		"--", "powershell.exe",
-		"-ExecutionPolicy", "Bypass",
-		"-File", runner,
-		"-Packages", packages,
-		"-Flags", flags,
-	)
-	return runCapturingExit(ctx, d.exe, args, logWriter)
-}
-
-func (d *vboxDriver) execLinux(ctx context.Context, vm *VMConfig, packages, flags string, logWriter io.Writer) (int, error) {
-	dst := vm.ProjectCopyPath
-	if dst == "" {
-		dst = "/tmp/maldev"
-	}
-	share := vm.SharedFolder
-	if share == "" {
-		share = "maldev"
-	}
-	envs := collectMaldevEnv()
-	envPrefix := strings.Join(envs, " ")
-	if envPrefix != "" {
-		envPrefix += " "
-	}
-	// Try the kernel auto-mount path first (/media/sf_<share>), fall back to
-	// the user-specified mount. Matches the legacy vm-run-tests.sh behaviour.
-	script := fmt.Sprintf(
-		"cp -r /media/sf_%s %s 2>/dev/null || cp -r /mnt/%s %s; "+
-			"cd %s; "+
-			"%sgo test %s %s 2>&1; "+
-			"echo VM_TEST_EXIT_CODE=$?",
-		share, dst, share, dst, dst, envPrefix, packages, flags,
-	)
-	// On VBox 7.2 the args after `--` become argv[1+] (the resolved --exe
-	// path is already argv[0]); repeating "bash" here makes the guest see
-	// argv[1]="bash" and try to execute it as a script ("cannot execute
-	// binary file"). Pass `-c <script>` directly.
-	args := []string{
-		"guestcontrol", vm.VBoxName, "run",
-		"--exe", "/bin/bash",
-		"--username", vm.User,
-		"--password", vm.Password,
-		"--wait-stdout", "--wait-stderr",
-		"--", "-c", script,
-	}
-	return runCapturingExit(ctx, d.exe, args, logWriter)
 }
 
 // runCapturingExit executes a command with stdout/stderr passthrough and

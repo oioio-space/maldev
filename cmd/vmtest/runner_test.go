@@ -107,50 +107,70 @@ func TestGuestClrhostCoverPath(t *testing.T) {
 	}
 }
 
-func TestContainsSharedFolder(t *testing.T) {
-	const realSample = `name="Ubuntu25.10"
-ostype="Ubuntu (64-bit)"
-VMState="poweroff"
-SharedFolderNameMachineMapping1="maldev"
-SharedFolderPathMachineMapping1="C:\\Users\\m.bachmann\\GolandProjects\\maldev"
-nic1="nat"
-hostonlyadapter2="VirtualBox Host-Only Ethernet Adapter"
-`
-	cases := []struct {
-		name   string
-		out    string
-		share  string
-		want   bool
-	}{
-		{name: "empty output", out: "", share: "maldev", want: false},
-		{name: "no share lines", out: "VMState=\"running\"\n", share: "maldev", want: false},
-		{name: "match at index 1", out: realSample, share: "maldev", want: true},
-		{name: "wrong name", out: realSample, share: "other", want: false},
-		{
-			name: "match at index 2 (multiple shares)",
-			out: `SharedFolderNameMachineMapping1="other"
-SharedFolderPathMachineMapping1="C:\\other"
-SharedFolderNameMachineMapping2="maldev"
-SharedFolderPathMachineMapping2="C:\\maldev"
-`,
-			share: "maldev", want: true,
-		},
-		{
-			name:  "substring of name must not match",
-			out:   `SharedFolderNameMachineMapping1="maldev-other"` + "\n",
-			share: "maldev", want: false,
-		},
-		{
-			name:  "path mapping line must not match (suffix differs)",
-			out:   `SharedFolderPathMachineMapping1="maldev"` + "\n",
-			share: "maldev", want: false,
-		},
+func TestParseGuestPropertyValue(t *testing.T) {
+	cases := map[string]string{
+		"":                                    "",
+		"No value set!\n":                     "",
+		"Value: 192.168.56.103\n":             "192.168.56.103",
+		"  Value: 10.0.2.15  ":                "10.0.2.15",
+		"Value:\t192.168.56.103":              "192.168.56.103",
+		"Last changed: 2026-04-27T08:00:00Z":  "",
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := containsSharedFolder([]byte(tc.out), tc.share); got != tc.want {
-				t.Errorf("containsSharedFolder(%q) = %v, want %v", tc.share, got, tc.want)
-			}
-		})
+	for in, want := range cases {
+		if got := parseGuestPropertyValue([]byte(in)); got != want {
+			t.Errorf("parseGuestPropertyValue(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRemoteCleanCmd(t *testing.T) {
+	if got := remoteCleanCmd("linux", "/tmp/maldev"); !strings.Contains(got, "rm -rf /tmp/maldev") || !strings.Contains(got, "mkdir -p /tmp/maldev") {
+		t.Errorf("linux cleanCmd missing rm/mkdir: %q", got)
+	}
+	got := remoteCleanCmd("windows", `C:\maldev`)
+	if !strings.Contains(got, "rmdir /s /q") || !strings.Contains(got, "mkdir") || !strings.Contains(got, "cmd.exe /c") {
+		t.Errorf("windows cleanCmd missing rmdir/mkdir/cmd.exe: %q", got)
+	}
+}
+
+func TestRemoteExtractCmd(t *testing.T) {
+	if got := remoteExtractCmd("linux", "/tmp/maldev"); got != "tar -xzf - -C /tmp/maldev" {
+		t.Errorf("linux extract = %q", got)
+	}
+	if got := remoteExtractCmd("windows", `C:\maldev`); !strings.Contains(got, "tar -xzf -") || !strings.Contains(got, `C:\maldev`) {
+		t.Errorf("windows extract = %q", got)
+	}
+}
+
+func TestRemoteGoTest(t *testing.T) {
+	envs := []string{"MALDEV_INTRUSIVE=1", "MALDEV_MANUAL=1"}
+
+	got, err := remoteGoTest("linux", "/tmp/maldev", "./...", "-count=1", envs)
+	if err != nil {
+		t.Fatalf("linux: %v", err)
+	}
+	for _, want := range []string{"cd /tmp/maldev", "MALDEV_INTRUSIVE=1", "MALDEV_MANUAL=1", "go test ./... -count=1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("linux missing %q in %q", want, got)
+		}
+	}
+
+	got, err = remoteGoTest("windows", `C:\maldev`, "./...", "-count=1", envs)
+	if err != nil {
+		t.Fatalf("windows: %v", err)
+	}
+	for _, want := range []string{"cmd.exe /c", "cd /d C:\\maldev", "set MALDEV_INTRUSIVE=1", "set MALDEV_MANUAL=1", "go test ./... -count=1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("windows missing %q in %q", want, got)
+		}
+	}
+
+	if _, err := remoteGoTest("darwin", "/tmp", "./...", "", nil); err == nil {
+		t.Errorf("expected error for unsupported platform")
+	}
+
+	got, _ = remoteGoTest("linux", "/tmp/x", "./...", "", nil)
+	if strings.Contains(got, "  ") {
+		t.Errorf("empty envs should not introduce double-space: %q", got)
 	}
 }
