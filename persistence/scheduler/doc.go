@@ -1,28 +1,45 @@
-// Package scheduler creates, deletes, lists and runs Windows scheduled tasks
-// via the COM ITaskService API — no schtasks.exe child process.
+// Package scheduler creates, deletes, lists, and runs Windows
+// scheduled tasks via the COM `ITaskService` API — no
+// `schtasks.exe` child process.
 //
-// Technique: Windows Task Scheduler persistence via COM (Schedule.Service).
-// MITRE ATT&CK: T1053.005 (Scheduled Task/Job: Scheduled Task)
-// Platform: Windows
-// Detection: Medium — task registration is still logged (Event ID 4698),
-// but no schtasks.exe child process is spawned (evades Sysmon Event ID 1
-// and child-process EDR telemetry).
+// Instantiates the `Schedule.Service` COM object via go-ole,
+// builds an `ITaskDefinition` with trigger / action / settings,
+// and registers it through `ITaskFolder::RegisterTaskDefinition`.
+// Supports logon, startup, daily, and one-shot time triggers;
+// tasks may be flagged hidden so they don't appear in
+// `taskschd.msc` without the operator pressing the "Show hidden
+// tasks" toggle.
 //
-// How it works: Instantiates the Schedule.Service COM object via go-ole,
-// builds an ITaskDefinition with trigger/action/settings, and registers it
-// through ITaskFolder.RegisterTaskDefinition. Supports logon, startup,
-// daily and one-shot time triggers; tasks may be flagged hidden.
+// Task names must start with a backslash: `\TaskName` for the
+// root folder, or `\Folder\TaskName` inside a subfolder.
+// Startup / logon triggers require elevation.
 //
-// Task names must start with a backslash: `\TaskName` for the root folder,
-// or `\Folder\TaskName` inside a subfolder.
+// # MITRE ATT&CK
 //
-// Example:
+//   - T1053.005 (Scheduled Task/Job: Scheduled Task)
 //
-//	err := scheduler.Create(`\MyTask`,
-//	    scheduler.WithAction(`C:\payload.exe`),
-//	    scheduler.WithTriggerLogon(),
-//	    scheduler.WithHidden(),
-//	)
+// # Detection level
 //
-// Startup/logon triggers require elevation.
+// moderate
+//
+// Task registration emits Event ID 4698 (security log,
+// "scheduled task created") regardless of how the task is
+// created — `schtasks.exe`, COM, or PowerShell all hit the same
+// audit hook. The COM path *avoids* `schtasks.exe`-spawn
+// telemetry (Sysmon Event 1, child-process EDR rules), which
+// some defender stacks rely on more heavily than the 4698
+// audit. Hidden flag does not suppress logging.
+//
+// # Example
+//
+// See [ExampleCreate] in scheduler_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/persistence/task-scheduler.md
+//   - [github.com/oioio-space/maldev/persistence/service] — sibling SYSTEM-scope persistence
+//   - [github.com/oioio-space/maldev/cleanup] — remove the task post-op
+//
+// [github.com/oioio-space/maldev/persistence/service]: https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service
+// [github.com/oioio-space/maldev/cleanup]: https://pkg.go.dev/github.com/oioio-space/maldev/cleanup
 package scheduler

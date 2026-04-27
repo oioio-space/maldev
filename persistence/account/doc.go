@@ -1,27 +1,46 @@
 //go:build windows
 
-// Package user provides Windows local user account management via NetAPI32.
+// Package user provides Windows local user account management
+// via NetAPI32 — create, delete, set password, manage group
+// membership, enumerate.
 //
-// Technique: Local account creation, deletion, and group membership modification.
-// MITRE ATT&CK: T1136.001 (Create Account: Local Account).
-// Detection: High -- account creation and modification generates Windows Security
-// event logs (4720, 4722, 4732, 4724) that are typically monitored by SIEM.
-// Platform: Windows.
+// Uses standard administrative APIs backed by the SAM database:
+// `NetUserAdd`, `NetUserDel`, `NetUserSetInfo`, `NetUserEnum`,
+// `NetLocalGroupAddMembers` / `NetLocalGroupDelMembers`. The
+// directory is named `account` for organisation; the package
+// itself is `user` (the Win32 API surface name).
 //
-// How it works: Calls NetUserAdd, NetUserDel, NetUserSetInfo, NetUserEnum, and
-// NetLocalGroupAddMembers / NetLocalGroupDelMembers to manage local user accounts
-// and their group memberships. These are standard administrative APIs backed by
-// the SAM database.
+// Operationally, account-creation persistence is the loudest
+// option in the persistence/* tree: every create / modify
+// emits Security event 4720 / 4722 / 4732 / 4724 regardless of
+// audit policy on modern Windows.
 //
-// Limitations:
-//   - Most operations require local administrator privileges.
-//   - Account events are logged even if audit policy is not explicitly configured
-//     on modern Windows versions.
-//   - Domain-joined machines may have Group Policy restrictions on local accounts.
+// # MITRE ATT&CK
 //
-// Example:
+//   - T1136.001 (Create Account: Local Account)
+//   - T1098 (Account Manipulation) — group-membership changes
 //
-//	user.Add("svc-update", "P@ssw0rd!2024")
-//	user.SetAdmin("svc-update")
-//	defer user.Delete("svc-update")
+// # Detection level
+//
+// noisy
+//
+// Account creation and modification generates Windows Security
+// event logs (4720 add, 4722 enable, 4732 group-member add,
+// 4724 password reset) that any mature SIEM monitors. Audit
+// policy is enabled by default on modern Windows; suppressing
+// the events requires kernel-level tampering out of this
+// package's scope.
+//
+// # Example
+//
+// See [ExampleAdd] in account_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/persistence/account.md
+//   - [github.com/oioio-space/maldev/persistence/service] — pair with service persistence to run as the new account
+//   - [github.com/oioio-space/maldev/credentials] — pair with credential dumping for stealthier alternatives
+//
+// [github.com/oioio-space/maldev/persistence/service]: https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service
+// [github.com/oioio-space/maldev/credentials]: https://pkg.go.dev/github.com/oioio-space/maldev/credentials
 package user

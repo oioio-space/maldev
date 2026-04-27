@@ -60,6 +60,7 @@ OPSEC / MITRE / Limitations / See also).
 | [T1027.013](https://attack.mitre.org/techniques/T1027/013/) | [`crypto`](../crypto) |
 | [T1036](https://attack.mitre.org/techniques/T1036/) | [`evasion/callstack`](../evasion/callstack) · [`evasion/stealthopen`](../evasion/stealthopen) |
 | [T1036.005](https://attack.mitre.org/techniques/T1036/005/) | [`pe`](../pe) · [`pe/masquerade`](../pe/masquerade) |
+| [T1053.005](https://attack.mitre.org/techniques/T1053/005/) | [`persistence`](../persistence) · [`persistence/scheduler`](../persistence/scheduler) |
 | [T1055](https://attack.mitre.org/techniques/T1055/) | [`c2/meterpreter`](../c2/meterpreter) · [`inject`](../inject) |
 | [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | [`inject`](../inject) · [`pe`](../pe) · [`pe/srdi`](../pe/srdi) |
 | [T1055.003](https://attack.mitre.org/techniques/T1055/003/) | [`inject`](../inject) |
@@ -81,7 +82,12 @@ OPSEC / MITRE / Limitations / See also).
 | [T1106](https://attack.mitre.org/techniques/T1106/) | [`pe`](../pe) · [`pe/imports`](../pe/imports) |
 | [T1113](https://attack.mitre.org/techniques/T1113/) | [`collection`](../collection) |
 | [T1115](https://attack.mitre.org/techniques/T1115/) | [`collection`](../collection) |
+| [T1136.001](https://attack.mitre.org/techniques/T1136/001/) | [`persistence`](../persistence) |
+| [T1204.002](https://attack.mitre.org/techniques/T1204/002/) | [`persistence`](../persistence) · [`persistence/lnk`](../persistence/lnk) |
 | [T1529](https://attack.mitre.org/techniques/T1529/) | [`cleanup/bsod`](../cleanup/bsod) |
+| [T1543.003](https://attack.mitre.org/techniques/T1543/003/) | [`persistence`](../persistence) · [`persistence/service`](../persistence/service) |
+| [T1547.001](https://attack.mitre.org/techniques/T1547/001/) | [`persistence`](../persistence) · [`persistence/registry`](../persistence/registry) · [`persistence/startup`](../persistence/startup) |
+| [T1547.009](https://attack.mitre.org/techniques/T1547/009/) | [`persistence`](../persistence) · [`persistence/lnk`](../persistence/lnk) · [`persistence/startup`](../persistence/startup) |
 | [T1550.002](https://attack.mitre.org/techniques/T1550/002/) | [`credentials/sekurlsa`](../credentials/sekurlsa) |
 | [T1553.002](https://attack.mitre.org/techniques/T1553/002/) | [`pe`](../pe) · [`pe/cert`](../pe/cert) |
 | [T1558.001](https://attack.mitre.org/techniques/T1558/001/) | [`credentials/goldenticket`](../credentials/goldenticket) |
@@ -239,14 +245,22 @@ toolchain artefacts that fingerprint the producer:
 
   - The Go pclntab (Go 1.16+ magic bytes) — wiped, breaking
     redress, GoReSym, and IDA's `go_parser` plugin |
-| [`persistence`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence) | — | provides system persistence techniques for maintaining
-access across reboots |
-| [`persistence/lnk`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk) | — | creates Windows shortcut (.lnk) files via COM/OLE automation |
-| [`persistence/registry`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry) | — | provides Windows registry Run/RunOnce key persistence |
-| [`persistence/scheduler`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler) | — | creates, deletes, lists and runs Windows scheduled tasks
-via the COM ITaskService API — no schtasks.exe child process |
-| [`persistence/service`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service) | — | provides Windows service persistence via the Service Control Manager |
-| [`persistence/startup`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup) | — | provides StartUp folder persistence via LNK shortcut files |
+| [`persistence`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence) | Varies | is the umbrella for system persistence
+techniques — mechanisms that re-launch an implant across
+reboots and user logons |
+| [`persistence/lnk`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk) | quiet | creates Windows shortcut (.lnk) files via COM/OLE
+automation — fluent builder API, fully Windows-only |
+| [`persistence/registry`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry) | moderate | implements Windows registry Run / RunOnce
+key persistence — the canonical "auto-launch on logon" hook |
+| [`persistence/scheduler`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler) | moderate | creates, deletes, lists, and runs Windows
+scheduled tasks via the COM `ITaskService` API — no
+`schtasks.exe` child process |
+| [`persistence/service`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service) | noisy | implements Windows service persistence via
+the Service Control Manager — the highest-trust persistence
+mechanism available, running as SYSTEM at boot |
+| [`persistence/startup`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup) | moderate | implements StartUp-folder persistence via LNK
+shortcut files — Windows Shell launches every shortcut in the
+folder at user logon |
 | [`privesc/cve202430088`](https://pkg.go.dev/github.com/oioio-space/maldev/privesc/cve202430088) | — | implements CVE-2024-30088, a Windows kernel TOCTOU
 race condition in AuthzBasepCopyoutInternalSecurityAttributes that allows
 local privilege escalation to SYSTEM |
