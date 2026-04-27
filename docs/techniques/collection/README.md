@@ -1,67 +1,91 @@
-# Collection
-
-[<- Back to README](../../../README.md)
-
-**MITRE ATT&CK:** [T1056 - Input Capture](https://attack.mitre.org/techniques/T1056/), [T1115 - Clipboard Data](https://attack.mitre.org/techniques/T1115/), [T1113 - Screen Capture](https://attack.mitre.org/techniques/T1113/), [T1564.004 - Hide Artifacts: NTFS File Attributes](https://attack.mitre.org/techniques/T1564/004/), [T1003.001 - OS Credential Dumping: LSASS Memory](https://attack.mitre.org/techniques/T1003/001/)
-
+---
+last_reviewed: 2026-04-27
+reflects_commit: b75160a
 ---
 
-## Overview
+# Collection techniques
 
-The `collection/` package provides post-exploitation data collection techniques. Each sub-package captures a different data source.
+[← maldev README](../../../README.md) · [docs/index](../../index.md)
+
+The `collection/*` package tree groups **local data-acquisition primitives**
+for post-exploitation: keystrokes, clipboard contents, screen captures.
+Each sub-package is self-contained and Windows-only — pick the data source
+the operator needs and import the matching package.
+
+```mermaid
+flowchart LR
+    subgraph user [User session]
+        KB[Keyboard input]
+        CB[Clipboard]
+        FB[Framebuffer]
+    end
+    subgraph collection [collection/*]
+        K[keylog<br/>WH_KEYBOARD_LL hook]
+        C[clipboard<br/>OpenClipboard + seq poll]
+        S[screenshot<br/>GDI BitBlt]
+    end
+    subgraph sink [Operator sink]
+        OUT[stdout / file / C2 channel]
+    end
+    KB --> K
+    CB --> C
+    FB --> S
+    K -. Ctrl+V .-> C
+    K --> OUT
+    C --> OUT
+    S --> OUT
+```
 
 ## Packages
 
-| Package | Technique | MITRE | Platform | Detection |
-|---------|-----------|-------|----------|-----------|
-| `collection/keylog` | Low-level keyboard hook (SetWindowsHookEx) | T1056.001 | Windows | High |
-| `collection/clipboard` | Clipboard text monitoring | T1115 | Windows | Medium |
-| `collection/screenshot` | Screen capture via GDI BitBlt | T1113 | Windows | Medium |
-| [`credentials/lsassdump`](lsass-dump.md) | LSASS memory dump (NtGetNextProcess + NtReadVirtualMemory, MINIDUMP assembled in-process) | T1003.001 | Windows | High |
-| `cleanup/ads` | NTFS Alternate Data Streams (hide/store data in named streams) | T1564.004 | Windows | Medium |
+| Package | Tech page | Detection | One-liner |
+|---|---|---|---|
+| [`collection/keylog`](../../../collection/keylog) | [keylogging.md](keylogging.md) | noisy | low-level keyboard hook with per-event window/process attribution and Ctrl+V clipboard capture |
+| [`collection/clipboard`](../../../collection/clipboard) | [clipboard.md](clipboard.md) | quiet | one-shot `ReadText` plus `Watch` channel driven by `GetClipboardSequenceNumber` polling |
+| [`collection/screenshot`](../../../collection/screenshot) | [screenshot.md](screenshot.md) | quiet | GDI `BitBlt` → PNG; primary, arbitrary rectangle, or per-monitor capture |
 
-## Usage
+## Quick decision tree
 
-### Keylogger
+| You want to… | Use |
+|---|---|
+| …record what the user types, with window context | [`keylog.Start`](keylogging.md) |
+| …also capture pasted credentials | [`keylog.Start`](keylogging.md) — Ctrl+V auto-snapshots clipboard into the event |
+| …read clipboard once (e.g. after `runas`) | [`clipboard.ReadText`](clipboard.md) |
+| …stream clipboard changes for a session | [`clipboard.Watch`](clipboard.md) |
+| …grab the primary monitor as PNG | [`screenshot.Capture`](screenshot.md) |
+| …enumerate monitors first, then capture one | [`screenshot.DisplayCount`](screenshot.md) → [`CaptureDisplay`](screenshot.md) |
+| …crop to a specific UI region (e.g. an open RDP window) | [`screenshot.CaptureRect`](screenshot.md) |
 
-```go
-import "github.com/oioio-space/maldev/collection/keylog"
+## MITRE ATT&CK
 
-ch, err := keylog.Start(ctx)
-if err != nil {
-    log.Fatal(err)
-}
+| T-ID | Name | Packages | D3FEND counter |
+|---|---|---|---|
+| [T1056.001](https://attack.mitre.org/techniques/T1056/001/) | Input Capture: Keylogging | `collection/keylog` | [D3-PA](https://d3fend.mitre.org/technique/d3f:ProcessAnalysis/) |
+| [T1115](https://attack.mitre.org/techniques/T1115/) | Clipboard Data | `collection/clipboard`, `collection/keylog` (paste capture) | [D3-PA](https://d3fend.mitre.org/technique/d3f:ProcessAnalysis/) |
+| [T1113](https://attack.mitre.org/techniques/T1113/) | Screen Capture | `collection/screenshot` | [D3-PA](https://d3fend.mitre.org/technique/d3f:ProcessAnalysis/) |
 
-for ev := range ch {
-    fmt.Printf("[%s] %s: %s\n", ev.Process, ev.Window, ev.Character)
-}
-```
+## Cross-referenced techniques
 
-### Clipboard
+Two adjacent collection workflows live under sibling areas. They are
+listed here as a navigation convenience; their canonical homes are the
+packages that own them.
 
-```go
-import "github.com/oioio-space/maldev/collection/clipboard"
+| Area concern | Tech page | Owning package |
+|---|---|---|
+| NTFS Alternate Data Streams (hide collected data in `:stream` suffixes) | [alternate-data-streams.md](alternate-data-streams.md) | [`cleanup/ads`](../cleanup/README.md) |
+| LSASS minidump (in-process MINIDUMP assembly via `NtReadVirtualMemory`) | [lsass-dump.md](lsass-dump.md) | [`credentials/lsassdump`](../../../credentials/lsassdump) |
 
-// One-shot read
-text, err := clipboard.ReadText()
+> [!NOTE]
+> Both pages will move to their owning areas in Phase 6 of the doc
+> refactor (see [docs/refactor-2026-doc/progress.md](../../refactor-2026-doc/progress.md)).
 
-// Continuous monitoring
-for content := range clipboard.Watch(ctx, 500*time.Millisecond) {
-    fmt.Println("Clipboard changed:", content)
-}
-```
+## See also
 
-### Screenshot
-
-```go
-import "github.com/oioio-space/maldev/collection/screenshot"
-
-// Capture primary display as PNG bytes
-png, err := screenshot.Capture()
-
-// Capture specific region
-png, err = screenshot.CaptureRect(0, 0, 1920, 1080)
-
-// Capture specific display
-png, err = screenshot.CaptureDisplay(0)
-```
+- [Operator path: post-exploitation collection](../../by-role/operator.md)
+- [Detection eng path: collection telemetry](../../by-role/detection-eng.md)
+- [`c2/transport`](../c2/README.md) — exfiltrate captured data over the
+  established channel.
+- [`crypto`](../crypto/README.md) — encrypt collected blobs before
+  staging or transmission.
+- [`cleanup`](../cleanup/README.md) — wipe collection artefacts after
+  exfiltration.

@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-04-27
-reflects_commit: 36484a4
+reflects_commit: 811c9c57029002948dfd9550907c739e17944486
 ---
 
 # Documentation refactor — progress tracker
@@ -55,7 +55,7 @@ Each area gets:
 | `inject` | ✅ 1/1 | ✅ 12/12 | ✅ 1/1 | Done (sweep landed in commits `4798780..ab0f7f8`). doc.go aligned to template; `inject_example_windows_test.go` added (5 godoc examples covering DefaultWindowsConfig / Build / Pipeline / chained / InjectWithFallback). All 12 tech pages rewritten to template (Group A: CRT, EarlyBird, ThreadHijack — Group B: Callback, ThreadPool, ModuleStomp, SectionMap — Group C: KCT, PhantomDLL, EtwpCreateEtwThread — Group D: NtQueueApcThreadEx, ProcessArgSpoofing) plus area README refreshed (decision flow, SelfInjector contract, syscall modes, MITRE table). |
 | `crypto / encode / hash` | ✅ 5/5 | ✅ 5/5 | ✅ 5/5 | Layer 0 done. doc.go + example_test.go landed earlier (`cf. f815d85`); tech md split into three areas this session: `docs/techniques/crypto/{README,payload-encryption}.md`, `docs/techniques/encode/{README,encode}.md`, `docs/techniques/hash/{README,cryptographic-hashes,fuzzy-hashing}.md` (fuzzy moved out of crypto/). Counts include `random` + `useragent` (Layer 0 helpers, doc.go + example_test.go templated; no dedicated tech md — both are utilities surfaced in their consumers' pages). |
 | `c2/*` | ✅ 7/7 | ✅ 7/7 | ✅ 7/7 | Sweep landed in commits `36484a4..` (this session). All 7 doc.go aligned to template; example_test.go inherited from earlier work; tech md (`README.md`, `reverse-shell.md`, `transport.md`, `meterpreter.md`, `multicat.md`, `namedpipe.md`, `malleable-profiles.md`) rewritten with full API Reference + 4-tier examples + OPSEC table + MITRE rollup. |
-| `collection/*` | ⬜ 0/3 | ⬜ 0/5 | ⬜ 0/3 | Existing pages cover keylog, clipboard, screenshot, alternate-data-streams, lsass-dump. The last two are mis-categorised — decide canonical home in Phase 6. |
+| `collection/*` | ✅ 3/3 | ✅ 3/3 + README | ✅ 3/3 | Done. All 3 doc.go aligned to template; README + 3 tech pages (keylogging, clipboard, screenshot) rewritten to template. `alternate-data-streams.md` + `lsass-dump.md` stay here as cross-ref stubs with a NOTE pointing to canonical owners; will move in Phase 6. |
 | `credentials/*` | ⬜ 0/4 | ⬜ 0/3 | ⬜ 0/4 | Big content — sekurlsa is 109-line doc.go already. Audit flagged 3 missing pages: goldenticket, samdump, plus the existing sekurlsa. |
 | `pe/*` | ⬜ 0/7 | ⬜ 0/7 | ⬜ 0/7 | Existing pages: certificate-theft, imports, masquerade, morph, pe-to-shellcode, strip-sanitize. |
 | `persistence/*` | ⬜ 0/6 | ⬜ 0/3 | ⬜ 0/6 | Audit flagged 3 missing tech pages: account, lnk, service. |
