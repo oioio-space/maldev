@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-04-27
-reflects_commit: 469a208
+reflects_commit: 4b36958
 ---
 
 # Documentation refactor — progress tracker
@@ -57,7 +57,7 @@ Each area gets:
 | `c2/*` | ✅ 7/7 | ✅ 7/7 | ✅ 7/7 | Sweep landed in commits `36484a4..` (this session). All 7 doc.go aligned to template; example_test.go inherited from earlier work; tech md (`README.md`, `reverse-shell.md`, `transport.md`, `meterpreter.md`, `multicat.md`, `namedpipe.md`, `malleable-profiles.md`) rewritten with full API Reference + 4-tier examples + OPSEC table + MITRE rollup. |
 | `collection/*` | ✅ 3/3 | ✅ 3/3 + README | ✅ 3/3 | Done. All 3 doc.go aligned to template; README + 3 tech pages (keylogging, clipboard, screenshot) rewritten to template. `alternate-data-streams.md` + `lsass-dump.md` stay here as cross-ref stubs with a NOTE pointing to canonical owners; will move in Phase 6. |
 | `credentials/*` | ✅ 4/4 | ✅ 4/4 + README | ✅ 4/4 | Done (commits `cfd7730..`). doc.go aligned to template (goldenticket, lsassdump, samdump, sekurlsa). 3 NEW tech pages (goldenticket, lsassdump, samdump) + area README rewrite (Mermaid flow, decision tree, MITRE table with D3FEND counters, Pass-the-X chains documented end-to-end). `sekurlsa.md` carries the older heading order (Primer / How It Works / Simple Example / Composed / Advanced / Limitations / API Reference) — left intact for now, re-aligned in Phase 6. example_test.go sizes match c2 baseline. |
-| `pe/*` | ✅ 8/8 | ⬜ 0/7 | ⬜ 0/7 | doc.go aligned to template (pe umbrella + cert, imports, masquerade, morph, parse, srdi, strip). Stale references to pe/bof + pe/clr removed (now under runtime/). 6 existing tech md (certificate-theft, imports, masquerade, morph, pe-to-shellcode, strip-sanitize) drift wildly from template — full rewrites pending. NO example_test.go exist anywhere in pe/* — full set to write. |
+| `pe/*` | ✅ 8/8 | ⬜ 0/7 | ✅ 7/7 | doc.go aligned to template (pe umbrella + cert, imports, masquerade, morph, parse, srdi, strip). Stale references to pe/bof + pe/clr removed (now under runtime/). 7 NEW example_test.go (one per sub-package) covering ExampleOpen / ExampleList / ExampleSanitize / ExampleUPXMorph / ExampleRead+Copy / ExampleConvertFile+Bytes / ExampleClone+Build. 6 existing tech md (certificate-theft, imports, masquerade, morph, pe-to-shellcode, strip-sanitize) drift wildly from template — full rewrites pending. |
 | `persistence/*` | ⬜ 0/6 | ⬜ 0/3 | ⬜ 0/6 | Audit flagged 3 missing tech pages: account, lnk, service. |
 | `process/*` | ⬜ 0/6 | ⬜ 0/3 | ⬜ 0/6 | Includes `process/tamper/*`. Audit flagged: herpaderping (no .md despite 112-line doc.go!), enum, session. |
 | `recon/*` | ⬜ 0/9 | ⬜ 0/8 | ⬜ 0/9 | Existing pages partly under `docs/techniques/evasion/` (anti-analysis, dll-hijack, hw-breakpoints, sandbox, timing) — re-locate in Phase 6 or accept the categorisation. |
