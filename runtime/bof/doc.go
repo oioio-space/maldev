@@ -1,37 +1,39 @@
-// Package bof provides a minimal Beacon Object File (BOF) loader for
-// in-memory COFF execution.
+// Package bof loads and executes Beacon Object Files (BOFs) —
+// compiled COFF object files (`.o`) — entirely in process memory.
 //
-// Technique: In-memory COFF object file loading and execution.
-// MITRE ATT&CK: T1059 (Command and Scripting Interpreter)
-// Platform: Windows (amd64)
-// Detection: Medium — executable memory allocation is visible to EDR, but
-// the payload never touches disk and runs inside the calling process.
+// A BOF is a relocatable COFF object that runs in the calling
+// process's address space. The loader parses the COFF header,
+// locates the `.text` section, applies relocations
+// (`IMAGE_REL_AMD64_ADDR64`, `IMAGE_REL_AMD64_ADDR32NB`,
+// `IMAGE_REL_AMD64_REL32`), resolves the entry-point symbol from
+// the symbol table, and jumps into RWX memory. The same format
+// used by Cobalt Strike's inline-execute and Sliver's BOF runner.
 //
-// How it works:
+// # MITRE ATT&CK
 //
-// A BOF is a compiled COFF (.o) object file. The loader parses the COFF
-// header, locates the .text section containing machine code, applies
-// relocations, resolves the entry point symbol from the symbol table,
-// and executes it from RWX memory. This avoids writing a full PE to disk
-// and leverages the same format used by Cobalt Strike's inline-execute.
+//   - T1059 (Command and Scripting Interpreter) — in-memory code execution
+//   - T1620 (Reflective Code Loading) — COFF loader is a textbook reflective primitive
 //
-// Limitations:
-//   - Only basic COFF relocation types are supported (IMAGE_REL_AMD64_ADDR64,
-//     IMAGE_REL_AMD64_ADDR32NB, IMAGE_REL_AMD64_REL32).
-//   - Beacon API functions (BeaconOutput, BeaconFormatAlloc, etc.) are NOT
-//     resolved. BOFs that call Beacon APIs will crash.
-//   - Only x64 COFF files are supported (Machine == 0x8664).
+// # Detection level
 //
-// Example:
+// moderate
 //
-//	data, _ := os.ReadFile("mybof.o")
-//	b, err := bof.Load(data)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	output, err := b.Execute(nil)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	fmt.Println(string(output))
+// RWX memory allocation is visible to EDR; the payload never
+// touches disk and runs inside the caller's process so there is
+// no fresh-process telemetry. Behavioural EDRs that watch for
+// `VirtualAlloc(RWX)` + `EXECUTE` from non-text regions flag
+// the loader.
+//
+// # Example
+//
+// See [ExampleLoad] in bof_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/runtime/bof-loader.md
+//   - [github.com/oioio-space/maldev/runtime/clr] — sibling reflective runtime (.NET)
+//   - [github.com/oioio-space/maldev/inject] — alternative for cross-process delivery
+//
+// [github.com/oioio-space/maldev/runtime/clr]: https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr
+// [github.com/oioio-space/maldev/inject]: https://pkg.go.dev/github.com/oioio-space/maldev/inject
 package bof

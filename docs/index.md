@@ -71,7 +71,7 @@ OPSEC / MITRE / Limitations / See also).
 | [T1055.015](https://attack.mitre.org/techniques/T1055/015/) | [`inject`](../inject) |
 | [T1056.001](https://attack.mitre.org/techniques/T1056/001/) | [`collection`](../collection) · [`collection/keylog`](../collection/keylog) |
 | [T1057](https://attack.mitre.org/techniques/T1057/) | [`process`](../process) · [`process/enum`](../process/enum) |
-| [T1059](https://attack.mitre.org/techniques/T1059/) | [`c2`](../c2) · [`c2/meterpreter`](../c2/meterpreter) · [`c2/shell`](../c2/shell) |
+| [T1059](https://attack.mitre.org/techniques/T1059/) | [`c2`](../c2) · [`c2/meterpreter`](../c2/meterpreter) · [`c2/shell`](../c2/shell) · [`runtime/bof`](../runtime/bof) · [`runtime/clr`](../runtime/clr) |
 | [T1059.001](https://attack.mitre.org/techniques/T1059/001/) | [`c2/shell`](../c2/shell) |
 | [T1059.003](https://attack.mitre.org/techniques/T1059/003/) | [`c2/shell`](../c2/shell) |
 | [T1059.004](https://attack.mitre.org/techniques/T1059/004/) | [`c2/shell`](../c2/shell) |
@@ -114,7 +114,7 @@ OPSEC / MITRE / Limitations / See also).
 | [T1573.002](https://attack.mitre.org/techniques/T1573/002/) | [`c2`](../c2) · [`c2/cert`](../c2/cert) · [`c2/transport`](../c2/transport) |
 | [T1574.001](https://attack.mitre.org/techniques/T1574/001/) | [`recon/dllhijack`](../recon/dllhijack) |
 | [T1574.012](https://attack.mitre.org/techniques/T1574/012/) | [`evasion/hook`](../evasion/hook) |
-| [T1620](https://attack.mitre.org/techniques/T1620/) | [`pe/srdi`](../pe/srdi) |
+| [T1620](https://attack.mitre.org/techniques/T1620/) | [`pe/srdi`](../pe/srdi) · [`runtime/bof`](../runtime/bof) · [`runtime/clr`](../runtime/clr) |
 | [T1622](https://attack.mitre.org/techniques/T1622/) | [`recon/antidebug`](../recon/antidebug) · [`recon/hwbp`](../recon/hwbp) |
 
 <!-- END AUTOGEN: mitre-index -->
@@ -335,11 +335,12 @@ that aggregates checks across `recon/antidebug`,
 sandboxes which fast-forward `Sleep()` calls — sandboxes
 commonly hook `Sleep` / `WaitForSingleObject` to skip the
 delay and analyse what the implant does next |
-| [`runtime/bof`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof) | — | provides a minimal Beacon Object File (BOF) loader for
-in-memory COFF execution |
-| [`runtime/clr`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr) | — | loads the .NET Common Language Runtime (CLR) in-process via the
-ICLRMetaHost / ICorRuntimeHost COM interfaces and executes .NET assemblies
-from memory without writing them to disk |
+| [`runtime/bof`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof) | moderate | loads and executes Beacon Object Files (BOFs) —
+compiled COFF object files (`.o`) — entirely in process memory |
+| [`runtime/clr`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr) | moderate | hosts the .NET Common Language Runtime in process
+via the `ICLRMetaHost` / `ICorRuntimeHost` COM interfaces and
+executes managed assemblies from memory without writing them
+to disk |
 | [`testutil`](https://pkg.go.dev/github.com/oioio-space/maldev/testutil) | — | provides shared test helpers for the maldev project |
 | [`useragent`](https://pkg.go.dev/github.com/oioio-space/maldev/useragent) | very-quiet | provides a curated database of real-world browser
 User-Agent strings for HTTP traffic blending |

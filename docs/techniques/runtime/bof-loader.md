@@ -1,230 +1,142 @@
-# BOF (COFF) Loader
-
-[<- Back to PE Overview](README.md)
-
-**MITRE ATT&CK:** [T1059 - Command and Scripting Interpreter](https://attack.mitre.org/techniques/T1059/)
-**D3FEND:** [D3-EFA - Executable File Analysis](https://d3fend.mitre.org/technique/d3f:ExecutableFileAnalysis/)
-
 ---
+package: github.com/oioio-space/maldev/runtime/bof
+last_reviewed: 2026-04-27
+reflects_commit: 3797037
+---
+
+# BOF (Beacon Object File) loader
+
+[← runtime index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Load + execute a Cobalt Strike-style Beacon Object File (BOF) —
+a compiled COFF object — entirely in process memory. Parses
+COFF, applies relocations, resolves entry-point, jumps into
+RWX memory. x64-only; no Beacon-API helpers (BOFs that call
+`BeaconOutput` etc. crash).
 
 ## Primer
 
-Cobalt Strike introduced Beacon Object Files (BOFs) -- small compiled C programs in COFF format that run inside the beacon process. They are powerful post-exploitation tools, but normally you need Cobalt Strike to use them.
+A BOF is a relocatable COFF (`.o`) object compiled by MSVC /
+MinGW. The format is the same as Linux's `.o` but for Windows
+PE-style relocations. BOFs were popularised by Cobalt Strike's
+`inline-execute` command — a tactical execution primitive that
+runs a small piece of native code inside the implant's process
+without spawning a fresh process or writing a PE to disk.
 
-**Running CobaltStrike plugins without CobaltStrike.** The BOF loader parses the COFF object file, allocates executable memory, applies relocations, finds the entry point function, and calls it -- all in-process, without writing anything to disk.
+Use cases:
 
----
+- Run small Windows-API-heavy snippets (token enum, share
+  enum, share scan) that don't need a full PE infrastructure.
+- Distribute compiled techniques as a `.o` artefact rather
+  than a full implant.
+- Compose with the implant's runtime — the BOF runs in the
+  caller's address space, so it can interact with implant
+  state directly.
 
 ## How It Works
 
-### COFF Loading Process
-
 ```mermaid
-flowchart TD
-    INPUT["COFF .o file\n(compiled BOF)"] --> PARSE["Parse COFF header\n(machine type, sections, symbols)"]
-    PARSE --> VALIDATE["Validate: x64 only\n(machine = 0x8664)"]
-    VALIDATE --> FIND_TEXT["Find .text section\n(executable code)"]
-    FIND_TEXT --> ALLOC["VirtualAlloc()\nRWX memory"]
-    ALLOC --> COPY["Copy .text to\nexecutable memory"]
-    COPY --> RELOC["Apply relocations\n(ADDR64, ADDR32NB, REL32)"]
-    RELOC --> SYMBOL["Find entry point symbol\n('go' or '_go')"]
-    SYMBOL --> CALL["Call entry:\ngo(char* data, int len)"]
-    CALL --> FREE["VirtualFree()\nRelease memory"]
-
-    style INPUT fill:#49a,color:#fff
-    style CALL fill:#4a9,color:#fff
-    style FREE fill:#a94,color:#fff
+flowchart LR
+    INPUT[BOF .o bytes] --> PARSE[parse COFF<br/>header + sections]
+    PARSE --> ALLOC[VirtualAlloc RWX<br/>copy .text + .data]
+    ALLOC --> RELOC[apply relocations<br/>ADDR64 / ADDR32NB / REL32]
+    RELOC --> SYM[resolve entry symbol<br/>from COFF symtab]
+    SYM --> EXEC[jump to entry<br/>via function ptr]
+    EXEC --> OUT[capture output<br/>via stdout redirect]
 ```
-
-### COFF Structure
-
-```mermaid
-graph TD
-    subgraph "COFF Object File"
-        HDR["COFF Header (20 bytes)\nMachine, NumSections,\nSymbolTable, NumSymbols"]
-        SEC["Section Headers (40 bytes each)\n.text, .data, .rdata, ..."]
-        RAW["Section Data\n(raw bytes)"]
-        RELOCS["Relocation Entries\n(10 bytes each)"]
-        SYMS["Symbol Table\n(18 bytes each)"]
-        STRTAB["String Table\n(long symbol names)"]
-
-        HDR --> SEC --> RAW
-        SEC --> RELOCS
-        HDR --> SYMS --> STRTAB
-    end
-```
-
-### Relocation Types
-
-The loader supports three x64 COFF relocation types:
-
-| Type | Value | Description |
-|------|-------|-------------|
-| `IMAGE_REL_AMD64_ADDR64` | 0x0001 | 64-bit absolute address |
-| `IMAGE_REL_AMD64_ADDR32NB` | 0x0003 | 32-bit image-base relative |
-| `IMAGE_REL_AMD64_REL32` | 0x0004 | 32-bit RIP-relative |
-
----
-
-## Usage
-
-### Load and Execute a BOF
-
-```go
-import "github.com/oioio-space/maldev/runtime/bof"
-
-// Load COFF object file
-data, _ := os.ReadFile("whoami.o")
-b, err := bof.Load(data)
-if err != nil {
-    log.Fatal(err)
-}
-
-// Execute with arguments (BOF convention: char* data, int len)
-args := []byte("argument data")
-output, err := b.Execute(args)
-if err != nil {
-    log.Fatal(err)
-}
-```
-
-### Custom Entry Point
-
-```go
-b, _ := bof.Load(data)
-b.Entry = "main"  // default is "go"
-b.Execute(nil)
-```
-
-### BOF from Embedded Data
-
-```go
-import (
-    _ "embed"
-    "github.com/oioio-space/maldev/runtime/bof"
-)
-
-//go:embed bofs/enum_users.o
-var enumUsersBOF []byte
-
-func runBOF() error {
-    b, err := bof.Load(enumUsersBOF)
-    if err != nil {
-        return err
-    }
-    _, err = b.Execute(nil)
-    return err
-}
-```
-
----
-
-## Combined Example: BOF with Evasion
-
-```go
-package main
-
-import (
-    "os"
-
-    "github.com/oioio-space/maldev/evasion"
-    "github.com/oioio-space/maldev/evasion/amsi"
-    "github.com/oioio-space/maldev/evasion/etw"
-    "github.com/oioio-space/maldev/runtime/bof"
-    wsyscall "github.com/oioio-space/maldev/win/syscall"
-)
-
-func main() {
-    // Indirect syscalls for evasion
-    caller := wsyscall.New(wsyscall.MethodIndirect, wsyscall.NewTartarus())
-    defer caller.Close()
-
-    // Patch AMSI + ETW before running BOF
-    evasion.ApplyAll([]evasion.Technique{amsi.ScanBufferPatch(), etw.All()}, caller)
-
-    // Load and execute BOF
-    data, _ := os.ReadFile("sa-whoami.x64.o")
-    b, err := bof.Load(data)
-    if err != nil {
-        panic(err)
-    }
-
-    if _, err := b.Execute(nil); err != nil {
-        panic(err)
-    }
-}
-```
-
----
-
-## Advantages & Limitations
-
-### Advantages
-
-- **No Cobalt Strike needed**: Run the large ecosystem of public BOFs independently
-- **In-memory execution**: COFF loaded and executed entirely in memory
-- **Standard COFF**: Compatible with any x64 COFF object file (gcc, MSVC, clang)
-- **Relocation support**: Handles ADDR64, ADDR32NB, and REL32 relocations
-- **Custom entry points**: Not limited to the default `go` symbol
-
-### Limitations
-
-- **x64 only**: Machine type 0x8664 enforced -- no x86 or ARM support
-- **RWX memory**: VirtualAlloc with PAGE_EXECUTE_READWRITE is detectable
-- **Partial BOF API**: BeaconOutput/BeaconPrintf output is captured; process-manipulation Beacon APIs (BeaconSpawnTemporaryProcess, etc.) are not supported
-- **Single .text section**: Relocations only applied to .text -- multi-section BOFs may not fully work
-- **No output capture from native BOF writes**: Return value is `nil` for BOFs that write directly to stdout rather than through Beacon APIs
-
----
-
-## Beacon API Shim
-
-Our BOF loader includes a Go-native Beacon API shim for argument packing.
-
-### Packing Arguments
-
-```go
-args := bof.NewArgs()
-args.AddInt(42)
-args.AddString("hello")
-args.AddBytes(shellcode)
-
-b, _ := bof.Load(coffData)
-output, _ := b.Execute(args.Pack())
-```
-
-**Note:** This is a partial implementation. BOFs that call BeaconOutput or
-BeaconPrintf will have output captured. BOFs calling BeaconSpawnTemporaryProcess
-or other process-manipulation Beacon APIs are not yet supported.
-
----
 
 ## API Reference
 
-### BOF
+| Symbol | Description |
+|---|---|
+| [`type BOF`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof#BOF) | Loaded BOF instance |
+| [`Load(data []byte) (*BOF, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof#Load) | Parse + relocate + ready to execute |
+| `(*BOF).Execute(args []byte) ([]byte, error)` | Run the entry point; return captured stdout |
+
+## Examples
+
+### Simple — load + execute
 
 ```go
-type BOF struct {
-    Data  []byte  // Raw COFF data
-    Entry string  // Entry point symbol name (default: "go")
+import (
+    "os"
+
+    "github.com/oioio-space/maldev/runtime/bof"
+)
+
+data, _ := os.ReadFile("whoami.o")
+b, err := bof.Load(data)
+if err != nil {
+    return
 }
-
-// Load parses a COFF object file from bytes.
-func Load(data []byte) (*BOF, error)
-
-// Execute runs the BOF's entry point with arguments.
-func (b *BOF) Execute(args []byte) ([]byte, error)
+output, _ := b.Execute(nil)
+fmt.Println(string(output))
 ```
 
-### Args
+### Composed — chain multiple BOFs
 
 ```go
-// NewArgs allocates an empty argument packer.
-func NewArgs() *Args
-
-func (a *Args) AddInt(v int32)       // 4-byte big-endian integer
-func (a *Args) AddShort(v int16)     // 2-byte big-endian integer
-func (a *Args) AddString(s string)   // 4-byte length prefix + string + null terminator
-func (a *Args) AddBytes(data []byte) // 4-byte length prefix + raw bytes
-func (a *Args) Pack() []byte         // returns the packed buffer (copy)
+for _, path := range []string{"whoami.o", "netstat.o", "tasklist.o"} {
+    data, _ := os.ReadFile(path)
+    b, err := bof.Load(data)
+    if err != nil {
+        continue
+    }
+    out, _ := b.Execute(nil)
+    fmt.Printf("=== %s ===\n%s\n", path, out)
+}
 ```
+
+## OPSEC & Detection
+
+| Artefact | Where defenders look |
+|---|---|
+| `VirtualAlloc(RWX)` followed by EXECUTE from the alloc | Behavioural EDR — high-fidelity reflective-loader signal |
+| Module-load events for non-stack `.text` regions | ETW Microsoft-Windows-Threat-Intelligence |
+| BOF entry-point execution from non-image memory | Defender for Endpoint MsSense |
+
+**D3FEND counters:**
+
+- [D3-PA](https://d3fend.mitre.org/technique/d3f:ProcessAnalysis/) — RWX execute-from-allocation telemetry.
+- [D3-FCA](https://d3fend.mitre.org/technique/d3f:FileContentAnalysis/) — YARA on the loaded bytes.
+
+**Hardening for the operator:**
+
+- Allocate `RW` then `RX` via `VirtualProtect` instead of
+  `RWX` — defeats the simplest RWX-watcher rules.
+- Encrypt the BOF at rest via [`crypto`](../crypto/README.md);
+  decrypt + load + immediately re-encrypt the source buffer.
+- Pair with [`evasion/sleepmask`](../evasion/sleep-mask.md)
+  for cleartext-at-rest mitigation.
+
+## MITRE ATT&CK
+
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1059](https://attack.mitre.org/techniques/T1059/) | Command and Scripting Interpreter | partial — in-memory native code execution | D3-PA |
+| [T1620](https://attack.mitre.org/techniques/T1620/) | Reflective Code Loading | full — COFF reflective load | D3-FCA, D3-PA |
+
+## Limitations
+
+- **No Beacon-API resolution.** BOFs that call `BeaconOutput`,
+  `BeaconFormatAlloc`, `BeaconErrorD` etc. crash. Use BOFs
+  built without the Beacon-API contract or implement a stub
+  resolver (out of scope here).
+- **x64 only.** `Machine == 0x8664` required.
+- **Limited relocation types.** ADDR64 / ADDR32NB / REL32 only;
+  exotic relocations (TLS, GOT) not supported.
+- **No symbol resolution beyond the entry point.** External
+  imports are not resolved — pure in-process code only.
+- **RWX allocation is loud.** Hardened EDRs flag RWX from any
+  source; pair with sleep-mask + RW→RX flip.
+
+## See also
+
+- [`runtime/clr`](clr.md) — sibling reflective runtime (.NET).
+- [`crypto`](../crypto/README.md) — encrypt BOF at rest.
+- [`evasion/sleepmask`](../evasion/sleep-mask.md) — hide BOF
+  bytes at rest.
+- [Operator path](../../by-role/operator.md).
+- [Detection eng path](../../by-role/detection-eng.md).
