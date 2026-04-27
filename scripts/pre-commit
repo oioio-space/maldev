@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Project pre-commit hook. Install with:
+#   git config core.hooksPath scripts
+#
+# What it checks:
+#   1. Doc-tables drift: cmd/docgen --check must exit 0.
+#      (Edit doc.go in the source package, regenerate, commit.)
+#   2. (Future) Markdown link checker, last_reviewed bump validator.
+#
+# Skip on the rare commit that touches infra only:
+#   SKIP_DOCGEN=1 git commit …
+
+set -euo pipefail
+
+if [ "${SKIP_DOCGEN:-0}" = "1" ]; then
+    echo "pre-commit: docgen check skipped via SKIP_DOCGEN=1"
+    exit 0
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+
+if ! command -v go >/dev/null 2>&1; then
+    echo "pre-commit: go not in PATH; skipping docgen drift check"
+    exit 0
+fi
+
+if ! go run ./cmd/docgen --check 2>/dev/null; then
+    echo "pre-commit: documentation tables are out of sync." >&2
+    echo "            Run 'go run ./cmd/docgen' and stage the result." >&2
+    exit 1
+fi

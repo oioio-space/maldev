@@ -1,0 +1,38 @@
+name: docs
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "**/doc.go"
+      - "docs/**"
+      - "README.md"
+      - "cmd/docgen/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "**/doc.go"
+      - "docs/**"
+      - "README.md"
+      - "cmd/docgen/**"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: docgen drift check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+      - name: Verify autogen tables are up to date
+        run: |
+          go run ./cmd/docgen --check
+        # If this fails, the contributor needs to run:
+        #   go run ./cmd/docgen
+        # locally and commit the result. The pre-commit hook in
+        # scripts/pre-commit catches this before push when installed via
+        # `git config core.hooksPath scripts`.
