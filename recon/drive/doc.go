@@ -1,33 +1,41 @@
-// Package drive provides drive detection, monitoring, and volume information
-// retrieval for Windows systems.
+// Package drive enumerates Windows logical drives and watches
+// for newly connected removable / network volumes.
 //
-// Technique: Logical drive enumeration and volume fingerprinting.
-// MITRE ATT&CK: T1120 (Peripheral Device Discovery)
-// Detection: Low — drive enumeration is standard system behavior.
-// Platform: Windows.
+// Drive enumeration via `GetLogicalDrives` + `GetDriveTypeW` +
+// `GetVolumeInformationW`. Each [Info] carries letter, type
+// (`Fixed` / `Removable` / `Network` / …), and volume metadata
+// (name, serial, filesystem). [Watcher] polls a snapshot at a
+// configurable interval and emits Add / Remove events as
+// drives appear and disappear.
 //
-// How it works: Enumerates logical drives via GetLogicalDrives (bitmask of
-// A:-Z:), queries each drive's type with GetDriveTypeW, and retrieves volume
-// metadata (name, serial number, filesystem) with GetVolumeInformationW.
-// A polling-based watcher detects newly connected removable/network drives
-// by comparing successive snapshots.
+// Used to discover USB-key insertion (data-staging trigger),
+// new SMB shares (lateral-movement candidates), and
+// removable-media events for triggered-execution payloads.
 //
-// Key features:
-//   - Enumerate logical drives and their types (fixed, removable, network, etc.)
-//   - Retrieve volume information (name, serial number, filesystem)
-//   - Monitor for newly connected drives with configurable polling interval
-//   - Filter drives by type using callback functions
-//   - Unique drive ID (MD5 of type + serial + filesystem) for deduplication
+// # MITRE ATT&CK
 //
-// Limitations:
-//   - Polling-based detection (not event-driven) — default 200ms interval.
-//   - Volume serial number may be 0 for some virtual drives.
-//   - WatchNew goroutine runs until context is cancelled.
+//   - T1120 (Peripheral Device Discovery)
+//   - T1083 (File and Directory Discovery) — sibling discovery primitive
 //
-// Example:
+// # Detection level
 //
-//	drives := drive.NewDrives(ctx)
-//	all, _ := drives.All(func(d *drive.Drive) bool {
-//	    return d.Type == drive.Removable
-//	})
+// quiet
+//
+// Drive enumeration is standard system behaviour; every
+// shell, file manager, AV, and backup tool calls these APIs
+// continuously. Polling intervals are configurable — sub-100 ms
+// polling may stand out behaviourally on idle systems.
+//
+// # Example
+//
+// See [ExampleNew] and [ExampleNewWatcher] in drive_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/recon/drive.md
+//   - [github.com/oioio-space/maldev/recon/folder] — sibling Windows special-folder resolution
+//   - [github.com/oioio-space/maldev/cleanup] — pair to clean staged data on removable media
+//
+// [github.com/oioio-space/maldev/recon/folder]: https://pkg.go.dev/github.com/oioio-space/maldev/recon/folder
+// [github.com/oioio-space/maldev/cleanup]: https://pkg.go.dev/github.com/oioio-space/maldev/cleanup
 package drive

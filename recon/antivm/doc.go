@@ -1,28 +1,39 @@
-// Package antivm provides cross-platform virtual machine and hypervisor
-// detection techniques with configurable check dimensions.
+// Package antivm detects virtual machines and hypervisors via
+// configurable check dimensions: registry keys, files, MAC
+// prefixes, processes, CPUID/BIOS, and DMI info.
 //
-// Technique: VM detection via registry keys, files, MAC prefixes, processes,
-// CPUID/BIOS data, and DMI info.
-// MITRE ATT&CK: T1497.001 (Virtualization/Sandbox Evasion: System Checks)
-// Platform: Cross-platform (Windows and Linux)
-// Detection: Low -- VM detection is common in legitimate software.
+// Detected hypervisors: Hyper-V, Parallels, VirtualBox,
+// VirtualPC, VMware, Xen, QEMU/KVM, Proxmox, Docker, WSL.
 //
-// Detected hypervisors: Hyper-V, Parallels, VirtualBox, VirtualPC, VMware,
-// Xen, QEMU/KVM, Proxmox, Docker, and WSL.
+// [Config] selects which vendors and dimensions to evaluate;
+// [DefaultConfig] enables all. [Detect] returns the first
+// matching vendor name; [DetectAll] returns every match.
+// Dimension-specific helpers ([DetectNic], [DetectFiles],
+// [DetectDMI]) let callers compose their own pipelines.
 //
-// Use [Config] to control which vendors and detection dimensions are evaluated:
+// # MITRE ATT&CK
 //
-//	// Default: all vendors, all checks
-//	name, err := antivm.Detect(antivm.DefaultConfig())
+//   - T1497.001 (Virtualization/Sandbox Evasion: System Checks)
 //
-//	// Only check NIC and files for VMware
-//	cfg := antivm.Config{
-//	    Vendors: []antivm.Vendor{{Name: "VMware", Nic: []string{"00:0C:29"}}},
-//	    Checks:  antivm.CheckNIC | antivm.CheckFiles,
-//	}
-//	name, err := antivm.Detect(cfg)
+// # Detection level
 //
-// Platform-specific implementations:
-//   - Windows: checks registry keys, driver files, NIC MAC prefixes, processes, and BIOS product name
-//   - Linux: checks DMI info in /sys/class/dmi/, files, NIC MAC prefixes, processes, and CPUID flags
+// quiet
+//
+// VM detection is universally common in legitimate software
+// (DRM, anti-piracy, performance-tuning) — no defensive tool
+// flags it on its own. Combined with subsequent suspicious
+// actions an EDR may correlate.
+//
+// # Example
+//
+// See [ExampleDetect] in antivm_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/recon/anti-analysis.md
+//   - [github.com/oioio-space/maldev/recon/sandbox] — multi-factor orchestrator
+//   - [github.com/oioio-space/maldev/recon/antidebug] — sibling debugger detection
+//
+// [github.com/oioio-space/maldev/recon/sandbox]: https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox
+// [github.com/oioio-space/maldev/recon/antidebug]: https://pkg.go.dev/github.com/oioio-space/maldev/recon/antidebug
 package antivm

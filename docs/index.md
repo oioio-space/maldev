@@ -53,10 +53,11 @@ OPSEC / MITRE / Limitations / See also).
 |---|---|
 | [T1003.001](https://attack.mitre.org/techniques/T1003/001/) | [`credentials/lsassdump`](../credentials/lsassdump) · [`credentials/sekurlsa`](../credentials/sekurlsa) |
 | [T1003.002](https://attack.mitre.org/techniques/T1003/002/) | [`credentials/samdump`](../credentials/samdump) |
+| [T1016](https://attack.mitre.org/techniques/T1016/) | [`recon/network`](../recon/network) |
 | [T1021.002](https://attack.mitre.org/techniques/T1021/002/) | [`c2/transport/namedpipe`](../c2/transport/namedpipe) |
 | [T1027](https://attack.mitre.org/techniques/T1027/) | [`crypto`](../crypto) · [`encode`](../encode) · [`evasion/sleepmask`](../evasion/sleepmask) |
 | [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | [`pe`](../pe) · [`pe/morph`](../pe/morph) · [`pe/parse`](../pe/parse) · [`pe/strip`](../pe/strip) |
-| [T1027.005](https://attack.mitre.org/techniques/T1027/005/) | [`pe/strip`](../pe/strip) · [`process/tamper/herpaderping`](../process/tamper/herpaderping) · [`process/tamper/hideprocess`](../process/tamper/hideprocess) |
+| [T1027.005](https://attack.mitre.org/techniques/T1027/005/) | [`pe/strip`](../pe/strip) · [`process/tamper/herpaderping`](../process/tamper/herpaderping) · [`process/tamper/hideprocess`](../process/tamper/hideprocess) · [`recon/hwbp`](../recon/hwbp) |
 | [T1027.013](https://attack.mitre.org/techniques/T1027/013/) | [`crypto`](../crypto) |
 | [T1036](https://attack.mitre.org/techniques/T1036/) | [`evasion/callstack`](../evasion/callstack) · [`evasion/stealthopen`](../evasion/stealthopen) |
 | [T1036.005](https://attack.mitre.org/techniques/T1036/005/) | [`pe`](../pe) · [`pe/masquerade`](../pe/masquerade) · [`process`](../process) · [`process/tamper/fakecmd`](../process/tamper/fakecmd) |
@@ -80,18 +81,24 @@ OPSEC / MITRE / Limitations / See also).
 | [T1070.006](https://attack.mitre.org/techniques/T1070/006/) | [`cleanup/timestomp`](../cleanup/timestomp) |
 | [T1071](https://attack.mitre.org/techniques/T1071/) | [`c2`](../c2) · [`c2/transport`](../c2/transport) |
 | [T1071.001](https://attack.mitre.org/techniques/T1071/001/) | [`c2`](../c2) · [`c2/meterpreter`](../c2/meterpreter) · [`c2/transport/namedpipe`](../c2/transport/namedpipe) · [`useragent`](../useragent) |
+| [T1083](https://attack.mitre.org/techniques/T1083/) | [`recon/drive`](../recon/drive) · [`recon/folder`](../recon/folder) |
 | [T1095](https://attack.mitre.org/techniques/T1095/) | [`c2`](../c2) · [`c2/meterpreter`](../c2/meterpreter) · [`c2/transport`](../c2/transport) |
 | [T1106](https://attack.mitre.org/techniques/T1106/) | [`pe`](../pe) · [`pe/imports`](../pe/imports) |
 | [T1113](https://attack.mitre.org/techniques/T1113/) | [`collection`](../collection) |
 | [T1115](https://attack.mitre.org/techniques/T1115/) | [`collection`](../collection) |
+| [T1120](https://attack.mitre.org/techniques/T1120/) | [`recon/drive`](../recon/drive) |
 | [T1134.001](https://attack.mitre.org/techniques/T1134/001/) | [`process/session`](../process/session) |
 | [T1134.002](https://attack.mitre.org/techniques/T1134/002/) | [`process`](../process) · [`process/session`](../process/session) |
 | [T1136.001](https://attack.mitre.org/techniques/T1136/001/) | [`persistence`](../persistence) |
 | [T1204.002](https://attack.mitre.org/techniques/T1204/002/) | [`persistence`](../persistence) · [`persistence/lnk`](../persistence/lnk) |
+| [T1497](https://attack.mitre.org/techniques/T1497/) | [`recon/sandbox`](../recon/sandbox) |
+| [T1497.001](https://attack.mitre.org/techniques/T1497/001/) | [`recon/antivm`](../recon/antivm) |
+| [T1497.003](https://attack.mitre.org/techniques/T1497/003/) | [`recon/timing`](../recon/timing) |
 | [T1529](https://attack.mitre.org/techniques/T1529/) | [`cleanup/bsod`](../cleanup/bsod) |
 | [T1543.003](https://attack.mitre.org/techniques/T1543/003/) | [`persistence`](../persistence) · [`persistence/service`](../persistence/service) |
 | [T1547.001](https://attack.mitre.org/techniques/T1547/001/) | [`persistence`](../persistence) · [`persistence/registry`](../persistence/registry) · [`persistence/startup`](../persistence/startup) |
 | [T1547.009](https://attack.mitre.org/techniques/T1547/009/) | [`persistence`](../persistence) · [`persistence/lnk`](../persistence/lnk) · [`persistence/startup`](../persistence/startup) |
+| [T1548.002](https://attack.mitre.org/techniques/T1548/002/) | [`recon/dllhijack`](../recon/dllhijack) |
 | [T1550.002](https://attack.mitre.org/techniques/T1550/002/) | [`credentials/sekurlsa`](../credentials/sekurlsa) |
 | [T1553.002](https://attack.mitre.org/techniques/T1553/002/) | [`pe`](../pe) · [`pe/cert`](../pe/cert) |
 | [T1558.001](https://attack.mitre.org/techniques/T1558/001/) | [`credentials/goldenticket`](../credentials/goldenticket) |
@@ -105,8 +112,10 @@ OPSEC / MITRE / Limitations / See also).
 | [T1573](https://attack.mitre.org/techniques/T1573/) | [`c2`](../c2) · [`c2/transport`](../c2/transport) |
 | [T1573.001](https://attack.mitre.org/techniques/T1573/001/) | [`c2/cert`](../c2/cert) |
 | [T1573.002](https://attack.mitre.org/techniques/T1573/002/) | [`c2`](../c2) · [`c2/cert`](../c2/cert) · [`c2/transport`](../c2/transport) |
+| [T1574.001](https://attack.mitre.org/techniques/T1574/001/) | [`recon/dllhijack`](../recon/dllhijack) |
 | [T1574.012](https://attack.mitre.org/techniques/T1574/012/) | [`evasion/hook`](../evasion/hook) |
 | [T1620](https://attack.mitre.org/techniques/T1620/) | [`pe/srdi`](../pe/srdi) |
+| [T1622](https://attack.mitre.org/techniques/T1622/) | [`recon/antidebug`](../recon/antidebug) · [`recon/hwbp`](../recon/hwbp) |
 
 <!-- END AUTOGEN: mitre-index -->
 
@@ -297,25 +306,35 @@ terminating the EventLog service threads inside the hosting
 listing but no new entries are written |
 | [`random`](https://pkg.go.dev/github.com/oioio-space/maldev/random) | very-quiet | provides cryptographically secure random generation
 helpers backed by `crypto/rand` (OS entropy) |
-| [`recon/antidebug`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antidebug) | — | provides cross-platform debugger detection techniques |
-| [`recon/antivm`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm) | — | provides cross-platform virtual machine and hypervisor
-detection techniques with configurable check dimensions |
-| [`recon/dllhijack`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack) | — | discovers DLL-search-order hijack opportunities on
-Windows — places where an application will load a DLL from a
-user-writable directory BEFORE reaching the legitimate copy (typically
-in System32) |
-| [`recon/drive`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive) | — | provides drive detection, monitoring, and volume information
-retrieval for Windows systems |
-| [`recon/folder`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/folder) | — | provides access to Windows special folder paths via the
-SHGetSpecialFolderPath Shell32 API |
-| [`recon/hwbp`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp) | — | provides detection and clearing of hardware breakpoints
-set by EDR products on NT function prologues |
-| [`recon/network`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/network) | — | provides IP address retrieval and local address detection
-utilities |
-| [`recon/sandbox`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox) | — | provides a configurable sandbox/VM evasion orchestrator
-that aggregates multiple detection checks into a single assessment |
-| [`recon/timing`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing) | — | provides time-based evasion techniques that defeat sandbox
-analysis systems which fast-forward Sleep() calls |
+| [`recon/antidebug`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antidebug) | quiet | detects whether a debugger is currently
+attached to the implant — Windows via `IsDebuggerPresent`
+(PEB BeingDebugged), Linux via `/proc/self/status TracerPid` |
+| [`recon/antivm`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm) | quiet | detects virtual machines and hypervisors via
+configurable check dimensions: registry keys, files, MAC
+prefixes, processes, CPUID/BIOS, and DMI info |
+| [`recon/dllhijack`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack) | moderate | discovers DLL-search-order hijack
+opportunities on Windows — places where an application
+loads a DLL from a user-writable directory BEFORE reaching
+the legitimate copy (typically in System32) |
+| [`recon/drive`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive) | quiet | enumerates Windows logical drives and watches
+for newly connected removable / network volumes |
+| [`recon/folder`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/folder) | very-quiet | resolves Windows special folder paths via
+`SHGetSpecialFolderPathW` (Shell32) — Desktop, AppData,
+Startup, Program Files, Common AppData, etc |
+| [`recon/hwbp`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp) | moderate | detects and clears hardware breakpoints set by
+EDR products on NT function prologues — surviving the
+classic ntdll-on-disk-unhook pass |
+| [`recon/network`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/network) | very-quiet | provides cross-platform IP address
+retrieval and local-address detection |
+| [`recon/sandbox`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox) | quiet | is the multi-factor sandbox / VM /
+analysis-environment detector — a configurable orchestrator
+that aggregates checks across `recon/antidebug`,
+`recon/antivm`, and its own primitives into a single
+"is this a sandbox?" assessment |
+| [`recon/timing`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing) | quiet | provides time-based evasion that defeats
+sandboxes which fast-forward `Sleep()` calls — sandboxes
+commonly hook `Sleep` / `WaitForSingleObject` to skip the
+delay and analyse what the implant does next |
 | [`runtime/bof`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof) | — | provides a minimal Beacon Object File (BOF) loader for
 in-memory COFF execution |
 | [`runtime/clr`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr) | — | loads the .NET Common Language Runtime (CLR) in-process via the

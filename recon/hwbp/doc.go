@@ -1,29 +1,44 @@
-// Package hwbp provides detection and clearing of hardware breakpoints
-// set by EDR products on NT function prologues.
+// Package hwbp detects and clears hardware breakpoints set by
+// EDR products on NT function prologues — surviving the
+// classic ntdll-on-disk-unhook pass.
 //
-// Technique: Hardware debug register (DR0-DR7) manipulation to detect and
-// remove EDR monitoring points that survive ntdll unhooking.
-// MITRE ATT&CK: T1622 (Debugger Evasion)
-// Detection: Medium — modifying debug registers is unusual but not inherently
-// malicious. Some EDRs monitor SetThreadContext calls.
-// Platform: Windows.
+// Hardware debug registers DR0-DR3 hold breakpoint addresses;
+// DR6 / DR7 carry status / control. EDRs (CrowdStrike, S1)
+// place HWBPs on `Nt*` prologues to monitor them without
+// modifying ntdll's `.text` — so the unhook-from-disk
+// technique that defeats inline hooks does not defeat HWBPs.
 //
-// How it works: EDRs like CrowdStrike set hardware breakpoints (DR0-DR3) on
-// NT function prologues instead of inline hooks. These persist even after
-// ntdll is unhooked from disk. This package reads debug registers via
-// GetThreadContext, identifies breakpoints pointing into ntdll, and clears
-// them via SetThreadContext on all threads in the process.
+// `Detect` reads DR0-DR3 via `GetThreadContext` on every
+// thread and returns breakpoints that point inside ntdll;
+// [DetectAll] returns every set HWBP regardless of target.
+// [ClearAll] zeros the registers via `SetThreadContext` on
+// every thread.
 //
-// Limitations:
-//   - Must enumerate and modify ALL threads — missed threads retain breakpoints.
-//   - SetThreadContext is itself monitored by some EDRs.
-//   - Hardware breakpoints are limited to 4 (DR0-DR3); if all are used by EDR,
-//     clearing them removes all monitoring.
+// # MITRE ATT&CK
 //
-// Example:
+//   - T1622 (Debugger Evasion)
+//   - T1027.005 (Indicator Removal from Tools) — neutralising EDR HWBPs
 //
-//	bps, _ := hwbp.Detect()
-//	if len(bps) > 0 {
-//	    hwbp.ClearAll()
-//	}
+// # Detection level
+//
+// moderate
+//
+// Modifying debug registers is unusual but not inherently
+// malicious; some EDRs flag `SetThreadContext` calls. Every
+// thread must be enumerated and patched — missed threads
+// retain breakpoints. Restoring HWBPs to non-zero state from
+// user-mode requires kernel-context aware bypasses on Win11.
+//
+// # Example
+//
+// See [ExampleDetect] in hwbp_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/recon/hw-breakpoints.md
+//   - [github.com/oioio-space/maldev/evasion/unhook] — pair: HWBP clear + ntdll unhook
+//   - [github.com/oioio-space/maldev/win/syscall] — direct/indirect syscalls survive both inline + HWBP
+//
+// [github.com/oioio-space/maldev/evasion/unhook]: https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook
+// [github.com/oioio-space/maldev/win/syscall]: https://pkg.go.dev/github.com/oioio-space/maldev/win/syscall
 package hwbp
