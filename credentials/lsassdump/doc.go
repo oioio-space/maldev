@@ -2,27 +2,9 @@
 // downstream tooling (credentials/sekurlsa, mimikatz, pypykatz) can
 // extract Windows credentials.
 //
-// Technique: Process memory dump of LSASS via NtReadVirtualMemory +
-// handcrafted MiniDump stream. Does NOT call MiniDumpWriteDump (that
-// export is heavily EDR-hooked); the MiniDump is assembled in-process.
-//
-// MITRE ATT&CK: T1003.001 (OS Credential Dumping: LSASS Memory)
-// Platform: Windows (build / dump pipeline) — the on-disk PE-parsing
-// helpers (Discover*Offset, DiscoverInitialSystemProcessRVA) are
-// pure Go and run cross-platform so analysts can resolve EPROCESS
-// offsets from a captured ntoskrnl.exe on Linux/CI.
-//
-// Detection: High — opening lsass.exe with PROCESS_VM_READ and
-// reading the full address space is one of the loudest events any
-// modern EDR watches. Reduce the blast radius by:
-//
-//   - Routing Nt* through a stealth *wsyscall.Caller (direct /
-//     indirect syscall) — Open/Dump and FindLsassEProcess all
-//     accept an optional Caller (nil = WinAPI fallback).
-//   - Routing on-disk reads through a stealthopen.Opener
-//     (Discover*Offset, FindLsassEProcess) so a path-based EDR
-//     file-hook never sees the ntoskrnl.exe path.
-//   - Writing the minidump to a non-standard path.
+// Process memory dump of LSASS via NtReadVirtualMemory + handcrafted
+// MiniDump stream. Does NOT call MiniDumpWriteDump (that export is
+// heavily EDR-hooked); the MiniDump is assembled in-process.
 //
 // PPL bypass via RTCore64 BYOVD: when lsass.exe runs with RunAsPPL=1
 // (Win 11 default), userland NtOpenProcess(VM_READ) is denied
@@ -49,8 +31,54 @@
 //     PsActiveProcessLinks via the kernel ReadWriter and returns
 //     the EPROCESS VA matching lsassPID; combines all of the above.
 //
-// All path-based discovery helpers accept a stealthopen.Opener
+// All path-based discovery helpers accept a [stealthopen.Opener]
 // (nil = os.Open) and resolve an empty path to
 // `%SystemRoot%\System32\ntoskrnl.exe` via SHGetSpecialFolderPathW
 // on Windows (recon/folder.Get(CSIDL_SYSTEM)).
+//
+// Platform: Windows (build / dump pipeline) — the on-disk PE-parsing
+// helpers (Discover*Offset, DiscoverInitialSystemProcessRVA) are
+// pure Go and run cross-platform so analysts can resolve EPROCESS
+// offsets from a captured ntoskrnl.exe on Linux/CI.
+//
+// # MITRE ATT&CK
+//
+//   - T1003.001 (OS Credential Dumping: LSASS Memory)
+//   - T1068 (Exploitation for Privilege Escalation) — kernel write
+//     primitive used for PPL bypass
+//
+// # Detection level
+//
+// noisy
+//
+// Opening lsass.exe with PROCESS_VM_READ and reading the full
+// address space is one of the loudest events any modern EDR
+// watches. Reduce the blast radius by:
+//
+//   - Routing Nt* through a stealth *wsyscall.Caller (direct /
+//     indirect syscall) — Open/Dump and FindLsassEProcess all
+//     accept an optional Caller (nil = WinAPI fallback).
+//   - Routing on-disk reads through a [stealthopen.Opener]
+//     (Discover*Offset, FindLsassEProcess) so a path-based EDR
+//     file-hook never sees the ntoskrnl.exe path.
+//   - Writing the minidump to a non-standard path.
+//
+// # Example
+//
+// See [ExampleDumpToFile] in lsassdump_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/credentials/lsassdump.md
+//   - [github.com/oioio-space/maldev/credentials/sekurlsa] — parses
+//     the produced minidump
+//   - [github.com/oioio-space/maldev/kernel/driver/rtcore64] — PPL
+//     bypass driver
+//   - [github.com/oioio-space/maldev/evasion/stealthopen] —
+//     path-based file-hook bypass
+//
+// [stealthopen.Opener]: https://pkg.go.dev/github.com/oioio-space/maldev/evasion/stealthopen#Opener
+// [github.com/oioio-space/maldev/credentials/sekurlsa]: https://pkg.go.dev/github.com/oioio-space/maldev/credentials/sekurlsa
+// [github.com/oioio-space/maldev/kernel/driver/rtcore64]: https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver/rtcore64
+// [github.com/oioio-space/maldev/evasion/stealthopen]: https://pkg.go.dev/github.com/oioio-space/maldev/evasion/stealthopen
 package lsassdump

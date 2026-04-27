@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-04-27
-reflects_commit: 811c9c57029002948dfd9550907c739e17944486
+reflects_commit: 1bd95dfd17be7318348fff26fc48a222a81f30ed
 ---
 
 # Documentation refactor — progress tracker
@@ -56,7 +56,7 @@ Each area gets:
 | `crypto / encode / hash` | ✅ 5/5 | ✅ 5/5 | ✅ 5/5 | Layer 0 done. doc.go + example_test.go landed earlier (`cf. f815d85`); tech md split into three areas this session: `docs/techniques/crypto/{README,payload-encryption}.md`, `docs/techniques/encode/{README,encode}.md`, `docs/techniques/hash/{README,cryptographic-hashes,fuzzy-hashing}.md` (fuzzy moved out of crypto/). Counts include `random` + `useragent` (Layer 0 helpers, doc.go + example_test.go templated; no dedicated tech md — both are utilities surfaced in their consumers' pages). |
 | `c2/*` | ✅ 7/7 | ✅ 7/7 | ✅ 7/7 | Sweep landed in commits `36484a4..` (this session). All 7 doc.go aligned to template; example_test.go inherited from earlier work; tech md (`README.md`, `reverse-shell.md`, `transport.md`, `meterpreter.md`, `multicat.md`, `namedpipe.md`, `malleable-profiles.md`) rewritten with full API Reference + 4-tier examples + OPSEC table + MITRE rollup. |
 | `collection/*` | ✅ 3/3 | ✅ 3/3 + README | ✅ 3/3 | Done. All 3 doc.go aligned to template; README + 3 tech pages (keylogging, clipboard, screenshot) rewritten to template. `alternate-data-streams.md` + `lsass-dump.md` stay here as cross-ref stubs with a NOTE pointing to canonical owners; will move in Phase 6. |
-| `credentials/*` | ⬜ 0/4 | ⬜ 0/3 | ⬜ 0/4 | Big content — sekurlsa is 109-line doc.go already. Audit flagged 3 missing pages: goldenticket, samdump, plus the existing sekurlsa. |
+| `credentials/*` | ✅ 4/4 | ⬜ 0/3 | ⬜ 0/4 | doc.go aligned to template (goldenticket, lsassdump, samdump, sekurlsa) with `# MITRE ATT&CK` / `# Detection level` / `# Example` / `# See also` headings + GoDoc link anchors. Tech md still TODO: goldenticket, lsassdump, samdump (sekurlsa.md already exists). example_test.go audit pending — lsassdump (20 lines) + sekurlsa (19 lines) likely too sparse. |
 | `pe/*` | ⬜ 0/7 | ⬜ 0/7 | ⬜ 0/7 | Existing pages: certificate-theft, imports, masquerade, morph, pe-to-shellcode, strip-sanitize. |
 | `persistence/*` | ⬜ 0/6 | ⬜ 0/3 | ⬜ 0/6 | Audit flagged 3 missing tech pages: account, lnk, service. |
 | `process/*` | ⬜ 0/6 | ⬜ 0/3 | ⬜ 0/6 | Includes `process/tamper/*`. Audit flagged: herpaderping (no .md despite 112-line doc.go!), enum, session. |

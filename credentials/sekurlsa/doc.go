@@ -1,51 +1,39 @@
 // Package sekurlsa extracts credential material from a Windows LSASS
 // minidump — the consumer counterpart to credentials/lsassdump.
 //
-// Technique: parse a MINIDUMP blob, locate the auth-package DLLs
-// (lsasrv.dll, msv1_0.dll, wdigest.dll, kerberos.dll, tspkg.dll,
-// cloudap.dll, livessp.dll, dpapisrv.dll) in the captured module
-// list, scan for per-provider globals via byte-pattern templates,
-// decrypt each provider's session list with the LSA crypto chain
-// (3DES / AES via BCRYPT_KEY_HANDLE → KIWI_BCRYPT_KEY), and surface
-// the typed credentials per LUID.
-//
-// MITRE ATT&CK: T1003.001 (OS Credential Dumping: LSASS Memory).
-// Platform: cross-platform (pure Go) — analysts can parse a dump
-// from any host, not just Windows. The package never opens lsass.exe
-// itself; that's credentials/lsassdump's job.
-//
-// Detection: Low. The loud operations all live upstream — the dump
-// itself (PROCESS_VM_READ + NtReadVirtualMemory, see
-// docs/techniques/collection/lsass-dump.md) and any driver-assisted
-// PPL bypass. Parsing happens in the implant's own address space
-// with pure-Go primitives — no syscalls, no file opens beyond the
-// caller-supplied dump bytes / path.
+// Parse a MINIDUMP blob, locate the auth-package DLLs (lsasrv.dll,
+// msv1_0.dll, wdigest.dll, kerberos.dll, tspkg.dll, cloudap.dll,
+// livessp.dll, dpapisrv.dll) in the captured module list, scan for
+// per-provider globals via byte-pattern templates, decrypt each
+// provider's session list with the LSA crypto chain (3DES / AES via
+// BCRYPT_KEY_HANDLE → KIWI_BCRYPT_KEY), and surface the typed
+// credentials per LUID.
 //
 // Public surface:
 //
-//   - Parse(reader, size) — main entry point; takes any io.ReaderAt.
-//   - ParseFile(path, opener) — convenience wrapper. `opener` is an
-//     optional stealthopen.Opener (nil = os.Open) so the dump file
-//     read can route through an NTFS-Object-ID open or any other
+//   - [Parse] — main entry point; takes any io.ReaderAt.
+//   - [ParseFile] — convenience wrapper. `opener` is an optional
+//     [stealthopen.Opener] (nil = os.Open) so the dump file read
+//     can route through an NTFS-Object-ID open or any other
 //     stealth strategy that bypasses path-based EDR file hooks.
 //   - Result.Wipe() — zeroizes every credential's sensitive byte
 //     buffer in place. wipe() is a mandatory part of the Credential
 //     interface (compile-time guarantee that no provider's
 //     plaintext / hash / PRT can leak through Result discard).
-//   - RegisterTemplate(t) — adds a per-build template at runtime
-//     for builds the inline default set doesn't cover.
+//   - [RegisterTemplate] — adds a per-build template at runtime for
+//     builds the inline default set doesn't cover.
 //
 // Sentinel errors (errors.Is-friendly):
 //
-//   - ErrNotMinidump — not an MDMP blob.
-//   - ErrUnsupportedBuild — no template for the dump's BuildNumber.
-//     Result still populates Modules + BuildNumber + Architecture so
-//     the caller can RegisterTemplate and retry.
-//   - ErrUnsupportedArchitecture — dump is not x64 (WoW64 / legacy
-//     x86 dumps rejected; v1 ships x64-only walkers).
-//   - ErrLSASRVNotFound / ErrMSVNotFound — the named module is
+//   - [ErrNotMinidump] — not an MDMP blob.
+//   - [ErrUnsupportedBuild] — no template for the dump's
+//     BuildNumber. Result still populates Modules + BuildNumber +
+//     Architecture so the caller can RegisterTemplate and retry.
+//   - [ErrUnsupportedArchitecture] — dump is not x64 (WoW64 /
+//     legacy x86 dumps rejected; v1 ships x64-only walkers).
+//   - [ErrLSASRVNotFound] / [ErrMSVNotFound] — the named module is
 //     missing from MODULE_LIST.
-//   - ErrKeyExtractFailed — pattern matched but the BCRYPT key
+//   - [ErrKeyExtractFailed] — pattern matched but the BCRYPT key
 //     blob header was malformed (typically a wrong-template false
 //     positive on signatures).
 //
@@ -86,5 +74,45 @@
 // so the operational value is limited.
 //
 // Layering: Layer 2 alongside credentials/lsassdump. Pure Go; no
-// dependency on win/api or kernel/driver.
+// dependency on win/api or kernel/driver. Cross-platform — analysts
+// can parse a dump from any host, not just Windows. The package
+// never opens lsass.exe itself; that's credentials/lsassdump's job.
+//
+// # MITRE ATT&CK
+//
+//   - T1003.001 (OS Credential Dumping: LSASS Memory)
+//   - T1550.002 (Use Alternate Authentication Material: Pass the
+//     Hash) — downstream consumer of MSVCredential
+//   - T1558.003 (Steal or Forge Kerberos Tickets: Kerberoasting) —
+//     downstream consumer of KerberosCredential
+//
+// # Detection level
+//
+// quiet
+//
+// The loud operations all live upstream — the dump itself
+// (PROCESS_VM_READ + NtReadVirtualMemory, see
+// docs/techniques/collection/lsass-dump.md) and any driver-assisted
+// PPL bypass. Parsing happens in the implant's own address space
+// with pure-Go primitives — no syscalls, no file opens beyond the
+// caller-supplied dump bytes / path.
+//
+// # Example
+//
+// See [ExampleParseFile] in sekurlsa_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/credentials/sekurlsa.md
+//   - [github.com/oioio-space/maldev/credentials/lsassdump] —
+//     produces the dump consumed here
+//   - [github.com/oioio-space/maldev/credentials/goldenticket] —
+//     downstream consumer of extracted krbtgt hash
+//   - [github.com/oioio-space/maldev/evasion/stealthopen] —
+//     stealth dump-file open
+//
+// [stealthopen.Opener]: https://pkg.go.dev/github.com/oioio-space/maldev/evasion/stealthopen#Opener
+// [github.com/oioio-space/maldev/credentials/lsassdump]: https://pkg.go.dev/github.com/oioio-space/maldev/credentials/lsassdump
+// [github.com/oioio-space/maldev/credentials/goldenticket]: https://pkg.go.dev/github.com/oioio-space/maldev/credentials/goldenticket
+// [github.com/oioio-space/maldev/evasion/stealthopen]: https://pkg.go.dev/github.com/oioio-space/maldev/evasion/stealthopen
 package sekurlsa

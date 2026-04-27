@@ -51,6 +51,8 @@ OPSEC / MITRE / Limitations / See also).
 
 | T-ID | Packages |
 |---|---|
+| [T1003.001](https://attack.mitre.org/techniques/T1003/001/) | [`credentials/lsassdump`](../credentials/lsassdump) · [`credentials/sekurlsa`](../credentials/sekurlsa) |
+| [T1003.002](https://attack.mitre.org/techniques/T1003/002/) | [`credentials/samdump`](../credentials/samdump) |
 | [T1021.002](https://attack.mitre.org/techniques/T1021/002/) | [`c2/transport/namedpipe`](../c2/transport/namedpipe) |
 | [T1027](https://attack.mitre.org/techniques/T1027/) | [`crypto`](../crypto) · [`encode`](../encode) · [`evasion/sleepmask`](../evasion/sleepmask) |
 | [T1027.013](https://attack.mitre.org/techniques/T1027/013/) | [`crypto`](../crypto) |
@@ -66,6 +68,7 @@ OPSEC / MITRE / Limitations / See also).
 | [T1059.001](https://attack.mitre.org/techniques/T1059/001/) | [`c2/shell`](../c2/shell) |
 | [T1059.003](https://attack.mitre.org/techniques/T1059/003/) | [`c2/shell`](../c2/shell) |
 | [T1059.004](https://attack.mitre.org/techniques/T1059/004/) | [`c2/shell`](../c2/shell) |
+| [T1068](https://attack.mitre.org/techniques/T1068/) | [`credentials/lsassdump`](../credentials/lsassdump) |
 | [T1070](https://attack.mitre.org/techniques/T1070/) | [`cleanup/memory`](../cleanup/memory) |
 | [T1070.004](https://attack.mitre.org/techniques/T1070/004/) | [`cleanup/wipe`](../cleanup/wipe) |
 | [T1070.006](https://attack.mitre.org/techniques/T1070/006/) | [`cleanup/timestomp`](../cleanup/timestomp) |
@@ -75,6 +78,9 @@ OPSEC / MITRE / Limitations / See also).
 | [T1113](https://attack.mitre.org/techniques/T1113/) | [`collection`](../collection) |
 | [T1115](https://attack.mitre.org/techniques/T1115/) | [`collection`](../collection) |
 | [T1529](https://attack.mitre.org/techniques/T1529/) | [`cleanup/bsod`](../cleanup/bsod) |
+| [T1550.002](https://attack.mitre.org/techniques/T1550/002/) | [`credentials/sekurlsa`](../credentials/sekurlsa) |
+| [T1558.001](https://attack.mitre.org/techniques/T1558/001/) | [`credentials/goldenticket`](../credentials/goldenticket) |
+| [T1558.003](https://attack.mitre.org/techniques/T1558/003/) | [`credentials/sekurlsa`](../credentials/sekurlsa) |
 | [T1562.001](https://attack.mitre.org/techniques/T1562/001/) | [`evasion/cet`](../evasion/cet) · [`evasion/kcallback`](../evasion/kcallback) · [`evasion/preset`](../evasion/preset) |
 | [T1564.004](https://attack.mitre.org/techniques/T1564/004/) | [`cleanup/ads`](../cleanup/ads) |
 | [T1571](https://attack.mitre.org/techniques/T1571/) | [`c2`](../c2) · [`c2/multicat`](../c2/multicat) |
@@ -151,14 +157,14 @@ snapshot restore between runs |
 post-exploitation: keystrokes, clipboard contents, screen captures |
 | [`collection/keylog`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/keylog) | noisy | captures keystrokes via a low-level keyboard hook
 (`SetWindowsHookEx(WH_KEYBOARD_LL)`) |
-| [`credentials/goldenticket`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/goldenticket) | — | forges Kerberos Golden Tickets — long-lived
+| [`credentials/goldenticket`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/goldenticket) | noisy | forges Kerberos Golden Tickets — long-lived
 TGTs minted with a stolen krbtgt account hash |
-| [`credentials/lsassdump`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/lsassdump) | — | produces a MiniDump blob of lsass.exe's memory so
+| [`credentials/lsassdump`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/lsassdump) | noisy | produces a MiniDump blob of lsass.exe's memory so
 downstream tooling (credentials/sekurlsa, mimikatz, pypykatz) can
 extract Windows credentials |
-| [`credentials/samdump`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/samdump) | — | performs offline NT-hash extraction from a SAM
+| [`credentials/samdump`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/samdump) | quiet | performs offline NT-hash extraction from a SAM
 hive (with the SYSTEM hive supplying the boot key) |
-| [`credentials/sekurlsa`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/sekurlsa) | — | extracts credential material from a Windows LSASS
+| [`credentials/sekurlsa`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/sekurlsa) | quiet | extracts credential material from a Windows LSASS
 minidump — the consumer counterpart to credentials/lsassdump |
 | [`crypto`](https://pkg.go.dev/github.com/oioio-space/maldev/crypto) | very-quiet | provides cryptographic primitives for payload
 encryption / decryption and lightweight obfuscation |
