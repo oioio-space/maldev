@@ -1,76 +1,81 @@
-# Command & Control (C2)
-
-[<- Back to README](../../../README.md)
-
-The `c2/` package tree provides a complete C2 communication stack: transport layer (TCP, TLS, uTLS with JA3 spoofing), reverse shell with automatic reconnection, Meterpreter staging, and malleable HTTP profiles for traffic blending.
-
+---
+last_reviewed: 2026-04-27
+reflects_commit: 36484a4
 ---
 
-## Architecture Overview
+# C2 techniques
+
+[← maldev README](../../../README.md) · [docs/index](../../index.md)
+
+The `c2/*` package tree is the implant's outbound communication layer
+plus the operator's listener side. Six sub-packages compose into a
+complete reverse-shell / staging / multi-session stack:
 
 ```mermaid
-graph TD
-    subgraph "c2/shell"
-        SHELL["Shell"]
-        SM["State Machine"]
-        SHELL --> SM
+flowchart LR
+    subgraph implant [Implant side]
+        S[c2/shell<br/>reverse shell]
+        M[c2/meterpreter<br/>MSF stager]
     end
-
-    subgraph "c2/meterpreter"
-        STAGER["Stager"]
-        FETCH["fetchStage()"]
-        EXEC["platformSpecificStage()"]
-        STAGER --> FETCH --> EXEC
+    subgraph wire [Wire]
+        T[c2/transport<br/>TCP / TLS / uTLS]
+        NP[c2/transport/namedpipe<br/>SMB pipes]
+        Cert[c2/cert<br/>mTLS certs + pinning]
+        T -.uses.-> Cert
     end
-
-    subgraph "c2/transport"
-        IFACE["Transport interface"]
-        TCP["TCPTransport"]
-        TLS["TLSTransport"]
-        UTLS["UTLSTransport\n(JA3 spoofing)"]
-        MALL["MalleableTransport\n(HTTP profiles)"]
-
-        TCP -->|implements| IFACE
-        TLS -->|implements| IFACE
-        UTLS -->|implements| IFACE
-        MALL -->|implements| IFACE
+    subgraph operator [Operator side]
+        MC[c2/multicat<br/>multi-session listener]
     end
-
-    subgraph "c2/cert"
-        CERT["Generator\n(self-signed TLS certs)"]
-    end
-
-    SHELL -->|uses| IFACE
-    TLS -->|optional| CERT
-    UTLS -->|profiles| JA3["JA3Chrome\nJA3Firefox\nJA3Edge\nJA3Safari"]
-    MALL -->|profiles| PROF["JQueryCDN()\nGoogleAPI()"]
+    S --> T
+    S --> NP
+    M --> T
+    T --> MC
+    NP --> MC
 ```
 
-## Documentation
+## Packages
 
-| Document | Description |
-|----------|-------------|
-| [Reverse Shell](reverse-shell.md) | Shell lifecycle, reconnection with exponential backoff |
-| [Meterpreter Stager](meterpreter.md) | TCP/HTTP/HTTPS staging for Metasploit |
-| [Transport Layer](transport.md) | TCP, TLS, uTLS with JA3 spoofing, cert pinning |
-| [Malleable Profiles](malleable-profiles.md) | HTTP traffic disguise with JQueryCDN and GoogleAPI profiles |
-| [Multicat (multi-session listener)](multicat.md) | Operator-side multi-handler — accepts many shells on one port, tracks sessions |
-| [Named Pipe Transport](namedpipe.md) | Windows named pipe transport for local/lateral C2 communication |
+| Package | Tech page | Detection | One-liner |
+|---|---|---|---|
+| [`c2/shell`](../../../c2/shell) | [reverse-shell.md](reverse-shell.md) | noisy | reverse shell with PTY + auto-reconnect + AMSI/ETW evasion hooks |
+| [`c2/meterpreter`](../../../c2/meterpreter) | [meterpreter.md](meterpreter.md) | noisy | MSF stager (TCP / HTTP / HTTPS) with optional `inject.Injector` for stage delivery |
+| [`c2/transport`](../../../c2/transport) | [transport.md](transport.md) · [malleable-profiles.md](malleable-profiles.md) | moderate | pluggable TCP / TLS / uTLS + malleable HTTP profiles |
+| [`c2/transport/namedpipe`](../../../c2/transport/namedpipe) | [namedpipe.md](namedpipe.md) | quiet | Windows named-pipe transport (local IPC + SMB lateral) |
+| [`c2/cert`](../../../c2/cert) | [transport.md](transport.md) | quiet | self-signed X.509 generation + SHA-256 fingerprint pinning |
+| [`c2/multicat`](../../../c2/multicat) | [multicat.md](multicat.md) | quiet | operator-side multi-session listener (BANNER protocol) |
+
+## Quick decision tree
+
+| You want to… | Use |
+|---|---|
+| …land a reverse shell that survives drops | [`c2/shell.New`](reverse-shell.md) + [`c2/transport`](transport.md) |
+| …blend C2 with browser TLS fingerprints | [`c2/transport`](transport.md) uTLS profile (Chrome / Firefox / iOS Safari) |
+| …pin the operator certificate against TLS-MITM | [`c2/cert.Fingerprint`](transport.md) + transport `PinSHA256` |
+| …carry C2 over local IPC / SMB lateral | [`c2/transport/namedpipe`](namedpipe.md) |
+| …stage a Meterpreter session with `inject` middleware | [`c2/meterpreter`](meterpreter.md) + `Config.Injector` |
+| …disguise HTTP traffic as jQuery CDN fetches | [malleable-profiles.md](malleable-profiles.md) |
+| …host many simultaneous reverse-shell agents | [`c2/multicat`](multicat.md) on the operator box |
 
 ## MITRE ATT&CK
 
-| Technique | ID | Description |
-|-----------|-----|-------------|
-| Command and Scripting Interpreter: Unix Shell | [T1059.004](https://attack.mitre.org/techniques/T1059/004/) | Reverse shell execution |
-| Command and Scripting Interpreter | [T1059](https://attack.mitre.org/techniques/T1059/) | Meterpreter staging |
-| Encrypted Channel: Asymmetric Cryptography | [T1573.002](https://attack.mitre.org/techniques/T1573/002/) | TLS/uTLS transport |
-| Application Layer Protocol: Web Protocols | [T1071.001](https://attack.mitre.org/techniques/T1071/001/) | Malleable HTTP profiles |
-| Non-Standard Port | [T1571](https://attack.mitre.org/techniques/T1571/) | Multi-session reverse shell listener (operator-side) |
+| T-ID | Name | Packages | D3FEND counter |
+|---|---|---|---|
+| [T1071](https://attack.mitre.org/techniques/T1071/) | Application Layer Protocol | `c2/transport` (HTTP/TLS), `c2/transport/namedpipe` | D3-NTA |
+| [T1071.001](https://attack.mitre.org/techniques/T1071/001/) | Web Protocols | `c2/transport` (malleable), `c2/meterpreter` (HTTP/HTTPS) | D3-NTA |
+| [T1573](https://attack.mitre.org/techniques/T1573/) | Encrypted Channel | `c2/transport` (TLS) | D3-NTA |
+| [T1573.002](https://attack.mitre.org/techniques/T1573/002/) | Asymmetric Cryptography | `c2/cert` (mTLS) | D3-NTA |
+| [T1095](https://attack.mitre.org/techniques/T1095/) | Non-Application Layer Protocol | `c2/transport` (raw TCP) | D3-NTA |
+| [T1059](https://attack.mitre.org/techniques/T1059/) | Command and Scripting Interpreter | `c2/shell` | D3-PSA |
+| [T1571](https://attack.mitre.org/techniques/T1571/) | Non-Standard Port | `c2/multicat` | D3-NTA |
+| [T1021.002](https://attack.mitre.org/techniques/T1021/002/) | SMB/Admin Shares | `c2/transport/namedpipe` (cross-host) | D3-NTA |
 
-## D3FEND Countermeasures
+## See also
 
-| Countermeasure | ID | Description |
-|----------------|-----|-------------|
-| Outbound Connection Analysis | [D3-OCA](https://d3fend.mitre.org/technique/d3f:OutboundConnectionAnalysis/) | Detect reverse shell callbacks |
-| DNS Traffic Analysis | [D3-DNSTA](https://d3fend.mitre.org/technique/d3f:DNSTrafficAnalysis/) | Detect C2 DNS patterns |
-| Network Traffic Analysis | [D3-NTA](https://d3fend.mitre.org/technique/d3f:NetworkTrafficAnalysis/) | Detect anomalous HTTP patterns |
+- [Operator path: build a reliable shell](../../by-role/operator.md)
+- [Detection eng path: C2 telemetry](../../by-role/detection-eng.md)
+- [`evasion`](../evasion/README.md) — apply patches **before** the
+  shell connects.
+- [`useragent`](../../../useragent) — pair with HTTP transports for
+  realistic User-Agent headers.
+- [`inject`](../injection/README.md) — stage execution surface for
+  `c2/meterpreter`.

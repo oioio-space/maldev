@@ -51,25 +51,36 @@ OPSEC / MITRE / Limitations / See also).
 
 | T-ID | Packages |
 |---|---|
+| [T1021.002](https://attack.mitre.org/techniques/T1021/002/) | [`c2/transport/namedpipe`](../c2/transport/namedpipe) |
 | [T1027](https://attack.mitre.org/techniques/T1027/) | [`crypto`](../crypto) · [`encode`](../encode) · [`evasion/sleepmask`](../evasion/sleepmask) |
 | [T1027.013](https://attack.mitre.org/techniques/T1027/013/) | [`crypto`](../crypto) |
 | [T1036](https://attack.mitre.org/techniques/T1036/) | [`evasion/callstack`](../evasion/callstack) · [`evasion/stealthopen`](../evasion/stealthopen) |
-| [T1055](https://attack.mitre.org/techniques/T1055/) | [`inject`](../inject) |
+| [T1055](https://attack.mitre.org/techniques/T1055/) | [`c2/meterpreter`](../c2/meterpreter) · [`inject`](../inject) |
 | [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | [`inject`](../inject) |
 | [T1055.003](https://attack.mitre.org/techniques/T1055/003/) | [`inject`](../inject) |
 | [T1055.004](https://attack.mitre.org/techniques/T1055/004/) | [`inject`](../inject) |
 | [T1055.012](https://attack.mitre.org/techniques/T1055/012/) | [`inject`](../inject) |
 | [T1055.015](https://attack.mitre.org/techniques/T1055/015/) | [`inject`](../inject) |
 | [T1056.001](https://attack.mitre.org/techniques/T1056/001/) | [`collection`](../collection) · [`collection/keylog`](../collection/keylog) |
+| [T1059](https://attack.mitre.org/techniques/T1059/) | [`c2`](../c2) · [`c2/meterpreter`](../c2/meterpreter) · [`c2/shell`](../c2/shell) |
+| [T1059.001](https://attack.mitre.org/techniques/T1059/001/) | [`c2/shell`](../c2/shell) |
+| [T1059.003](https://attack.mitre.org/techniques/T1059/003/) | [`c2/shell`](../c2/shell) |
+| [T1059.004](https://attack.mitre.org/techniques/T1059/004/) | [`c2/shell`](../c2/shell) |
 | [T1070](https://attack.mitre.org/techniques/T1070/) | [`cleanup/memory`](../cleanup/memory) |
 | [T1070.004](https://attack.mitre.org/techniques/T1070/004/) | [`cleanup/wipe`](../cleanup/wipe) |
 | [T1070.006](https://attack.mitre.org/techniques/T1070/006/) | [`cleanup/timestomp`](../cleanup/timestomp) |
-| [T1071.001](https://attack.mitre.org/techniques/T1071/001/) | [`useragent`](../useragent) |
+| [T1071](https://attack.mitre.org/techniques/T1071/) | [`c2`](../c2) · [`c2/transport`](../c2/transport) |
+| [T1071.001](https://attack.mitre.org/techniques/T1071/001/) | [`c2`](../c2) · [`c2/meterpreter`](../c2/meterpreter) · [`c2/transport/namedpipe`](../c2/transport/namedpipe) · [`useragent`](../useragent) |
+| [T1095](https://attack.mitre.org/techniques/T1095/) | [`c2`](../c2) · [`c2/meterpreter`](../c2/meterpreter) · [`c2/transport`](../c2/transport) |
 | [T1113](https://attack.mitre.org/techniques/T1113/) | [`collection`](../collection) |
 | [T1115](https://attack.mitre.org/techniques/T1115/) | [`collection`](../collection) |
 | [T1529](https://attack.mitre.org/techniques/T1529/) | [`cleanup/bsod`](../cleanup/bsod) |
 | [T1562.001](https://attack.mitre.org/techniques/T1562/001/) | [`evasion/cet`](../evasion/cet) · [`evasion/kcallback`](../evasion/kcallback) · [`evasion/preset`](../evasion/preset) |
 | [T1564.004](https://attack.mitre.org/techniques/T1564/004/) | [`cleanup/ads`](../cleanup/ads) |
+| [T1571](https://attack.mitre.org/techniques/T1571/) | [`c2`](../c2) · [`c2/multicat`](../c2/multicat) |
+| [T1573](https://attack.mitre.org/techniques/T1573/) | [`c2`](../c2) · [`c2/transport`](../c2/transport) |
+| [T1573.001](https://attack.mitre.org/techniques/T1573/001/) | [`c2/cert`](../c2/cert) |
+| [T1573.002](https://attack.mitre.org/techniques/T1573/002/) | [`c2`](../c2) · [`c2/cert`](../c2/cert) · [`c2/transport`](../c2/transport) |
 | [T1574.012](https://attack.mitre.org/techniques/T1574/012/) | [`evasion/hook`](../evasion/hook) |
 
 <!-- END AUTOGEN: mitre-index -->
@@ -85,20 +96,25 @@ godoc.
 |---|---|---|
 | [`.`](https://pkg.go.dev/github.com/oioio-space/maldev) | — | is a modular malware development library for offensive
 security research and red team operations |
-| [`c2`](https://pkg.go.dev/github.com/oioio-space/maldev/c2) | — | provides command and control building blocks: reverse shells,
-Meterpreter staging, pluggable transports (TCP/TLS/uTLS/NamedPipe), mTLS
-certificate helpers, and session multiplexing |
-| [`c2/cert`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/cert) | — | provides self-signed X.509 certificate generation and
+| [`c2`](https://pkg.go.dev/github.com/oioio-space/maldev/c2) | Varies | provides command and control building blocks: reverse
+shells, Meterpreter staging, pluggable transports (TCP / TLS / uTLS /
+named pipe), mTLS certificate helpers, and session multiplexing |
+| [`c2/cert`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/cert) | quiet | provides self-signed X.509 certificate generation and
 fingerprint computation for C2 TLS infrastructure |
-| [`c2/meterpreter`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/meterpreter) | — | implements Metasploit Framework staging functionality
-for receiving and executing second-stage Meterpreter payloads |
-| [`c2/multicat`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/multicat) | — | provides a multi-session reverse shell listener for operator use |
-| [`c2/shell`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell) | — | provides a reverse shell implementation with automatic
-reconnection, PTY support, and optional Windows evasion techniques |
-| [`c2/transport`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport) | — | provides pluggable network transport implementations
-for C2 communication including plain TCP and TLS with certificate pinning |
-| [`c2/transport/namedpipe`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport/namedpipe) | — | provides a Windows named pipe transport implementing
-the transport.Transport and transport.Listener interfaces |
+| [`c2/meterpreter`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/meterpreter) | noisy | implements Metasploit Framework staging — pulls
+a second-stage Meterpreter payload from a `multi/handler` and
+executes it in the current process or a target picked via the
+optional `Config.Injector` |
+| [`c2/multicat`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/multicat) | quiet | provides a multi-session reverse-shell listener
+for operator use |
+| [`c2/shell`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell) | noisy | provides a reverse shell with automatic reconnection,
+PTY support, and optional Windows evasion integration |
+| [`c2/transport`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport) | moderate | provides pluggable network transport
+implementations for C2 communication: plain TCP, TLS with optional
+certificate pinning, and uTLS for JA3/JA4 fingerprint randomisation |
+| [`c2/transport/namedpipe`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport/namedpipe) | quiet | provides a Windows named-pipe transport
+implementing the [github.com/oioio-space/maldev/c2/transport]
+`Transport` and `Listener` interfaces |
 | [`cleanup`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup) | — | provides on-host artifact removal and anti-forensics
 utilities used after an operation completes |
 | [`cleanup/ads`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/ads) | quiet | provides CRUD operations for NTFS Alternate Data Streams |

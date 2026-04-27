@@ -1,23 +1,41 @@
-# Multicat — Multi-Session Reverse-Shell Listener
-
-[<- Back to C2 index](README.md)
-
-**MITRE ATT&CK:** [T1571 - Non-Standard Port](https://attack.mitre.org/techniques/T1571/)
-**Package:** `c2/multicat`
-**Platform:** Cross-platform (operator-side only)
-**Detection:** Low — never embedded in the implant; runs on the operator box.
-
 ---
+package: github.com/oioio-space/maldev/c2/multicat
+last_reviewed: 2026-04-27
+reflects_commit: 36484a4
+---
+
+# Multicat — multi-session listener
+
+[← c2 index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Operator-side counterpart to `c2/shell`. One `Listener`, many
+concurrent agents. Each inbound connection gets a sequential session
+ID, optional BANNER-encoded hostname metadata, and a lifecycle event
+(`EventOpened` / `EventClosed`) on the manager's channel. Sessions
+are in-memory only — they do not survive a manager restart. Never
+embedded in the implant.
 
 ## Primer
 
-Multicat is the operator's side of a reverse shell: one port, many concurrent agents. Each inbound connection gets a session ID and a lifecycle event. Defenders see nothing new here — the noise is on the implant's egress, not the listener.
+Engagements with more than one host quickly outgrow a single `nc -lvp
+4444`. Multicat is a thin manager that owns one transport `Listener`,
+accepts every incoming agent, assigns a session ID, optionally reads
+a `BANNER:<hostname>\n` hello line, and emits a typed event so an
+operator UI (TUI, web dashboard, anything) can render an arrival /
+departure stream.
 
----
+The wire protocol is intentionally tiny: when an agent connects,
+multicat reads the first line with a 500 ms deadline. If the line
+matches `BANNER:<hostname>\n`, it populates `SessionMetadata.Hostname`.
+All other bytes are part of the normal shell I/O stream and pass
+through. Agents that do not implement BANNER are unaffected.
 
-## How It Works
+The package never runs on a target — it is operator infrastructure.
+That keeps the detection surface zero.
 
-One listener accepts arbitrarily many transport connections, wraps each in a `Session`, and streams `EventOpened` / `EventClosed` so an operator UI can track arrivals in real time.
+## How it works
 
 ```mermaid
 sequenceDiagram
@@ -25,251 +43,148 @@ sequenceDiagram
     participant Mgr as multicat.Manager
     participant Op as Operator UI
 
-    Agent->>Mgr: Dial (TCP/TLS/pipe)
-    Agent->>Mgr: BANNER:<hostname>\n
-    Mgr->>Mgr: Assign sequential ID<br/>parse hostname
-    Mgr-->>Op: EventOpened{ID, RemoteAddr, Hostname}
-    Note over Agent,Mgr: shell I/O multiplexed<br/>over same connection
-    Agent--xMgr: disconnect
-    Mgr-->>Op: EventClosed{ID}
+    Agent->>Mgr: Connect (transport)
+    Mgr->>Mgr: assign session ID
+    Mgr->>Agent: read first line (500ms deadline)
+    Agent-->>Mgr: BANNER:lab-host-01\n  (optional)
+    Mgr->>Op: Event{Type: EventOpened, Session: …}
+    Note over Agent,Mgr: full-duplex shell I/O
+    Agent->>Mgr: connection drop
+    Mgr->>Op: Event{Type: EventClosed, Session: …}
 ```
-
-- `multicat.New()` — create a `Manager` with an internal events channel.
-- `Manager.Listen(ctx, lis)` — accept against any `transport.Listener` (TCP, TLS, uTLS, named pipe).
-- First inbound line parsed with 500 ms deadline: `BANNER:<hostname>\n` populates `Session.Meta.Hostname`.
-- `Manager.Events()` — receive-only channel of lifecycle events.
-- `Manager.Sessions()` / `Get(id)` / `Remove(id)` — live roster access.
-
-Sessions live in memory; a manager restart drops them all.
-
----
-
-## Usage
-
-```go
-import (
-    "context"
-
-    "github.com/oioio-space/maldev/c2/multicat"
-    "github.com/oioio-space/maldev/c2/transport"
-)
-
-func main() {
-    lis, _ := transport.NewTCPListener(":4444")
-    mgr := multicat.New()
-
-    go mgr.Listen(context.Background(), lis)
-
-    for ev := range mgr.Events() {
-        if ev.Type == multicat.EventOpened {
-            // ev.Session.Meta.ID / RemoteAddr / Hostname
-            // ev.Session implements io.ReadWriteCloser
-        }
-    }
-}
-```
-
-The agent side (a `c2/shell` implant) should emit `BANNER:<hostname>\n` as its first write so the manager can label sessions without extra round-trips.
-
----
-
-## Advanced — Interactive Session Roster
-
-Track sessions by ID, switch between them, and push a command to a specific
-agent. The `Events()` channel drives the UI state; `Get(id)` recovers a
-`Session` for I/O; `Remove(id)` is idempotent.
-
-```go
-package main
-
-import (
-    "bufio"
-    "context"
-    "fmt"
-    "os"
-    "strings"
-
-    "github.com/oioio-space/maldev/c2/multicat"
-    "github.com/oioio-space/maldev/c2/transport"
-)
-
-func main() {
-    lis, _ := transport.NewTCPListener(":4444")
-    mgr := multicat.New()
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
-    go mgr.Listen(ctx, lis)
-
-    // Passive: log arrivals/departures.
-    go func() {
-        for ev := range mgr.Events() {
-            switch ev.Type {
-            case multicat.EventOpened:
-                fmt.Printf("[+] %s from %s (%s)\n",
-                    ev.Session.Meta.ID,
-                    ev.Session.Meta.RemoteAddr,
-                    ev.Session.Meta.Hostname)
-            case multicat.EventClosed:
-                fmt.Printf("[-] %s closed\n", ev.Session.Meta.ID)
-            }
-        }
-    }()
-
-    // Active: operator REPL — "list", "use <id>", "kill <id>".
-    in := bufio.NewScanner(os.Stdin)
-    var active *multicat.Session
-    for in.Scan() {
-        parts := strings.Fields(in.Text())
-        switch {
-        case len(parts) == 1 && parts[0] == "list":
-            for _, s := range mgr.Sessions() {
-                fmt.Printf("  %s  %s\n", s.Meta.ID, s.Meta.Hostname)
-            }
-        case len(parts) == 2 && parts[0] == "use":
-            if s, ok := mgr.Get(parts[1]); ok {
-                active = s
-            }
-        case len(parts) == 2 && parts[0] == "kill":
-            _ = mgr.Remove(parts[1])
-        default:
-            if active != nil {
-                fmt.Fprintln(active, in.Text())
-                buf := make([]byte, 4096)
-                n, _ := active.Read(buf)
-                os.Stdout.Write(buf[:n])
-            }
-        }
-    }
-}
-```
-
----
-
-## Combined Example
-
-Stand up a multicat listener and wrap every inbound message in AES-GCM
-before logging it — the transport handles live relay, the per-message
-layer gives you a replayable session archive that cannot be read by
-whoever later compromises the operator box.
-
-```go
-package main
-
-import (
-    "context"
-    "io"
-    "log"
-    "os"
-
-    "github.com/oioio-space/maldev/c2/multicat"
-    "github.com/oioio-space/maldev/c2/transport"
-    "github.com/oioio-space/maldev/crypto"
-)
-
-func main() {
-    // 1. Per-operator AES-GCM key. Shared out-of-band with every implant.
-    key, err := crypto.NewAESKey()
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // 2. Listener — swap for transport.NewTLSListener in production.
-    lis, err := transport.NewTCPListener(":4444")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // 3. Manager + Listen in the background.
-    mgr := multicat.New()
-    go mgr.Listen(context.Background(), lis)
-
-    // 4. Archive each session's raw bytes, encrypted per chunk.
-    for ev := range mgr.Events() {
-        if ev.Type != multicat.EventOpened {
-            continue
-        }
-        go func(s *multicat.Session) {
-            f, _ := os.Create(s.Meta.Hostname + ".log")
-            defer f.Close()
-            buf := make([]byte, 4096)
-            for {
-                n, err := s.Read(buf)
-                if n > 0 {
-                    blob, _ := crypto.EncryptAESGCM(key, buf[:n])
-                    _, _ = f.Write(blob)
-                }
-                if err == io.EOF {
-                    return
-                }
-            }
-        }(ev.Session)
-    }
-}
-```
-
-Layered benefit: the network leg stays plaintext-agnostic (swap TCP
-for TLS without touching application code), and even a full disk
-compromise of the operator box yields only AES-GCM ciphertext — the
-shared key never touches storage.
-
----
 
 ## API Reference
 
-```go
-// EventType discriminates lifecycle events on Manager.Events().
-type EventType int
+### `multicat.New() *Manager`
 
-const (
-    EventConnected EventType = iota
-    EventDisconnected
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/multicat#New)
+
+Construct an empty manager.
+
+### `(*Manager).Listen(ctx context.Context, ln transport.Listener) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/multicat#Manager.Listen)
+
+Accept loop. Blocks until `ctx` is cancelled or the listener errors.
+
+### `(*Manager).Events() <-chan Event`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/multicat#Manager.Events)
+
+Returns the lifecycle-event channel. Close-safe.
+
+### `multicat.Session` / `multicat.SessionMetadata`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/multicat#Session)
+
+`Session` holds the connection plus a `SessionMetadata` (`ID`,
+`Hostname`, `RemoteAddr`).
+
+### `multicat.EventType`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/multicat#EventType)
+
+Enum: `EventOpened`, `EventClosed`.
+
+## Examples
+
+### Simple
+
+```go
+import (
+    "context"
+    "fmt"
+
+    "github.com/oioio-space/maldev/c2/multicat"
+    "github.com/oioio-space/maldev/c2/transport"
 )
 
-// SessionMetadata aggregates connection-time facts about a session.
-type SessionMetadata struct {
-    RemoteAddr string
-    Hostname   string
-    Username   string
-    OS         string
-    ConnectedAt time.Time
+ln, _ := transport.NewTCPListener(":4444")
+mgr := multicat.New()
+go func() { _ = mgr.Listen(context.Background(), ln) }()
+
+for ev := range mgr.Events() {
+    if ev.Type == multicat.EventOpened {
+        fmt.Printf("[+] %s from %s\n", ev.Session.Meta.Hostname, ev.Session.Meta.RemoteAddr)
+    }
 }
-
-// Session is one accepted reverse-shell connection.
-type Session struct {
-    ID       string
-    Conn     net.Conn
-    Metadata SessionMetadata
-}
-
-// Event surfaces a session lifecycle change.
-type Event struct {
-    Type    EventType
-    Session *Session
-}
-
-// Manager owns the listener loop, the session table, and the event fan-out.
-type Manager struct{ /* unexported fields */ }
-
-// New creates an empty Manager. Call Listen with one or more
-// transport.Listener implementations (TCP, named pipe, …) to start
-// accepting sessions.
-func New() *Manager
-
-// Listen accepts every connection from l and registers each as a
-// Session until ctx is canceled or l errors.
-func (m *Manager) Listen(ctx context.Context, l transport.Listener) error
-
-// Events returns the receive-only channel of Event values.
-func (m *Manager) Events() <-chan Event
-
-// Sessions returns a snapshot of every currently-registered session.
-func (m *Manager) Sessions() []*Session
-
-// Get returns the Session with the given ID, or (nil, false) if absent.
-func (m *Manager) Get(id string) (*Session, bool)
-
-// Remove closes and unregisters the named session.
-func (m *Manager) Remove(id string) error
 ```
 
-See also [c2.md](../../c2.md#c2multicat----operator-side-multi-session-listener) for the package summary row.
+### Composed (TLS listener + BANNER agents)
+
+Operator side:
+
+```go
+ln, _ := transport.NewTLSListener(":8443", "server.crt", "server.key")
+mgr := multicat.New()
+go mgr.Listen(context.Background(), ln)
+```
+
+Agent side (in `c2/shell` extension or custom code):
+
+```go
+_, _ = conn.Write([]byte("BANNER:" + osHostname + "\n"))
+```
+
+### Advanced (channel multiplexer routing into a TUI)
+
+```go
+go func() {
+    for ev := range mgr.Events() {
+        switch ev.Type {
+        case multicat.EventOpened:
+            ui.Add(ev.Session)
+        case multicat.EventClosed:
+            ui.Remove(ev.Session.Meta.ID)
+        }
+    }
+}()
+```
+
+### Complex
+
+The `Manager` does not own session selection or interactive
+"foreground" semantics — that is the operator UI's job. See
+`cmd/rshell` for a reference TUI.
+
+See `ExampleNew` in
+[`multicat_example_test.go`](../../../c2/multicat/multicat_example_test.go).
+
+## OPSEC & Detection
+
+This package never executes on a target. The only relevant signals
+are on the agent side ([reverse-shell.md](reverse-shell.md)).
+
+The operator-side listener is an inbound TCP / TLS port on the
+operator's box. Common operator-hygiene practices apply: bind on a
+private interface, front with a redirector (Apache rewrite,
+Cloudflare worker), put it behind a single jump host.
+
+## MITRE ATT&CK
+
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1571](https://attack.mitre.org/techniques/T1571/) | Non-Standard Port | listener typically binds a high non-standard port | D3-NTA |
+
+## Limitations
+
+- **In-memory state.** Restarting the manager loses every session.
+  Persist out-of-band (log file, database) if the engagement needs
+  continuity.
+- **No interactive multiplexer.** The package emits events; the
+  operator UI implements foreground selection, scroll-back, kill-on-
+  exit. `cmd/rshell` is the reference TUI.
+- **BANNER deadline is 500 ms.** Lossy networks may miss the BANNER
+  line and treat the bytes as shell I/O. The agent should retry or
+  fall back to inline `BANNER` once authenticated.
+- **No authentication.** `multicat` accepts whoever the listener
+  hands it. For mTLS, configure on the listener
+  ([`c2/cert`](transport.md#cert-pinning)).
+
+## See also
+
+- [Reverse shell](reverse-shell.md) — agent counterpart.
+- [Transport](transport.md) — listener factories
+  (`NewTCPListener`, `NewTLSListener`).
+- [`cmd/rshell`](../../../cmd/rshell) — reference TUI built on
+  multicat.

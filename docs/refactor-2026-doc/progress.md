@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-04-27
-reflects_commit: ab0f7f8
+reflects_commit: 36484a4
 ---
 
 # Documentation refactor — progress tracker
@@ -54,7 +54,7 @@ Each area gets:
 | `evasion/*` | ✅ 12/12 | 🟡 4/~10 | ✅ 12/12 | **Mostly done.** All doc.go aligned to template; every package has example_test.go covering the exported API. Tech-md template rewrites done for amsi-bypass, etw-patching, sleep-mask (rewritten in 4b? — check), cet (NEW). Tech-md still legacy on: acg-blockdlls, callstack-spoof, inline-hook, kernel-callback-removal, ntdll-unhooking, preset, sleep-mask, stealthopen — do them in a polish round if time, low priority since legacy content is reasonable. **Cross-categorised pages** still living under evasion/ but documenting non-evasion packages: anti-analysis (recon), byovd-rtcore64 (kernel/driver), dll-hijack (recon), fakecmd/hideprocess/phant0m (process/tamper), hw-breakpoints (recon), ppid-spoofing (c2/shell), sandbox/timing (recon) — to be reorganised in Phase 6. |
 | `inject` | ✅ 1/1 | ✅ 12/12 | ✅ 1/1 | Done (sweep landed in commits `4798780..ab0f7f8`). doc.go aligned to template; `inject_example_windows_test.go` added (5 godoc examples covering DefaultWindowsConfig / Build / Pipeline / chained / InjectWithFallback). All 12 tech pages rewritten to template (Group A: CRT, EarlyBird, ThreadHijack — Group B: Callback, ThreadPool, ModuleStomp, SectionMap — Group C: KCT, PhantomDLL, EtwpCreateEtwThread — Group D: NtQueueApcThreadEx, ProcessArgSpoofing) plus area README refreshed (decision flow, SelfInjector contract, syscall modes, MITRE table). |
 | `crypto / encode / hash` | ✅ 5/5 | ✅ 5/5 | ✅ 5/5 | Layer 0 done. doc.go + example_test.go landed earlier (`cf. f815d85`); tech md split into three areas this session: `docs/techniques/crypto/{README,payload-encryption}.md`, `docs/techniques/encode/{README,encode}.md`, `docs/techniques/hash/{README,cryptographic-hashes,fuzzy-hashing}.md` (fuzzy moved out of crypto/). Counts include `random` + `useragent` (Layer 0 helpers, doc.go + example_test.go templated; no dedicated tech md — both are utilities surfaced in their consumers' pages). |
-| `c2/*` | ⬜ 0/7 | ⬜ 0/6 | ⬜ 0/7 | Includes `c2/transport/namedpipe`. |
+| `c2/*` | ✅ 7/7 | ✅ 7/7 | ✅ 7/7 | Sweep landed in commits `36484a4..` (this session). All 7 doc.go aligned to template; example_test.go inherited from earlier work; tech md (`README.md`, `reverse-shell.md`, `transport.md`, `meterpreter.md`, `multicat.md`, `namedpipe.md`, `malleable-profiles.md`) rewritten with full API Reference + 4-tier examples + OPSEC table + MITRE rollup. |
 | `collection/*` | ⬜ 0/3 | ⬜ 0/5 | ⬜ 0/3 | Existing pages cover keylog, clipboard, screenshot, alternate-data-streams, lsass-dump. The last two are mis-categorised — decide canonical home in Phase 6. |
 | `credentials/*` | ⬜ 0/4 | ⬜ 0/3 | ⬜ 0/4 | Big content — sekurlsa is 109-line doc.go already. Audit flagged 3 missing pages: goldenticket, samdump, plus the existing sekurlsa. |
 | `pe/*` | ⬜ 0/7 | ⬜ 0/7 | ⬜ 0/7 | Existing pages: certificate-theft, imports, masquerade, morph, pe-to-shellcode, strip-sanitize. |
