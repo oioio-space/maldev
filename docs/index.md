@@ -56,18 +56,20 @@ OPSEC / MITRE / Limitations / See also).
 | [T1021.002](https://attack.mitre.org/techniques/T1021/002/) | [`c2/transport/namedpipe`](../c2/transport/namedpipe) |
 | [T1027](https://attack.mitre.org/techniques/T1027/) | [`crypto`](../crypto) · [`encode`](../encode) · [`evasion/sleepmask`](../evasion/sleepmask) |
 | [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | [`pe`](../pe) · [`pe/morph`](../pe/morph) · [`pe/parse`](../pe/parse) · [`pe/strip`](../pe/strip) |
-| [T1027.005](https://attack.mitre.org/techniques/T1027/005/) | [`pe/strip`](../pe/strip) |
+| [T1027.005](https://attack.mitre.org/techniques/T1027/005/) | [`pe/strip`](../pe/strip) · [`process/tamper/herpaderping`](../process/tamper/herpaderping) · [`process/tamper/hideprocess`](../process/tamper/hideprocess) |
 | [T1027.013](https://attack.mitre.org/techniques/T1027/013/) | [`crypto`](../crypto) |
 | [T1036](https://attack.mitre.org/techniques/T1036/) | [`evasion/callstack`](../evasion/callstack) · [`evasion/stealthopen`](../evasion/stealthopen) |
-| [T1036.005](https://attack.mitre.org/techniques/T1036/005/) | [`pe`](../pe) · [`pe/masquerade`](../pe/masquerade) |
+| [T1036.005](https://attack.mitre.org/techniques/T1036/005/) | [`pe`](../pe) · [`pe/masquerade`](../pe/masquerade) · [`process`](../process) · [`process/tamper/fakecmd`](../process/tamper/fakecmd) |
 | [T1053.005](https://attack.mitre.org/techniques/T1053/005/) | [`persistence`](../persistence) · [`persistence/scheduler`](../persistence/scheduler) |
-| [T1055](https://attack.mitre.org/techniques/T1055/) | [`c2/meterpreter`](../c2/meterpreter) · [`inject`](../inject) |
+| [T1055](https://attack.mitre.org/techniques/T1055/) | [`c2/meterpreter`](../c2/meterpreter) · [`inject`](../inject) · [`process/tamper/herpaderping`](../process/tamper/herpaderping) |
 | [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | [`inject`](../inject) · [`pe`](../pe) · [`pe/srdi`](../pe/srdi) |
 | [T1055.003](https://attack.mitre.org/techniques/T1055/003/) | [`inject`](../inject) |
 | [T1055.004](https://attack.mitre.org/techniques/T1055/004/) | [`inject`](../inject) |
 | [T1055.012](https://attack.mitre.org/techniques/T1055/012/) | [`inject`](../inject) |
+| [T1055.013](https://attack.mitre.org/techniques/T1055/013/) | [`process`](../process) · [`process/tamper/herpaderping`](../process/tamper/herpaderping) |
 | [T1055.015](https://attack.mitre.org/techniques/T1055/015/) | [`inject`](../inject) |
 | [T1056.001](https://attack.mitre.org/techniques/T1056/001/) | [`collection`](../collection) · [`collection/keylog`](../collection/keylog) |
+| [T1057](https://attack.mitre.org/techniques/T1057/) | [`process`](../process) · [`process/enum`](../process/enum) |
 | [T1059](https://attack.mitre.org/techniques/T1059/) | [`c2`](../c2) · [`c2/meterpreter`](../c2/meterpreter) · [`c2/shell`](../c2/shell) |
 | [T1059.001](https://attack.mitre.org/techniques/T1059/001/) | [`c2/shell`](../c2/shell) |
 | [T1059.003](https://attack.mitre.org/techniques/T1059/003/) | [`c2/shell`](../c2/shell) |
@@ -82,6 +84,8 @@ OPSEC / MITRE / Limitations / See also).
 | [T1106](https://attack.mitre.org/techniques/T1106/) | [`pe`](../pe) · [`pe/imports`](../pe/imports) |
 | [T1113](https://attack.mitre.org/techniques/T1113/) | [`collection`](../collection) |
 | [T1115](https://attack.mitre.org/techniques/T1115/) | [`collection`](../collection) |
+| [T1134.001](https://attack.mitre.org/techniques/T1134/001/) | [`process/session`](../process/session) |
+| [T1134.002](https://attack.mitre.org/techniques/T1134/002/) | [`process`](../process) · [`process/session`](../process/session) |
 | [T1136.001](https://attack.mitre.org/techniques/T1136/001/) | [`persistence`](../persistence) |
 | [T1204.002](https://attack.mitre.org/techniques/T1204/002/) | [`persistence`](../persistence) · [`persistence/lnk`](../persistence/lnk) |
 | [T1529](https://attack.mitre.org/techniques/T1529/) | [`cleanup/bsod`](../cleanup/bsod) |
@@ -93,6 +97,9 @@ OPSEC / MITRE / Limitations / See also).
 | [T1558.001](https://attack.mitre.org/techniques/T1558/001/) | [`credentials/goldenticket`](../credentials/goldenticket) |
 | [T1558.003](https://attack.mitre.org/techniques/T1558/003/) | [`credentials/sekurlsa`](../credentials/sekurlsa) |
 | [T1562.001](https://attack.mitre.org/techniques/T1562/001/) | [`evasion/cet`](../evasion/cet) · [`evasion/kcallback`](../evasion/kcallback) · [`evasion/preset`](../evasion/preset) |
+| [T1562.002](https://attack.mitre.org/techniques/T1562/002/) | [`process`](../process) · [`process/tamper/phant0m`](../process/tamper/phant0m) |
+| [T1564](https://attack.mitre.org/techniques/T1564/) | [`process/tamper/fakecmd`](../process/tamper/fakecmd) |
+| [T1564.001](https://attack.mitre.org/techniques/T1564/001/) | [`process`](../process) · [`process/tamper/hideprocess`](../process/tamper/hideprocess) |
 | [T1564.004](https://attack.mitre.org/techniques/T1564/004/) | [`cleanup/ads`](../cleanup/ads) |
 | [T1571](https://attack.mitre.org/techniques/T1571/) | [`c2`](../c2) · [`c2/multicat`](../c2/multicat) |
 | [T1573](https://attack.mitre.org/techniques/T1573/) | [`c2`](../c2) · [`c2/transport`](../c2/transport) |
@@ -264,20 +271,30 @@ folder at user logon |
 | [`privesc/cve202430088`](https://pkg.go.dev/github.com/oioio-space/maldev/privesc/cve202430088) | — | implements CVE-2024-30088, a Windows kernel TOCTOU
 race condition in AuthzBasepCopyoutInternalSecurityAttributes that allows
 local privilege escalation to SYSTEM |
-| [`process`](https://pkg.go.dev/github.com/oioio-space/maldev/process) | — | provides cross-platform process enumeration and management |
-| [`process/enum`](https://pkg.go.dev/github.com/oioio-space/maldev/process/enum) | — | provides cross-platform process enumeration for listing
-and searching running processes by name or PID |
-| [`process/session`](https://pkg.go.dev/github.com/oioio-space/maldev/process/session) | — | provides utilities for executing processes and impersonating
-threads in other user sessions on Windows |
-| [`process/tamper/fakecmd`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/fakecmd) | — | overwrites the current process PEB CommandLine string so
-that process-listing tools (Process Explorer, wmic, Get-Process) display a
-fake command line rather than the real one |
-| [`process/tamper/herpaderping`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/herpaderping) | — | implements the Process Herpaderping technique |
-| [`process/tamper/hideprocess`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess) | — | patches NtQuerySystemInformation in a target process
-so it returns STATUS_NOT_IMPLEMENTED, blinding that process's ability to
-enumerate running processes |
-| [`process/tamper/phant0m`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m) | — | provides Event Log service thread termination (Phant0m technique)
-to suppress Windows Event Log recording |
+| [`process`](https://pkg.go.dev/github.com/oioio-space/maldev/process) | Varies | is the umbrella for cross-platform process
+enumeration / management, plus the Windows-specific
+process-tamper sub-tree |
+| [`process/enum`](https://pkg.go.dev/github.com/oioio-space/maldev/process/enum) | quiet | provides cross-platform process enumeration —
+list every running process or find one by name / predicate |
+| [`process/session`](https://pkg.go.dev/github.com/oioio-space/maldev/process/session) | moderate | enumerates Windows sessions and creates
+processes / impersonates threads inside other users'
+sessions |
+| [`process/tamper/fakecmd`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/fakecmd) | quiet | overwrites the current process's PEB
+`CommandLine` UNICODE_STRING so process-listing tools
+(Process Explorer, `wmic`, `Get-Process`, Task Manager)
+display a fake command-line instead of the real one |
+| [`process/tamper/herpaderping`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/herpaderping) | moderate | implements Process Herpaderping and the
+related Process Ghosting variant — kernel image-section cache
+exploitation that lets the running process execute one PE
+while the file on disk reads as another (or doesn't exist) |
+| [`process/tamper/hideprocess`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess) | moderate | patches `NtQuerySystemInformation` in a
+target process so it returns `STATUS_NOT_IMPLEMENTED`,
+blinding that process's ability to enumerate running
+processes |
+| [`process/tamper/phant0m`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m) | noisy | suppresses Windows Event Log recording by
+terminating the EventLog service threads inside the hosting
+`svchost.exe` — the service stays "Running" in the SCM
+listing but no new entries are written |
 | [`random`](https://pkg.go.dev/github.com/oioio-space/maldev/random) | very-quiet | provides cryptographically secure random generation
 helpers backed by `crypto/rand` (OS entropy) |
 | [`recon/antidebug`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antidebug) | — | provides cross-platform debugger detection techniques |

@@ -1,20 +1,50 @@
-// Package phant0m provides Event Log service thread termination (Phant0m technique)
-// to suppress Windows Event Log recording.
+// Package phant0m suppresses Windows Event Log recording by
+// terminating the EventLog service threads inside the hosting
+// `svchost.exe` — the service stays "Running" in the SCM
+// listing but no new entries are written.
 //
-// Technique: Terminate threads of the Event Log service to prevent log writes.
-// MITRE ATT&CK: T1562.002 (Impair Defenses: Disable Windows Event Logging)
-// Platform: Windows
-// Detection: High -- killing Event Log threads triggers alerts in mature environments.
+// Mechanics:
 //
-// The Phant0m technique enumerates threads belonging to the Windows Event Log
-// service (svchost.exe hosting EventLog) and terminates them individually,
-// preventing new events from being written while the service appears running.
+//  1. Enumerate svchost.exe processes; identify the one
+//     hosting the EventLog service (`svchost.exe -k LocalServiceNetworkRestricted`
+//     on modern Windows).
+//  2. List its threads via `NtQuerySystemInformation(SystemProcessInformation)`
+//     or `CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD)`.
+//  3. Open each thread (`OpenThread(THREAD_TERMINATE)`) and
+//     call `TerminateThread` individually.
 //
-// How it works: The Windows Event Log service runs as a set of threads inside
-// a shared svchost.exe process. Rather than stopping the service (which would
-// trigger an alert), Phant0m identifies the specific svchost process hosting
-// the EventLog service, enumerates its threads, and terminates each one
-// individually using TerminateThread. The service remains registered as
-// "running" in the SCM, but with no threads alive, no new log entries can be
-// written -- effectively silencing the event log without a visible service stop.
+// SCM still reports "Running" because the *process* is alive —
+// only the worker threads of the EventLog service inside the
+// shared host are dead. New writes via `ReportEvent` /
+// `EvtReportEvent` queue but never persist.
+//
+// # MITRE ATT&CK
+//
+//   - T1562.002 (Impair Defenses: Disable Windows Event Logging)
+//
+// # Detection level
+//
+// noisy
+//
+// Killing EventLog threads is itself an event the EventLog
+// service would log — but it can't. Mature SOCs detect the
+// gap: EventLog entries stop arriving, the service shows
+// "Running", a heartbeat probe (Defender, MDE, custom
+// tripwire) fires. Sysmon Event ID 8 (CreateRemoteThread)
+// against svchost.exe + Sysmon Event ID 10 (ProcessAccess)
+// with `THREAD_TERMINATE` are the kernel-side telemetry
+// most EDRs ship by default.
+//
+// # Example
+//
+// See [ExampleKill] in phant0m_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/process/phant0m.md
+//   - [github.com/oioio-space/maldev/evasion/etw] — sibling logging-suppression surface (per-process ETW)
+//   - [github.com/oioio-space/maldev/cleanup] — pair to clean log artefacts at op end
+//
+// [github.com/oioio-space/maldev/evasion/etw]: https://pkg.go.dev/github.com/oioio-space/maldev/evasion/etw
+// [github.com/oioio-space/maldev/cleanup]: https://pkg.go.dev/github.com/oioio-space/maldev/cleanup
 package phant0m
