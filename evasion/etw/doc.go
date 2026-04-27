@@ -1,23 +1,43 @@
-// Package etw provides ETW (Event Tracing for Windows) bypass techniques
-// through runtime patching of ntdll event writing functions.
+//go:build windows
+
+// Package etw blinds Event Tracing for Windows in the current process
+// by patching the ETW write helpers in `ntdll.dll` with
+// `xor rax,rax; ret`.
 //
-// Technique: Runtime patching of ntdll ETW event writing functions.
-// MITRE ATT&CK: T1562.001 (Impair Defenses: Disable or Modify Tools)
-// Platform: Windows
-// Detection: Medium -- patches ntdll.dll in-memory, detectable by integrity checks.
+// PatchAll overwrites all five user-mode write functions
+// (`EtwEventWrite`, `EtwEventWriteEx`, `EtwEventWriteFull`,
+// `EtwEventWriteString`, `EtwEventWriteTransfer`) so any provider in
+// the process emits zero events while still returning STATUS_SUCCESS.
+// PatchNtTraceEvent additionally patches the kernel-call layer
+// `NtTraceEvent` with a single RET — useful when an EDR is direct-
+// calling that primitive. Wrappers `All` / `PatchTechnique` /
+// `NtTraceTechnique` adapt these to `evasion.Technique` for use with
+// `evasion.ApplyAll`.
 //
-// Patch overwrites all 5 ETW event writing functions (EtwEventWrite,
-// EtwEventWriteEx, EtwEventWriteFull, EtwEventWriteString, EtwEventWriteTransfer)
-// with "xor rax, rax; ret" (48 33 C0 C3), making them return STATUS_SUCCESS
-// without logging.
+// All entry points accept a `*wsyscall.Caller`. Pass an indirect-
+// syscall caller in production so the `NtProtectVirtualMemory` flips
+// route through clean ntdll stubs even if the EDR has hooked them.
 //
-// PatchNtTraceEvent patches the lower-level NtTraceEvent with a single RET.
+// # MITRE ATT&CK
 //
-// How it works: ETW is the primary telemetry pipeline in Windows, used by EDR
-// and security products to receive real-time events from both user-mode and
-// kernel-mode providers. By patching the ETW event writing functions in the
-// process's own copy of ntdll.dll, the implant prevents any ETW events from
-// being emitted from its process. The patch replaces each function's prologue
-// with "xor rax, rax; ret", which returns STATUS_SUCCESS (0) without writing
-// any event data, effectively blinding any ETW consumer monitoring the process.
+//   - T1562.001 (Impair Defenses: Disable or Modify Tools)
+//
+// # Detection level
+//
+// moderate
+//
+// The patched bytes are visible to anyone reading `ntdll.dll` RX pages
+// from outside; integrity-checking EDR stages catch this. The
+// `NtProtectVirtualMemory` calls show up in TI ETW events.
+//
+// # Example
+//
+// See [ExamplePatchAll] in etw_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/evasion/etw-patching.md
+//   - [github.com/oioio-space/maldev/evasion/amsi] — sibling defence-impair
+//
+// [github.com/oioio-space/maldev/evasion/amsi]: https://pkg.go.dev/github.com/oioio-space/maldev/evasion/amsi
 package etw

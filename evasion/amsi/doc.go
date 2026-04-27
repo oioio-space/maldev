@@ -1,24 +1,45 @@
-// Package amsi provides AMSI (Antimalware Scan Interface) bypass techniques
-// through runtime memory patching of amsi.dll functions.
+//go:build windows
+
+// Package amsi disables the Antimalware Scan Interface in the current
+// process via runtime memory patches on `amsi.dll`.
 //
-// Technique: Runtime memory patching of AmsiScanBuffer and AmsiOpenSession.
-// MITRE ATT&CK: T1562.001 (Impair Defenses: Disable or Modify Tools)
-// Platform: Windows
-// Detection: Medium -- EDR may monitor VirtualProtect on amsi.dll pages.
+// AMSI is the Windows interface that ships scripts (.NET, PowerShell,
+// VBScript, JavaScript) to a registered antimalware provider for
+// scanning. PatchScanBuffer overwrites the prologue of `AmsiScanBuffer`
+// with `xor eax,eax; ret` so the scan returns S_OK with a "clean"
+// verdict regardless of input. PatchOpenSession flips the conditional
+// jump in `AmsiOpenSession` so session creation always succeeds without
+// initialising the provider. PatchAll applies both. ScanBufferPatch /
+// OpenSessionPatch / All wrap each in an `evasion.Technique` for
+// composition with `evasion.ApplyAll`.
 //
-// Two bypass methods:
-//   - PatchScanBuffer: overwrites AmsiScanBuffer entry to return E_INVALIDARG,
-//     making AMSI report all scans as clean.
-//   - PatchOpenSession: flips a conditional jump (JZ to JNZ) in AmsiOpenSession,
-//     preventing AMSI session initialization.
-//   - PatchAll: applies both patches in sequence.
+// All entry points accept a `*wsyscall.Caller`. Pass `nil` to fall back
+// to WinAPI for debugging; pass an indirect-syscall caller in
+// production so the `NtProtectVirtualMemory` calls that flip the page
+// to RWX are routed through clean ntdll stubs.
 //
-// Returns nil if amsi.dll is not loaded (nothing to patch).
+// # MITRE ATT&CK
 //
-// How it works: AMSI is a Windows interface that allows antivirus engines to
-// scan scripts and .NET assemblies at runtime before they execute. Offensive
-// tools patch AMSI to prevent detection of in-memory payloads that would
-// otherwise be flagged. The patch overwrites the first few bytes of
-// AmsiScanBuffer's entry point so the function returns immediately with a
-// benign result, causing the AV engine to never see the content being scanned.
+//   - T1562.001 (Impair Defenses: Disable or Modify Tools)
+//
+// # Detection level
+//
+// noisy
+//
+// `NtProtectVirtualMemory` flips on `amsi.dll` are visible in ETW
+// Threat Intelligence (`EVENT_TI_NTPROTECT`); the resulting
+// `xor eax,eax; ret` byte pattern is detectable by memory scanners.
+//
+// # Example
+//
+// See [ExampleScanBufferPatch] in amsi_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/evasion/amsi-bypass.md
+//   - [github.com/oioio-space/maldev/evasion/etw] — sibling defence-impair
+//   - [github.com/oioio-space/maldev/evasion/unhook] — restore EDR-hooked APIs
+//
+// [github.com/oioio-space/maldev/evasion/etw]: https://pkg.go.dev/github.com/oioio-space/maldev/evasion/etw
+// [github.com/oioio-space/maldev/evasion/unhook]: https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook
 package amsi

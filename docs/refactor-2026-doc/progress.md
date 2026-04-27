@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-04-27
-reflects_commit: 0587c76
+reflects_commit: 7ac84d2
 ---
 
 # Documentation refactor — progress tracker
@@ -51,7 +51,7 @@ Each area gets:
 | Area | doc.go | tech md | example_test.go | Notes |
 |---|---|---|---|---|
 | `cleanup/*` | ✅ 7/7 | ✅ 7/7 + README | ✅ 8/8 | Done in Phase 2 (`11838e3`). Reference shape for everything below. |
-| `evasion/*` | ⬜ 0/13 | ⬜ 0/~10 | ⬜ 0/13 | **Currently in flight.** Strategy: refactor all `doc.go` and `example_test.go` ; rewrite the 5 most-used tech pages (amsi-bypass, etw-patching, ntdll-unhooking, sleep-mask, cet [NEW]) + area README; defer the rest (acg-blockdlls, callstack-spoof, kernel-callback-removal, preset, stealthopen, inline-hook) to a polish round inside the same phase. |
+| `evasion/*` | 🟡 5/13 | ⬜ 0/~10 | 🟡 5/13 | **In flight.** Sub-batch 4a (this commit): doc.go + example_test.go done for **amsi, etw, unhook, sleepmask, cet**. Remaining 8 packages (acg, blockdlls, callstack, hook + bridge + shellcode, kcallback, preset, stealthopen) keep their legacy doc.go for now and have NO example_test.go yet — pick up here. Sub-batch 4b: tech md rewrites (amsi-bypass, etw-patching, ntdll-unhooking, sleep-mask + new cet.md) + area README + cross-link audit. |
 | `inject` | ⬜ 0/1 | ⬜ 0/13 | ⬜ 0/1 | Single package, large API surface (15+ methods). 13 existing tech pages under `docs/techniques/injection/`. |
 | `crypto / encode / hash` | ⬜ 0/3 | ⬜ 0/4 | ⬜ 0/3 | Layer 0 — pure Go. Should be quick. |
 | `c2/*` | ⬜ 0/7 | ⬜ 0/6 | ⬜ 0/7 | Includes `c2/transport/namedpipe`. |

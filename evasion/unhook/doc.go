@@ -1,38 +1,57 @@
-// Package unhook provides techniques to remove EDR/AV hooks from ntdll.dll
-// by restoring original function bytes from a clean copy.
+//go:build windows
+
+// Package unhook restores the original prologue bytes of `ntdll.dll`
+// functions, removing inline hooks installed by EDR/AV products.
 //
-// Technique: Restore original ntdll.dll function bytes from disk or child process.
-// MITRE ATT&CK: T1562.001 (Impair Defenses: Disable or Modify Tools)
-// Platform: Windows
-// Detection: High -- reading ntdll from disk or spawning processes is monitored.
+// EDRs hook syscall stubs by overwriting the first ~5 bytes of each
+// `Nt*` function with a JMP into their monitoring DLL. The original
+// stub starts with `4C 8B D1 B8 ?? ?? ?? ??` (`mov r10, rcx; mov eax,
+// SSN`). This package restores those bytes from a clean source.
 //
-// Three methods by increasing sophistication:
-//   - ClassicUnhook: restore first 5 bytes of a single function from a disk copy
-//   - FullUnhook: replace the entire .text section from a disk copy, removing ALL hooks
-//   - PerunUnhook: read pristine ntdll from a freshly spawned suspended child process
+// Three escalating strategies:
 //
-// WARNING: All three methods read ntdll.dll from disk (or spawn a process),
-// which internally calls NtCreateFile, NtReadFile, and NtClose via the Go
-// runtime. If these I/O functions are hooked with INT3 or JMP-to-nowhere by
-// an EDR, the unhook operation itself may crash or deadlock.
+//   - ClassicUnhook(funcName) — read `ntdll.dll` from disk, copy the
+//     5-byte prologue back. Has a safelist that rejects Go-runtime-
+//     critical functions (NtClose, NtReadFile, …) to avoid deadlocks.
+//   - FullUnhook — same disk read but replaces the entire `.text`
+//     section in one memcpy. Safe even when the I/O Nt* functions are
+//     hooked, because the read completes before any patch is applied.
+//   - PerunUnhook — read pristine `ntdll.dll` from a freshly spawned
+//     suspended child process (avoids touching disk).
 //
-// FullUnhook is the safest choice: it replaces the entire .text section in
-// one pass, restoring the I/O functions along with everything else. The disk
-// read completes before patching, so the I/O hooks are only a problem during
-// the read — once the clean bytes are in memory, the single memcpy restores
-// all functions including the I/O ones.
+// Helpers: DetectHooked walks a list and reports which are hooked;
+// IsHooked checks one. CommonHookedFunctions and CommonClassic provide
+// a curated default set that EDRs typically watch.
 //
-// ClassicUnhook has a safelist that rejects Go-runtime-critical functions
-// (NtClose, NtCreateFile, NtReadFile, etc.) to prevent deadlocks. Prefer
-// unhooking the syscall functions you actually need (NtAllocateVirtualMemory,
-// NtCreateThreadEx, etc.).
+// Every entry point accepts a `*wsyscall.Caller` and a
+// `stealthopen.Opener`. The Caller routes the patch's
+// `NtProtectVirtualMemory` calls through indirect syscalls; the Opener
+// (when non-nil) routes the disk read of `ntdll.dll` through
+// `OpenFileById` so path-based EDR file hooks can't see it.
 //
-// How it works: EDR products install inline hooks by overwriting the first few
-// bytes of key ntdll functions (like NtAllocateVirtualMemory) with a JMP
-// instruction that redirects execution into the EDR's monitoring DLL. This
-// lets the EDR inspect every syscall before it reaches the kernel. Unhooking
-// reverses this by obtaining a clean, unmodified copy of ntdll.dll -- either
-// from disk or from a freshly spawned process that has not yet been hooked --
-// and overwriting the hooked .text section with the original bytes, restoring
-// all functions to their pristine state.
+// # MITRE ATT&CK
+//
+//   - T1562.001 (Impair Defenses: Disable or Modify Tools)
+//
+// # Detection level
+//
+// noisy
+//
+// EDRs that scan their own hook bytes for tampering catch the restored
+// stubs immediately. The disk read of `ntdll.dll` is itself
+// instrumentable. PerunUnhook (process-spawn variant) leaves the
+// suspended-child-process artefact.
+//
+// # Example
+//
+// See [ExampleClassic] and [ExampleFull] in unhook_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/evasion/ntdll-unhooking.md
+//   - [github.com/oioio-space/maldev/evasion/stealthopen] — `Opener` for the disk read
+//   - [github.com/oioio-space/maldev/win/syscall] — Caller chain
+//
+// [github.com/oioio-space/maldev/evasion/stealthopen]: https://pkg.go.dev/github.com/oioio-space/maldev/evasion/stealthopen
+// [github.com/oioio-space/maldev/win/syscall]: https://pkg.go.dev/github.com/oioio-space/maldev/win/syscall
 package unhook

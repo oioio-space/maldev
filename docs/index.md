@@ -49,11 +49,13 @@ OPSEC / MITRE / Limitations / See also).
 
 | T-ID | Packages |
 |---|---|
+| [T1027](https://attack.mitre.org/techniques/T1027/) | [`evasion/sleepmask`](../evasion/sleepmask) |
 | [T1070](https://attack.mitre.org/techniques/T1070/) | [`cleanup/memory`](../cleanup/memory) |
 | [T1070.004](https://attack.mitre.org/techniques/T1070/004/) | [`cleanup/selfdelete`](../cleanup/selfdelete) · [`cleanup/wipe`](../cleanup/wipe) |
 | [T1070.006](https://attack.mitre.org/techniques/T1070/006/) | [`cleanup/timestomp`](../cleanup/timestomp) |
 | [T1529](https://attack.mitre.org/techniques/T1529/) | [`cleanup/bsod`](../cleanup/bsod) |
 | [T1543.003](https://attack.mitre.org/techniques/T1543/003/) | [`cleanup/service`](../cleanup/service) |
+| [T1562.001](https://attack.mitre.org/techniques/T1562/001/) | [`evasion/amsi`](../evasion/amsi) · [`evasion/cet`](../evasion/cet) · [`evasion/etw`](../evasion/etw) · [`evasion/unhook`](../evasion/unhook) |
 | [T1564](https://attack.mitre.org/techniques/T1564/) | [`cleanup/service`](../cleanup/service) |
 | [T1564.004](https://attack.mitre.org/techniques/T1564/004/) | [`cleanup/ads`](../cleanup/ads) |
 
@@ -142,19 +144,21 @@ by the sub-packages to bypass defensive software (AMSI, ETW, inline hooks,
 sandbox/debugger/VM checks) |
 | [`evasion/acg`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/acg) | — | provides Arbitrary Code Guard (ACG) process mitigation policy
 management for preventing dynamic code generation |
-| [`evasion/amsi`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/amsi) | — | provides AMSI (Antimalware Scan Interface) bypass techniques
-through runtime memory patching of amsi.dll functions |
+| [`evasion/amsi`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/amsi) | noisy | disables the Antimalware Scan Interface in the current
+process via runtime memory patches on `amsi.dll` |
 | [`evasion/blockdlls`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/blockdlls) | — | provides DLL blocking via process mitigation policies
 to prevent non-Microsoft DLLs from being loaded into the process |
 | [`evasion/callstack`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/callstack) | — | spoofs the return-address chain seen by a stack
 walker at a given call site, so protected-API calls appear to
 originate from the expected thread-init sequence rather than from
 the caller's own module |
-| [`evasion/cet`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/cet) | — | inspects and relaxes Intel CET (Control-flow Enforcement
+| [`evasion/cet`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/cet) | noisy | inspects and relaxes Intel CET (Control-flow Enforcement
 Technology) shadow-stack enforcement for the current process, and
-exposes the ENDBR64 marker required by CET-gated indirect call sites |
-| [`evasion/etw`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/etw) | — | provides ETW (Event Tracing for Windows) bypass techniques
-through runtime patching of ntdll event writing functions |
+exposes the ENDBR64 marker required by CET-gated indirect call
+sites |
+| [`evasion/etw`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/etw) | moderate | blinds Event Tracing for Windows in the current process
+by patching the ETW write helpers in `ntdll.dll` with
+`xor rax,rax; ret` |
 | [`evasion/hook`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook) | — | provides x64 inline function hooking — intercept any exported
 Windows function by patching its prologue with a JMP to a Go callback |
 | [`evasion/hook/bridge`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/bridge) | — | provides a bidirectional control channel between a hook
@@ -166,12 +170,14 @@ products register to observe process/thread/image-load events, and
 (pluggable future work) provides the surface to remove them |
 | [`evasion/preset`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/preset) | — | provides ready-to-use evasion technique combinations at
 three risk levels: Minimal, Stealth, and Aggressive |
-| [`evasion/sleepmask`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/sleepmask) | — | provides encrypted sleep to defeat memory scanning |
+| [`evasion/sleepmask`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/sleepmask) | quiet | encrypts the implant's payload memory while it
+sleeps so concurrent memory scanners cannot recover the original
+shellcode bytes or PE headers |
 | [`evasion/stealthopen`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/stealthopen) | — | opens files by their NTFS Object ID (a 128-bit GUID
 stored in the MFT) rather than by path, bypassing path-based EDR hooks on
 NtCreateFile / CreateFile |
-| [`evasion/unhook`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook) | — | provides techniques to remove EDR/AV hooks from ntdll.dll
-by restoring original function bytes from a clean copy |
+| [`evasion/unhook`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook) | noisy | restores the original prologue bytes of `ntdll.dll`
+functions, removing inline hooks installed by EDR/AV products |
 | [`hash`](https://pkg.go.dev/github.com/oioio-space/maldev/hash) | — | provides hashing utilities for integrity verification,
 API hashing, and fuzzy hashing |
 | [`inject`](https://pkg.go.dev/github.com/oioio-space/maldev/inject) | — | provides unified shellcode injection techniques
