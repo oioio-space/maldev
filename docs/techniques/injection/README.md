@@ -1,74 +1,97 @@
-# Injection Techniques Overview
+---
+last_reviewed: 2026-04-27
+reflects_commit: 4798780
+---
 
-> **MITRE ATT&CK:** T1055 -- Process Injection | **Detection:** High -- all injection methods are monitored by EDR products
+# Injection techniques
 
-## What Is Process Injection?
+[← maldev README](../../../README.md) · [docs/index](../../index.md)
 
-Process injection is a family of techniques that place executable code (shellcode) into another process's memory and trigger its execution. This allows malware to run inside a trusted process, inheriting its identity, permissions, and trust level. Security tools watching for suspicious new processes see nothing unusual -- the code runs inside an already-running, legitimate application.
+The `inject/` package supplies a unified Windows + Linux injection
+surface: 16 Windows methods, 3 Linux methods, plus a Pipeline pattern
+for custom memory + executor combinations. Every method implements
+[`Injector`](https://pkg.go.dev/github.com/oioio-space/maldev/inject#Injector);
+self-process methods additionally implement
+[`SelfInjector`](https://pkg.go.dev/github.com/oioio-space/maldev/inject#SelfInjector)
+so the freshly-allocated region can be wired into
+[`evasion/sleepmask`](../evasion/sleep-mask.md) or
+[`cleanup/memory.WipeAndFree`](../cleanup/memory-wipe.md) without
+re-deriving address and size.
 
-maldev provides a unified `inject` package with 15 injection methods across Windows and Linux, a fluent builder API, middleware decorators for evasion, and automatic fallback support.
+## TL;DR
 
-## Target Categories
+```mermaid
+flowchart LR
+    SC[shellcode] --> M{target}
+    M -->|self| S[CreateThread / Fiber / EtwpCreateEtwThread / ThreadPool / Callback]
+    M -->|child suspended| C[EarlyBird APC / Thread Hijack / spoofed args]
+    M -->|existing PID| R[CRT / NtQueueApcThreadEx / SectionMap / KCT / PhantomDLL]
+    S -->|via SelfInjector| SM[evasion/sleepmask]
+    S -->|via SelfInjector| WM[cleanup/memory.WipeAndFree]
+```
 
-The **Target** column below tells you *where* the shellcode ends up running
-— this drives the OpSec trade-offs and the API surface you need.
+## Target categories
 
-| Target              | Meaning                                                                                  | Who pays the cost        | Typical API calls                                    |
-|---------------------|------------------------------------------------------------------------------------------|--------------------------|------------------------------------------------------|
-| **Self**            | Shellcode runs inside the current `maldev`-built process.                                | Our own process          | None cross-process — direct `VirtualAlloc` + exec    |
-| **Local**           | Same as Self, but the technique deliberately avoids spawning a new thread (callback abuse, pool work, module stomping). Useful when any visible `CreateThread` would be flagged. | Our own process          | `VirtualAlloc` / `EnumWindows` / `TpPostWork` / stomp |
-| **Remote**          | Shellcode runs inside an already-running OS process (PID supplied by the caller). Requires `PROCESS_VM_WRITE` + `PROCESS_VM_OPERATION` (+ possibly `PROCESS_CREATE_THREAD`). | Target PID's process     | `OpenProcess` + `VirtualAllocEx` + `WriteProcessMemory` + thread trigger |
-| **Child (suspended)** | We *spawn* a new process in `CREATE_SUSPENDED` state, write shellcode into it, then resume. The child never executes its original entry point. | Newly-created child process | `CreateProcess(CREATE_SUSPENDED)` + write + resume/APC/hijack |
+The **target** column drives the OPSEC trade-off and the API surface
+the implant pays for.
 
-**Stealth ranking by target** (generally): Local > Child (suspended) >
-Remote. Local avoids cross-process memory primitives entirely; Child is
-acceptable because the process tree is predictable (our malware spawned
-it); Remote is the loudest — `WriteProcessMemory` into an unrelated
-running process is a classic EDR trigger.
+| Target | Meaning | Who pays the cost | Typical syscalls |
+|---|---|---|---|
+| **Self** | Shellcode runs in the current `maldev`-built process. | Implant's own process | none cross-process — `VirtualAlloc` + exec |
+| **Local** | Same as Self, but the technique deliberately avoids spawning a new thread (callback abuse, pool work, module stomping). | Implant's own process | `VirtualAlloc` + `EnumWindows` / `TpPostWork` / stomp |
+| **Remote** | Existing PID supplied by the caller. | Target PID | `OpenProcess` + `VirtualAllocEx` + `WriteProcessMemory` (or a section variant) + thread trigger |
+| **Child (suspended)** | Implant spawns a process in `CREATE_SUSPENDED`, mutates state, resumes. | Newly-created child | `CreateProcess(SUSPENDED)` + write + resume / APC / hijack |
 
-## Technique Comparison
+Stealth ranking by target (general): Local > Child (suspended) > Remote.
+Local avoids cross-process primitives; Child is acceptable because the
+process tree is predictable; Remote is the loudest — `WriteProcessMemory`
+into an unrelated running process is a textbook EDR trigger.
 
-| Technique | Method Constant | Target | Creates Thread? | Uses WriteProcessMemory? | Stealth | Complexity |
-|-----------|----------------|--------|-----------------|--------------------------|---------|------------|
-| [CreateRemoteThread](create-remote-thread.md) | `MethodCreateRemoteThread` | Remote | Yes | Yes | Low | Low |
-| [Early Bird APC](early-bird-apc.md) | `MethodEarlyBirdAPC` | Child (suspended) | No (APC) | Yes | Medium | Medium |
-| [Module Stomping](module-stomping.md) | `ModuleStomp()` | Local | Caller decides | No | High | Medium |
-| [Section Mapping](section-mapping.md) | `SectionMapInject()` | Remote | Yes | No | High | High |
-| [Callback Execution](callback-execution.md) | `ExecuteCallback()` | Local | No | No | High | Low |
-| [Thread Pool](thread-pool.md) | `ThreadPoolExec()` | Local | No (pool) | No | High | Medium |
-| [KernelCallbackTable](kernel-callback-table.md) | `KernelCallbackExec()` | Remote | No | Yes | High | High |
-| [Phantom DLL](phantom-dll.md) | `PhantomDLLInject()` | Remote | No (caller) | Yes | Very High | High |
-| [Thread Hijack](thread-hijack.md) | `MethodThreadHijack` | Child (suspended) | No | Yes | Medium | Medium |
-| [Argument Spoofing](process-arg-spoofing.md) | `SpawnWithSpoofedArgs()` | Child (suspended) | No | Yes | Medium | Medium |
-| [EtwpCreateEtwThread](etwp-create-etw-thread.md) | `MethodEtwpCreateEtwThread` | Self | Yes (internal) | No | High | Low |
-| [NtQueueApcThreadEx](nt-queue-apc-thread-ex.md) | `MethodNtQueueApcThreadEx` | Remote | No (special APC) | Yes | Medium | Medium |
+## Per-method index
 
-## Decision Flow
+| Technique | Method constant | Target | Creates thread? | Uses `WriteProcessMemory`? | Stealth tier |
+|---|---|---|---|---|---|
+| [CreateRemoteThread](create-remote-thread.md) | `MethodCreateRemoteThread` | Remote | yes | yes | low |
+| [Early Bird APC](early-bird-apc.md) | `MethodEarlyBirdAPC` | Child (suspended) | no (APC) | yes | medium |
+| [Thread Hijack](thread-hijack.md) | `MethodThreadHijack` | Child (suspended) | no | yes | medium |
+| [NtQueueApcThreadEx](nt-queue-apc-thread-ex.md) | `MethodNtQueueApcThreadEx` | Remote | no (special APC) | yes | medium |
+| [Callback execution](callback-execution.md) | `ExecuteCallback` | Local | no | no | high |
+| [Thread Pool](thread-pool.md) | `ThreadPoolExec` | Local | no (pool worker) | no | high |
+| [Module Stomping](module-stomping.md) | `ModuleStomp` | Local | caller decides | no | high |
+| [Section Mapping](section-mapping.md) | `SectionMapInject` | Remote | yes | **no** | high |
+| [Phantom DLL](phantom-dll.md) | `PhantomDLLInject` | Remote (placement only) | no (caller) | yes | very high |
+| [Kernel Callback Table](kernel-callback-table.md) | `KernelCallbackExec` | Remote | no | yes | high |
+| [EtwpCreateEtwThread](etwp-create-etw-thread.md) | `MethodEtwpCreateEtwThread` | Self | yes (internal) | no | high |
+| [Process Argument Spoofing](process-arg-spoofing.md) | `SpawnWithSpoofedArgs` | Child (suspended) | n/a — disguise | yes | medium |
+
+## Decision flow
 
 ```mermaid
 flowchart TD
     Start([Need to run shellcode]) --> Q1{Self or remote?}
-    Q1 -->|Self-inject| Q2{Need memory stealth?}
-    Q1 -->|Remote process| Q3{Can create new process?}
+    Q1 -->|self-inject| Q2{Need memory stealth?}
+    Q1 -->|remote process| Q3{Can spawn a new process?}
 
-    Q2 -->|Yes| MS[Module Stomping]
-    Q2 -->|No| Q4{Avoid thread creation?}
+    Q2 -->|yes — image-backed| MS[Module Stomping]
+    Q2 -->|no| Q4{Avoid thread creation?}
 
-    Q4 -->|Yes| CB[Callback Execution]
-    Q4 -->|Pool is fine| TP[Thread Pool]
-    Q4 -->|Thread is fine| CT[CreateThread]
+    Q4 -->|yes| CB[Callback execution]
+    Q4 -->|pool is fine| TP[Thread Pool]
+    Q4 -->|thread is fine| ETW[EtwpCreateEtwThread]
 
-    Q3 -->|Yes| Q5{Need APC stealth?}
-    Q3 -->|No, existing PID| Q6{Avoid WriteProcessMemory?}
+    Q3 -->|yes — cover for the spawn| Q5{Need APC stealth?}
+    Q3 -->|no — existing PID| Q6{Avoid WriteProcessMemory?}
 
-    Q5 -->|Yes| EB[Early Bird APC]
-    Q5 -->|Thread hijack| TH[Thread Hijack]
+    Q5 -->|yes| EB[Early Bird APC]
+    Q5 -->|register-mutate| TH[Thread Hijack]
+    Q5 -->|disguise args too| AS[Process Arg Spoofing + EB/TH]
 
-    Q6 -->|Yes| SM[Section Mapping]
-    Q6 -->|WPM is OK| Q7{Target has windows?}
-
-    Q7 -->|Yes| KC[KernelCallbackTable]
-    Q7 -->|No| CRT[CreateRemoteThread]
+    Q6 -->|yes| SM[Section Mapping]
+    Q6 -->|WPM is OK| Q7{Win10 1903+?}
+    Q7 -->|yes| APCEX[NtQueueApcThreadEx]
+    Q7 -->|either way| Q8{Target has windows?}
+    Q8 -->|yes| KC[KernelCallbackTable]
+    Q8 -->|no| CRT[CreateRemoteThread]
 
     style MS fill:#2d5016,color:#fff
     style SM fill:#2d5016,color:#fff
@@ -79,7 +102,7 @@ flowchart TD
 
 ## Architecture
 
-All injection methods implement the `Injector` interface:
+All methods implement `Injector`:
 
 ```go
 type Injector interface {
@@ -87,10 +110,15 @@ type Injector interface {
 }
 ```
 
-The builder API provides fluent construction with syscall method selection:
+`Build()` returns a fluent
+[`*InjectorBuilder`](https://pkg.go.dev/github.com/oioio-space/maldev/inject#InjectorBuilder)
+that selects syscall mode (WinAPI / NativeAPI / direct / indirect with
+arbitrary [`SSNResolver`](../syscalls/ssn-resolvers.md)), pins target,
+stacks middleware (`WithValidation`, `WithCPUDelay`, `WithXOR`), and
+emits an `Injector`.
 
 ```go
-injector, err := inject.Build().
+inj, err := inject.Build().
     Method(inject.MethodEarlyBirdAPC).
     ProcessPath(`C:\Windows\System32\svchost.exe`).
     IndirectSyscalls().
@@ -98,37 +126,26 @@ injector, err := inject.Build().
     Create()
 ```
 
-The Pipeline pattern separates memory setup from execution, allowing mix-and-match:
+The
+[`Pipeline`](https://pkg.go.dev/github.com/oioio-space/maldev/inject#Pipeline)
+pattern separates memory setup from execution, allowing mix-and-match
+combinations the named methods do not cover:
 
 ```go
 p := inject.NewPipeline(
     inject.RemoteMemory(hProcess, caller),
     inject.CreateRemoteThreadExecutor(hProcess, caller),
 )
-err := p.Inject(shellcode)
+return p.Inject(shellcode)
 ```
 
-## SelfInjector — Getting the Region Back
+## SelfInjector — recovering the region
 
 Self-process injectors (`MethodCreateThread`, `MethodCreateFiber`,
-`MethodEtwpCreateEtwThread` on Windows; `MethodProcMem` on Linux) place the
-shellcode inside the current process. The base `Injector` interface throws
-that address away, forcing callers who want to sleep-mask or wipe the
-region to compute it themselves. The optional `SelfInjector` interface
-exposes it:
-
-> **`MethodCreateFiber` warning** — `ConvertThreadToFiber` permanently
-> transforms the calling OS thread; Go's M:N scheduler does not know
-> about fibers and any subsequent goroutine multiplexed onto that
-> thread observes fiber state instead of goroutine state. Real
-> shellcode that calls `ExitThread` kills the host runtime mid-test.
-> If you need the Fiber injection method from a Go program, spawn a
-> *true* OS thread via `kernel32!CreateThread` (not `go func()` —
-> goroutines + `runtime.LockOSThread` aren't enough), let it run the
-> fiber dance there, and let it die when the shellcode exits. The
-> matrix test `TestFiber_RealShellcode` is permanently skipped — see
-> the comment in `inject/realsc_windows_test.go` for the full
-> diagnosis.
+`MethodEtwpCreateEtwThread` on Windows; `MethodProcMem` on Linux) place
+the shellcode inside the current process. The base `Injector` interface
+throws the address away. The optional `SelfInjector` interface exposes
+it:
 
 ```go
 type Region struct {
@@ -142,8 +159,7 @@ type SelfInjector interface {
 }
 ```
 
-Type-assert the `Injector` you got back and you can feed the region
-directly into `evasion/sleepmask` for the beacon-loop pattern:
+Type-assert and feed the region directly into `evasion/sleepmask`:
 
 ```go
 inj, _ := inject.NewWindowsInjector(&inject.WindowsConfig{
@@ -156,34 +172,70 @@ if self, ok := inj.(inject.SelfInjector); ok {
     if r, ok := self.InjectedRegion(); ok {
         mask := sleepmask.New(sleepmask.Region{Addr: r.Addr, Size: r.Size})
         for {
-            // ... beacon work ...
             mask.Sleep(30 * time.Second)
         }
     }
 }
 ```
 
-Contract details:
+Contract:
 
 - Returns `(Region{}, false)` before the first successful `Inject`.
-- Returns `(Region{}, false)` on cross-process methods (CRT, APC, EarlyBird,
-  ThreadHijack, Rtl, NtQueueApcThreadEx) — the region lives in the target
-  process, not ours.
-- Failed `Inject` calls do **not** clobber a previously-published region.
-- All three decorators (`WithValidation`, `WithCPUDelay`, `WithXOR`) and
-  the `Pipeline` transparently forward `InjectedRegion` to the wrapped
-  injector, so the pattern works at the end of any `Chain`.
+- Returns `(Region{}, false)` on cross-process methods (CRT, APC,
+  EarlyBird, ThreadHijack, Rtl, NtQueueApcThreadEx) — the region
+  lives in the target, not the implant.
+- A failed `Inject` does **not** clobber a previously-published
+  region.
+- Decorators (`WithValidation`, `WithCPUDelay`, `WithXOR`) and
+  `Pipeline` forward `InjectedRegion` transparently.
 
-See `evasion/sleepmask/doc.go` and `docs/techniques/evasion/sleep-mask.md`
-for the encrypted-sleep side of this pattern.
+> [!WARNING]
+> **`MethodCreateFiber` notice** — `ConvertThreadToFiber` permanently
+> transforms the calling OS thread; Go's M:N scheduler is unaware of
+> fibers, and any goroutine multiplexed onto that thread observes
+> fiber state instead of goroutine state. Real shellcode that calls
+> `ExitThread` kills the host runtime. Spawn a true OS thread via
+> `kernel32!CreateThread` (not `go func()` — `runtime.LockOSThread`
+> is not enough), let it run the fiber dance, let it die when the
+> shellcode exits. The matrix test `TestFiber_RealShellcode` is
+> permanently skipped — see the comment in
+> [`inject/realsc_windows_test.go`](../../../inject/realsc_windows_test.go).
 
-## Syscall Methods
+## Syscall modes
 
-Every injection method supports four syscall routing modes via `WindowsConfig.SyscallMethod`:
+Every Windows injection method routes through one of the four modes
+on the configured `*wsyscall.Caller`:
 
-| Mode | Constant | Hooks Bypassed | Use When |
-|------|----------|---------------|----------|
-| WinAPI | `wsyscall.MethodWinAPI` | None | Testing, no EDR |
-| Native API | `wsyscall.MethodNativeAPI` | kernel32 | Light EDR |
-| Direct Syscall | `wsyscall.MethodDirect` | All userland | Medium EDR |
-| Indirect Syscall | `wsyscall.MethodIndirect` | All userland + CFG | Heavy EDR |
+| Mode | Constant | Bypasses | Use when |
+|---|---|---|---|
+| WinAPI | `wsyscall.MethodWinAPI` | nothing | testing / no EDR |
+| Native API | `wsyscall.MethodNativeAPI` | `kernel32` hooks | light EDR |
+| Direct syscall | `wsyscall.MethodDirect` | all userland hooks | medium EDR |
+| Indirect syscall | `wsyscall.MethodIndirect` | userland hooks + CFG check | heavy EDR |
+
+Pair with [`evasion/unhook`](../evasion/ntdll-unhooking.md) to defeat
+ntdll inline hooks before the inject fires.
+
+## MITRE ATT&CK
+
+| T-ID | Name | Methods | D3FEND counter |
+|---|---|---|---|
+| [T1055](https://attack.mitre.org/techniques/T1055/) | Process Injection | umbrella | D3-PSA |
+| [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | DLL Injection | CRT, KCT, ModuleStomp, PhantomDLL, SectionMap, ThreadPool, Callback | D3-PSA / D3-PCSV |
+| [T1055.003](https://attack.mitre.org/techniques/T1055/003/) | Thread Execution Hijacking | ThreadHijack | D3-PSA |
+| [T1055.004](https://attack.mitre.org/techniques/T1055/004/) | Asynchronous Procedure Call | EarlyBird, NtQueueApcThreadEx | D3-PSA |
+| [T1055.015](https://attack.mitre.org/techniques/T1055/015/) | ListPlanting | Callback (`CreateTimerQueueTimer`) | D3-PCSV |
+| [T1564.010](https://attack.mitre.org/techniques/T1564/010/) | Process Argument Spoofing | `SpawnWithSpoofedArgs` | D3-PSA |
+| [T1036.005](https://attack.mitre.org/techniques/T1036/005/) | Match Legitimate Name or Location | combine with arg spoofing | D3-PSA |
+
+## See also
+
+- [Operator path: deciding the injection method](../../by-role/operator.md)
+- [Researcher path: per-method primitives](../../by-role/researcher.md)
+- [Detection eng path: injection telemetry](../../by-role/detection-eng.md)
+- [`win/syscall`](../syscalls/direct-indirect.md) — `Caller` interface
+  and SSN resolvers.
+- [`evasion/sleepmask`](../evasion/sleep-mask.md) — pair with
+  `SelfInjector` to mask the region during sleep.
+- [`cleanup/memory`](../cleanup/memory-wipe.md) — pair to wipe the
+  region on exit.

