@@ -1,33 +1,33 @@
 // Package ads provides CRUD operations for NTFS Alternate Data Streams.
 //
-// Alternate Data Streams (ADS) are hidden data storage areas within NTFS files.
-// Each file can have multiple named streams beyond the default :$DATA stream.
-// ADS are commonly used for:
-//   - Data hiding (T1564.004)
-//   - Persistence (store payloads in ADS of legitimate files)
-//   - Self-deletion (rename default stream before delete)
+// Alternate Data Streams (ADS) are hidden data storage areas attached to NTFS
+// files. Every file has a default unnamed `:$DATA` stream; additional named
+// streams (`file:streamname`) can store arbitrary bytes that don't appear in
+// `dir`, Explorer, or most file-listing APIs. The package exposes Write /
+// Read / List / Delete primitives over `Win32 CreateFileW` so callers can
+// hide payloads, store implant state, or rename a default stream as part of
+// the [selfdelete] dance.
 //
-// Example:
+// # MITRE ATT&CK
 //
-//	// Write payload to ADS
-//	err := ads.Write(`C:\Users\Public\desktop.ini`, "payload", shellcode)
+//   - T1564.004 (Hide Artifacts: NTFS File Attributes)
 //
-//	// List all streams
-//	streams, err := ads.List(`C:\Users\Public\desktop.ini`)
+// # Detection level
 //
-//	// Read it back
-//	data, err := ads.Read(`C:\Users\Public\desktop.ini`, "payload")
+// quiet
 //
-//	// Delete the stream
-//	err = ads.Delete(`C:\Users\Public\desktop.ini`, "payload")
+// File metadata events are logged but stream-level visibility requires
+// dedicated tooling (Sysinternals Streams, `Get-Item -Stream *`,
+// EDR-with-MFT-aware-scanner).
 //
-// Technique: NTFS Alternate Data Streams
-// MITRE ATT&CK: T1564.004 (Hide Artifacts: NTFS File Attributes)
-// Platform: Windows only (NTFS filesystem required)
-// Detection: Medium — Sysinternals Streams, PowerShell Get-Item -Stream *,
-// and some EDR products can enumerate ADS.
+// # Example
 //
-// References:
-//   - https://github.com/microsoft/go-winio/blob/main/backup.go
-//   - https://cqureacademy.com/blog/alternate-data-streams/
+// See [ExampleWrite] in ads_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/cleanup/ads.md
+//   - [github.com/oioio-space/maldev/cleanup/selfdelete] — uses ADS rename
+//
+// [selfdelete]: https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/selfdelete
 package ads

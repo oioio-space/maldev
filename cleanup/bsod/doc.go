@@ -1,14 +1,31 @@
-// Package bsod triggers a Blue Screen of Death via NtRaiseHardError.
+// Package bsod triggers a Blue Screen of Death via NtRaiseHardError as a
+// last-resort cleanup primitive.
 //
-// Technique: System crash via NtRaiseHardError (Blue Screen of Death)
-// MITRE ATT&CK: T1529 (System Shutdown/Reboot)
-// Platform: Windows
-// Detection: Low — the crash itself is the detection; crash dump analysis
-// may reveal the originating process. RtlAdjustPrivilege call may be
-// logged by EDR.
+// The package enables `SeShutdownPrivilege` via `RtlAdjustPrivilege`, then
+// calls `NtRaiseHardError` with a fatal status code. The kernel responds by
+// crashing the system with the supplied bug-check code. Used when an
+// operator wants to terminate evidence collection in flight: the in-memory
+// state vanishes faster than any forensic agent can flush it, and the
+// running process disappears with the kernel.
 //
-// How it works: Enables SeShutdownPrivilege via RtlAdjustPrivilege, then
-// calls NtRaiseHardError with a fatal error code. This triggers an
-// unrecoverable system crash (BSOD) with the specified error code.
-// Use with extreme caution — this is a destructive, irreversible action.
+// # MITRE ATT&CK
+//
+//   - T1529 (System Shutdown/Reboot)
+//
+// # Detection level
+//
+// very-noisy
+//
+// The crash itself is the artifact. Crash dump analysis recovers the
+// originating process; `RtlAdjustPrivilege` may be logged by EDR before the
+// crash. Use only when the trade-off is acceptable.
+//
+// # Example
+//
+// See [ExampleTrigger] in bsod_example_test.go. The example is build-tag
+// gated and does NOT run by default — invoking it really crashes the host.
+//
+// # See also
+//
+//   - docs/techniques/cleanup/bsod.md
 package bsod

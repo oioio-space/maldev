@@ -1,26 +1,37 @@
 //go:build windows
 
-// Package service provides Windows service hiding via DACL (Discretionary
-// Access Control List) manipulation to restrict service visibility.
+// Package service hides Windows services from listing utilities by applying
+// a restrictive DACL on the service object.
 //
-// Technique: Apply restrictive security descriptors to Windows services.
-// MITRE ATT&CK: T1564 / T1543.003 (Hide Artifacts / Windows Service)
-// Platform: Windows
-// Detection: Medium -- DACL changes on services are logged if auditing is enabled.
+// HideService writes a Discretionary Access Control List that denies
+// `SERVICE_QUERY_CONFIG`, `SERVICE_QUERY_STATUS`, and related rights to
+// Interactive Users, Service accounts, and Administrators while leaving
+// minimal access for the SCM. UnHideService restores the default DACL. Two
+// application modes:
 //
-// Two application modes:
-//   - Native: uses SetNamedSecurityInfo Windows API directly
-//   - SC_SDSET: uses sc.exe SDSET command (works remotely with hostname)
+//   - Native — direct call to `SetNamedSecurityInfo`.
+//   - SC_SDSET — invokes `sc.exe sdset`, which accepts a remote hostname.
 //
-// HideService applies a DACL that denies interactive/service/admin users
-// most access while allowing minimal read access. UnHideService restores
-// the default DACL.
+// # MITRE ATT&CK
 //
-// Example:
+//   - T1564 (Hide Artifacts)
+//   - T1543.003 (Create or Modify System Process: Windows Service)
 //
-//	// Hide a service using native Windows API
-//	output, err := service.HideService(service.Native, "", "MyService")
+// # Detection level
 //
-//	// Restore default DACL
-//	output, err := service.UnHideService(service.Native, "", "MyService")
+// noisy
+//
+// DACL changes on services emit Security event 4670 when SACL auditing is
+// enabled. Sysmon Event 4697 logs the service control change.
+//
+// # Example
+//
+// See [ExampleHideService] in service_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/cleanup/service.md
+//   - [github.com/oioio-space/maldev/persistence/service] — install/start side
+//
+// [github.com/oioio-space/maldev/persistence/service]: https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service
 package service
