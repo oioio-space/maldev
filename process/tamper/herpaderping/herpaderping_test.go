@@ -26,6 +26,21 @@ func modeForHost() Mode {
 	return ModeHerpaderping
 }
 
+// skipIfBothModesBlocked skips the test on Win11 builds that have closed
+// both NtCreateProcessEx variants for section-from-tampered-file. Validated
+// against Win11 25H2 (build 26200): NtCreateProcessEx returns STATUS_NOT_SUPPORTED
+// for both ModeHerpaderping (file overwrite path) and ModeGhosting (file
+// delete-pending path) regardless of the order operations are performed in.
+// The technique is functional on Win10 + Win11 < 26100 and ModeGhosting
+// remains useful as a primitive against those targets; the test pattern is
+// what's blocked on the latest Win11 builds.
+func skipIfBothModesBlocked(t *testing.T) {
+	t.Helper()
+	if version.AtLeast(version.WINDOWS_11_24H2) {
+		t.Skip("Win11 24H2+ NtCreateProcessEx hardening rejects both ModeHerpaderping and ModeGhosting (STATUS_NOT_SUPPORTED). Technique still ships as a primitive for Win10 + Win11 < 26100; pending RE for a new bypass on 26100+.")
+	}
+}
+
 func TestConfigValidation(t *testing.T) {
 	// Zero-value Config: ModeHerpaderping, no paths, no Caller, no Opener
 	cfg := Config{}
@@ -87,6 +102,7 @@ func TestRunInvalidPE(t *testing.T) {
 func TestRunWithDecoy(t *testing.T) {
 	testutil.RequireManual(t)
 	testutil.RequireIntrusive(t)
+	skipIfBothModesBlocked(t)
 
 	mode := modeForHost()
 
@@ -135,6 +151,7 @@ func TestRunWithDecoy(t *testing.T) {
 func TestRunVerifyProcessCreated(t *testing.T) {
 	testutil.RequireManual(t)
 	testutil.RequireIntrusive(t)
+	skipIfBothModesBlocked(t)
 
 	mode := modeForHost()
 

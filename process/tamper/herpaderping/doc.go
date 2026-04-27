@@ -29,13 +29,15 @@
 // payload. Herpaderping operates at a lower level — the deception is in the
 // kernel section cache, not in user-space memory.
 //
-// Process Ghosting (ModeGhosting): creates a delete-pending file, maps it as
-// SEC_IMAGE, then lets the file deletion complete before creating the process.
-// The file never exists at the time of thread creation. This package implements
-// both variants; ModeGhosting is required on Win11 24H2+ where the kernel
-// rejects the herpaderping pattern in NtCreateProcessEx.
-// Both exploit the same kernel caching primitive but at different lifecycle
-// stages.
+// Process Ghosting (ModeGhosting, Gabriel Landau 2021): creates a
+// delete-pending file, maps it as SEC_IMAGE, then closes the handle to
+// let the file deletion complete BEFORE creating the process. The file
+// never exists at the time of thread creation. This package implements
+// both variants; ModeGhosting was confirmed to bypass Win11 24H2 by
+// hasherezade (Jan 2025) but is also rejected on Win11 25H2 (build 26200)
+// — NtCreateProcessEx returns STATUS_NOT_SUPPORTED for both modes there.
+// Both exploit the same kernel caching primitive but at different
+// lifecycle stages.
 //
 // # Advantages
 //
@@ -55,6 +57,12 @@
 //     therefore return the decoy, but in-memory reconstruction is still possible.
 //   - Requires Windows 10 or later (NtCreateProcessEx behaviour differs on
 //     older versions).
+//   - Win11 26100+ (24H2 / 25H2) hardens NtCreateProcessEx against
+//     section-from-tampered-or-deleted-file. Both ModeHerpaderping and
+//     ModeGhosting return STATUS_NOT_SUPPORTED on those builds. The
+//     primitives still ship for Win10 + Win11 < 26100; new bypass research
+//     is required for 26100+ targets (Process Doppelgänging via
+//     transactions, PE-from-memory loaders are candidate replacements).
 //
 // # Detection
 //
