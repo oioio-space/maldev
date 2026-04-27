@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-04-27
-reflects_commit: 9691c73
+reflects_commit: f8b1a51
 ---
 
 # Documentation refactor — progress tracker
@@ -58,7 +58,7 @@ Each area gets:
 | `collection/*` | ✅ 3/3 | ✅ 3/3 + README | ✅ 3/3 | Done. All 3 doc.go aligned to template; README + 3 tech pages (keylogging, clipboard, screenshot) rewritten to template. `alternate-data-streams.md` + `lsass-dump.md` stay here as cross-ref stubs with a NOTE pointing to canonical owners; will move in Phase 6. |
 | `credentials/*` | ✅ 4/4 | ✅ 4/4 + README | ✅ 4/4 | Done (commits `cfd7730..`). doc.go aligned to template (goldenticket, lsassdump, samdump, sekurlsa). 3 NEW tech pages (goldenticket, lsassdump, samdump) + area README rewrite (Mermaid flow, decision tree, MITRE table with D3FEND counters, Pass-the-X chains documented end-to-end). `sekurlsa.md` carries the older heading order (Primer / How It Works / Simple Example / Composed / Advanced / Limitations / API Reference) — left intact for now, re-aligned in Phase 6. example_test.go sizes match c2 baseline. |
 | `pe/*` | ✅ 8/8 | ✅ 6/6 + README | ✅ 7/7 | Done. doc.go aligned to template (pe umbrella + cert, imports, masquerade, morph, parse, srdi, strip). Stale references to pe/bof + pe/clr removed (now under runtime/). 7 example_test.go (one per sub-package). 6 tech md fully rewritten to canonical template (TL;DR / Primer / How It Works / API Reference / Examples / OPSEC & Detection / MITRE ATT&CK / Limitations / See also): certificate-theft, imports, masquerade, morph, pe-to-shellcode, strip-sanitize. README rewrite: Mermaid offline→runtime flow, 6-step layered scrub recipe, MITRE+D3FEND table. pe/parse covered by README + doc.go (no dedicated tech md — pure helper for other pe/* packages). |
-| `persistence/*` | ✅ 7/7 | ⬜ 3/6 | ✅ 6/6 | doc.go aligned to template (umbrella + account, lnk, registry, scheduler, service, startup). example_test.go already exist for all 6 sub-packages. Tech md TODO: 3 NEW (account, lnk, service) + 3 existing rewrites (registry, startup-folder, task-scheduler) + README refresh. Note: directory `persistence/account/` declares `package user` (Win32 API surface name). |
+| `persistence/*` | ✅ 7/7 | ✅ 6/6 + README | ✅ 6/6 | Done. doc.go aligned + 6 tech md (3 NEW: account, lnk, service · 3 rewrites: registry, startup-folder, task-scheduler) + README rewrite (Mermaid trigger→mech→compose flow + redundancy recipe + MITRE+D3FEND). Note: `persistence/account/` directory declares `package user` (Win32 API surface name). |
 | `process/*` | ⬜ 0/6 | ⬜ 0/3 | ⬜ 0/6 | Includes `process/tamper/*`. Audit flagged: herpaderping (no .md despite 112-line doc.go!), enum, session. |
 | `recon/*` | ⬜ 0/9 | ⬜ 0/8 | ⬜ 0/9 | Existing pages partly under `docs/techniques/evasion/` (anti-analysis, dll-hijack, hw-breakpoints, sandbox, timing) — re-locate in Phase 6 or accept the categorisation. |
 | `runtime/*` | ⬜ 0/2 | ⬜ 0/2 | ⬜ 0/2 | bof, clr — both have existing tech pages. |

