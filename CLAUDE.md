@@ -34,6 +34,12 @@ Follow the rules in:
 - `.claude/skills/go-conventions.md` — naming, packages, files, receivers, anti-chatter, x/sys/windows dedup
 - `.claude/skills/go-styleguide.md` — error handling, interfaces, documentation, variable declarations, shadowing
 
+## Documentation
+Follow the rules in:
+- `docs/conventions/documentation.md` — **tracked, machine-portable.** Surface (hybrid /docs + gh-pages), audience paths (Operator/Researcher/Detection eng), per-package doc.go template, per-technique markdown template, Mermaid usage, GFM features, README/index structure, auto-gen tables, voice/style, migration order. **Source of truth for ALL doc work — never write docs from memory.**
+
+In-progress doc refactor reference: `docs/refactor-2026-doc/audit-2026-04-27.md` (exhaustive audit of legacy state).
+
 Key rules:
 - `camelCase` unexported, `PascalCase` exported. `ID` not `Id`. `HTTP` not `Http`.
 - No `utils`, `helpers`, `common` package names.
