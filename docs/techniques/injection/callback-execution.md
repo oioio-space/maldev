@@ -120,16 +120,6 @@ func main() {
 | Limitations | Local execution only -- cannot trigger a callback in a remote process. Shellcode must be in executable memory before calling. EnumWindows requires at least one top-level window to exist. |
 | Forensics | ETW may log the specific API call (e.g., window enumeration). Call stack analysis shows the callback originating from user32/kernel32/crypt32. |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
-|---------|--------|--------|--------------|--------------|
-| EnumWindows callback | Yes | No | No | No |
-| TimerQueue callback | Yes | No | No | No |
-| CertEnum callback | Yes | No | No | No |
-| Extensible method enum | `CallbackMethod` type | N/A | N/A | N/A |
-| Pairs with ModuleStomp | Natural composition | N/A | N/A | N/A |
-
 ## API Reference
 
 ```go

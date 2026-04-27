@@ -219,19 +219,6 @@ func main() {
 
 ---
 
-## Compared to Other Implementations
-
-| Feature | maldev (impersonate) | Cobalt Strike | SharpImpersonation | PowerShell |
-|---------|---------------------|---------------|--------------------|-----------|
-| Language | Go | Java/C | C# | PowerShell |
-| Thread locking | Yes (auto) | Internal | Manual | N/A |
-| Auto-revert | Yes (defer) | Yes | Manual | Manual |
-| Domain support | Yes | Yes | Yes | Yes |
-| Logon types | Interactive, NewCredentials, Network, Batch, Service | Various | Various | Various |
-| Callback pattern | Yes (func() error) | Internal | N/A | Script block |
-
----
-
 ## Composable Elevation
 
 The `impersonate` package provides composable elevation primitives that chain

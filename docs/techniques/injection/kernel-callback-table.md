@@ -121,16 +121,6 @@ func main() {
 | Limitations | Requires `PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION` access. Cannot target console-only processes without windows. The `SendMessage` call is synchronous -- the attacker blocks until the callback returns. |
 | Detection vectors | PEB modification monitoring, ETW `WM_COPYDATA` tracing, memory protection changes on the callback table. |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
-|---------|--------|--------|--------------|--------------|
-| KernelCallbackTable hijack | Yes | No | No | No |
-| Automatic window discovery | `findWindowByPID()` | N/A | N/A | N/A |
-| Pointer restoration | Automatic | N/A | N/A | N/A |
-| PEB offset (x64) | 0x58 | N/A | N/A | N/A |
-| Protection toggle for KCT | Yes (RW→restore) | N/A | N/A | N/A |
-
 ## API Reference
 
 ```go

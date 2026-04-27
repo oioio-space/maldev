@@ -125,16 +125,6 @@ func main() {
 | Caller routing | Partial -- memory operations (VirtualAlloc/VirtualProtect) can route through Caller, but EtwpCreateEtwThread itself must use direct proc call because its return convention differs from NTSTATUS. |
 | Fallback | Falls back to CreateThread, then CreateFiber if EtwpCreateEtwThread fails. |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike |
-|---------|--------|--------|--------------|
-| EtwpCreateEtwThread support | Yes | No | No |
-| Syscall routing for memory ops | Yes (via Caller) | N/A | N/A |
-| Builder API | Fluent `.Build()` | N/A | N/A |
-| Fallback on failure | `WithFallback()` | N/A | N/A |
-| RW→RX memory transition | Yes | N/A | N/A |
-
 ## API Reference
 
 ```go

@@ -234,19 +234,6 @@ func main() {
 
 ---
 
-## Compared to Other Implementations
-
-| Feature | maldev (pe/morph) | UPX Scrambler | Manual hex edit | Amber |
-|---------|-------------------|---------------|-----------------|-------|
-| Language | Go | Python | N/A | Go |
-| Section rename | Yes (random) | Yes (fixed) | Yes (manual) | No |
-| Auto-detection | Yes (scans for UPX) | Yes | No | N/A |
-| Reversible | Yes (UPXFix) | No | No | N/A |
-| Hash change | Yes | Yes | Yes | Yes |
-| Deep obfuscation | No | No | No | Yes (reflective) |
-
----
-
 ## API Reference
 
 ### Functions

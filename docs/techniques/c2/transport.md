@@ -219,20 +219,6 @@ func main() {
 
 ---
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | Cobalt Strike | Mythic |
-|---------|--------|--------|---------------|--------|
-| TCP | Yes | Yes | Yes | Yes |
-| TLS | Yes | Yes | Yes | Agent-specific |
-| JA3 spoofing | Yes (uTLS) | Yes | Malleable C2 | No |
-| Cert pinning | Yes (SHA256) | Yes | Yes | Agent-specific |
-| Domain fronting | Yes (SNI) | Yes | Yes | Agent-specific |
-| Profiles | Chrome/Firefox/Edge/Safari | Chrome | Custom | N/A |
-| Interface-based | Yes | Internal | Internal | Internal |
-
----
-
 ## API Reference
 
 ### Transport Interface

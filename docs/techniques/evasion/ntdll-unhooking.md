@@ -161,17 +161,6 @@ func main() {
 | Detection vectors | Disk read of ntdll.dll (Full/Classic), child process spawn (Perun), memory integrity checks before/after, ETW events for VirtualProtect on ntdll pages. |
 | Limitations | Does not affect kernel-level hooks (minifilters, callbacks). Does not remove hooks set after the unhook operation. Some EDRs re-hook periodically. |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
-|---------|--------|--------|--------------|--------------|
-| Classic (per-function) | Yes | No | No | Yes |
-| Full (.text overwrite) | Yes | Yes | No | Yes |
-| Perun (cross-process) | Yes (configurable host) | No | No | No |
-| Caller-routed writes | Yes | No | N/A | No |
-| Technique interface | `evasion.Technique` | Built-in | N/A | Function |
-| CommonClassic preset | Yes | No | No | No |
-
 ## API Reference
 
 ```go

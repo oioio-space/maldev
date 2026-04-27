@@ -219,19 +219,6 @@ func main() {
 
 ---
 
-## Compared to Other Implementations
-
-| Feature | maldev | Cobalt Strike | Sliver | Havoc |
-|---------|--------|---------------|--------|-------|
-| Malleable profiles | Yes | Yes (full DSL) | HTTP C2 | Yes |
-| Built-in profiles | JQueryCDN, GoogleAPI | Many built-in | Internal | Internal |
-| Custom profiles | Yes (struct) | Yes (profile DSL) | Config-based | Config-based |
-| URI rotation | Yes | Yes | Yes | Yes |
-| Data transformation | Encoder/Decoder funcs | Transforms DSL | Internal | Internal |
-| JA3 integration | Via WithTLSConfig | Built-in | Via config | Via config |
-
----
-
 ## API Reference
 
 ### Profile

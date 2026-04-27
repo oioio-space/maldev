@@ -125,16 +125,6 @@ func main() {
 | Compatibility | Windows 10 1709+ (Fall Creators Update). Returns error on older versions. |
 | Limitations | `SetProcessMitigationPolicy` is a kernel32 export with no NT equivalent routable through `*wsyscall.Caller`. The `caller` parameter is accepted for API consistency but cannot bypass hooks on this specific function. BlockDLLs may break legitimate third-party DLLs. |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
-|---------|--------|--------|--------------|--------------|
-| ACG enable | Yes | No | No | No |
-| BlockDLLs enable | Yes | blockdlls (spawnto) | blockdlls (spawnto) | No |
-| Technique interface | `acg.Guard()`, `blockdlls.MicrosoftOnly()` | Config | Profile | N/A |
-| Preset bundles | `preset.Aggressive()` | No | No | N/A |
-| Self-process hardening | Yes | Child process only | Child process only | N/A |
-
 ## API Reference
 
 ```go

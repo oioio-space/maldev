@@ -167,20 +167,6 @@ func main() {
 
 ---
 
-## Compared to Other Implementations
-
-| Feature | maldev (pe/strip) | garble | gobfuscate | donut |
-|---------|-------------------|--------|------------|-------|
-| Timestamp randomization | Yes | No | No | No |
-| Pclntab wipe | Yes | No | No | No |
-| Section rename | Yes | No | No | No |
-| Symbol obfuscation | No (use garble) | Yes | Yes | No |
-| Literal encryption | No (use garble) | Yes | No | No |
-| Language | Go | Go | Go | C |
-| Works on any PE | Yes | Go only | Go only | PE/shellcode |
-
----
-
 ## API Reference
 
 ### Functions

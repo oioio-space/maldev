@@ -121,17 +121,6 @@ func main() {
 | Reliability | High -- well-understood, deterministic execution. No race conditions or timing dependencies. |
 | Limitations | Requires `PROCESS_CREATE_THREAD` access, which triggers EDR alerts. The new remote thread has no legitimate call stack, making stack-walking detection trivial. Cannot target Protected Process Light (PPL) processes. |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
-|---------|--------|--------|--------------|--------------|
-| Direct/Indirect syscalls | Yes (configurable) | Indirect only | BOF-based | No |
-| Builder API | Yes (fluent) | Config struct | Malleable C2 profile | Function call |
-| XOR pre-encoding | Decorator middleware | Built-in | Sleep mask | Manual |
-| CPU delay evasion | Decorator middleware | No | Sleep jitter | No |
-| Automatic fallback | `WithFallback()` | No | No | No |
-| Caller routing (EDR bypass) | `*wsyscall.Caller` | Built-in | N/A | N/A |
-
 ## API Reference
 
 ```go

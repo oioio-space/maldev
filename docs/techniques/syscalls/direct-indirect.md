@@ -221,20 +221,6 @@ func main() {
 
 ---
 
-## Compared to Other Implementations
-
-| Feature | maldev | SysWhispers2 | SysWhispers3 | Hell's Hall |
-|---------|--------|-------------|-------------|-------------|
-| Language | Go | C/ASM | C/ASM/Python | C/ASM |
-| Runtime SSN resolution | Yes | No (compile-time) | Yes | Yes |
-| Multiple resolvers | Yes (Chain) | No | No | No |
-| Hash-based resolution | Yes (HashGate) | No | No | No |
-| RW/RX cycling | Yes | No (RWX) | No (RWX) | No |
-| Indirect syscall | Yes | No | Yes | Yes |
-| Go integration | Native | FFI required | FFI required | FFI required |
-
----
-
 ## API Reference
 
 ### Types

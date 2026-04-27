@@ -223,22 +223,6 @@ func main() {
 
 ---
 
-## Compared to Other Implementations
-
-| Feature | maldev (pe/srdi) | TheWover/donut (C) | go-donut (direct) | Donut-Loader (C#) |
-|---------|-----------------|-------------------|-------------------|-------------------|
-| Language | Go (wrapper) | C | Go | C# |
-| Pure Go / no CGO | Yes | No | Yes (same dep) | No |
-| Input formats | 7 | 7 | 7 | EXE/DLL only |
-| AMSI/WLDP bypass | Yes (configurable) | Yes | Yes | Partial |
-| Dual arch (x84) | Yes | Yes | Yes | No |
-| .NET support | Yes | Yes | Yes | Yes |
-| Script support (VBS/JS/XSL) | Yes | Yes | Yes | No |
-| Integrate with inject/ | Yes (direct) | No | Manual | No |
-| Syscall bypass | Via inject/Caller | No | No | No |
-
----
-
 ## API Reference
 
 ### Types

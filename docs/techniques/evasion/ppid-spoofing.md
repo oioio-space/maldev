@@ -137,16 +137,6 @@ Defenders can detect PPID spoofing via:
 3. **Behavioral anomalies** -- A child process's token/session doesn't match the supposed parent's session.
 4. **Sysmon Event ID 1** -- `ParentProcessId` vs `ParentProcessGuid` can reveal mismatches.
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
-|---------|--------|--------|--------------|--------------|
-| PPID spoofing | Yes | Yes | Yes (spawnto) | No |
-| Go 1.24+ native | Yes (`SysProcAttr`) | Custom | N/A (C) | No |
-| Configurable targets | Yes (list) | Yes | Profile | No |
-| Auto-discovery | `FindTargetProcess()` | Manual | Profile | No |
-| Exploit Guard handling | Graceful skip | Fails | Fails | No |
-
 ## API Reference
 
 ```go

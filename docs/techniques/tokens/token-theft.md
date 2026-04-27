@@ -243,20 +243,6 @@ func main() {
 
 ---
 
-## Compared to Other Implementations
-
-| Feature | maldev (win/token) | Incognito | Cobalt Strike | SharpToken |
-|---------|-------------------|-----------|--------------|-----------|
-| Language | Go | C | Java/C | C# |
-| Steal by PID | Yes | Yes | Yes | Yes |
-| Steal by name | Yes | Yes | Yes | Yes |
-| DuplicateHandle bypass | Yes | No | No | No |
-| Interactive token | Yes (WTS) | Yes | Yes | Yes |
-| Privilege management | Yes (enable/disable/remove) | Limited | Yes | Yes |
-| Linked token | Yes | No | No | Yes |
-
----
-
 ## API Reference
 
 ### Token Creation

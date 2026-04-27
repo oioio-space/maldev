@@ -124,16 +124,6 @@ func main() {
 | Limitations | Does not provide execution -- you need a separate trigger mechanism. Uses `WriteProcessMemory` (monitored). Advanced scanners can detect `.text` integrity violations by comparing mapped bytes against disk. |
 | DLL selection | Use DLLs not commonly loaded by the target to avoid conflicts: `amsi.dll`, `dbghelp.dll`, `msftedit.dll`. |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
-|---------|--------|--------|--------------|--------------|
-| SEC_IMAGE from real DLL | Yes | No | Module stomping (different) | No |
-| Configurable DLL | Yes (any name) | N/A | spawnto_x64 | N/A |
-| Remote process injection | Yes | N/A | Yes (different method) | N/A |
-| PE header parsing | Manual (from file bytes) | N/A | Built-in | N/A |
-| .text overwrite + protection | RW→write→RX | N/A | N/A | N/A |
-
 ## API Reference
 
 ```go

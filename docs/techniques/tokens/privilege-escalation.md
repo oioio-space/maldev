@@ -234,21 +234,6 @@ func main() {
 
 ---
 
-## Compared to Other Implementations
-
-| Feature | maldev | UACME | SharpBypassUAC | Cobalt Strike |
-|---------|--------|-------|----------------|---------------|
-| Language | Go | C | C# | Java/C |
-| FODHelper | Yes | Yes | Yes | No |
-| SLUI | Yes | Yes | No | No |
-| SilentCleanup | Yes | Yes | Yes | No |
-| EventVwr | Yes | Yes | Yes | Yes |
-| Total UAC methods | 4 | 70+ | 5 | 2 |
-| Auto-cleanup | Yes (defer) | Varies | Varies | Yes |
-| ExecAs (credential) | Yes | No | No | Yes |
-
----
-
 ## API Reference
 
 ### win/privilege

@@ -115,16 +115,6 @@ func main() {
 | Limitations | Local injection only. The shellcode must be position-independent. If the process has no thread pool initialized yet, `TpAllocWork` initializes one (visible in ETW). |
 | Call stack | The callback call stack originates from `ntdll!TppWorkerThread`, which is normal for any application using the thread pool. |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
-|---------|--------|--------|--------------|--------------|
-| TpAllocWork/TpPostWork | Yes | No | No | No |
-| Self-contained function | `ThreadPoolExec()` | N/A | N/A | N/A |
-| Waits for completion | Yes (`TpWaitForWork`) | N/A | N/A | N/A |
-| Proper cleanup | `TpReleaseWork` | N/A | N/A | N/A |
-| Two-step alloc (RW→RX) | Yes | N/A | N/A | N/A |
-
 ## API Reference
 
 ```go

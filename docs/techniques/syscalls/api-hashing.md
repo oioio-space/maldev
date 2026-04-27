@@ -246,19 +246,6 @@ func main() {
 
 ---
 
-## Compared to Other Implementations
-
-| Feature | maldev (win/api + win/syscall) | ShellcodeRDI | Donut | Cobalt Strike |
-|---------|-------------------------------|-------------|-------|---------------|
-| Hash algorithm | ROR13 | CRC32 | Murmurhash3 | DJB2 |
-| Module resolution | PEB walk | PEB walk | PEB walk | PEB walk |
-| SSN extraction | Yes (HashGate) | No | No | No |
-| Pre-computed constants | Yes (api.HashXxx) | No | Internal | Internal |
-| Go native | Yes | C | C | Java/C |
-| Indirect syscall integration | Yes | No | No | No |
-
----
-
 ## API Reference
 
 ### win/api

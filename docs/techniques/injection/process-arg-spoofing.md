@@ -133,16 +133,6 @@ func main() {
 | Limitations | Advanced EDR may re-read the PEB after resume or hook `NtQueryInformationProcess` to detect changes. The process image path cannot be spoofed this way (only arguments). |
 | Complementary | Pairs naturally with Early Bird APC or Thread Hijack -- spoof args + inject shellcode in the same suspended process. |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
-|---------|--------|--------|--------------|--------------|
-| PEB argument overwrite | Yes | No | argue (BOF) | No |
-| Returns ProcessInformation | Yes (caller controls resume) | N/A | N/A | N/A |
-| UTF-16LE encoding | Built-in | N/A | N/A | N/A |
-| Length validation | Checks MaximumLength | N/A | N/A | N/A |
-| Composable with injection | Yes (same suspended process) | N/A | N/A | N/A |
-
 ## API Reference
 
 ```go

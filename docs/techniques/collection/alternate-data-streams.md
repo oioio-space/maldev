@@ -163,17 +163,6 @@ deletion can remove them.
 | Limitations | Host file must already exist on an NTFS volume. ADS size counts against the volume quota. Streams are lost when the file is copied to a non-NTFS destination (e.g., FAT32 USB drive, email attachment). |
 | Detection bypass | Zone.Identifier (the browser download ADS) is well-known; custom stream names are less scrutinised but uncommon stream names can stand out in EDR telemetry. |
 
-## Compared to Other Implementations
-
-| Feature | maldev | go-winio (microsoft) | Sliver | PowerShell |
-|---------|--------|----------------------|--------|------------|
-| List streams | `FindFirstStreamW` / `FindNextStreamW` | Backup stream enumeration | No built-in | `Get-Item -Stream *` |
-| Read / Write | `os.ReadFile/WriteFile` with `:name` | Backup API | Manual | `Get-Content -Stream` |
-| Undeletable files | `\\?\` + trailing dots | No | No | No |
-| Cross-platform stub | Yes (returns error) | No | N/A | N/A |
-| Single DLL source | `win/api.Kernel32` | Own lazy DLL | N/A | N/A |
-| Error wrapping | `errors.Is` / `%w` | Varied | N/A | Exceptions |
-
 ## API Reference
 
 ```go

@@ -128,16 +128,6 @@ func main() {
 | Timing | Shellcode runs before any application code, including CRT initialization. Use position-independent shellcode only. |
 | Limitations | Creates a visible child process (choose a process that blends in). The child process must remain alive or the shellcode terminates with it. |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
-|---------|--------|--------|--------------|--------------|
-| Configurable host process | Yes (`ProcessPath`) | Yes | Yes (spawnto) | No (hardcoded) |
-| Syscall routing | Direct/Indirect/WinAPI | Indirect | BOF | No |
-| Builder API | Fluent `.Build()` | Config | Profile | Function |
-| Fallback on failure | `WithFallback()` | No | No | No |
-| NtQueueApcThread vs kernel32 | NT via Caller | NT | Varies | kernel32 |
-
 ## API Reference
 
 ```go

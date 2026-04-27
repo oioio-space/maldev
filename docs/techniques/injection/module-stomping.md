@@ -107,16 +107,6 @@ func main() {
 | Detection vectors | Advanced scanners compare in-memory `.text` bytes against the on-disk DLL. This "integrity check" detects stomping. |
 | Limitations | Local injection only -- cannot stomp a module in another process. The DLL must not already be loaded (would get a reference to the existing copy). |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
-|---------|--------|--------|--------------|--------------|
-| Configurable DLL target | Yes (any name) | No | Module stomping profile | No |
-| PE header parsing | In-memory manual walk | N/A | Built-in | N/A |
-| Returns address (deferred exec) | Yes | No | No | No |
-| .text zeroing before copy | Yes | N/A | Unknown | N/A |
-| Callback execution helpers | `ExecuteCallback()` | No | No | No |
-
 ## API Reference
 
 ```go

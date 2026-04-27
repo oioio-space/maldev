@@ -252,22 +252,6 @@ func main() {
 
 ---
 
-## Compared to Other Implementations
-
-| Feature | maldev | msfvenom | Donut | ScareCrow |
-|---------|--------|---------|-------|-----------|
-| AES-GCM | Yes | No (AES-CBC) | Yes | Yes |
-| ChaCha20 | Yes | No | No | No |
-| XOR | Yes | Yes | Yes | Yes |
-| RC4 | Yes | Yes | No | No |
-| Authenticated | Yes (GCM/Poly1305) | No | Yes | Yes |
-| Random nonce | Yes (auto) | N/A | Internal | Internal |
-| Key generation | Yes | Internal | Internal | Internal |
-| Base64 | Yes | Yes | No | Yes |
-| PowerShell encoding | Yes | Yes | No | No |
-
----
-
 ## Lightweight Obfuscation
 
 When the goal is not confidentiality but **breaking signatures and static analysis**, cryptographic primitives are overkill. Five lightweight obfuscations ship alongside the full ciphers for layered shellcode packers and small-footprint stages.

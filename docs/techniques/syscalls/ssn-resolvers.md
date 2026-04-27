@@ -316,19 +316,6 @@ func main() {
 
 ---
 
-## Compared to Other Implementations
-
-| Feature | maldev | Hell's Gate (original) | Halo's Gate (original) | FreshyCalls | RecycledGate |
-|---------|--------|----------------------|----------------------|-------------|-------------|
-| Language | Go | C/ASM | C/ASM | C# | C/ASM |
-| Resolver chaining | Yes | No | No | No | No |
-| Hash-based resolution | Yes | No | No | No | No |
-| Tartarus (JMP follow) | Yes | No | No | No | No |
-| Indirect syscall | Yes | No | No | Yes | Yes |
-| RW/RX cycling | Yes | No | No | No | No |
-
----
-
 ## API Reference
 
 ### SSNResolver Interface

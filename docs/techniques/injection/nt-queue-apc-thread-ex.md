@@ -148,16 +148,6 @@ func main() {
 | Caller routing | Full -- `OpenProcess`, memory operations, and `NtQueueApcThreadEx` all route through Caller for EDR bypass. |
 | Fallback | Falls back to QueueUserAPC (standard), then CreateRemoteThread. |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
-|---------|--------|--------|--------------|--------------|
-| NtQueueApcThreadEx support | Yes | No | Limited (BOF) | No |
-| Special user APC flag | Yes (flag=1) | N/A | Varies | N/A |
-| Syscall routing | Direct/Indirect/WinAPI | N/A | BOF | No |
-| Multi-thread fallback | Yes (tries all threads) | N/A | N/A | N/A |
-| Builder API | Fluent `.Build()` | N/A | Profile | N/A |
-
 ## API Reference
 
 ```go

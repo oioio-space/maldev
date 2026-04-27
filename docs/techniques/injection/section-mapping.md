@@ -114,16 +114,6 @@ func main() {
 | Limitations | Still creates a remote thread (detectable via `PsSetCreateThreadNotifyRoutine`). The section object itself may be logged by ETW. Page-file-backed sections with RX mapping are unusual and may trigger heuristics. |
 | Memory forensics | Shared sections leave artifacts in the kernel section object table. Volatility/Rekall can identify them. |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
-|---------|--------|--------|--------------|--------------|
-| Caller-routed NT APIs | Yes | N/A | N/A | No |
-| No WriteProcessMemory | Yes | Yes (when used) | Module stomping only | No |
-| Automatic local cleanup | `NtUnmapViewOfSection` | Manual | Built-in | N/A |
-| Thread creation fallback | `CreateRemoteThread` when no Caller | N/A | N/A | N/A |
-| Configurable section type | SEC_COMMIT | Fixed | Fixed | N/A |
-
 ## API Reference
 
 ```go

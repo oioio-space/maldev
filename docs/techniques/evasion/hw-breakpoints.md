@@ -129,16 +129,6 @@ func main() {
 | Limitations | Requires `THREAD_GET_CONTEXT` / `THREAD_SET_CONTEXT` access on each thread. Cannot detect kernel-mode debug breakpoints. New threads created after clearing may get new breakpoints from EDR. |
 | Race condition | EDR may re-set breakpoints after clearing. Consider clearing immediately before the sensitive operation. |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
-|---------|--------|--------|--------------|--------------|
-| Detection (read DRs) | Yes | No | No | No |
-| Clear all threads | Yes | No | No | No |
-| Single-thread detect | `Detect()` | N/A | N/A | N/A |
-| Breakpoint details | Register, address, thread ID | N/A | N/A | N/A |
-| Thread enumeration | Toolhelp32 snapshot | N/A | N/A | N/A |
-
 ## API Reference
 
 ```go

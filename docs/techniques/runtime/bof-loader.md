@@ -177,19 +177,6 @@ func main() {
 
 ---
 
-## Compared to Other Implementations
-
-| Feature | maldev (runtime/bof) | COFFLoader | RunOF | InlineExecute-Assembly |
-|---------|-----------------|-----------|-------|------------------------|
-| Language | Go | C | Rust | C# |
-| Relocation types | 3 (ADDR64, ADDR32NB, REL32) | Full | Full | N/A |
-| BOF API support | Partial (Args + output) | Yes | Yes | N/A (.NET) |
-| Output capture | Partial (BeaconOutput/Printf) | Yes | Yes | Yes |
-| x86 support | No | Yes | No | N/A |
-| In-process | Yes | Yes | Yes | Yes |
-
----
-
 ## Beacon API Shim
 
 Our BOF loader includes a Go-native Beacon API shim for argument packing.

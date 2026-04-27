@@ -274,19 +274,6 @@ func main() {
 
 ---
 
-## Compared to Other Implementations
-
-| Feature | maldev | Metasploit (msfvenom) | Sliver | Havoc |
-|---------|--------|-----------------------|--------|-------|
-| Language | Go | C/Ruby | Go | C/Python |
-| TCP staging | Yes | Yes | N/A | Yes |
-| HTTP/HTTPS staging | Yes | Yes | N/A | Yes |
-| Caller bypass | Yes | No | No | No |
-| Cross-platform | Yes | Yes | Yes | Windows |
-| Stageless | No | Yes | Yes (implants) | Yes |
-
----
-
 ## API Reference
 
 ### Stager

@@ -257,19 +257,6 @@ func main() {
 
 ---
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | Cobalt Strike | Mythic |
-|---------|--------|--------|---------------|--------|
-| Language | Go | Go | Java/C | Python/Go |
-| Auto-reconnect | Yes (backoff + jitter) | Yes | Yes | Yes |
-| State machine | Yes (6 phases) | Internal | Internal | Internal |
-| Transport plugins | Yes (interface) | Yes | Yes (profiles) | Yes (agents) |
-| Evasion integration | Yes (Caller) | Partial | Yes | Agent-specific |
-| Cross-platform | Yes (PTY/direct) | Yes | Windows-focused | Agent-specific |
-
----
-
 ## API Reference
 
 ### Shell

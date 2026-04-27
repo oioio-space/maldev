@@ -171,17 +171,6 @@ func main() {
 | **Limitation** | CPUID-based VM detection can be disabled by hypervisor |
 | **Limitation** | Some analysts use bare-metal — no VM to detect |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext |
-|---------|--------|--------|-------------|-------|
-| Anti-debug | IsDebuggerPresent + TracerPid | Basic | Advanced (multiple checks) | IsDebuggerPresent |
-| Anti-VM | 8 vendors, registry+files+NIC+CPUID+DMI | Basic VM check | Configurable | Registry + files |
-| Sandbox | 7 environmental checks + timing | None | Sleep mask only | Basic |
-| Configurable | Full Config struct | No | Profile-based | Partial |
-| Cross-platform | Windows + Linux | Windows + Linux | Windows only | Windows only |
-| Timing evasion | 3 CPU-burn methods | None | Sleep mask | None |
-
 ## API Reference
 
 ```go

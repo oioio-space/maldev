@@ -127,16 +127,6 @@ func main() {
 | Compatibility | x64 only in current implementation (uses `CONTEXT.Rip`). Windows 7+. |
 | Limitations | Requires `THREAD_GET_CONTEXT | THREAD_SET_CONTEXT` access. Creates a visible child process. The original entry point code never runs (process may appear broken if shellcode does not hand off). `NtSetContextThread` is a high-signal indicator for EDR. |
 
-## Compared to Other Implementations
-
-| Feature | maldev | Sliver | CobaltStrike | D3Ext/maldev |
-|---------|--------|--------|--------------|--------------|
-| Caller-routed NT APIs | Yes | No | N/A | No |
-| Configurable host process | Yes (`ProcessPath`) | Yes | spawnto | No |
-| Context manipulation | `NtGetContextThread`/`NtSetContextThread` via Caller | Direct | Built-in | Direct |
-| Builder pattern | Yes | Config | Profile | Function |
-| x86 support | Not yet | Yes | Yes | No |
-
 ## API Reference
 
 ```go
