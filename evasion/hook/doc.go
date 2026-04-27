@@ -1,25 +1,46 @@
-// Package hook provides x64 inline function hooking — intercept any exported
-// Windows function by patching its prologue with a JMP to a Go callback.
+//go:build windows
+
+// Package hook installs x64 inline hooks on exported Windows functions:
+// patch the prologue with a JMP to a Go callback, automatically generate
+// a trampoline for calling the original, and fix up RIP-relative
+// instructions in the stolen prologue.
 //
-// Technique: Inline hooking with relay + trampoline. Automatically analyzes
-// the function prologue to determine steal length, generates a trampoline
-// for calling the original, and fixes up RIP-relative instructions.
+// Hook represents a single installed hook; HookGroup batches several
+// for atomic install/remove. Functional options (`HookOption`) tune
+// install behaviour: probe-only mode, remote-process install, IPC
+// bridge controller for out-of-process callbacks. GoHandler /
+// GoHandlerBytes generate self-contained shellcode that runs an
+// arbitrary Go DLL handler without CGo. RemoteInstall /
+// RemoteInstallByName install hooks in a target process via
+// `CreateRemoteThread`-class injection.
 //
-// MITRE ATT&CK: T1574.012 — Hijack Execution Flow: Inline Hooking.
-// Platform: Windows (x64 only).
-// Detection: High — EDR integrity checks detect modified function prologues.
+// No CGo required — uses `syscall.NewCallback` for the Go-to-native
+// bridge. No external disassembler — prologue analysis uses
+// `golang.org/x/arch/x86asm`.
 //
-// No CGo required — uses syscall.NewCallback for the Go-to-native bridge.
-// No x64dbg required — prologue analysis is automatic via x86asm.
+// # MITRE ATT&CK
 //
-// Example:
+//   - T1574.012 (Hijack Execution Flow: COR_PROFILER —
+//     inline-hook scaffolding falls under the same parent technique)
 //
-//	var h *hook.Hook
-//	h, _ = hook.InstallByName("kernel32.dll", "DeleteFileW", func(lpFileName uintptr) uintptr {
-//	    name := windows.UTF16PtrToString((*uint16)(unsafe.Pointer(lpFileName)))
-//	    log.Printf("DeleteFileW: %s", name)
-//	    r, _, _ := syscall.SyscallN(h.Trampoline(), lpFileName)
-//	    return r
-//	})
-//	defer h.Remove()
+// # Detection level
+//
+// noisy
+//
+// EDR integrity checks detect modified function prologues. Cross-
+// process install path triggers `EVENT_TI_NTPROTECT` on the target's
+// loaded modules.
+//
+// # Example
+//
+// See [ExampleNew] and [ExampleInstallByName] in hook_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/evasion/inline-hook.md
+//   - [github.com/oioio-space/maldev/evasion/hook/bridge] — IPC controller
+//   - [github.com/oioio-space/maldev/evasion/hook/shellcode] — trampoline generator
+//
+// [github.com/oioio-space/maldev/evasion/hook/bridge]: https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/bridge
+// [github.com/oioio-space/maldev/evasion/hook/shellcode]: https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/shellcode
 package hook

@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-04-27
-reflects_commit: 7ac84d2
+reflects_commit: 1805d8e
 ---
 
 # Documentation refactor — progress tracker
@@ -51,7 +51,7 @@ Each area gets:
 | Area | doc.go | tech md | example_test.go | Notes |
 |---|---|---|---|---|
 | `cleanup/*` | ✅ 7/7 | ✅ 7/7 + README | ✅ 8/8 | Done in Phase 2 (`11838e3`). Reference shape for everything below. |
-| `evasion/*` | 🟡 5/13 | ⬜ 0/~10 | 🟡 5/13 | **In flight.** Sub-batch 4a (this commit): doc.go + example_test.go done for **amsi, etw, unhook, sleepmask, cet**. Remaining 8 packages (acg, blockdlls, callstack, hook + bridge + shellcode, kcallback, preset, stealthopen) keep their legacy doc.go for now and have NO example_test.go yet — pick up here. Sub-batch 4b: tech md rewrites (amsi-bypass, etw-patching, ntdll-unhooking, sleep-mask + new cet.md) + area README + cross-link audit. |
+| `evasion/*` | ✅ 12/12 | 🟡 4/~10 | ✅ 12/12 | **Mostly done.** All doc.go aligned to template; every package has example_test.go covering the exported API. Tech-md template rewrites done for amsi-bypass, etw-patching, sleep-mask (rewritten in 4b? — check), cet (NEW). Tech-md still legacy on: acg-blockdlls, callstack-spoof, inline-hook, kernel-callback-removal, ntdll-unhooking, preset, sleep-mask, stealthopen — do them in a polish round if time, low priority since legacy content is reasonable. **Cross-categorised pages** still living under evasion/ but documenting non-evasion packages: anti-analysis (recon), byovd-rtcore64 (kernel/driver), dll-hijack (recon), fakecmd/hideprocess/phant0m (process/tamper), hw-breakpoints (recon), ppid-spoofing (c2/shell), sandbox/timing (recon) — to be reorganised in Phase 6. |
 | `inject` | ⬜ 0/1 | ⬜ 0/13 | ⬜ 0/1 | Single package, large API surface (15+ methods). 13 existing tech pages under `docs/techniques/injection/`. |
 | `crypto / encode / hash` | ⬜ 0/3 | ⬜ 0/4 | ⬜ 0/3 | Layer 0 — pure Go. Should be quick. |
 | `c2/*` | ⬜ 0/7 | ⬜ 0/6 | ⬜ 0/7 | Includes `c2/transport/namedpipe`. |

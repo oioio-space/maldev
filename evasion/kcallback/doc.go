@@ -1,25 +1,46 @@
-// Package kcallback enumerates the kernel-mode callback arrays EDR
-// products register to observe process/thread/image-load events, and
-// (pluggable future work) provides the surface to remove them.
+//go:build windows
+
+// Package kcallback enumerates and removes kernel-mode callback
+// registrations that EDR products use to observe process/thread/image-
+// load events from the kernel side.
 //
-// Technique: read the ntoskrnl callback arrays
-// (PspCreateProcessNotifyRoutine, PspCreateThreadNotifyRoutine,
-// PspLoadImageNotifyRoutine) via a caller-supplied KernelReader. When
-// the KernelReader is backed by a driver-level primitive (BYOVD like
-// RTCore64, GDRV, or a dedicated driver), the package can also report
-// which routines are registered and by which signed driver.
+// Reads the ntoskrnl callback arrays (`PspCreateProcessNotifyRoutine`,
+// `PspCreateThreadNotifyRoutine`, `PspLoadImageNotifyRoutine`) via a
+// caller-supplied KernelReader / KernelReadWriter. When backed by a
+// driver-level primitive (BYOVD like RTCore64, GDRV, or a dedicated
+// signed driver), the package reports which routines are registered
+// and by which driver, then optionally zeroes the chosen slot under a
+// refcount-aware RemoveToken so Restore puts the original value back
+// without callers tracking the displaced bytes.
 //
-// MITRE ATT&CK: T1562.001 (Impair Defenses: Disable or Modify Tools —
-// the kernel-mode analogue of userland EDR patching).
-// Platform: Windows amd64
-// Detection: Low when removal succeeds cleanly (the EDR simply stops
-// getting callbacks and often reports itself as "running"). High
-// during the BYOVD driver load — Win10/11 HVCI blocks unsigned
-// drivers and the attested driver list is audited.
+// `NtoskrnlBase` resolves the kernel image base via
+// `SystemModuleInformation` (requires `SeDebugPrivilege`). `DriverAt`
+// resolves a callback-array address to its hosting driver name.
 //
-// v0.17.1 scope: enumeration + Remove + Restore. Callers plug in a
-// KernelReadWriter (kernel/driver/rtcore64.Driver, GDRV, custom) and
-// the package zeroes the chosen slot under a refcount-aware token so
-// Restore puts the original value back without callers needing to
-// remember the displaced bytes.
+// # MITRE ATT&CK
+//
+//   - T1562.001 (Impair Defenses: Disable or Modify Tools) —
+//     kernel-mode analogue of user-mode hook removal
+//
+// # Detection level
+//
+// very-noisy
+//
+// The BYOVD driver load is the loudest event — Win10/11 HVCI blocks
+// unsigned drivers; the attested-driver list is audited; Defender
+// Driver Block-list catches RTCore64. After the slot is zeroed the
+// EDR simply stops getting callbacks and may report itself as
+// "running" (silent failure for blue), but the driver-load forensics
+// still mark the host.
+//
+// # Example
+//
+// See [ExampleNtoskrnlBase] in kcallback_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/evasion/kernel-callback-removal.md
+//   - [github.com/oioio-space/maldev/kernel/driver/rtcore64] — BYOVD KernelReadWriter
+//
+// [github.com/oioio-space/maldev/kernel/driver/rtcore64]: https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver/rtcore64
 package kcallback
