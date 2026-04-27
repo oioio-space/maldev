@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-04-27
-reflects_commit: 6e26818
+reflects_commit: ad40545
 ---
 
 # Documentation refactor — progress tracker
@@ -60,7 +60,7 @@ Each area gets:
 | `pe/*` | ✅ 8/8 | ✅ 6/6 + README | ✅ 7/7 | Done. doc.go aligned to template (pe umbrella + cert, imports, masquerade, morph, parse, srdi, strip). Stale references to pe/bof + pe/clr removed (now under runtime/). 7 example_test.go (one per sub-package). 6 tech md fully rewritten to canonical template (TL;DR / Primer / How It Works / API Reference / Examples / OPSEC & Detection / MITRE ATT&CK / Limitations / See also): certificate-theft, imports, masquerade, morph, pe-to-shellcode, strip-sanitize. README rewrite: Mermaid offline→runtime flow, 6-step layered scrub recipe, MITRE+D3FEND table. pe/parse covered by README + doc.go (no dedicated tech md — pure helper for other pe/* packages). |
 | `persistence/*` | ✅ 7/7 | ✅ 6/6 + README | ✅ 6/6 | Done. doc.go aligned + 6 tech md (3 NEW: account, lnk, service · 3 rewrites: registry, startup-folder, task-scheduler) + README rewrite (Mermaid trigger→mech→compose flow + redundancy recipe + MITRE+D3FEND). Note: `persistence/account/` directory declares `package user` (Win32 API surface name). |
 | `process/*` | ✅ 7/7 | ✅ 6/6 + README | ✅ 6/6 | Done. doc.go aligned + 6 tech md (3 NEW: enum, session, herpaderping · 3 moved+rewritten from evasion/: fakecmd, hideprocess, phant0m) + new README under fresh `docs/techniques/process/` directory. evasion/README cross-refs updated to point at `../process/<name>.md`. evasion area's "cross-categorised" table now correctly delegates these 3 pages to their owner directory. |
-| `recon/*` | ⬜ 0/9 | ⬜ 0/8 | ⬜ 0/9 | Existing pages partly under `docs/techniques/evasion/` (anti-analysis, dll-hijack, hw-breakpoints, sandbox, timing) — re-locate in Phase 6 or accept the categorisation. |
+| `recon/*` | ✅ 9/9 | ✅ 8/8 + README | ✅ 9/9 | Done (commits f31fca1..ad40545). doc.go aligned + 9 NEW example_test.go + 8 tech md (5 ports from evasion/: anti-analysis, dll-hijack, hw-breakpoints, sandbox, timing · 3 NEW: drive, folder, network) + new README under docs/techniques/recon/. evasion/README cross-categorised table updated. |
 | `runtime/*` | ⬜ 0/2 | ⬜ 0/2 | ⬜ 0/2 | bof, clr — both have existing tech pages. |
 | `win/*` | ⬜ 0/8 | ⬜ 0/3 | ⬜ 0/8 | win/syscall + win/ntapi + win/api covered by `docs/techniques/syscalls/*`. The other 5 (domain, impersonate, privilege, token, version) lack per-package pages. |
 | `kernel/driver/*` | ⬜ 0/2 | ⬜ 0/1 | ⬜ 0/2 | Single tech page (byovd-rtcore64.md) currently under `docs/techniques/evasion/`. |
