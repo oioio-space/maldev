@@ -1,122 +1,100 @@
-# PE Morphing (UPX Section Rename)
-
-[<- Back to PE Overview](README.md)
-
-**MITRE ATT&CK:** [T1027.002 - Obfuscated Files or Information: Software Packing](https://attack.mitre.org/techniques/T1027/002/)
-**D3FEND:** [D3-SEA - Static Executable Analysis](https://d3fend.mitre.org/technique/d3f:StaticExecutableAnalysis/)
-
 ---
+package: github.com/oioio-space/maldev/pe/morph
+last_reviewed: 2026-04-27
+reflects_commit: 23c9331
+---
+
+# PE Morphing (UPX section rename)
+
+[← pe index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Replace UPX section names (`UPX0`, `UPX1`, `UPX2`) with random
+bytes so off-the-shelf static unpackers (CFF Explorer, x64dbg's
+UPX plugin, IDA's UPX preprocessor) fail to recognise the input.
+The runtime UPX stub keeps working because it references offsets,
+not the magic. `UPXFix` reverses the morph for debugging.
 
 ## Primer
 
-UPX is the most popular executable packer -- it compresses binaries to reduce their size. The problem is that UPX-packed binaries have well-known section names (`UPX0`, `UPX1`, `UPX2`) that every antivirus and EDR recognizes instantly.
+UPX is the most popular executable packer — it compresses
+binaries to reduce size. Every UPX-packed binary carries
+well-known section names that every antivirus and EDR fingerprint
+on contact. `pe/morph` rewrites those names with random non-zero
+bytes, breaking the signature-based unpack pipeline while leaving
+the runtime behaviour intact.
 
-**Changing the chapter titles in a packed book so automated scanners cannot recognize it.** PE morphing replaces the `UPX` section names with random strings, breaking automatic UPX detection and unpacking tools while keeping the binary functional.
-
----
+The morph is a 24-byte change (three 8-byte section name fields).
+That is enough to break SHA-256 blocklists entirely, but
+similarity-hash scans (ssdeep, TLSH) still pin the variant to its
+parent in the ~95th percentile range — the morph is genuinely
+shallow, defeating only signature-based static unpacker matching.
 
 ## How It Works
 
-### Morphing Process
-
 ```mermaid
 flowchart LR
-    INPUT["UPX-packed binary\nSections: UPX0, UPX1, UPX2"] --> DETECT["Scan sections\nfor 'UPX' substring"]
-    DETECT --> RANDOM["Generate 8-byte\nrandom names"]
-    RANDOM --> PATCH["Overwrite section\nname fields in\nPE header"]
-    PATCH --> OUTPUT["Morphed binary\nSections: xK9mP2, aB7nQ4, ..."]
-
-    style INPUT fill:#f66,color:#fff
-    style OUTPUT fill:#4a9,color:#fff
+    INPUT["UPX-packed binary<br/>UPX0 / UPX1 / UPX2"] --> SCAN[Scan section table<br/>for 'UPX' substring]
+    SCAN --> RAND[Generate 8 random<br/>printable bytes per section]
+    RAND --> PATCH[Overwrite Name field<br/>40-byte section header offset]
+    PATCH --> OUT[Morphed binary<br/>random section names]
 ```
 
-### Section Header Layout
+The section name field lives at offset 0 of every 40-byte section
+header in the section table. The section table itself starts at
+`COFF_offset + 20 + SizeOfOptionalHeader`; each header is 40 bytes;
+the Name field is the first 8 bytes. `UPXMorph` walks the table,
+matches names containing "UPX", and overwrites the 8 bytes in
+place. `UPXFix` walks the same table, matches the random bytes
+against the expected layout (3 sections, sequential), and
+restores the canonical names.
 
-```mermaid
-graph TD
-    subgraph "PE File Structure"
-        DOS["DOS Header\ne_lfanew at 0x3C"]
-        PE["PE Signature\n'PE\\0\\0'"]
-        COFF["COFF Header\nNumSections, SizeOfOptionalHeader"]
-        OPT["Optional Header"]
-        SEC["Section Table"]
+## API Reference
 
-        DOS -->|"e_lfanew"| PE --> COFF --> OPT --> SEC
-    end
+### `UPXMorph(peData []byte) ([]byte, error)`
 
-    subgraph "Section Header (40 bytes)"
-        NAME["Name (8 bytes)\n'UPX0\\0\\0\\0\\0'"]
-        REST["VirtualSize, VirtualAddress,\nSizeOfRawData, ..."]
-        NAME --> REST
-    end
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph#UPXMorph)
 
-    SEC -->|"offset = COFF + 20 + SizeOfOptHdr + i*40"| NAME
+Replace UPX section names with random bytes. Returns the input
+unchanged when the PE is not UPX-packed; returns an error on
+malformed PE input.
 
-    style NAME fill:#f96,color:#fff
-```
+### `UPXFix(peData []byte) ([]byte, error)`
 
-### Before and After
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph#UPXFix)
 
-```text
-Before morphing:
-  Section 0: UPX0     (virtual, decompression target)
-  Section 1: UPX1     (compressed data)
-  Section 2: UPX2     (UPX metadata)
+Restore canonical UPX0 / UPX1 / UPX2 section names. The morphed
+binary becomes unpackable with `upx -d` again.
 
-After morphing:
-  Section 0: xK9mP2aB (random)
-  Section 1: 7nQ4rT8w (random)
-  Section 2: mD5vL1cX (random)
-```
+## Examples
 
----
-
-## Usage
-
-### Morph UPX Section Names
+### Simple — morph an existing UPX binary
 
 ```go
 import (
     "os"
+
     "github.com/oioio-space/maldev/pe/morph"
 )
 
-data, _ := os.ReadFile("implant-upx.exe")
-
-// Replace UPX section names with random strings
-morphed, err := morph.UPXMorph(data)
-if err != nil {
-    log.Fatal(err)
-}
-
-os.WriteFile("implant-morphed.exe", morphed, 0644)
+raw, _ := os.ReadFile("payload.upx.exe")
+morphed, _ := morph.UPXMorph(raw)
+_ = os.WriteFile("payload.morph.exe", morphed, 0o644)
 ```
 
-### Restore UPX Names (for Debugging)
+### Composed — restore for debugging
 
 ```go
-// Restore original UPX0/UPX1/UPX2 names
-restored, err := morph.UPXFix(morphed)
-if err != nil {
-    log.Fatal(err)
-}
-
-os.WriteFile("implant-restored.exe", restored, 0644)
-// Can now be unpacked with: upx -d implant-restored.exe
+restored, _ := morph.UPXFix(morphed)
+// upx -d on restored now succeeds
 ```
 
----
+### Advanced — fuzzy-hash before/after
 
-## Combined Example — Morph + Fuzzy Hash Fingerprint
-
-UPXMorph changes 24 bytes (three 8-byte section name fields). That is enough
-to break SHA-256-based blocklists entirely. But defenders using ssdeep or
-TLSH still detect the variant because 99.99 % of the binary is unchanged.
-This example makes the contrast concrete:
+Demonstrate the morph defeats SHA-256 but not similarity hashes:
 
 ```go
-package main
-
 import (
     "fmt"
     "os"
@@ -125,124 +103,86 @@ import (
     "github.com/oioio-space/maldev/pe/morph"
 )
 
-func main() {
-    packed, _ := os.ReadFile("implant-upx.exe")
+raw, _ := os.ReadFile("payload.upx.exe")
+sha256Before := hash.SHA256(raw)
+ssBefore, _ := hash.Ssdeep(raw)
+tlBefore, _ := hash.TLSH(raw)
 
-    // Hash the original.
-    sha256Before := hash.SHA256(packed)
-    ssBefore, _  := hash.Ssdeep(packed)
-    tlBefore, _  := hash.TLSH(packed)
+morphed, _ := morph.UPXMorph(raw)
 
-    // Morph: only UPX section names change.
-    morphed, err := morph.UPXMorph(packed)
-    if err != nil {
-        fmt.Fprintln(os.Stderr, err)
-        os.Exit(1)
-    }
+ssAfter, _ := hash.Ssdeep(morphed)
+tlAfter, _ := hash.TLSH(morphed)
+ssScore, _ := hash.SsdeepCompare(ssBefore, ssAfter)
+tlDist, _ := hash.TLSHCompare(tlBefore, tlAfter)
 
-    // Hash the morphed copy.
-    sha256After := hash.SHA256(morphed)
-    ssAfter, _  := hash.Ssdeep(morphed)
-    tlAfter, _  := hash.TLSH(morphed)
-
-    ssScore, _ := hash.SsdeepCompare(ssBefore, ssAfter)
-    tlDist, _  := hash.TLSHCompare(tlBefore, tlAfter)
-
-    fmt.Printf("SHA-256  before: %s\n", sha256Before)
-    fmt.Printf("SHA-256  after:  %s\n", sha256After)
-    fmt.Printf("same?    %v\n\n", sha256Before == sha256After) // false
-
-    fmt.Printf("ssdeep score:    %d / 100\n", ssScore)   // ~97
-    fmt.Printf("TLSH distance:   %d\n", tlDist)          // ~12
-
-    // SHA-256 blocklist → miss.
-    // ssdeep / TLSH similarity scan → hit (~97 score, ~12 distance).
-    _ = os.WriteFile("implant-morphed.exe", morphed, 0o644)
-}
+fmt.Printf("SHA-256 same?    %v\n", sha256Before == hash.SHA256(morphed)) // false
+fmt.Printf("ssdeep score:    %d / 100\n", ssScore)                        // ~97
+fmt.Printf("TLSH distance:   %d\n", tlDist)                               // ~12
 ```
 
-**What this tells a defender:** a morphed UPX binary evades every hash-based
-IOC but is trivially flagged by a similarity scan against the pre-morph
-sample. Layering morph with `pe/strip` (section rename + pclntab wipe)
-closes part of that gap, but TLSH distance only grows to ~30–50 —
-still well within "same family" range for most tools.
-
----
-
-## Combined Example: Build, Pack, Sanitize, Morph
+### Pipeline — build → pack → strip → morph
 
 ```go
-package main
+exec.Command("garble", "-literals", "-tiny", "build", "-o", "step1.exe", "./cmd/implant").Run()
+exec.Command("upx", "--best", "-o", "step2.exe", "step1.exe").Run()
 
-import (
-    "fmt"
-    "os"
-    "os/exec"
-
-    "github.com/oioio-space/maldev/pe/morph"
-    "github.com/oioio-space/maldev/pe/strip"
-)
-
-func main() {
-    // Step 1: Build with garble
-    exec.Command("garble", "-literals", "-tiny", "build",
-        "-ldflags", "-s -w -H windowsgui",
-        "-o", "step1-garbled.exe",
-        "./cmd/implant",
-    ).Run()
-
-    // Step 2: Pack with UPX
-    exec.Command("upx", "--best", "-o", "step2-packed.exe", "step1-garbled.exe").Run()
-
-    // Step 3: Read packed binary
-    data, _ := os.ReadFile("step2-packed.exe")
-
-    // Step 4: Sanitize PE metadata
-    data = strip.Sanitize(data)
-
-    // Step 5: Morph UPX section names
-    data, err := morph.UPXMorph(data)
-    if err != nil {
-        fmt.Println("morph failed:", err)
-        return
-    }
-
-    // Step 6: Write final binary
-    os.WriteFile("final-implant.exe", data, 0644)
-    fmt.Println("Pipeline complete: final-implant.exe")
-}
+raw, _ := os.ReadFile("step2.exe")
+raw = strip.Sanitize(raw)
+raw, _ = morph.UPXMorph(raw)
+_ = os.WriteFile("final.exe", raw, 0o644)
 ```
 
----
+See [`ExampleUPXMorph`](../../../pe/morph/morph_example_test.go).
 
-## Advantages & Limitations
+## OPSEC & Detection
 
-### Advantages
+| Artefact | Where defenders look |
+|---|---|
+| `UPX0` / `UPX1` / `UPX2` literal section names | YARA / EDR static rules — defeated by morph |
+| Sequential 24KB+ executable sections + decompression stub | Heuristic UPX detection — *not* defeated |
+| File entropy ~7.99 bits/byte (compressed payload) | Anti-malware entropy scans — unchanged |
+| Runtime: `VirtualAlloc(RWX)` + decompression in-place | Behavioural EDR — outside scope; UPX morph only touches the on-disk file |
+| ssdeep / TLSH similarity to a known UPX-packed family member | Fuzzy-hash blocklists — only ~24 bytes change, similarity stays high |
 
-- **Breaks UPX detection**: Antivirus YARA rules matching UPX section names no longer trigger
-- **Breaks auto-unpacking**: Tools that detect and unpack UPX fail without the standard names
-- **Changes file hash**: New random section names change the SHA256 of every morphed copy
-- **Reversible**: `UPXFix()` restores original names for debugging/unpacking
-- **Preserves functionality**: Only the 8-byte name fields change -- no code modification
+**D3FEND counters:**
 
-### Limitations
+- [D3-SEA](https://d3fend.mitre.org/technique/d3f:StaticExecutableAnalysis/)
+  — section-table inspection.
+- [D3-FCA](https://d3fend.mitre.org/technique/d3f:FileContentAnalysis/)
+  — entropy + fuzzy-hash similarity.
 
-- **UPX-specific**: Only targets UPX section names -- does not handle other packers
-- **Superficial**: The UPX decompression stub is still present and recognizable by deep analysis
-- **Entropy unchanged**: High-entropy sections (compressed data) are still detectable
-- **Requires valid PE**: Uses the `saferwall/pe` parser -- malformed PEs may fail
+**Hardening for the operator:**
 
----
+- Pair with `pe/strip` (pclntab + section rename) for both Go and
+  UPX scrub in a single pass.
+- The UPX runtime stub itself is detectable — for higher-effort
+  scenarios swap the stub via a custom packer.
 
-## API Reference
+## MITRE ATT&CK
 
-### Functions
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | Obfuscated Files or Information: Software Packing | partial — UPX header morph defeats signature-based unpackers; entropy + stub remain | D3-SEA, D3-FCA |
 
-```go
-// UPXMorph replaces UPX section names with random bytes.
-// Returns data unchanged if not UPX-packed.
-func UPXMorph(peData []byte) ([]byte, error)
+## Limitations
 
-// UPXFix restores original UPX section names (UPX0, UPX1, UPX2).
-func UPXFix(peData []byte) ([]byte, error)
-```
+- **UPX-specific.** Only targets UPX section names; other packers
+  (Themida, VMProtect, ASPack) are out of scope.
+- **Superficial.** The UPX decompression stub is still present
+  and recognisable by deep analysis — heuristic detectors win.
+- **Entropy unchanged.** High-entropy compressed sections remain
+  detectable by entropy scans.
+- **Fuzzy hash leak.** ssdeep / TLSH similarity stays in the
+  ~95th-percentile range; not safe against family-similarity
+  blocklists.
+- **Requires valid PE.** Malformed input returns an error; no
+  best-effort partial morph.
+
+## See also
+
+- [PE strip / sanitize](strip-sanitize.md) — Go-toolchain scrub
+  to pair with morph.
+- [`hash`](../hash/README.md) — measure the SHA-256 vs fuzzy-hash
+  delta after morph.
+- [Operator path](../../by-role/operator.md).
+- [Detection eng path](../../by-role/detection-eng.md).

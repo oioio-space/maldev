@@ -1,83 +1,110 @@
-# PE Manipulation
-
-[<- Back to README](../../../README.md)
-
-The `pe/` package tree provides tools for manipulating Portable Executable files: stripping Go-specific metadata, loading COFF object files (BOFs), and morphing UPX-packed binaries to evade signature detection.
-
+---
+last_reviewed: 2026-04-27
+reflects_commit: 23c9331
 ---
 
-## Architecture Overview
+# PE manipulation
+
+[← maldev README](../../../README.md) · [docs/index](../../index.md)
+
+Pure-Go Portable Executable analysis, sanitisation, identity
+cloning, signature grafting, and conversion-to-shellcode. The
+package tree is intentionally bottom-up: `pe/parse` and
+`pe/imports` are read-only walkers, `pe/strip`, `pe/morph`,
+`pe/cert`, `pe/masquerade` are byte-mutators on a `[]byte`, and
+`pe/srdi` is the producer of position-independent shellcode that
+downstream `inject/` chains consume. Runtime-side BOF and CLR
+loaders moved to [`runtime/bof`](../runtime/) and
+[`runtime/clr`](../runtime/) respectively.
 
 ```mermaid
-graph TD
-    subgraph "pe/"
-        subgraph "pe/strip"
-            SANITIZE["Sanitize()"]
-            TS["SetTimestamp()"]
-            PCLNTAB["WipePclntab()"]
-            RENAME["RenameSections()"]
-            SANITIZE --> TS
-            SANITIZE --> PCLNTAB
-            SANITIZE --> RENAME
-        end
-
-        subgraph "runtime/bof"
-            LOAD["Load()"]
-            EXEC["Execute()"]
-            LOAD --> EXEC
-        end
-
-        subgraph "pe/morph"
-            UPX["UPXMorph()"]
-            FIX["UPXFix()"]
-        end
-
-        subgraph "pe/parse"
-            PARSE["Parse()"]
-        end
-
-        subgraph "pe/srdi"
-            CONVERT["ConvertFile()"]
-            CONVERTB["ConvertBytes()"]
-        end
+flowchart LR
+    subgraph offline [Offline / build-host]
+        SRC[Source PE<br/>signed donor]
+        PARSE[parse + imports<br/>read-only walkers]
+        STRIP[strip<br/>Go-toolchain scrub]
+        MORPH[morph<br/>UPX header rename]
+        CERT[cert<br/>Authenticode graft]
+        MASQ[masquerade<br/>manifest + icon<br/>+ VERSIONINFO clone]
+        SRDI[srdi<br/>Donut PE → shellcode]
     end
-
-    INPUT["PE Binary"] --> SANITIZE
-    INPUT --> UPX
-    INPUT --> CONVERT
-    COFF["COFF Object"] --> LOAD
-
-    style SANITIZE fill:#4a9,color:#fff
-    style UPX fill:#49a,color:#fff
-    style LOAD fill:#a94,color:#fff
+    subgraph runtime [Runtime / target host]
+        INJECT[inject/*<br/>execute shellcode]
+        BOF[runtime/bof<br/>COFF loader]
+        CLR[runtime/clr<br/>.NET hosting]
+    end
+    SRC --> PARSE
+    SRC --> STRIP
+    SRC --> MORPH
+    SRC --> CERT
+    SRC --> MASQ
+    SRC --> SRDI
+    SRDI --> INJECT
+    PARSE -. drives unhook scoping .-> RUNT[runtime evasion]
 ```
 
-## Documentation
+## Packages
 
-| Document | Description |
-|----------|-------------|
-| [PE Sanitization](strip-sanitize.md) | Remove Go metadata: timestamps, pclntab, section names |
-| [PE Morphing](morph.md) | Randomize UPX section names to evade signatures |
-| [PE-to-Shellcode](pe-to-shellcode.md) | Convert EXE/DLL/.NET/scripts to injectable shellcode via Donut |
-| [Certificate Theft](certificate-theft.md) | Read, copy, strip, and write Authenticode certificates |
-| [Resource Masquerade](masquerade.md) | Compile-time manifest/icon/VERSIONINFO embedding via blank import (`pe/masquerade/preset/`) **or** programmatic `.syso` generation (`pe/masquerade`) — T1036.005 |
-| [Import Table Analysis](imports.md) | Enumerate DLL dependencies and imported function names from PE bytes — T1106 |
-| [BOF Loader](../runtime/bof-loader.md) | Moved to `runtime/bof` in v0.21.0 — load and execute Cobalt Strike BOFs (COFF objects) |
-| [CLR Hosting](../runtime/clr.md) | Moved to `runtime/clr` in v0.21.0 — in-process .NET assembly execution via ICorRuntimeHost — T1620 |
+| Package | Tech page | Detection | One-liner |
+|---|---|---|---|
+| [`pe/parse`](../../../pe/parse) | (covered here + doc.go) | very-quiet | Read-only `debug/pe` wrapper for section / export / raw-byte access |
+| [`pe/imports`](../../../pe/imports) | [imports.md](imports.md) | very-quiet | Cross-platform import-table enumeration |
+| [`pe/strip`](../../../pe/strip) | [strip-sanitize.md](strip-sanitize.md) | quiet | Go pclntab wipe + section rename + timestamp scrub |
+| [`pe/morph`](../../../pe/morph) | [morph.md](morph.md) | moderate | UPX header signature mutation |
+| [`pe/cert`](../../../pe/cert) | [certificate-theft.md](certificate-theft.md) | quiet | Authenticode security-directory read / copy / strip / write |
+| [`pe/masquerade`](../../../pe/masquerade) | [masquerade.md](masquerade.md) | quiet | manifest + icon + VERSIONINFO clone via `.syso` (preset or programmatic) |
+| [`pe/srdi`](../../../pe/srdi) | [pe-to-shellcode.md](pe-to-shellcode.md) | moderate | PE / .NET / script → Donut shellcode |
+
+## Quick decision tree
+
+| You want to… | Use |
+|---|---|
+| …read every DLL!Function pair from a PE | [`imports.List`](imports.md) |
+| …wipe the "Made in Go" markers | [`strip.Sanitize`](strip-sanitize.md) |
+| …hide a UPX-packed binary from auto-unpackers | [`morph.UPXMorph`](morph.md) |
+| …graft a Microsoft signature onto an unsigned binary | [`cert.Copy`](certificate-theft.md) |
+| …make Process Explorer render the implant as svchost | [preset blank-import](masquerade.md) |
+| …clone any PE's identity programmatically | [`masquerade.Clone`](masquerade.md) / [`Build`](masquerade.md) |
+| …convert a PE / .NET / script to position-independent shellcode | [`srdi.ConvertFile`](pe-to-shellcode.md) |
+| …feed shellcode to remote-process injection | [`pe/srdi`](pe-to-shellcode.md) → [`inject`](../inject/README.md) |
+| …enumerate sections / exports for tooling | [`pe/parse`](../../../pe/parse) |
 
 ## MITRE ATT&CK
 
-| Technique | ID | Description |
-|-----------|-----|-------------|
-| Obfuscated Files: Software Packing | [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | PE strip + UPX morphing |
-| Command and Scripting Interpreter | [T1059](https://attack.mitre.org/techniques/T1059/) | BOF execution |
-| Process Injection: DLL Injection | [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | PE-to-shellcode via Donut |
-| Reflective Code Loading | [T1620](https://attack.mitre.org/techniques/T1620/) | In-memory .NET execution via CLR hosting |
+| T-ID | Name | Packages | D3FEND counter |
+|---|---|---|---|
+| [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | Obfuscated Files or Information: Software Packing | `pe/strip`, `pe/morph`, `pe/parse` | [D3-SEA](https://d3fend.mitre.org/technique/d3f:StaticExecutableAnalysis/), [D3-FCA](https://d3fend.mitre.org/technique/d3f:FileContentAnalysis/) |
+| [T1027.005](https://attack.mitre.org/techniques/T1027/005/) | Indicator Removal from Tools | `pe/strip` | [D3-SEA](https://d3fend.mitre.org/technique/d3f:StaticExecutableAnalysis/) |
+| [T1036.005](https://attack.mitre.org/techniques/T1036/005/) | Masquerading: Match Legitimate Name or Location | `pe/masquerade` | [D3-EAL](https://d3fend.mitre.org/technique/d3f:ExecutableAllowlisting/), [D3-SEA](https://d3fend.mitre.org/technique/d3f:StaticExecutableAnalysis/) |
+| [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | Process Injection: Dynamic-link Library Injection | `pe/srdi` (consumer) | [D3-PA](https://d3fend.mitre.org/technique/d3f:ProcessAnalysis/) |
+| [T1106](https://attack.mitre.org/techniques/T1106/) | Native API | `pe/imports` | [D3-SEA](https://d3fend.mitre.org/technique/d3f:StaticExecutableAnalysis/) |
+| [T1553.002](https://attack.mitre.org/techniques/T1553/002/) | Subvert Trust Controls: Code Signing | `pe/cert` | [D3-EAL](https://d3fend.mitre.org/technique/d3f:ExecutableAllowlisting/) |
+| [T1620](https://attack.mitre.org/techniques/T1620/) | Reflective Code Loading | `pe/srdi` | [D3-FCA](https://d3fend.mitre.org/technique/d3f:FileContentAnalysis/), [D3-PA](https://d3fend.mitre.org/technique/d3f:ProcessAnalysis/) |
 
-## D3FEND Countermeasures
+## Layered scrub recipe
 
-| Countermeasure | ID | Description |
-|----------------|-----|-------------|
-| Static Executable Analysis | [D3-SEA](https://d3fend.mitre.org/technique/d3f:StaticExecutableAnalysis/) | Detect modified PE metadata |
-| Executable File Analysis | [D3-EFA](https://d3fend.mitre.org/technique/d3f:ExecutableFileAnalysis/) | Detect COFF loading patterns |
-| Process Spawn Analysis | [D3-PSA](https://d3fend.mitre.org/technique/d3f:ProcessSpawnAnalysis/) | Detect shellcode execution patterns (Donut stub) |
+The full identity scrub for a Go-built implant is a six-step
+build-host pipeline. None of the steps is enough alone; together
+they survive triage long enough to matter.
+
+1. **Build with [garble](https://github.com/burrowers/garble)** — symbol obfuscation at compile time.
+2. **`pe/masquerade.Clone`** — clone svchost / cmd / explorer identity at link time via `.syso`.
+3. **`pe/strip.Sanitize`** — wipe pclntab + rename Go sections + scrub timestamp.
+4. **UPX pack + `pe/morph.UPXMorph`** — defeat signature-based unpackers.
+5. **`pe/cert.Copy`** — graft a Microsoft Authenticode blob.
+6. **`cleanup/timestomp.CopyFromFull`** — align MFT timestamps to the donor.
+
+For payload delivery (separate from build):
+
+7. **`pe/srdi.ConvertFile`** — convert the implant or downstream payload to Donut shellcode.
+8. **`inject/*`** — deliver the shellcode via any of the documented techniques.
+
+## See also
+
+- [Operator path: build-host pipeline](../../by-role/operator.md) — full scrub recipe.
+- [Detection eng path: PE-level artefacts](../../by-role/detection-eng.md).
+- [`runtime/bof`](../runtime/) — COFF (BOF) loader; consumes BOF objects produced upstream.
+- [`runtime/clr`](../runtime/) — in-process .NET hosting; consumes managed payloads.
+- [`inject`](../inject/README.md) — execution surface for `pe/srdi` shellcode.
+- [`crypto`](../crypto/README.md) — payload encryption pre-conversion.
+- [`hash`](../hash/README.md) — measure SHA-256 vs fuzzy-hash deltas after morph.
