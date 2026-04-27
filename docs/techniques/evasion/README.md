@@ -53,10 +53,10 @@ Cross-categorised pages currently living here (packages live elsewhere):
 | [anti-analysis.md](anti-analysis.md) | `recon/antidebug`, `recon/antivm` | recon-class, kept here for the evasion-flow reader |
 | [byovd-rtcore64.md](byovd-rtcore64.md) | `kernel/driver/rtcore64` | BYOVD primitive used by kcallback + lsassdump |
 | [dll-hijack.md](dll-hijack.md) | `recon/dllhijack` | discovery is recon, exploitation is evasion |
-| [fakecmd.md](fakecmd.md) | `process/tamper/fakecmd` | PEB CommandLine spoof |
-| [hideprocess.md](hideprocess.md) | `process/tamper/hideprocess` | NtQSI patch to hide PIDs |
+| [../process/fakecmd.md](../process/fakecmd.md) | `process/tamper/fakecmd` | PEB CommandLine spoof — moved to process/ |
+| [../process/hideprocess.md](../process/hideprocess.md) | `process/tamper/hideprocess` | NtQSI patch to hide PIDs — moved to process/ |
 | [hw-breakpoints.md](hw-breakpoints.md) | `recon/hwbp` | DR0–DR7 inspection |
-| [phant0m.md](phant0m.md) | `process/tamper/phant0m` | EventLog svchost thread kill |
+| [../process/phant0m.md](../process/phant0m.md) | `process/tamper/phant0m` | EventLog svchost thread kill — moved to process/ |
 | [ppid-spoofing.md](ppid-spoofing.md) | `c2/shell` (PPIDSpoofer) | spawn-time parent PID spoof |
 | [sandbox.md](sandbox.md) | `recon/sandbox` | sandbox detection |
 | [timing.md](timing.md) | `recon/timing` | timing-based sandbox bypass |
