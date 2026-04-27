@@ -142,8 +142,8 @@ If you know the technique you want, jump straight to the matching package:
 | Dump LSASS | `credentials/lsassdump` | [LSASS Dump](techniques/collection/lsass-dump.md) |
 | Parse a MINIDUMP for NT hashes | `credentials/sekurlsa` | [LSASS Parse](techniques/credentials/sekurlsa.md) |
 | Bypass UAC | `privesc/uac` | [Privilege](privilege.md) |
-| Spoof a process command-line | `process/tamper/fakecmd` | [FakeCmd](techniques/evasion/fakecmd.md) |
-| Suspend Event Log threads | `process/tamper/phant0m` | [Phant0m](techniques/evasion/phant0m.md) |
+| Spoof a process command-line | `process/tamper/fakecmd` | [FakeCmd](techniques/process/fakecmd.md) |
+| Suspend Event Log threads | `process/tamper/phant0m` | [Phant0m](techniques/process/phant0m.md) |
 | Persistence — registry | `persistence/registry` | [Registry](techniques/persistence/registry.md) |
 | Persistence — Startup folder | `persistence/startup` | [Startup Folder](techniques/persistence/startup-folder.md) |
 | Persistence — scheduled task | `persistence/scheduler` | [Task Scheduler](techniques/persistence/task-scheduler.md) |

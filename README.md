@@ -96,12 +96,12 @@ injector.Inject(shellcode)
 | **C2** | [techniques/c2/](docs/techniques/c2/README.md) | `shell`, `transport`, `transport/namedpipe`, `meterpreter`, `multicat`, `cert` — reverse shell + reconnect, JA3 fingerprinting, Meterpreter staging, multi-session listener |
 | **Persistence** | [techniques/persistence/](docs/techniques/persistence/README.md) | `registry`, `startup`, `scheduler`, `service`, `lnk`, `account` — Run/RunOnce, scheduled tasks via COM, service install, local account creation |
 | **Credentials** | [techniques/credentials/](docs/techniques/credentials/README.md) | `lsassdump`, `sekurlsa`, `samdump`, `goldenticket` — LSASS dump, MSV/Kerberos parser, SAM offline parse, Golden Ticket forge |
-| **Recon** | [techniques/evasion/](docs/techniques/evasion/README.md) (anti-analysis pages) | `antidebug`, `antivm`, `sandbox`, `timing`, `hwbp`, `dllhijack`, `drive`, `folder`, `network` — environment checks, HW breakpoint inspection, DLL-search-order discovery |
-| **Process tamper** | [techniques/evasion/](docs/techniques/evasion/README.md) (process-tamper pages) | `herpaderping`, `fakecmd`, `hideprocess`, `phant0m` — herpaderping/ghosting, PEB CommandLine spoof, hide PID, kill EventLog |
+| **Recon** | [techniques/recon/](docs/techniques/recon/README.md) | `antidebug`, `antivm`, `sandbox`, `timing`, `hwbp`, `dllhijack`, `drive`, `folder`, `network` — environment checks, HW breakpoint inspection, DLL-search-order discovery |
+| **Process tamper** | [techniques/process/](docs/techniques/process/README.md) | `enum`, `session`, `tamper/herpaderping`, `tamper/fakecmd`, `tamper/hideprocess`, `tamper/phant0m` — herpaderping/ghosting, PEB CommandLine spoof, hide PID, kill EventLog |
 | **Privesc** | [docs/privilege.md](docs/privilege.md) | `uac`, `cve202430088` — 4 UAC bypasses, CVE-2024-30088 LPE |
 | **Cleanup** | [techniques/cleanup/](docs/techniques/cleanup/README.md) | `selfdelete`, `memory`, `timestomp`, `wipe`, `ads`, `bsod`, `service` — self-delete, secure wipe, timestomp, ADS streams, controlled BSOD |
 | **Collection** | [techniques/collection/](docs/techniques/collection/README.md) | `keylog`, `clipboard`, `screenshot` — keyboard hook, clipboard watch, multi-monitor screenshot |
-| **Kernel BYOVD** | [techniques/evasion/byovd-rtcore64.md](docs/techniques/evasion/byovd-rtcore64.md) | `rtcore64` — RTCore64 (CVE-2019-16098) read/write primitives |
+| **Kernel BYOVD** | [techniques/evasion/byovd-rtcore64.md](docs/techniques/evasion/byovd-rtcore64.md) | `rtcore64` — RTCore64 (CVE-2019-16098) read/write primitives (move to `techniques/kernel/` planned) |
 | **Tokens & Privileges** | [techniques/tokens/](docs/techniques/tokens/README.md) | `win/token`, `win/privilege`, `win/impersonate` — token theft, impersonation, privilege escalation |
 | **Crypto / encode / hash** | [techniques/crypto/](docs/techniques/crypto/README.md) · [techniques/encode/](docs/techniques/encode/README.md) | `crypto`, `encode`, `hash` — AES-GCM, ChaCha20, XTEA, S-Box · Base64, UTF-16LE · ROR13, ssdeep, TLSH |
 

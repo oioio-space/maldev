@@ -181,9 +181,9 @@ Click any package name to jump to its area-doc or technique page.
 | [`evasion/preset`](techniques/evasion/preset.md) | `Apply`, `ApplyAll` orchestration |
 | [`evasion/byovd`](techniques/evasion/byovd-rtcore64.md) | RTCore64 BYOVD driver lifecycle |
 | [`evasion/stealthopen`](techniques/evasion/stealthopen.md) | `Opener` interface + transactional NTFS |
-| [`process/tamper/fakecmd`](techniques/evasion/fakecmd.md) | PEB CommandLine spoof |
-| [`process/tamper/hideprocess`](techniques/evasion/hideprocess.md) | Process Hacker / Explorer in-memory patch |
-| [`process/tamper/phant0m`](techniques/evasion/phant0m.md) | Suspend EventLog threads |
+| [`process/tamper/fakecmd`](techniques/process/fakecmd.md) | PEB CommandLine spoof |
+| [`process/tamper/hideprocess`](techniques/process/hideprocess.md) | Process Hacker / Explorer in-memory patch |
+| [`process/tamper/phant0m`](techniques/process/phant0m.md) | Suspend EventLog threads |
 | [`recon/*`](recon.md) | antidebug, antivm, sandbox, timing, hwbp, dllhijack, drive, folder, network |
 | [`inject/`](injection.md) | 15 injection methods (CRT, EarlyBird, ETW thread, KernelCallbackTable, ModuleStomp, NtQueueApcEx, RemoteThread, SectionMap, ThreadHijack, ThreadPool, …) |
 | [`pe/*`](pe.md) | parse, strip, morph (UPX), srdi, cert, masquerade, imports |

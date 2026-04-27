@@ -31,7 +31,7 @@ The `evasion/` module provides composable defense evasion techniques for Windows
 | `evasion/preset` | Composable technique presets | -- | -- | Windows |
 
 Full technique walk-throughs:
-[fakecmd](techniques/process/tamper/fakecmd.md) · [hideprocess](techniques/process/tamper/hideprocess.md) · [stealthopen](techniques/evasion/stealthopen.md) · [inline-hook](techniques/evasion/inline-hook.md) · [ntdll-unhooking](techniques/evasion/ntdll-unhooking.md) · [amsi-bypass](techniques/evasion/amsi-bypass.md) · [etw-patching](techniques/evasion/etw-patching.md)
+[fakecmd](techniques/process/fakecmd.md) · [hideprocess](techniques/process/hideprocess.md) · [stealthopen](techniques/evasion/stealthopen.md) · [inline-hook](techniques/evasion/inline-hook.md) · [ntdll-unhooking](techniques/evasion/ntdll-unhooking.md) · [amsi-bypass](techniques/evasion/amsi-bypass.md) · [etw-patching](techniques/evasion/etw-patching.md)
 
 ## Core Interface (`evasion`)
 
