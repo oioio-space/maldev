@@ -1,27 +1,48 @@
-// Package cert provides PE Authenticode certificate manipulation — read,
-// copy, strip, and write certificate data in PE files.
+// Package cert manipulates the PE Authenticode security directory
+// — read, copy, strip, and write WIN_CERTIFICATE blobs without
+// any Windows crypto API.
 //
-// Technique: PE Authenticode certificate manipulation (read, copy, strip)
-// MITRE ATT&CK: T1553.002 (Subvert Trust Controls: Code Signing)
-// Platform: Cross-platform (operates on PE file bytes)
-// Detection: Low — certificate manipulation leaves no runtime artifacts;
-// modified PE files may fail signature verification.
+// The PE security directory (data directory index 4) carries a
+// file offset + size pointing at WIN_CERTIFICATE structures
+// appended after the last section. This package operates on
+// those raw bytes:
 //
-// How it works:
+//   - [Read] / [Has] inspect the security directory entry.
+//   - [Write] appends certificate data and patches the directory.
+//   - [Strip] truncates certificate data and zeroes the directory.
+//   - [Copy] combines [Read] + [Write] across two PE files.
+//   - [Import] persists raw certificate blobs from disk.
 //
-// The PE security directory (data directory index 4) contains a file offset
-// and size pointing to WIN_CERTIFICATE structures appended after the last
-// section. This package reads, replaces, or removes that certificate blob
-// by manipulating raw PE bytes — no Windows crypto APIs required.
+// Operationally the package is paired with pe/strip + pe/morph
+// to clone a legitimate publisher's cert onto an unsigned
+// implant — enough to trick file-property dialogs and naive
+// signature audits, though Windows itself will reject the
+// signature when verified.
 //
-//   - Read / Has inspect the security directory entry
-//   - Write appends certificate data and patches the directory entry
-//   - Strip truncates certificate data and zeroes the directory entry
-//   - Copy combines Read + Write across two PE files
-//   - Export / Import persist raw certificate blobs to disk
+// # MITRE ATT&CK
 //
-// Limitations:
-//   - Does not validate Authenticode signatures or certificate chains
-//   - Does not recompute PE checksum after modification
-//   - Expects well-formed PE input; truncated files return ErrInvalidPE
+//   - T1553.002 (Subvert Trust Controls: Code Signing) — clone a third-party signature blob
+//
+// # Detection level
+//
+// quiet
+//
+// Certificate manipulation leaves no runtime artifacts; modified
+// PE files fail signature verification when actually checked
+// (`signtool verify`, Windows Defender SmartScreen) but pass
+// at rest in directory listings, file properties, and basic
+// EDR PE-metadata scans.
+//
+// # Example
+//
+// See [ExampleRead] and [ExampleCopy] in cert_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/pe/certificate-theft.md
+//   - [github.com/oioio-space/maldev/pe/strip] — sanitise before signing
+//   - [github.com/oioio-space/maldev/pe/masquerade] — clone the publisher's manifest + version too
+//
+// [github.com/oioio-space/maldev/pe/strip]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip
+// [github.com/oioio-space/maldev/pe/masquerade]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade
 package cert

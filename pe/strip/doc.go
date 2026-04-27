@@ -1,27 +1,41 @@
-// Package strip provides PE binary sanitization to remove Go-specific
-// metadata and compilation artifacts that fingerprint the toolchain.
+// Package strip sanitises Go-built PE binaries by removing
+// toolchain artefacts that fingerprint the producer:
 //
-// Technique: PE header and section manipulation to defeat static analysis.
-// MITRE ATT&CK: T1027.002 (Obfuscated Files or Information: Software Packing)
-// Platform: Cross-platform (operates on PE byte slices)
-// Detection: Low -- modified headers and wiped metadata are unlikely to
-// trigger behavioural detections; static scanners lose Go-specific context.
+//   - The Go pclntab (Go 1.16+ magic bytes) — wiped, breaking
+//     redress, GoReSym, and IDA's `go_parser` plugin.
+//   - Go-specific section names (.gopclntab, .gosymtab, etc.)
+//     — renamed to neutral aliases.
+//   - The PE TimeDateStamp — overwritten with a caller-chosen
+//     value (default: project epoch).
 //
-// How it works:
-//   - SetTimestamp overwrites IMAGE_FILE_HEADER.TimeDateStamp
-//   - WipePclntab zeros the Go pclntab header, breaking tools like redress,
-//     GoReSym, and IDA's go_parser plugin
-//   - RenameSections renames Go-specific PE sections (.gopclntab, etc.)
-//   - Sanitize combines all sanitizations with sensible defaults
+// [Sanitize] chains the three primitives with sensible defaults;
+// individual primitives stay exported so callers can compose
+// custom pipelines.
 //
-// Limitations:
-//   - Does not strip rich header, debug directory, or build-id
-//   - Pclntab wipe only targets Go 1.16+ magic bytes
-//   - Functions expect well-formed PE input; malformed data may panic
+// # MITRE ATT&CK
 //
-// Example:
+//   - T1027.002 (Obfuscated Files or Information: Software Packing) — header + symbol-table scrub
+//   - T1027.005 (Indicator Removal from Tools) — pclntab wipe defeats Go-binary signatures
 //
-//	raw, _ := os.ReadFile("implant.exe")
-//	clean := strip.Sanitize(raw)
-//	os.WriteFile("implant_clean.exe", clean, 0o644)
+// # Detection level
+//
+// quiet
+//
+// Modified headers and wiped metadata are unlikely to trigger
+// behavioural detections; static scanners lose the Go-specific
+// context. Forensic re-analysis on a copy that was hashed
+// pre-strip can still surface the modification.
+//
+// # Example
+//
+// See [ExampleSanitize] in strip_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/pe/strip-sanitize.md
+//   - [github.com/oioio-space/maldev/pe/morph] — UPX header morph; pair with strip for full scrub
+//   - [github.com/oioio-space/maldev/pe/cert] — strip/replace Authenticode after sanitisation
+//
+// [github.com/oioio-space/maldev/pe/morph]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph
+// [github.com/oioio-space/maldev/pe/cert]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert
 package strip

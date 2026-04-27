@@ -55,10 +55,13 @@ OPSEC / MITRE / Limitations / See also).
 | [T1003.002](https://attack.mitre.org/techniques/T1003/002/) | [`credentials/samdump`](../credentials/samdump) |
 | [T1021.002](https://attack.mitre.org/techniques/T1021/002/) | [`c2/transport/namedpipe`](../c2/transport/namedpipe) |
 | [T1027](https://attack.mitre.org/techniques/T1027/) | [`crypto`](../crypto) · [`encode`](../encode) · [`evasion/sleepmask`](../evasion/sleepmask) |
+| [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | [`pe`](../pe) · [`pe/morph`](../pe/morph) · [`pe/parse`](../pe/parse) · [`pe/strip`](../pe/strip) |
+| [T1027.005](https://attack.mitre.org/techniques/T1027/005/) | [`pe/strip`](../pe/strip) |
 | [T1027.013](https://attack.mitre.org/techniques/T1027/013/) | [`crypto`](../crypto) |
 | [T1036](https://attack.mitre.org/techniques/T1036/) | [`evasion/callstack`](../evasion/callstack) · [`evasion/stealthopen`](../evasion/stealthopen) |
+| [T1036.005](https://attack.mitre.org/techniques/T1036/005/) | [`pe`](../pe) · [`pe/masquerade`](../pe/masquerade) |
 | [T1055](https://attack.mitre.org/techniques/T1055/) | [`c2/meterpreter`](../c2/meterpreter) · [`inject`](../inject) |
-| [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | [`inject`](../inject) |
+| [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | [`inject`](../inject) · [`pe`](../pe) · [`pe/srdi`](../pe/srdi) |
 | [T1055.003](https://attack.mitre.org/techniques/T1055/003/) | [`inject`](../inject) |
 | [T1055.004](https://attack.mitre.org/techniques/T1055/004/) | [`inject`](../inject) |
 | [T1055.012](https://attack.mitre.org/techniques/T1055/012/) | [`inject`](../inject) |
@@ -75,10 +78,12 @@ OPSEC / MITRE / Limitations / See also).
 | [T1071](https://attack.mitre.org/techniques/T1071/) | [`c2`](../c2) · [`c2/transport`](../c2/transport) |
 | [T1071.001](https://attack.mitre.org/techniques/T1071/001/) | [`c2`](../c2) · [`c2/meterpreter`](../c2/meterpreter) · [`c2/transport/namedpipe`](../c2/transport/namedpipe) · [`useragent`](../useragent) |
 | [T1095](https://attack.mitre.org/techniques/T1095/) | [`c2`](../c2) · [`c2/meterpreter`](../c2/meterpreter) · [`c2/transport`](../c2/transport) |
+| [T1106](https://attack.mitre.org/techniques/T1106/) | [`pe`](../pe) · [`pe/imports`](../pe/imports) |
 | [T1113](https://attack.mitre.org/techniques/T1113/) | [`collection`](../collection) |
 | [T1115](https://attack.mitre.org/techniques/T1115/) | [`collection`](../collection) |
 | [T1529](https://attack.mitre.org/techniques/T1529/) | [`cleanup/bsod`](../cleanup/bsod) |
 | [T1550.002](https://attack.mitre.org/techniques/T1550/002/) | [`credentials/sekurlsa`](../credentials/sekurlsa) |
+| [T1553.002](https://attack.mitre.org/techniques/T1553/002/) | [`pe`](../pe) · [`pe/cert`](../pe/cert) |
 | [T1558.001](https://attack.mitre.org/techniques/T1558/001/) | [`credentials/goldenticket`](../credentials/goldenticket) |
 | [T1558.003](https://attack.mitre.org/techniques/T1558/003/) | [`credentials/sekurlsa`](../credentials/sekurlsa) |
 | [T1562.001](https://attack.mitre.org/techniques/T1562/001/) | [`evasion/cet`](../evasion/cet) · [`evasion/kcallback`](../evasion/kcallback) · [`evasion/preset`](../evasion/preset) |
@@ -88,6 +93,7 @@ OPSEC / MITRE / Limitations / See also).
 | [T1573.001](https://attack.mitre.org/techniques/T1573/001/) | [`c2/cert`](../c2/cert) |
 | [T1573.002](https://attack.mitre.org/techniques/T1573/002/) | [`c2`](../c2) · [`c2/cert`](../c2/cert) · [`c2/transport`](../c2/transport) |
 | [T1574.012](https://attack.mitre.org/techniques/T1574/012/) | [`evasion/hook`](../evasion/hook) |
+| [T1620](https://attack.mitre.org/techniques/T1620/) | [`pe/srdi`](../pe/srdi) |
 
 <!-- END AUTOGEN: mitre-index -->
 
@@ -210,19 +216,29 @@ by EDR-bypass packages that need arbitrary kernel reads or writes
 (kcallback, lsassdump PPL-bypass, callback-array tampering, etc.) |
 | [`kernel/driver/rtcore64`](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver/rtcore64) | — | wraps the MSI Afterburner RTCore64.sys signed driver
 (CVE-2019-16098) as a kernel/driver.ReadWriter primitive |
-| [`pe`](https://pkg.go.dev/github.com/oioio-space/maldev/pe) | — | provides Portable Executable analysis and manipulation utilities |
-| [`pe/cert`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert) | — | provides PE Authenticode certificate manipulation — read,
-copy, strip, and write certificate data in PE files |
-| [`pe/imports`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports) | — | provides cross-platform PE import table analysis |
-| [`pe/masquerade`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade) | — | provides programmatic PE resource extraction and .syso
-generation for identity cloning |
-| [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) | — | provides UPX header mutation for PE files to prevent
-automatic unpacking and change file hashes |
-| [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) | — | provides PE file parsing and modification utilities |
-| [`pe/srdi`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi) | — | provides PE/DLL/EXE-to-shellcode conversion using the Donut
-framework (github.com/Binject/go-donut) |
-| [`pe/strip`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip) | — | provides PE binary sanitization to remove Go-specific
-metadata and compilation artifacts that fingerprint the toolchain |
+| [`pe`](https://pkg.go.dev/github.com/oioio-space/maldev/pe) | Varies | is the umbrella for Portable Executable analysis,
+manipulation, and conversion utilities |
+| [`pe/cert`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert) | quiet | manipulates the PE Authenticode security directory
+— read, copy, strip, and write WIN_CERTIFICATE blobs without
+any Windows crypto API |
+| [`pe/imports`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports) | very-quiet | enumerates a PE's import directory — every DLL
+dependency and every imported function name — without invoking
+any Windows API |
+| [`pe/masquerade`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade) | quiet | clones a Windows PE's identity — manifest,
+icons, VERSIONINFO, optional Authenticode certificate — into
+a linkable `.syso` COFF object so a Go binary picks them up
+at compile time |
+| [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) | moderate | mutates UPX-packed PE headers so automatic
+unpackers fail to recognise the input |
+| [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) | very-quiet | provides PE file parsing and modification utilities |
+| [`pe/srdi`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi) | moderate | converts PE / .NET / script payloads into
+position-independent shellcode via the Donut framework
+(github.com/Binject/go-donut) |
+| [`pe/strip`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip) | quiet | sanitises Go-built PE binaries by removing
+toolchain artefacts that fingerprint the producer:
+
+  - The Go pclntab (Go 1.16+ magic bytes) — wiped, breaking
+    redress, GoReSym, and IDA's `go_parser` plugin |
 | [`persistence`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence) | — | provides system persistence techniques for maintaining
 access across reboots |
 | [`persistence/lnk`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk) | — | creates Windows shortcut (.lnk) files via COM/OLE automation |

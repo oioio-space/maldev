@@ -1,12 +1,36 @@
 // Package parse provides PE file parsing and modification utilities.
 //
-// Wraps the standard library debug/pe package with helpers for maldev
-// operations: section enumeration, export resolution, header manipulation,
-// and raw byte access for PE morphing and sRDI workflows.
+// Wraps the standard library `debug/pe` package with helpers
+// tailored to maldev workflows: section enumeration, export
+// resolution, header manipulation, and raw byte access for PE
+// morphing and sRDI pipelines. The package operates on bytes
+// only — every entry point accepts an `io.ReaderAt` or a `[]byte`,
+// so analysts can inspect Windows PEs from any host.
 //
-// Technique: PE file analysis and manipulation.
-// MITRE ATT&CK: T1027.002 (Obfuscated Files or Information: Software Packing)
-// Detection: N/A — offline analysis tool, no runtime footprint.
+// # MITRE ATT&CK
 //
-// Platform: Cross-platform (parses Windows PE files on any OS).
+//   - T1027.002 (Obfuscated Files or Information: Software Packing) — discovery primitive consumed by pe/strip + pe/morph
+//
+// # Detection level
+//
+// very-quiet
+//
+// Offline analysis only — no syscalls, no file opens beyond the
+// caller-supplied reader. The package is invisible to runtime
+// telemetry.
+//
+// # Example
+//
+// See [ExampleOpen] in parse_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/pe/README.md
+//   - [github.com/oioio-space/maldev/pe/strip] — primary consumer for Go-binary sanitisation
+//   - [github.com/oioio-space/maldev/pe/morph] — primary consumer for UPX morphing
+//   - [github.com/oioio-space/maldev/pe/imports] — sibling import-table analyser
+//
+// [github.com/oioio-space/maldev/pe/strip]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip
+// [github.com/oioio-space/maldev/pe/morph]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph
+// [github.com/oioio-space/maldev/pe/imports]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports
 package parse
