@@ -1,99 +1,95 @@
-# Evasion Techniques Overview
+---
+last_reviewed: 2026-04-27
+reflects_commit: 3fd7622
+---
 
-> **MITRE ATT&CK:** T1562 -- Impair Defenses | **Detection:** Varies by technique
+# Evasion techniques
 
-## What Is Evasion?
+[← maldev README](../../../README.md) · [docs/index](../../index.md)
 
-Evasion techniques neutralize or bypass security monitoring before performing offensive actions. On Windows, this means disabling scanners (AMSI), blinding telemetry (ETW), removing hooks placed by EDR products (unhooking), and protecting your implant from analysis (sleep encryption, anti-debug, anti-VM).
+In-process and on-host primitives that **disable, blind, restore, or
+hide** the defensive surface so subsequent injection / collection /
+post-ex code runs unobserved. Every package in this area accepts a
+`*wsyscall.Caller` and composes via `evasion.ApplyAll` or
+`evasion/preset` recipes.
 
-maldev provides a unified `evasion.Technique` interface with composable presets, all supporting optional `*wsyscall.Caller` routing for EDR bypass.
-
-## Layered Defense Model
+## TL;DR
 
 ```mermaid
-flowchart TB
-    subgraph Layer1["Layer 1: Pre-Execution"]
-        AD[Anti-Debug\nanti-VM\nSandbox Detection]
-    end
-
-    subgraph Layer2["Layer 2: Neutralize Monitoring"]
-        AMSI[AMSI Bypass\nPatch AmsiScanBuffer]
-        ETW[ETW Patching\nBlind EtwEventWrite*]
-        UH[ntdll Unhooking\nClassic / Full / Perun]
-    end
-
-    subgraph Layer3["Layer 3: Harden Process"]
-        ACG[ACG\nBlock dynamic code]
-        BD[BlockDLLs\nMicrosoft-signed only]
-        HW[HW Breakpoint\nDetect + Clear DR0-DR7]
-    end
-
-    subgraph Layer4["Layer 4: Runtime Protection"]
-        SM[Sleep Mask\nXOR encrypt + RW downgrade]
-    end
-
-    Layer1 --> Layer2
-    Layer2 --> Layer3
-    Layer3 --> Layer4
-
-    style Layer1 fill:#1a3a5c,color:#fff
-    style Layer2 fill:#5c1a1a,color:#fff
-    style Layer3 fill:#2d5016,color:#fff
-    style Layer4 fill:#3a1a5c,color:#fff
+flowchart LR
+    A[unhook ntdll] --> B[patch AMSI]
+    B --> C[patch ETW]
+    C --> D[harden process<br/>ACG / BlockDLLs / CET]
+    D --> E[sleepmask between callbacks]
 ```
 
-## Technique Comparison
+The "operator's first 100 ms" — restore clean syscall stubs, blind the
+two main monitoring channels, harden the process against future hooks,
+mask payload memory during sleep.
 
-| Technique | Package | MITRE | Detection | Reversible? | Caller-Routed? |
-|-----------|---------|-------|-----------|-------------|----------------|
-| [AMSI Bypass](amsi-bypass.md) | `evasion/amsi` | T1562.001 | Medium | No (permanent patch) | Yes |
-| [ETW Patching](etw-patching.md) | `evasion/etw` | T1562.001 | Medium | No | Yes |
-| [ntdll Unhooking](ntdll-unhooking.md) | `evasion/unhook` | T1562.001 | High | No | Yes |
-| [Sleep Mask](sleep-mask.md) | `evasion/sleepmask` | T1027 | Low | Yes (auto-decrypt) | No |
-| [HW Breakpoints](hw-breakpoints.md) | `recon/hwbp` | T1622 | Low | Yes (clear) | No |
-| [ACG + BlockDLLs](acg-blockdlls.md) | `evasion/acg`, `evasion/blockdlls` | T1562.001 | Low | No (irreversible) | Partial |
-| [Anti-Analysis](anti-analysis.md) | `recon/antidebug`, `recon/antivm`, `recon/sandbox` | T1497/T1622 | Low | N/A (detection only) | No |
-| [PPID Spoofing](ppid-spoofing.md) | `c2/shell` | T1134.004 | Medium | N/A (child process) | No |
-| [FakeCmdLine](fakecmd.md) | `process/tamper/fakecmd` | T1036.005 | Low | Yes (Restore) | Yes |
-| [HideProcess](hideprocess.md) | `process/tamper/hideprocess` | T1564.001 | Medium | No (target patch) | Yes |
-| [StealthOpen](stealthopen.md) | `evasion/stealthopen` | T1036 | Low | N/A (file access) | No |
-| [Phant0m](phant0m.md) | `process/tamper/phant0m` | T1562.002 | High | No (thread kill) | Yes |
-| [Sandbox Detection](sandbox.md) | `recon/sandbox` | T1497 | Low | N/A (detection only) | No |
-| [Timing Evasion](timing.md) | `recon/timing` | T1497.003 | Low | N/A (detection only) | No |
-| [Evasion Presets](preset.md) | `evasion/preset` | Multiple | Varies | Varies | Yes |
-| [Inline Hook](inline-hook.md) | `evasion/hook` `evasion/hook/bridge/` `evasion/hook/shellcode/` | T1574.012 | High | Yes (Remove) | Yes (`WithCaller`) |
-| [DLL Hijack Discovery](dll-hijack.md) | `recon/dllhijack` | T1574.001 | Medium | N/A (discovery only) | No |
-| [Call-Stack Spoof (metadata)](callstack-spoof.md) | `evasion/callstack` | T1036 | Medium | N/A (primitives) | Future (pivot) |
-| [Kernel Callback Enumeration](kernel-callback-removal.md) | `evasion/kcallback` | T1562.001 | Low (read) / High (BYOVD load) | N/A (enum) | Future (Remove) |
-| [BYOVD — RTCore64](byovd-rtcore64.md) | `kernel/driver/rtcore64` | T1014, T1543.003 | High (driver load) / Medium (steady-state) | Yes (Uninstall) | N/A (foundation) |
+## Packages
 
-## Presets
+| Package | Tech page | Detection | One-liner |
+|---|---|---|---|
+| [`evasion/acg`](../../../evasion/acg) | [acg-blockdlls.md](acg-blockdlls.md) | quiet | Arbitrary Code Guard — block dynamic-code allocation in own process |
+| [`evasion/amsi`](../../../evasion/amsi) | [amsi-bypass.md](amsi-bypass.md) | noisy | Patch `AmsiScanBuffer` / `AmsiOpenSession` for "always clean" verdicts |
+| [`evasion/blockdlls`](../../../evasion/blockdlls) | [acg-blockdlls.md](acg-blockdlls.md) | quiet | Microsoft-only DLL signature requirement |
+| [`evasion/callstack`](../../../evasion/callstack) | [callstack-spoof.md](callstack-spoof.md) | quiet | Call-stack spoof primitives — fake return addresses for syscalls |
+| [`evasion/cet`](../../../evasion/cet) | [cet.md](cet.md) | noisy | Intel CET shadow-stack opt-out + ENDBR64 marker for APC paths |
+| [`evasion/etw`](../../../evasion/etw) | [etw-patching.md](etw-patching.md) | moderate | Patch ntdll ETW write helpers with `xor rax,rax; ret` |
+| [`evasion/hook`](../../../evasion/hook) | [inline-hook.md](inline-hook.md) | quiet | Install your own inline hooks (probe, group, remote, bridge) |
+| [`evasion/hook/bridge`](../../../evasion/hook/bridge) | [inline-hook.md](inline-hook.md) | quiet | IPC bridge — out-of-process hook controller |
+| [`evasion/hook/shellcode`](../../../evasion/hook/shellcode) | [inline-hook.md](inline-hook.md) | quiet | x64 trampoline / prologue-steal generator |
+| [`evasion/kcallback`](../../../evasion/kcallback) | [kernel-callback-removal.md](kernel-callback-removal.md) | very-noisy | Enumerate / remove kernel callback registrations (BYOVD-pluggable) |
+| [`evasion/preset`](../../../evasion/preset) | [preset.md](preset.md) | varies | Curated `Minimal` / `Stealth` / `Aggressive` Technique bundles |
+| [`evasion/sleepmask`](../../../evasion/sleepmask) | [sleep-mask.md](sleep-mask.md) | quiet | Encrypt payload memory during sleep with EKKO / Foliage / Inline strategies |
+| [`evasion/stealthopen`](../../../evasion/stealthopen) | [stealthopen.md](stealthopen.md) | quiet | NTFS Object-ID file access — bypass path-based EDR file hooks |
+| [`evasion/unhook`](../../../evasion/unhook) | [ntdll-unhooking.md](ntdll-unhooking.md) | noisy | Restore `ntdll.dll` syscall stubs from disk or fresh child process |
 
-The `evasion/preset` package provides curated technique bundles:
+Cross-categorised pages currently living here (packages live elsewhere):
 
-```go
-// Minimal: AMSI + ETW patches. Least detectable, most compatible.
-techniques := preset.Minimal()
+| Page | Actual package | Note |
+|---|---|---|
+| [anti-analysis.md](anti-analysis.md) | `recon/antidebug`, `recon/antivm` | recon-class, kept here for the evasion-flow reader |
+| [byovd-rtcore64.md](byovd-rtcore64.md) | `kernel/driver/rtcore64` | BYOVD primitive used by kcallback + lsassdump |
+| [dll-hijack.md](dll-hijack.md) | `recon/dllhijack` | discovery is recon, exploitation is evasion |
+| [fakecmd.md](fakecmd.md) | `process/tamper/fakecmd` | PEB CommandLine spoof |
+| [hideprocess.md](hideprocess.md) | `process/tamper/hideprocess` | NtQSI patch to hide PIDs |
+| [hw-breakpoints.md](hw-breakpoints.md) | `recon/hwbp` | DR0–DR7 inspection |
+| [phant0m.md](phant0m.md) | `process/tamper/phant0m` | EventLog svchost thread kill |
+| [ppid-spoofing.md](ppid-spoofing.md) | `c2/shell` (PPIDSpoofer) | spawn-time parent PID spoof |
+| [sandbox.md](sandbox.md) | `recon/sandbox` | sandbox detection |
+| [timing.md](timing.md) | `recon/timing` | timing-based sandbox bypass |
 
-// Stealth: Minimal + selective ntdll unhook of commonly hooked functions.
-techniques := preset.Stealth()
+## Quick decision tree
 
-// Aggressive: Everything. Apply AFTER injection (ACG blocks RWX allocation).
-techniques := preset.Aggressive()
+| You want to… | Use |
+|---|---|
+| …blind PowerShell / .NET AMSI scanning | [`amsi.PatchAll`](amsi-bypass.md) |
+| …blind ETW for the current process | [`etw.PatchAll`](etw-patching.md) |
+| …restore EDR-hooked syscall stubs before patching | [`unhook.FullUnhook`](ntdll-unhooking.md) or [`unhook.CommonClassic`](ntdll-unhooking.md) |
+| …make memory scanners blind during sleep | [`sleepmask`](sleep-mask.md) |
+| …ship a single "do everything sane" recipe | [`preset.Stealth()`](preset.md) |
+| …read a sensitive file path without leaving a path-based event | [`stealthopen`](stealthopen.md) |
+| …survive Win11+CET-enforced hosts on APC paths | [`cet.Wrap`](cet.md) or [`cet.Disable`](cet.md) |
+| …spoof call-stack return addresses for stealth syscalls | [`callstack.SpoofCall`](callstack-spoof.md) |
+| …remove a kernel callback (PsSetLoadImageNotifyRoutine etc.) | [`kcallback`](kernel-callback-removal.md) (requires BYOVD reader) |
 
-// Apply with optional syscall caller.
-errs := evasion.ApplyAll(techniques, caller)
-```
+## MITRE ATT&CK
 
-## Architecture
+| T-ID | Name | Packages | D3FEND counter |
+|---|---|---|---|
+| [T1027](https://attack.mitre.org/techniques/T1027/) | Obfuscated Files or Information | `evasion/sleepmask` | D3-PMA |
+| [T1036](https://attack.mitre.org/techniques/T1036/) | Masquerading | `evasion/callstack`, `evasion/stealthopen` | D3-PSA |
+| [T1497](https://attack.mitre.org/techniques/T1497/) | Virtualization/Sandbox Evasion | `recon/sandbox`, `recon/antivm`, `recon/timing` | D3-PSA, D3-PMA |
+| [T1562.001](https://attack.mitre.org/techniques/T1562/001/) | Impair Defenses: Disable or Modify Tools | `evasion/{amsi,etw,unhook,acg,blockdlls,cet,kcallback,preset}` | D3-PMC, D3-PSA |
+| [T1562.002](https://attack.mitre.org/techniques/T1562/002/) | Impair Defenses: Disable Windows Event Logging | `process/tamper/phant0m` | D3-RAPA |
+| [T1574.012](https://attack.mitre.org/techniques/T1574/012/) | Hijack Execution Flow: COR_PROFILER | `evasion/hook` (inline hook scaffold) | D3-PMC |
+| [T1622](https://attack.mitre.org/techniques/T1622/) | Debugger Evasion | `recon/antidebug`, `recon/hwbp` | D3-PSA |
 
-All evasion techniques implement the `evasion.Technique` interface:
+## See also
 
-```go
-type Technique interface {
-    Name() string
-    Apply(caller Caller) error
-}
-```
-
-Apply them individually or in batches with `evasion.ApplyAll()`.
+- [Operator path: 30-minute implant](../../by-role/operator.md#30-minute-path-a-working-implant)
+- [Researcher path: Caller pattern](../../by-role/researcher.md#the-caller-pattern)
+- [Detection eng path: AMSI / ETW / unhook artifacts](../../by-role/detection-eng.md)
+- [`docs/evasion.md`](../../evasion.md) — flat API reference (legacy; will be regenerated by `cmd/docgen`)
