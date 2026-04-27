@@ -1,23 +1,38 @@
-// Package encode provides encoding and decoding utilities for payload
-// transformation.
+// Package encode provides encoding / decoding utilities for payload
+// transformation: Base64 (standard + URL-safe), UTF-16LE (Windows API
+// strings), ROT13, and PowerShell `-EncodedCommand` format.
 //
-// Technique: Payload encoding for transport, embedding, and obfuscation.
-// MITRE ATT&CK: N/A (utility — no direct system interaction).
-// Detection: N/A — pure encoding operations.
-// Platform: Cross-platform.
+// Pure functions, no side effects. Cross-platform.
 //
-// How it works: Converts binary payloads to text-safe representations using
-// Base64 (standard and URL-safe), UTF-16LE (for Windows API string parameters),
-// ROT13 (alphabetic rotation), and PowerShell-compatible encoding (Base64 of
-// UTF-16LE). All operations are pure functions with no side effects.
+//   - `Base64Encode` / `Base64Decode` — RFC 4648 §4 standard encoding.
+//   - `Base64URLEncode` / `Base64URLDecode` — RFC 4648 §5 URL-safe.
+//   - `ToUTF16LE` — Go `string` → little-endian UTF-16 bytes (the
+//     format Windows API parameters expect).
+//   - `ROT13` — Caesar shift by 13 over ASCII letters; non-alpha
+//     bytes pass through.
+//   - `PowerShell` — `Base64(UTF-16LE(script))`, the format
+//     `powershell.exe -EncodedCommand` accepts.
 //
-// Limitations:
-//   - ROT13 only rotates ASCII letters; non-alpha characters pass through unchanged.
-//   - PowerShell encoding produces Base64(UTF-16LE), matching -EncodedCommand format.
+// # MITRE ATT&CK
 //
-// Example:
+//   - T1027 (Obfuscated Files or Information) — for the PowerShell
+//     encoded-command and Base64 wrappers
 //
-//	encoded := encode.Base64Encode(shellcode)
-//	decoded, _ := encode.Base64Decode(encoded)
-//	psCmd := encode.PowerShell("Get-Process")
+// # Detection level
+//
+// very-quiet
+//
+// Pure data transforms. No system interaction.
+//
+// # Example
+//
+// See [ExampleBase64Encode] and [ExamplePowerShell] in
+// encode_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/encode/README.md
+//   - [github.com/oioio-space/maldev/crypto] — encryption layer
+//
+// [github.com/oioio-space/maldev/crypto]: https://pkg.go.dev/github.com/oioio-space/maldev/crypto
 package encode

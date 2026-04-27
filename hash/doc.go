@@ -1,35 +1,36 @@
-// Package hash provides hashing utilities for integrity verification,
-// API hashing, and fuzzy hashing.
+// Package hash provides cryptographic and fuzzy hash primitives for
+// integrity verification, API hashing, and similarity detection.
 //
-// Technique: API hashing (ROR13) for runtime function resolution without
-// exposing plaintext import names to static analysis. Fuzzy hashing (ssdeep,
-// TLSH) for similarity detection across binary variants.
-// MITRE ATT&CK: N/A (utility — no direct system interaction).
-// Detection: N/A — pure hashing operations.
-// Platform: Cross-platform.
+// Layers:
 //
-// How it works: Standard hash functions (MD5, SHA-1, SHA-256, SHA-512) return
-// lowercase hex strings for easy comparison. ROR13 implements the classic
-// shellcode API hashing algorithm (rotate-right-13 + add) used to resolve
-// Windows API functions at runtime by comparing hashes instead of strings.
-// ROR13Module appends a null terminator before hashing, matching the convention
-// used in shellcode that resolves module names from the PEB.
+//   - Cryptographic: MD5 / SHA-1 / SHA-256 / SHA-512 → lowercase hex
+//     strings.
+//   - API hashing: ROR13 (rotate-right-13 + add) used by shellcode to
+//     resolve Windows APIs at runtime without plaintext import names.
+//     `ROR13Module` matches the convention that hashes the function
+//     name with a trailing null terminator (PEB-walk shellcode style).
+//   - Fuzzy hashing: ssdeep (CTPH — locality-sensitive) and TLSH (Trend
+//     Locality-Sensitive Hash) for related-sample detection.
 //
-// Fuzzy hashing: ssdeep uses context-triggered piecewise hashing to produce
-// locality-sensitive hashes — small changes yield similar hashes, enabling
-// detection of related samples. TLSH (Trend Locality Sensitive Hash) provides
-// a distance metric between files; lower distance indicates higher similarity.
+// # MITRE ATT&CK
 //
-// Limitations:
-//   - ROR13 is case-sensitive — callers must match the case used in shellcode.
-//   - MD5 and SHA-1 are cryptographically broken; use SHA-256+ for integrity.
-//   - ssdeep requires at least 4096 bytes of input to produce meaningful results.
-//   - TLSH requires at least 50 bytes of input.
+// N/A (utility primitives consumed by other packages such as
+// `win/api.ResolveByHash`).
 //
-// Example:
+// # Detection level
 //
-//	hex := hash.SHA256(payload)
-//	apiHash := hash.ROR13("LoadLibraryA")  // 0xEC0E4E8E
-//	fuzzy, _ := hash.Ssdeep(payload)
-//	tlshHash, _ := hash.TLSH(payload)
+// very-quiet
+//
+// Pure hash operations. No system interaction.
+//
+// # Example
+//
+// See [ExampleROR13] and [ExampleSHA256] in hash_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/syscalls/api-hashing.md (ROR13 use case)
+//   - [github.com/oioio-space/maldev/win/api] — `ResolveByHash`
+//
+// [github.com/oioio-space/maldev/win/api]: https://pkg.go.dev/github.com/oioio-space/maldev/win/api
 package hash

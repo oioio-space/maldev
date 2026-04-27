@@ -49,11 +49,13 @@ OPSEC / MITRE / Limitations / See also).
 
 | T-ID | Packages |
 |---|---|
-| [T1027](https://attack.mitre.org/techniques/T1027/) | [`evasion/sleepmask`](../evasion/sleepmask) |
+| [T1027](https://attack.mitre.org/techniques/T1027/) | [`crypto`](../crypto) · [`encode`](../encode) · [`evasion/sleepmask`](../evasion/sleepmask) |
+| [T1027.013](https://attack.mitre.org/techniques/T1027/013/) | [`crypto`](../crypto) |
 | [T1036](https://attack.mitre.org/techniques/T1036/) | [`evasion/callstack`](../evasion/callstack) · [`evasion/stealthopen`](../evasion/stealthopen) |
 | [T1070](https://attack.mitre.org/techniques/T1070/) | [`cleanup/memory`](../cleanup/memory) |
 | [T1070.004](https://attack.mitre.org/techniques/T1070/004/) | [`cleanup/selfdelete`](../cleanup/selfdelete) · [`cleanup/wipe`](../cleanup/wipe) |
 | [T1070.006](https://attack.mitre.org/techniques/T1070/006/) | [`cleanup/timestomp`](../cleanup/timestomp) |
+| [T1071.001](https://attack.mitre.org/techniques/T1071/001/) | [`useragent`](../useragent) |
 | [T1529](https://attack.mitre.org/techniques/T1529/) | [`cleanup/bsod`](../cleanup/bsod) |
 | [T1543.003](https://attack.mitre.org/techniques/T1543/003/) | [`cleanup/service`](../cleanup/service) |
 | [T1562.001](https://attack.mitre.org/techniques/T1562/001/) | [`evasion/acg`](../evasion/acg) · [`evasion/amsi`](../evasion/amsi) · [`evasion/blockdlls`](../evasion/blockdlls) · [`evasion/cet`](../evasion/cet) · [`evasion/etw`](../evasion/etw) · [`evasion/kcallback`](../evasion/kcallback) · [`evasion/preset`](../evasion/preset) · [`evasion/unhook`](../evasion/unhook) |
@@ -137,10 +139,11 @@ extract Windows credentials |
 hive (with the SYSTEM hive supplying the boot key) |
 | [`credentials/sekurlsa`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/sekurlsa) | — | extracts credential material from a Windows LSASS
 minidump — the consumer counterpart to credentials/lsassdump |
-| [`crypto`](https://pkg.go.dev/github.com/oioio-space/maldev/crypto) | — | provides cryptographic primitives for payload encryption
-and decryption |
-| [`encode`](https://pkg.go.dev/github.com/oioio-space/maldev/encode) | — | provides encoding and decoding utilities for payload
-transformation |
+| [`crypto`](https://pkg.go.dev/github.com/oioio-space/maldev/crypto) | very-quiet | provides cryptographic primitives for payload
+encryption / decryption and lightweight obfuscation |
+| [`encode`](https://pkg.go.dev/github.com/oioio-space/maldev/encode) | very-quiet | provides encoding / decoding utilities for payload
+transformation: Base64 (standard + URL-safe), UTF-16LE (Windows API
+strings), ROT13, and PowerShell `-EncodedCommand` format |
 | [`evasion`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion) | — | defines the Technique interface and shared primitives used
 by the sub-packages to bypass defensive software (AMSI, ETW, inline hooks,
 sandbox/debugger/VM checks) |
@@ -183,8 +186,8 @@ stored in the MFT) instead of by path, bypassing path-based EDR
 hooks on `NtCreateFile` / `CreateFileW` |
 | [`evasion/unhook`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook) | noisy | restores the original prologue bytes of `ntdll.dll`
 functions, removing inline hooks installed by EDR/AV products |
-| [`hash`](https://pkg.go.dev/github.com/oioio-space/maldev/hash) | — | provides hashing utilities for integrity verification,
-API hashing, and fuzzy hashing |
+| [`hash`](https://pkg.go.dev/github.com/oioio-space/maldev/hash) | very-quiet | provides cryptographic and fuzzy hash primitives for
+integrity verification, API hashing, and similarity detection |
 | [`inject`](https://pkg.go.dev/github.com/oioio-space/maldev/inject) | — | provides unified shellcode injection techniques
 for Windows and Linux platforms with automatic fallback support |
 | [`kernel/driver`](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver) | — | defines the kernel-memory primitive interfaces consumed
@@ -233,7 +236,8 @@ so it returns STATUS_NOT_IMPLEMENTED, blinding that process's ability to
 enumerate running processes |
 | [`process/tamper/phant0m`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m) | — | provides Event Log service thread termination (Phant0m technique)
 to suppress Windows Event Log recording |
-| [`random`](https://pkg.go.dev/github.com/oioio-space/maldev/random) | — | provides cryptographically secure random generation functions |
+| [`random`](https://pkg.go.dev/github.com/oioio-space/maldev/random) | very-quiet | provides cryptographically secure random generation
+helpers backed by `crypto/rand` (OS entropy) |
 | [`recon/antidebug`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antidebug) | — | provides cross-platform debugger detection techniques |
 | [`recon/antivm`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm) | — | provides cross-platform virtual machine and hypervisor
 detection techniques with configurable check dimensions |
@@ -259,9 +263,10 @@ in-memory COFF execution |
 ICLRMetaHost / ICorRuntimeHost COM interfaces and executes .NET assemblies
 from memory without writing them to disk |
 | [`testutil`](https://pkg.go.dev/github.com/oioio-space/maldev/testutil) | — | provides shared test helpers for the maldev project |
-| [`ui`](https://pkg.go.dev/github.com/oioio-space/maldev/ui) | — | provides Windows UI utilities such as message boxes and system sounds |
-| [`useragent`](https://pkg.go.dev/github.com/oioio-space/maldev/useragent) | — | provides a curated database of real browser User-Agent
-strings for realistic HTTP traffic generation |
+| [`ui`](https://pkg.go.dev/github.com/oioio-space/maldev/ui) | very-quiet | exposes minimal Windows UI primitives — `MessageBoxW` via
+`Show` and the system alert sound via `Beep` |
+| [`useragent`](https://pkg.go.dev/github.com/oioio-space/maldev/useragent) | very-quiet | provides a curated database of real-world browser
+User-Agent strings for HTTP traffic blending |
 | [`win`](https://pkg.go.dev/github.com/oioio-space/maldev/win) | — | is the parent umbrella for Windows-only primitives |
 | [`win/api`](https://pkg.go.dev/github.com/oioio-space/maldev/win/api) | — | is the single source of truth for all Windows DLL handles,
 procedure references, and shared structures used across the maldev library |

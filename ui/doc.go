@@ -1,18 +1,40 @@
 //go:build windows
 
-// Package ui provides Windows UI utilities such as message boxes and system sounds.
+// Package ui exposes minimal Windows UI primitives — `MessageBoxW` via
+// `Show` and the system alert sound via `Beep`.
 //
-// Platform: Windows
-// Detection: Low -- message boxes are standard Windows UI elements.
+// `Show` accepts strongly-typed enums for button set, icon, default
+// button, and modality so callers don't pass raw `MB_*` flag values.
+// Returns the user's selected `Response` (e.g., `IDOK`, `IDYES`).
 //
-// The Show function wraps MessageBoxW with a type-safe API for button types,
-// modality, icons, default buttons, and additional options. The Beep function
-// plays a system alert sound via MessageBeep.
+// `Beep` plays the standard Windows notification sound via
+// `MessageBeep(MB_OK)`.
 //
-// Example:
+// Useful for:
 //
-//	resp, _ := ui.Show("Alert", "Operation complete", ui.MB_OK, ui.MB_ICONINFORMATION)
-//	if resp == ui.IDOK {
-//	    // user acknowledged
-//	}
+//   - Implant lifecycle prompts during red-team exercises ("Operator
+//     ready?").
+//   - Honey-pot-style decoy dialogs.
+//   - Sandbox-evasion: humans dismiss dialogs; sandboxes generally
+//     don't (paired with [github.com/oioio-space/maldev/recon/sandbox]).
+//
+// # MITRE ATT&CK
+//
+// N/A (UI utility).
+//
+// # Detection level
+//
+// very-quiet
+//
+// `MessageBoxW` is the most-used Windows API; no signal.
+//
+// # Example
+//
+// See [ExampleShow] and [ExampleBeep] in ui_example_test.go.
+//
+// # See also
+//
+//   - [github.com/oioio-space/maldev/recon/sandbox] — pair with prompt-style sandbox detection
+//
+// [github.com/oioio-space/maldev/recon/sandbox]: https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox
 package ui

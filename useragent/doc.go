@@ -1,26 +1,31 @@
-// Package useragent provides a curated database of real browser User-Agent
-// strings for realistic HTTP traffic generation.
+// Package useragent provides a curated database of real-world browser
+// User-Agent strings for HTTP traffic blending.
 //
-// Technique: User-Agent spoofing for network traffic blending.
-// MITRE ATT&CK: N/A (utility — no direct system interaction).
-// Detection: N/A — selecting a User-Agent string is a pure data operation.
-// Platform: Cross-platform.
+// Embeds a JSON snapshot keyed by browser/OS with usage-percentage
+// metadata. `Load` parses the embedded snapshot; `DB.Random` picks a
+// random entry; `DB.Filter` selects by predicate (e.g.,
+// `Chrome`-only); `DB.Filter(...).Random()` chains. Used by
+// `c2/transport` and `c2/meterpreter` to set realistic User-Agent
+// headers.
 //
-// How it works: Embeds a JSON database of real-world browser User-Agent strings
-// with usage percentage and OS metadata. Provides random selection (weighted by
-// real-world prevalence is possible via Filter) and filtering by OS/browser.
-// Used by c2/transport and c2/meterpreter to generate realistic HTTP headers
-// that blend with legitimate browser traffic.
+// # MITRE ATT&CK
 //
-// Limitations:
-//   - The embedded database is a snapshot — update useragents.json periodically.
-//   - Random selection is uniform; for weighted selection, use Filter + Random.
+//   - T1071.001 (Application Layer Protocol: Web Protocols) — supplies
+//     the User-Agent header for HTTP-based C2.
 //
-// Example:
+// # Detection level
 //
-//	db, _ := useragent.Load()
-//	ua := db.Random()           // random User-Agent string
-//	chrome := db.Filter(func(u *useragent.Entry) bool {
-//	    return strings.Contains(u.Text, "Chrome")
-//	})
+// very-quiet
+//
+// Pure data — picking a string is invisible.
+//
+// # Example
+//
+// See [ExampleLoad] and [ExampleDB_Random] in useragent_example_test.go.
+//
+// # See also
+//
+//   - [github.com/oioio-space/maldev/c2/transport] — HTTP transport consumer
+//
+// [github.com/oioio-space/maldev/c2/transport]: https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport
 package useragent

@@ -1,21 +1,30 @@
-// Package random provides cryptographically secure random generation functions.
+// Package random provides cryptographically secure random generation
+// helpers backed by `crypto/rand` (OS entropy).
 //
-// Technique: Cryptographic random generation for keys, nonces, and jitter.
-// MITRE ATT&CK: N/A (utility — no direct system interaction).
-// Detection: N/A — uses crypto/rand (OS entropy source).
-// Platform: Cross-platform.
+//   - `Bytes(n)` — n random bytes.
+//   - `String(n)` — n alphanumeric characters from `[a-zA-Z0-9]`.
+//   - `Int(min, max)` — uniform integer in `[min, max]`.
+//   - `Duration(min, max)` — uniform `time.Duration` in `[min, max]`.
+//     Useful for callback jitter.
 //
-// How it works: All functions use crypto/rand.Reader (CSPRNG backed by OS
-// entropy) for random generation. String produces alphanumeric strings
-// via per-character uniform selection from a 62-char charset. Int and
-// Duration use math/big for uniform distribution over arbitrary ranges.
+// # MITRE ATT&CK
 //
-// Limitations:
-//   - String charset is fixed to [a-zA-Z0-9]; use Bytes for arbitrary data.
-//   - Int range is limited to Go int size (platform-dependent).
+// N/A (utility primitives).
 //
-// Example:
+// # Detection level
 //
-//	key, _ := random.Bytes(32)
-//	jitter, _ := random.Duration(100*time.Millisecond, 500*time.Millisecond)
+// very-quiet
+//
+// Reads from `RtlGenRandom` / `BCryptGenRandom` on Windows; standard
+// CSPRNG everywhere.
+//
+// # Example
+//
+// See [ExampleBytes] and [ExampleDuration] in random_example_test.go.
+//
+// # See also
+//
+//   - [github.com/oioio-space/maldev/crypto] — primary consumer
+//
+// [github.com/oioio-space/maldev/crypto]: https://pkg.go.dev/github.com/oioio-space/maldev/crypto
 package random

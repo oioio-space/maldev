@@ -1,23 +1,44 @@
-// Package crypto provides cryptographic primitives for payload encryption
-// and decryption.
+// Package crypto provides cryptographic primitives for payload
+// encryption / decryption and lightweight obfuscation.
 //
-// Technique: Payload encryption/decryption for obfuscation at rest and in transit.
-// MITRE ATT&CK: N/A (utility — no direct system interaction).
-// Detection: N/A — pure cryptographic operations.
-// Platform: Cross-platform.
+// Three layers:
 //
-// How it works: Wraps Go standard library ciphers (AES-256-GCM, XChaCha20-Poly1305,
-// RC4) with nonce management and key generation. AEAD ciphers (AES-GCM, ChaCha20)
-// prepend a random nonce to the ciphertext so that each encryption produces unique
-// output. XOR uses a repeating key for lightweight obfuscation.
+//   - **Strong AEAD**: AES-256-GCM (`EncryptAESGCM` / `DecryptAESGCM`)
+//     and XChaCha20-Poly1305 (`EncryptChaCha20` / `DecryptChaCha20`).
+//     Random nonce prepended to ciphertext.
+//   - **Lightweight stream / block**: RC4 (`EncryptRC4`), TEA / XTEA
+//     16-byte block ciphers, ArithShift (position-dependent byte add),
+//     XOR with repeating key.
+//   - **Signature-breaking transforms**: SBox (random 256-byte
+//     permutation + inverse), MatrixTransform (Hill cipher mod 256,
+//     n ∈ {2,3,4}). Not strong cryptography — used to break static
+//     signatures on payloads.
 //
-// Limitations:
-//   - RC4 is deprecated and provided only for legacy compatibility.
-//   - XOR is not encryption — it is trivially reversible obfuscation.
+// Helpers: `NewAESKey`, `NewChaChaKey` for sane-default key
+// generation.
 //
-// Example:
+// # MITRE ATT&CK
 //
-//	key, _ := crypto.NewAESKey()
-//	ciphertext, _ := crypto.EncryptAESGCM(key, shellcode)
-//	plaintext, _ := crypto.DecryptAESGCM(key, ciphertext)
+//   - T1027 (Obfuscated Files or Information)
+//   - T1027.013 (Encrypted/Encoded File)
+//
+// # Detection level
+//
+// very-quiet
+//
+// Pure cryptographic operations. No system interaction.
+//
+// # Example
+//
+// See [ExampleEncryptAESGCM] and [ExampleEncryptChaCha20] in
+// crypto_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/crypto/payload-encryption.md
+//   - [github.com/oioio-space/maldev/encode] — text encoding (Base64, UTF-16LE)
+//   - [github.com/oioio-space/maldev/hash] — hashing primitives
+//
+// [github.com/oioio-space/maldev/encode]: https://pkg.go.dev/github.com/oioio-space/maldev/encode
+// [github.com/oioio-space/maldev/hash]: https://pkg.go.dev/github.com/oioio-space/maldev/hash
 package crypto
