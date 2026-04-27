@@ -54,6 +54,12 @@ OPSEC / MITRE / Limitations / See also).
 | [T1027](https://attack.mitre.org/techniques/T1027/) | [`crypto`](../crypto) · [`encode`](../encode) · [`evasion/sleepmask`](../evasion/sleepmask) |
 | [T1027.013](https://attack.mitre.org/techniques/T1027/013/) | [`crypto`](../crypto) |
 | [T1036](https://attack.mitre.org/techniques/T1036/) | [`evasion/callstack`](../evasion/callstack) · [`evasion/stealthopen`](../evasion/stealthopen) |
+| [T1055](https://attack.mitre.org/techniques/T1055/) | [`inject`](../inject) |
+| [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | [`inject`](../inject) |
+| [T1055.003](https://attack.mitre.org/techniques/T1055/003/) | [`inject`](../inject) |
+| [T1055.004](https://attack.mitre.org/techniques/T1055/004/) | [`inject`](../inject) |
+| [T1055.012](https://attack.mitre.org/techniques/T1055/012/) | [`inject`](../inject) |
+| [T1055.015](https://attack.mitre.org/techniques/T1055/015/) | [`inject`](../inject) |
 | [T1056.001](https://attack.mitre.org/techniques/T1056/001/) | [`collection`](../collection) · [`collection/keylog`](../collection/keylog) |
 | [T1070](https://attack.mitre.org/techniques/T1070/) | [`cleanup/memory`](../cleanup/memory) |
 | [T1070.004](https://attack.mitre.org/techniques/T1070/004/) | [`cleanup/wipe`](../cleanup/wipe) |
@@ -174,8 +180,9 @@ stored in the MFT) instead of by path, bypassing path-based EDR
 hooks on `NtCreateFile` / `CreateFileW` |
 | [`hash`](https://pkg.go.dev/github.com/oioio-space/maldev/hash) | very-quiet | provides cryptographic and fuzzy hash primitives for
 integrity verification, API hashing, and similarity detection |
-| [`inject`](https://pkg.go.dev/github.com/oioio-space/maldev/inject) | — | provides unified shellcode injection techniques
-for Windows and Linux platforms with automatic fallback support |
+| [`inject`](https://pkg.go.dev/github.com/oioio-space/maldev/inject) | noisy | provides unified shellcode injection across Windows
+and Linux with a fluent builder, decorator middleware, and automatic
+fallback between methods |
 | [`kernel/driver`](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver) | — | defines the kernel-memory primitive interfaces consumed
 by EDR-bypass packages that need arbitrary kernel reads or writes
 (kcallback, lsassdump PPL-bypass, callback-array tampering, etc.) |
