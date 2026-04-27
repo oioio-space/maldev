@@ -34,10 +34,14 @@
 // let the file deletion complete BEFORE creating the process. The file
 // never exists at the time of thread creation. This package implements
 // both variants; ModeGhosting was confirmed to bypass Win11 24H2 by
-// hasherezade (Jan 2025) but is also rejected on Win11 25H2 (build 26200)
-// — NtCreateProcessEx returns STATUS_NOT_SUPPORTED for both modes there.
-// Both exploit the same kernel caching primitive but at different
-// lifecycle stages.
+// hasherezade (Jan 2025) on the early-26100 build, but our own
+// measurement against build 26200 (Win11 25H2 / late-26100 cumulative
+// updates may apply equally) saw NtCreateProcessEx return
+// STATUS_NOT_SUPPORTED for ModeGhosting too. The package therefore
+// treats every Win11 build ≥ 26100 as "both modes blocked" out of an
+// abundance of caution; operators with verified-working 26100 builds
+// can drop the test skip locally. Both modes exploit the same kernel
+// caching primitive but at different lifecycle stages.
 //
 // # Advantages
 //
@@ -106,6 +110,16 @@
 //	    PayloadPath: "payload.exe",
 //	    DecoyPath:   `C:\Windows\System32\notepad.exe`,
 //	    // TargetPath omitted — os.CreateTemp is used automatically
+//	})
+//
+// Process Ghosting (recommended on Win11 24H2 — file unlinked before
+// process creation, no on-disk artefact at all):
+//
+//	err := herpaderping.Run(herpaderping.Config{
+//	    Mode:        herpaderping.ModeGhosting,
+//	    PayloadPath: "payload.exe",
+//	    TargetPath:  `C:\Windows\Temp\nohost.exe`,
+//	    // DecoyPath ignored — the file is unlinked, not overwritten
 //	})
 //
 // Via the composable evasion.Technique interface:
