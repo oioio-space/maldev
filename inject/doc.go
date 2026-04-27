@@ -1,56 +1,63 @@
-// Package inject provides unified shellcode injection techniques
-// for Windows and Linux platforms with automatic fallback support.
+// Package inject provides unified shellcode injection across Windows
+// and Linux with a fluent builder, decorator middleware, and automatic
+// fallback between methods.
 //
-// Technique: Process injection via multiple methods per platform.
-// MITRE ATT&CK: T1055 (Process Injection)
-// Platform: Cross-platform (Windows and Linux)
-// Detection: High -- all injection methods are monitored by EDR products.
+// Sixteen Windows methods cover every common shape: classic remote
+// thread (CreateRemoteThread, RtlCreateUserThread), self-injection
+// (CreateThread, CreateFiber, EtwpCreateEtwThread), child-process
+// hijacks (EarlyBird APC, Thread Hijack on a CREATE_SUSPENDED child),
+// callback abuse (EnumWindows, CreateTimerQueueTimer,
+// CertEnumSystemStore), thread-pool work items (TpAllocWork +
+// TpPostWork), kernel callback table hijack via PEB, phantom DLL
+// (map clean System32 section then overwrite .text), section mapping
+// (NtCreateSection + NtMapViewOfSection cross-process), command-line
+// argument spoofing (PEB rewrite after CREATE_SUSPENDED), and the
+// special-case NtQueueApcThreadEx that does not need an alertable
+// wait. Three Linux methods (ptrace attach, memfd_create, /proc/pid/mem)
+// plus a CGo-free purego path round out the cross-platform surface.
 //
-// Windows methods:
-//   - CreateRemoteThread (crt): classic remote thread injection
-//   - CreateThread (ct): self-injection with XOR evasion and NtCreateThreadEx
-//   - QueueUserAPC (apc): APC injection into existing thread
-//   - EarlyBirdAPC (earlybird): APC injection into suspended child process
-//   - ProcessHollowing (hollow): replace suspended process thread context
-//   - RtlCreateUserThread (rtl): undocumented ntdll thread creation
-//   - DirectSyscall (syscall): bypass EDR hooks with raw syscall stubs
-//   - CreateFiber (fiber): fiber-based shellcode execution
-//   - EtwpCreateEtwThread (etwthr): abuse internal ETW thread creation in ntdll
-//   - NtQueueApcThreadEx (apcex): special user APC injection (Win10 1903+, no alertable wait needed)
-//   - ThreadPool (threadpool): abuse TpAllocWork/TpPostWork to run shellcode in existing thread pool
-//   - KernelCallbackTable (kcallback): hijack PEB KernelCallbackTable __fnCOPYDATA entry
-//   - PhantomDLL (phantomdll): map clean System32 DLL section, overwrite .text with shellcode
-//   - SpoofArgs (spoofargs): create process with fake command line, overwrite PEB with real args
-//   - Callback (callback): execute shellcode via Windows callback mechanisms (EnumWindows, CreateTimerQueueTimer, CertEnumSystemStore)
-//   - SectionMap (sectionmap): cross-process injection via shared section mapping (no WriteProcessMemory)
+// Every method implements [Injector]. Self-process methods additionally
+// implement [SelfInjector] so callers can pass the freshly allocated
+// region into evasion/sleepmask or cleanup/memory.WipeAndFree without
+// re-deriving address and size. Decorators (WithValidation, WithCPUDelay,
+// WithXOR) and the [Pipeline] forward [InjectedRegion] transparently,
+// so the pattern works at the end of any chain. The [InjectorBuilder]
+// returned by [Build] selects syscall mode (WinAPI / NativeAPI / direct
+// / indirect with arbitrary [wsyscall.SSNResolver]), pins the target,
+// stacks middleware, and emits an [Injector].
 //
-// Utilities:
-//   - FindAllThreadsNt: enumerate threads via NtQuerySystemInformation (less monitored than Toolhelp32)
+// # MITRE ATT&CK
 //
-// Linux methods:
-//   - Ptrace (ptrace): inject via ptrace attach
-//   - MemFD (memfd): execute via memfd_create anonymous file
-//   - ProcMem (procmem): write to /proc/self/mem
+//   - T1055 (Process Injection)
+//   - T1055.001 (DLL Injection) — CreateRemoteThread variants
+//   - T1055.003 (Thread Execution Hijacking) — ThreadHijack
+//   - T1055.004 (Asynchronous Procedure Call) — APC, EarlyBird APC, NtQueueApcThreadEx
+//   - T1055.012 (Process Hollowing) — adjacent; the package keeps the
+//     legacy MethodProcessHollowing alias pointing at MethodThreadHijack
+//   - T1055.015 (ListPlanting) — CreateTimerQueueTimer / EnumWindows callback paths
 //
-// The InjectWithFallback function tries alternate methods if the primary fails.
+// # Detection level
 //
-// How it works: Shellcode injection places raw machine code (shellcode) into a
-// target process's memory and triggers its execution. Local injection writes
-// shellcode into the current process and runs it via a new thread or fiber.
-// Remote injection targets another process by allocating memory in it (e.g.,
-// VirtualAllocEx), writing the shellcode, and triggering execution through
-// mechanisms like CreateRemoteThread or queuing an APC to an existing thread.
-// APC-based methods like EarlyBird are stealthier because they piggyback on
-// normal thread scheduling rather than creating a conspicuous new thread.
+// noisy
 //
-// SelfInjector:
+// Process injection is the single most-monitored class of malicious
+// behaviour on Windows. EDR vendors hook every kernel32, ntdll, and
+// kernel callback path that this package can travel. Per-method detail
+// lives in docs/techniques/injection/<method>.md.
 //
-// Self-process injectors (CreateThread, CreateFiber, EtwpCreateEtwThread on
-// Windows; ProcMem on Linux) also implement the optional SelfInjector
-// interface, exposing the base address and size of the injected region via
-// InjectedRegion(). This lets callers wire the region into
-// evasion/sleepmask.Mask or cleanup/memory.WipeAndFree without re-deriving
-// the allocation. The decorators (WithValidation, WithCPUDelay, WithXOR) and
-// Pipeline transparently forward the region, so the pattern works across
-// chains. Cross-process methods report (Region{}, false).
+// # Example
+//
+// See [ExampleNewWindowsInjector], [ExampleBuild], and [ExamplePipeline]
+// in inject_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/injection/README.md
+//   - [github.com/oioio-space/maldev/win/syscall] — Caller and SSN resolvers
+//   - [github.com/oioio-space/maldev/evasion/sleepmask] — pair with [SelfInjector] to mask the region during sleep
+//   - [github.com/oioio-space/maldev/cleanup/memory] — pair with [SelfInjector] to wipe the region on exit
+//
+// [github.com/oioio-space/maldev/win/syscall]: https://pkg.go.dev/github.com/oioio-space/maldev/win/syscall
+// [github.com/oioio-space/maldev/evasion/sleepmask]: https://pkg.go.dev/github.com/oioio-space/maldev/evasion/sleepmask
+// [github.com/oioio-space/maldev/cleanup/memory]: https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/memory
 package inject
