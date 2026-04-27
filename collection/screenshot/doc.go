@@ -1,13 +1,31 @@
-// Package screenshot captures screen contents via GDI BitBlt.
+//go:build windows
+
+// Package screenshot captures the screen via GDI `BitBlt` and returns
+// PNG bytes.
 //
-// Technique: Screen capture via GDI BitBlt.
-// MITRE ATT&CK: T1113 (Screen Capture)
-// Platform: Windows
-// Detection: Medium -- GDI operations are common; behavioral detection focuses
-// on frequency and process context.
+// Single-monitor: `Capture` (primary display) or `CaptureRect(x, y,
+// w, h)`. Multi-monitor: `DisplayCount` enumerates,
+// `DisplayBounds(idx)` reports the rectangle, `CaptureDisplay(idx)`
+// targets a specific monitor.
 //
-// Capture and CaptureRect produce PNG-encoded screenshots of the primary
-// display or an arbitrary rectangle. Multi-monitor support is provided
-// via EnumDisplayMonitors: CaptureDisplay targets a specific monitor,
-// DisplayCount and DisplayBounds enumerate available displays.
+// # MITRE ATT&CK
+//
+//   - T1113 (Screen Capture)
+//
+// # Detection level
+//
+// quiet
+//
+// GDI operations are high-volume legitimate APIs. Frequency-based
+// detection (one screenshot per minute is normal; one per second is
+// not) is the typical signal.
+//
+// # Example
+//
+// See [ExampleCapture] and [ExampleCaptureDisplay] in
+// screenshot_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/collection/screenshot.md
 package screenshot

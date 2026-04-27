@@ -52,10 +52,13 @@ OPSEC / MITRE / Limitations / See also).
 | [T1027](https://attack.mitre.org/techniques/T1027/) | [`crypto`](../crypto) · [`encode`](../encode) · [`evasion/sleepmask`](../evasion/sleepmask) |
 | [T1027.013](https://attack.mitre.org/techniques/T1027/013/) | [`crypto`](../crypto) |
 | [T1036](https://attack.mitre.org/techniques/T1036/) | [`evasion/callstack`](../evasion/callstack) · [`evasion/stealthopen`](../evasion/stealthopen) |
+| [T1056.001](https://attack.mitre.org/techniques/T1056/001/) | [`collection`](../collection) · [`collection/keylog`](../collection/keylog) |
 | [T1070](https://attack.mitre.org/techniques/T1070/) | [`cleanup/memory`](../cleanup/memory) |
 | [T1070.004](https://attack.mitre.org/techniques/T1070/004/) | [`cleanup/selfdelete`](../cleanup/selfdelete) · [`cleanup/wipe`](../cleanup/wipe) |
 | [T1070.006](https://attack.mitre.org/techniques/T1070/006/) | [`cleanup/timestomp`](../cleanup/timestomp) |
 | [T1071.001](https://attack.mitre.org/techniques/T1071/001/) | [`useragent`](../useragent) |
+| [T1113](https://attack.mitre.org/techniques/T1113/) | [`collection`](../collection) · [`collection/screenshot`](../collection/screenshot) |
+| [T1115](https://attack.mitre.org/techniques/T1115/) | [`collection`](../collection) · [`collection/clipboard`](../collection/clipboard) |
 | [T1529](https://attack.mitre.org/techniques/T1529/) | [`cleanup/bsod`](../cleanup/bsod) |
 | [T1543.003](https://attack.mitre.org/techniques/T1543/003/) | [`cleanup/service`](../cleanup/service) |
 | [T1562.001](https://attack.mitre.org/techniques/T1562/001/) | [`evasion/acg`](../evasion/acg) · [`evasion/amsi`](../evasion/amsi) · [`evasion/blockdlls`](../evasion/blockdlls) · [`evasion/cet`](../evasion/cet) · [`evasion/etw`](../evasion/etw) · [`evasion/kcallback`](../evasion/kcallback) · [`evasion/preset`](../evasion/preset) · [`evasion/unhook`](../evasion/unhook) |
@@ -126,10 +129,13 @@ concurrent memory scanner |
 and emits a per-test / per-package / per-platform matrix report |
 | [`cmd/vmtest`](https://pkg.go.dev/github.com/oioio-space/maldev/cmd/vmtest) | — | Command vmtest runs the maldev Go test suite inside isolated VMs with
 snapshot restore between runs |
-| [`collection`](https://pkg.go.dev/github.com/oioio-space/maldev/collection) | — | provides data collection techniques for post-exploitation |
-| [`collection/clipboard`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/clipboard) | — | provides Windows clipboard monitoring and capture |
-| [`collection/keylog`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/keylog) | — | captures keystrokes using a low-level keyboard hook |
-| [`collection/screenshot`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/screenshot) | — | captures screen contents via GDI BitBlt |
+| [`collection`](https://pkg.go.dev/github.com/oioio-space/maldev/collection) | varies | groups local data-acquisition primitives for
+post-exploitation: keystrokes, clipboard contents, screen captures |
+| [`collection/clipboard`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/clipboard) | quiet | reads and watches the Windows clipboard text |
+| [`collection/keylog`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/keylog) | noisy | captures keystrokes via a low-level keyboard hook
+(`SetWindowsHookEx(WH_KEYBOARD_LL)`) |
+| [`collection/screenshot`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/screenshot) | quiet | captures the screen via GDI `BitBlt` and returns
+PNG bytes |
 | [`credentials/goldenticket`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/goldenticket) | — | forges Kerberos Golden Tickets — long-lived
 TGTs minted with a stolen krbtgt account hash |
 | [`credentials/lsassdump`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/lsassdump) | — | produces a MiniDump blob of lsass.exe's memory so
