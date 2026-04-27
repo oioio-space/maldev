@@ -1,138 +1,252 @@
-# Callback-Based Execution
+---
+package: github.com/oioio-space/maldev/inject
+last_reviewed: 2026-04-27
+reflects_commit: 4798780
+---
 
-> **MITRE ATT&CK:** T1055.001 -- Process Injection: DLL Injection | **D3FEND:** D3-PSA -- Process Spawn Analysis | **Detection:** Low-Medium
+# Callback-based execution
+
+[← injection index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Run shellcode by handing its address to a Windows API that **already**
+takes a function pointer as part of its normal contract — `EnumWindows`,
+`CreateTimerQueueTimer`, `CertEnumSystemStore`, `ReadDirectoryChangesW`,
+`RtlRegisterWait`, `NtNotifyChangeDirectoryFile`. The OS calls the
+shellcode through its own dispatcher, so no `Create*Thread*` event
+fires. Local technique only — pair with a separate primitive that places
+the shellcode in executable memory.
 
 ## Primer
 
-Instead of hiring a new worker to carry out your task, you find an existing worker who already checks a to-do list as part of their normal job. You slip your task into that to-do list, and the existing worker picks it up without anyone noticing that a new employee showed up.
+Many Windows APIs accept callbacks as routine parameters: `EnumWindows`
+calls a function for every top-level window, `CreateTimerQueueTimer`
+fires one after a delay, `CertEnumSystemStore` invokes one per
+certificate store, `RtlRegisterWait` triggers one when a kernel object
+signals, and so on. If the implant aims any of those callbacks at its
+shellcode, **Windows itself executes the shellcode** as part of a
+documented API call.
 
-Many Windows APIs accept "callback" function pointers -- addresses that Windows will call on your behalf as part of a normal operation. For example, `EnumWindows` calls a function for every window on the desktop, `CreateTimerQueueTimer` calls a function after a delay, and `CertEnumSystemStore` calls a function for every certificate store. If you point these callbacks at your shellcode instead of a legitimate function, Windows itself executes your code.
+The advantage is the absence of any thread-creation or APC-queue
+syscall. EDRs that monitor `NtCreateThreadEx`, `NtQueueApcThread`, or
+`SetThreadContext` see nothing. The shellcode runs on a thread that
+already exists (the calling thread for `EnumWindows`/`CertEnum`, the
+timer-queue thread for `CreateTimerQueueTimer`, a thread-pool worker
+for `RtlRegisterWait`).
 
-The critical advantage is zero thread creation. No `CreateThread`, no `CreateRemoteThread`, no `NtCreateThreadEx`. Security products that monitor thread creation events see nothing. The shellcode runs inside an existing API call on an existing thread. This makes callback execution one of the stealthiest local execution methods available.
+The technique is **local-only**: every callback executes in the calling
+process. Pair with [`ModuleStomp`](module-stomping.md) or a manual
+`VirtualAlloc(RW) + memcpy + VirtualProtect(RX)` to place the shellcode
+in executable memory first; `ExecuteCallback` does not allocate.
 
-## How It Works
+## How it works
 
 ```mermaid
 flowchart TD
-    SC[Shellcode in executable memory] --> Choice{Choose callback method}
-
-    Choice -->|EnumWindows| EW[user32.EnumWindows]
-    Choice -->|TimerQueue| TQ[kernel32.CreateTimerQueueTimer]
-    Choice -->|CertEnum| CE[crypt32.CertEnumSystemStore]
-
-    EW --> EW1[Windows iterates top-level windows]
-    EW1 --> EW2["Calls shellcode(hwnd, 0) per window"]
-    EW2 --> EW3[Shellcode returns 0 to stop]
-
-    TQ --> TQ1[Timer fires immediately]
-    TQ1 --> TQ2[Timer thread calls shellcode]
-
-    CE --> CE1[OS enumerates cert stores]
-    CE1 --> CE2[Calls shellcode per store]
-
-    style SC fill:#1a3a5c,color:#fff
-    style EW2 fill:#5c1a1a,color:#fff
-    style TQ2 fill:#5c1a1a,color:#fff
-    style CE2 fill:#5c1a1a,color:#fff
+    SC[shellcode in RX page] --> Pick{CallbackMethod}
+    Pick -->|EnumWindows| EW[user32!EnumWindows]
+    Pick -->|CreateTimerQueue| TQ[kernel32!CreateTimerQueueTimer]
+    Pick -->|CertEnumSystemStore| CE[crypt32!CertEnumSystemStore]
+    Pick -->|ReadDirectoryChanges| RD[kernel32!ReadDirectoryChangesW]
+    Pick -->|RtlRegisterWait| RW[ntdll!RtlRegisterWait]
+    Pick -->|NtNotifyChangeDirectory| NC[ntdll!NtNotifyChangeDirectoryFile]
+    EW --> CALL[Windows calls shellcode<br/>as a normal API callback]
+    TQ --> CALL
+    CE --> CALL
+    RD --> CALL
+    RW --> CALL
+    NC --> CALL
 ```
 
-**Three callback methods:**
+The package selects the correct call shape and parameters for each
+method. `EnumWindows` and `CertEnumSystemStore` invoke the shellcode
+synchronously; `CreateTimerQueueTimer` fires it on the timer thread
+with `WT_EXECUTEINTIMERTHREAD`; `RtlRegisterWait` and
+`NtNotifyChangeDirectoryFile` deliver it via a thread-pool worker or
+APC dispatcher.
 
-1. **EnumWindows** -- The OS calls `shellcode(hwnd, lParam)` for each top-level window. Shellcode executes in the calling thread. Returns 0 to stop enumeration.
-2. **CreateTimerQueueTimer** -- A timer fires immediately (DueTime=0) with `WT_EXECUTEINTIMERTHREAD`, calling the shellcode in the timer thread. Semi-synchronous execution.
-3. **CertEnumSystemStore** -- The certificate subsystem calls the shellcode for each system store (CurrentUser). Runs in the calling thread.
+> [!IMPORTANT]
+> **CET enforcement** — on Windows 11 with `ProcessUserShadowStackPolicy`
+> enabled, two of the six methods (`CallbackRtlRegisterWait`,
+> `CallbackNtNotifyChangeDirectory`) require the shellcode to start
+> with the `ENDBR64` instruction (`F3 0F 1E FA`) or the kernel
+> terminates the process with `STATUS_STACK_BUFFER_OVERRUN`. Call
+> [`evasion/cet.Wrap(sc)`](../evasion/cet.md) on the shellcode before
+> passing it through, or [`evasion/cet.Disable()`](../evasion/cet.md)
+> once at start-up.
 
-All three methods require that the shellcode is already in executable memory. Pair with `ModuleStomp` or manual `VirtualAlloc` + `VirtualProtect`.
+## API Reference
 
-## Usage
+### `inject.CallbackMethod`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#CallbackMethod)
+
+Enum identifying which API the dispatcher routes through. Values:
+
+| Constant | API | Thread context | CET-affected |
+|---|---|---|---|
+| `CallbackEnumWindows` | `user32!EnumWindows` | calling thread | no |
+| `CallbackCreateTimerQueue` | `kernel32!CreateTimerQueueTimer` | timer thread | no |
+| `CallbackCertEnumSystemStore` | `crypt32!CertEnumSystemStore` | calling thread | no |
+| `CallbackReadDirectoryChanges` | `kernel32!ReadDirectoryChangesW` | calling thread (sync) | no |
+| `CallbackRtlRegisterWait` | `ntdll!RtlRegisterWait` | thread-pool worker | **yes** |
+| `CallbackNtNotifyChangeDirectory` | `ntdll!NtNotifyChangeDirectoryFile` | APC dispatcher | **yes** |
+
+### `inject.ExecuteCallback(addr uintptr, method CallbackMethod) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#ExecuteCallback)
+
+Invoke the shellcode at `addr` through the chosen callback API.
+
+**Parameters:**
+- `addr` — pointer to executable memory holding the shellcode. The
+  caller must have placed it there beforehand (RX-protected).
+- `method` — one of the `CallbackMethod` constants.
+
+**Returns:** `error` — propagates the underlying API error, plus a
+sentinel for unknown methods.
+
+**Side effects:** depends on the chosen method — `CreateTimerQueueTimer`
+allocates a timer queue, `ReadDirectoryChangesW` opens
+`C:\Windows\Temp`, `CertEnumSystemStore` enumerates certificate stores.
+None of the callback APIs persist state after the call returns.
+
+**OPSEC:** very low signal on thread-creation telemetry; medium on
+behavioural telemetry — the same six APIs in known-bad-behaviour rules
+exist in MDE / Defender catalogues.
+
+## Examples
+
+### Simple
+
+The shellcode must already be in executable memory. The shortest path
+is to allocate, write, protect, then execute:
 
 ```go
-package main
-
 import (
-    "log"
     "unsafe"
 
     "github.com/oioio-space/maldev/inject"
     "golang.org/x/sys/windows"
 )
 
-func main() {
-    shellcode := []byte{0x90, 0x90, 0xCC}
+addr, _ := windows.VirtualAlloc(0, uintptr(len(shellcode)),
+    windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_READWRITE)
+copy(unsafe.Slice((*byte)(unsafe.Pointer(addr)), len(shellcode)), shellcode)
+var old uint32
+_ = windows.VirtualProtect(addr, uintptr(len(shellcode)), windows.PAGE_EXECUTE_READ, &old)
 
-    // Allocate executable memory manually.
-    addr, err := windows.VirtualAlloc(0, uintptr(len(shellcode)),
-        windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_READWRITE)
-    if err != nil {
-        log.Fatal(err)
-    }
-    copy((*[1 << 20]byte)(unsafe.Pointer(addr))[:len(shellcode)], shellcode)
-    var old uint32
-    windows.VirtualProtect(addr, uintptr(len(shellcode)), windows.PAGE_EXECUTE_READ, &old)
-
-    // Execute via EnumWindows callback.
-    if err := inject.ExecuteCallback(addr, inject.CallbackEnumWindows); err != nil {
-        log.Fatal(err)
-    }
-}
+_ = inject.ExecuteCallback(addr, inject.CallbackEnumWindows)
 ```
 
-## Combined Example
+### Composed (with `inject.ModuleStomp`)
+
+Hide the executable region inside a legitimate System32 DLL's `.text`
+section, then trigger:
 
 ```go
-package main
+import "github.com/oioio-space/maldev/inject"
 
+addr, err := inject.ModuleStomp("msftedit.dll", shellcode)
+if err != nil { return err }
+return inject.ExecuteCallback(addr, inject.CallbackCreateTimerQueue)
+```
+
+### Advanced (with CET wrapping for thread-pool callbacks)
+
+Some callback paths require the `ENDBR64` prefix on Windows 11:
+
+```go
 import (
-    "log"
+    "github.com/oioio-space/maldev/evasion/cet"
+    "github.com/oioio-space/maldev/inject"
+)
 
+prepared := cet.Wrap(shellcode)
+addr, _ := inject.ModuleStomp("msftedit.dll", prepared)
+_ = inject.ExecuteCallback(addr, inject.CallbackRtlRegisterWait)
+```
+
+### Complex (full chain — evade + stomp + callback + cleanup)
+
+```go
+import (
+    "github.com/oioio-space/maldev/cleanup/memory"
     "github.com/oioio-space/maldev/evasion"
+    "github.com/oioio-space/maldev/evasion/cet"
     "github.com/oioio-space/maldev/evasion/preset"
     "github.com/oioio-space/maldev/inject"
 )
 
-func main() {
-    shellcode := []byte{0x90, 0x90, 0xCC}
+_ = evasion.ApplyAll(preset.Stealth(), nil)
+prepared := cet.Wrap(shellcode)
 
-    // 1. Evasion: AMSI + ETW + selective unhook.
-    evasion.ApplyAll(preset.Stealth(), nil)
+addr, err := inject.ModuleStomp("msftedit.dll", prepared)
+if err != nil { return err }
 
-    // 2. Module stomp -- shellcode in file-backed memory.
-    addr, err := inject.ModuleStomp("msftedit.dll", shellcode)
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // 3. Execute via CertEnumSystemStore -- no thread, no suspicious APIs.
-    if err := inject.ExecuteCallback(addr, inject.CallbackCertEnumSystemStore); err != nil {
-        log.Fatal(err)
-    }
+if err := inject.ExecuteCallback(addr, inject.CallbackNtNotifyChangeDirectory); err != nil {
+    return err
 }
+
+memory.SecureZero(prepared)
 ```
 
-## Advantages & Limitations
+## OPSEC & Detection
 
-| Aspect | Detail |
-|--------|--------|
-| Stealth | High -- no thread creation API calls. Execution appears as normal API usage. |
-| Thread creation | Zero. All callbacks run on existing threads. |
-| Execution model | Synchronous (EnumWindows, CertEnum) or timer-thread (TimerQueue). |
-| Compatibility | Excellent -- these APIs exist on all Windows versions. |
-| Limitations | Local execution only -- cannot trigger a callback in a remote process. Shellcode must be in executable memory before calling. EnumWindows requires at least one top-level window to exist. |
-| Forensics | ETW may log the specific API call (e.g., window enumeration). Call stack analysis shows the callback originating from user32/kernel32/crypt32. |
+| Artefact | Where defenders look |
+|---|---|
+| `EnumWindows` callback pointing into a non-image region | EDR memory scanners (CrowdStrike, MDE Live Response) — orphan callbacks lit up |
+| Sudden `RtlRegisterWait` from a non-system process with a callback in heap | Userland hooks + ETW `Microsoft-Windows-Threadpool` |
+| `CertEnumSystemStore` from a non-crypto-aware process | Behavioural rule (rare; Defender flags the chain when paired with downloaded payloads) |
+| File-watch on `C:\Windows\Temp` from a process that does not file-watch | Sysmon Event 12/13 (no direct event) but EDR file-IO baselines |
+| RW page promoted to RX in non-image region | Allocation-protect telemetry — flag the `VirtualProtect` to RX |
 
-## API Reference
+**D3FEND counters:**
 
-```go
-// CallbackMethod identifies the callback technique.
-type CallbackMethod int
+- [D3-PCSV](https://d3fend.mitre.org/technique/d3f:ProcessCodeSegmentVerification/)
+  — verifies callback pointers against image segments.
+- [D3-EAL](https://d3fend.mitre.org/technique/d3f:ExecutableAllowlisting/)
+  — WDAC denies execution from non-image-backed pages.
 
-const (
-    CallbackEnumWindows        CallbackMethod = iota  // user32.EnumWindows
-    CallbackCreateTimerQueue                           // kernel32.CreateTimerQueueTimer
-    CallbackCertEnumSystemStore                        // crypt32.CertEnumSystemStore
-)
+**Hardening for the operator:** combine with [`ModuleStomp`](module-stomping.md)
+so the callback pointer falls inside a legitimate DLL's `.text`
+section; rotate `CallbackMethod` between runs to defeat
+behaviour-rule fingerprinting; never run the same `EnumWindows`
+trigger twice in a row.
 
-// ExecuteCallback runs shellcode at addr using the specified callback.
-// The caller must ensure addr points to executable memory.
-func ExecuteCallback(addr uintptr, method CallbackMethod) error
-```
+## MITRE ATT&CK
+
+| T-ID | Name | Sub-coverage | D3FEND counter |
+|---|---|---|---|
+| [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | Process Injection: DLL Injection | callback variant — no thread creation | D3-PCSV |
+| [T1055.015](https://attack.mitre.org/techniques/T1055/015/) | Process Injection: ListPlanting | `CreateTimerQueueTimer` family | D3-PCSV |
+
+## Limitations
+
+- **Local only.** All six methods execute in the calling process.
+  Cross-process work needs a different primitive
+  ([`SectionMapInject`](section-mapping.md), [`KernelCallbackTable`](kernel-callback-table.md)).
+- **Shellcode must already be RX.** `ExecuteCallback` does not allocate.
+  Pair with `ModuleStomp` or manual `VirtualAlloc + VirtualProtect`.
+- **CET on two methods.** `CallbackRtlRegisterWait` and
+  `CallbackNtNotifyChangeDirectory` require the `ENDBR64` prefix on
+  Win11+ with shadow stacks enforced.
+- **Synchronous methods block.** `EnumWindows` and `CertEnumSystemStore`
+  return only after the shellcode finishes. The shellcode must
+  return cleanly (return 0) — long-running payloads should hand off to
+  a fiber or thread internally.
+- **Thread-pool worker context.** `CallbackRtlRegisterWait` runs on a
+  thread the implant did not create; locked OS resources held there
+  are unfamiliar territory.
+
+## See also
+
+- [Module Stomping](module-stomping.md) — the canonical pair to place
+  the shellcode in executable memory.
+- [Thread Pool](thread-pool.md) — a different self-injection path that
+  also avoids thread creation.
+- [`evasion/cet`](../evasion/cet.md) — CET shadow stack handling for
+  the two affected callback methods.
+- [Process Injection Techniques — modexp/SafeBreach](https://github.com/odzhan/injection)
+  — community catalogue of the same callback-API patterns.
