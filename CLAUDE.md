@@ -38,7 +38,9 @@ Follow the rules in:
 Follow the rules in:
 - `docs/conventions/documentation.md` — **tracked, machine-portable.** Surface (hybrid /docs + gh-pages), audience paths (Operator/Researcher/Detection eng), per-package doc.go template, per-technique markdown template, Mermaid usage, GFM features, README/index structure, auto-gen tables, voice/style, migration order. **Source of truth for ALL doc work — never write docs from memory.**
 
-In-progress doc refactor reference: `docs/refactor-2026-doc/audit-2026-04-27.md` (exhaustive audit of legacy state).
+In-progress doc refactor reference:
+- `docs/refactor-2026-doc/progress.md` — **the live state of the refactor.** Read FIRST when resuming work after any break or on a different machine. Update this file at every commit that advances a phase.
+- `docs/refactor-2026-doc/audit-2026-04-27.md` — exhaustive audit of pre-refactor state, used as the master TODO list.
 
 Key rules:
 - `camelCase` unexported, `PascalCase` exported. `ID` not `Id`. `HTTP` not `Http`.
