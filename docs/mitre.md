@@ -1,3 +1,8 @@
+---
+last_reviewed: 2026-04-27
+reflects_commit: a705c32
+---
+
 # MITRE ATT&CK + D3FEND Coverage
 
 [← Back to README](../README.md)

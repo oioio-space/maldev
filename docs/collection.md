@@ -1,3 +1,8 @@
+---
+last_reviewed: 2026-04-27
+reflects_commit: a705c32
+---
+
 # Collection APIs
 
 [<- Back to README](../README.md)

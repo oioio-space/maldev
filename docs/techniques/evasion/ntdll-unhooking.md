@@ -1,3 +1,8 @@
+---
+last_reviewed: 2026-04-27
+reflects_commit: a705c32
+---
+
 # ntdll Unhooking
 
 > **MITRE ATT&CK:** T1562.001 -- Impair Defenses: Disable or Modify Tools | **D3FEND:** D3-HBPI -- Hook-Based Process Instrumentation | **Detection:** High

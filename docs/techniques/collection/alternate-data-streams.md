@@ -1,3 +1,8 @@
+---
+last_reviewed: 2026-04-27
+reflects_commit: a705c32
+---
+
 # NTFS Alternate Data Streams
 
 > **MITRE ATT&CK:** T1564.004 -- Hide Artifacts: NTFS File Attributes | **Detection:** Medium

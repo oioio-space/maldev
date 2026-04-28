@@ -1,3 +1,8 @@
+---
+last_reviewed: 2026-04-27
+reflects_commit: a705c32
+---
+
 # VM Test Setup — Reproducible Bootstrap
 
 > **Scope.** This document covers **bootstrap from zero**: host tools,

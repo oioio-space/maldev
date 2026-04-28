@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-04-27
-reflects_commit: 664df0b
+reflects_commit: a705c32
 ---
 
 # Documentation refactor — progress tracker
@@ -32,7 +32,7 @@ reflects_commit: 664df0b
 | 3 — `cmd/docgen` + pre-commit + CI drift check | ✅ done | `b2e0464` | Drift check wired into `scripts/pre-commit` and `.github/workflows/docs.yml`. README package map fix in `0587c76`. |
 | 4 — sweep remaining 10 areas | ✅ done | `57c853b..` | All areas swept (cleanup, evasion, inject, layer-0, c2, collection, credentials, pe, persistence, process, recon, runtime, win, kernel, privesc, ui). Polish round for evasion legacy md pages deferred to Phase 6. |
 | 5 — transversal guides | 🟡 in-progress | — | mitre.md updated (T1016, T1027.007, T1068, T1078, T1134.001/002/004 enrichment). getting-started.md detection scale aligned to canonical 5-level. architecture.md per-package quick-reference fixed (kernel/driver/rtcore64 row, privesc → new tech md links, persistence/service+lnk+account rows added). testing.md, coverage-workflow.md still need a pass. |
-| 6 — final cross-link + breadcrumb + dead-link audit | 🟡 in-progress | `d1ff2d7..` | Repo-wide dead-link sweep done (8 broken refs fixed: byovd moved evasion/→kernel/, ppid-spoofing path, ../inject vs ../injection, persistence ../privilege depth, README byovd row, herpaderping anchor). Repo-wide `last_reviewed` bump still pending. |
+| 6 — final cross-link + breadcrumb + dead-link audit | ✅ done | `d1ff2d7..a705c32, 6b` | Repo-wide dead-link sweep (8 broken refs fixed) + repo-wide front-matter pass: 45 `docs/**.md` pages now carry `last_reviewed: 2026-04-27 / reflects_commit: a705c32`. Every `docs/` page now has uniform front-matter — index entries, by-role pages, area docs, transversal guides, technique md, examples. |
 | 3b — gh-pages mdBook deploy | ⬜ deferred | — | After Phase 6 stabilises, add the gh-pages workflow that builds an mdBook from `docs/`. |
 
 ## Phase 4 progress

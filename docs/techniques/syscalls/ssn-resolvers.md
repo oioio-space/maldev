@@ -1,3 +1,8 @@
+---
+last_reviewed: 2026-04-27
+reflects_commit: a705c32
+---
+
 # SSN Resolvers: Hell's Gate, Halo's Gate, Tartarus Gate, HashGate
 
 [<- Back to Syscalls Overview](README.md)

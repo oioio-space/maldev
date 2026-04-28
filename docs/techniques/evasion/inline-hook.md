@@ -1,3 +1,8 @@
+---
+last_reviewed: 2026-04-27
+reflects_commit: a705c32
+---
+
 # Inline Hook — x64 Function Interception
 
 [<- Back to Evasion](README.md)
