@@ -78,6 +78,62 @@ func TestParseExports(t *testing.T) {
 	assert.True(t, found, "expected NtClose in ntdll.dll exports")
 }
 
+func TestExportEntries_NtdllShape(t *testing.T) {
+	path := useSystemDLL(t)
+
+	f, err := Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	entries, err := f.ExportEntries()
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+
+	// ntdll exports thousands of named functions; every entry must
+	// carry a non-zero ordinal and the NtClose entry must be findable.
+	var ntCloseOrdinal uint16
+	for _, e := range entries {
+		assert.NotZero(t, e.Ordinal, "every export should have a non-zero ordinal")
+		if e.Name == "NtClose" {
+			ntCloseOrdinal = e.Ordinal
+		}
+	}
+	assert.NotZero(t, ntCloseOrdinal, "NtClose must be present in ntdll.dll")
+}
+
+// TestExportEntries_MsvcrtOrdinals asserts ExportEntries surfaces
+// ordinal-only entries — the whole point of the API. msvcrt.dll
+// historically exports a couple of ordinal-only entries (e.g.
+// `_o_cabs`, `_o_aligned_malloc`, ...). Modern Win10/11 may carry
+// fewer but msvcrt always has at least one.
+func TestExportEntries_MsvcrtOrdinals(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only: requires msvcrt.dll")
+	}
+	const path = `C:\Windows\System32\msvcrt.dll`
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("msvcrt.dll not found: %v", err)
+	}
+	f, err := Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	entries, err := f.ExportEntries()
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+
+	var named, ordinalOnly int
+	for _, e := range entries {
+		if e.Name == "" {
+			ordinalOnly++
+		} else {
+			named++
+		}
+	}
+	assert.Greater(t, named, 100, "msvcrt should expose hundreds of named exports")
+	t.Logf("msvcrt.dll: %d named, %d ordinal-only", named, ordinalOnly)
+}
+
 func TestFromBytesRoundTrip(t *testing.T) {
 	path := useSystemDLL(t)
 

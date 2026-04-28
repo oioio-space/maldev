@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 )
 
 // Machine identifies the COFF machine type baked into the emitted PE.
@@ -95,7 +96,30 @@ var (
 	ErrEmptyTargetName = errors.New("dllproxy: target name required")
 	// ErrI386NotSupported is returned for MachineI386 — Phase 3 work.
 	ErrI386NotSupported = errors.New("dllproxy: MachineI386 not yet implemented (phase 3)")
+	// ErrInvalidExport is returned when an Export passed to GenerateExt
+	// is unusable — both Name and Ordinal blank, or duplicate ordinals.
+	ErrInvalidExport = errors.New("dllproxy: invalid export")
 )
+
+// Export describes a single proxied export. Either Name or Ordinal (or
+// both) must be set.
+//
+//   - Name + Ordinal=0: emitter assigns sequential ordinals starting
+//     at 1, sorted alphabetically. This is the legacy [Generate] path.
+//   - Name + Ordinal!=0: explicit named export at the given ordinal —
+//     useful when the target's import descriptors reference both the
+//     name (binary search) and the ordinal index slot.
+//   - Name="" + Ordinal!=0: ordinal-only export. The forwarder string
+//     becomes "<target>.#<ordinal>" and the entry has no slot in the
+//     AddressOfNames table.
+//
+// The mirror type is [github.com/oioio-space/maldev/pe/parse.Export],
+// which extracts these from a real PE — the natural input source for
+// the proxy emitter.
+type Export struct {
+	Name    string
+	Ordinal uint16
+}
 
 // Generate emits a Windows DLL byte stream proxying targetName's named
 // exports back to the legitimate target. The result is a complete PE
@@ -117,7 +141,33 @@ var (
 //
 // On any input error a sentinel from the package's Err* set is
 // returned — wrap with errors.Is to switch on cause.
+//
+// Generate is sugar over [GenerateExt] for the common case of named
+// exports without explicit ordinals.
 func Generate(targetName string, exports []string, opts Options) ([]byte, error) {
+	if len(exports) == 0 {
+		return nil, ErrEmptyExports
+	}
+	rich := make([]Export, len(exports))
+	for i, n := range exports {
+		rich[i] = Export{Name: n}
+	}
+	return GenerateExt(targetName, rich, opts)
+}
+
+// GenerateExt is the rich-input variant of [Generate]: it accepts
+// [Export] entries that may carry an explicit ordinal, including
+// ordinal-only entries (Name == ""). Use when proxying targets that
+// rely on ordinal-only imports (msvcrt, ws2_32, several legacy
+// system DLLs).
+//
+// Ordinal-only entries become forwarders of the form
+// "<target>.#<ordinal>". Named entries keep the regular
+// "<target>.<name>" forwarder.
+//
+// On any input error a sentinel from the package's Err* set is
+// returned — wrap with errors.Is to switch on cause.
+func GenerateExt(targetName string, exports []Export, opts Options) ([]byte, error) {
 	if targetName == "" {
 		return nil, ErrEmptyTargetName
 	}
@@ -131,17 +181,62 @@ func Generate(targetName string, exports []string, opts Options) ([]byte, error)
 		return nil, fmt.Errorf("%w: got %s", ErrI386NotSupported, opts.Machine)
 	}
 
-	sortedExports := make([]string, len(exports))
-	copy(sortedExports, exports)
-	sort.Strings(sortedExports)
+	normalised, err := normaliseExports(exports)
+	if err != nil {
+		return nil, err
+	}
 
 	if opts.PayloadDLL == "" {
-		return assembleForwarderOnly(targetName, sortedExports, opts)
+		return assembleForwarderOnly(targetName, normalised, opts)
 	}
-	return assembleWithPayload(targetName, sortedExports, opts)
+	return assembleWithPayload(targetName, normalised, opts)
 }
 
-func assembleForwarderOnly(targetName string, sortedExports []string, opts Options) ([]byte, error) {
+// normaliseExports validates input, assigns missing ordinals, and
+// returns the slice in ordinal-ascending order — matching the layout
+// AddressOfFunctions expects (one slot per ordinal, sparse slots
+// zero, Base = lowest ordinal).
+func normaliseExports(exports []Export) ([]Export, error) {
+	out := make([]Export, len(exports))
+	copy(out, exports)
+
+	// Pass 1: validate + auto-assign ordinals to entries lacking one.
+	used := map[uint16]bool{}
+	var missingOrdinal []int
+	for i, e := range out {
+		if e.Name == "" && e.Ordinal == 0 {
+			return nil, fmt.Errorf("%w: entry %d has neither name nor ordinal", ErrInvalidExport, i)
+		}
+		if e.Ordinal == 0 {
+			missingOrdinal = append(missingOrdinal, i)
+			continue
+		}
+		if used[e.Ordinal] {
+			return nil, fmt.Errorf("%w: ordinal %d used twice", ErrInvalidExport, e.Ordinal)
+		}
+		used[e.Ordinal] = true
+	}
+	// Auto-assigned ordinals fill the lowest free slots from 1 upward —
+	// matches MSVC linker convention. Mixed inputs that explicitly
+	// reserve high ordinals (e.g. {Foo, 99}) end up with the auto
+	// entries densely packed at 1..K with a gap up to the explicit
+	// ordinal; the sparse middle slots stay zero in AddressOfFunctions.
+	next := uint16(1)
+	for _, idx := range missingOrdinal {
+		for used[next] {
+			next++
+		}
+		out[idx].Ordinal = next
+		used[next] = true
+		next++
+	}
+
+	// Pass 2: sort by ordinal ascending.
+	sort.Slice(out, func(i, j int) bool { return out[i].Ordinal < out[j].Ordinal })
+	return out, nil
+}
+
+func assembleForwarderOnly(targetName string, sortedExports []Export, opts Options) ([]byte, error) {
 	const rdataVA = sectionAlignment
 	rdata, exportSize := buildExportData(targetName, sortedExports, opts.PathScheme, rdataVA)
 
@@ -156,7 +251,7 @@ func assembleForwarderOnly(targetName string, sortedExports []string, opts Optio
 	return assemblePE(secs, 0, dataDirs, opts.Machine), nil
 }
 
-func assembleWithPayload(targetName string, sortedExports []string, opts Options) ([]byte, error) {
+func assembleWithPayload(targetName string, sortedExports []Export, opts Options) ([]byte, error) {
 	const (
 		textVA  = sectionAlignment     // 0x1000
 		rdataVA = sectionAlignment * 2 // 0x2000
@@ -223,52 +318,74 @@ type section struct {
 }
 
 // buildExportData produces the export-directory portion of the proxy
-// DLL's .rdata section: directory header, function/name/ordinal
-// arrays, DLL name, forwarder strings, and export name strings. Returns
-// the bytes plus the size — the IMAGE_DIRECTORY_ENTRY_EXPORT data
-// directory entry must span exactly that many bytes from sectionVA so
-// every forwarder RVA falls inside the range (loader-side detection
-// rule for forwarder exports).
+// DLL's .rdata section: directory header, function / name / ordinal
+// arrays, DLL name, forwarder strings, and export-name strings. Each
+// entry in sortedExports must carry an ordinal (normaliseExports
+// guarantees this). Returns the bytes plus the size — the
+// IMAGE_DIRECTORY_ENTRY_EXPORT data directory entry must span exactly
+// that many bytes from sectionVA so every forwarder RVA falls inside
+// the range (loader-side detection rule for forwarder exports).
 //
-// sectionVA is the RVA at which the bytes will be loaded — needed
-// because every absolute RVA stamped into the directory (function,
-// name, ordinal table addresses) is relative to the image base.
-func buildExportData(targetName string, sortedExports []string, scheme PathScheme, sectionVA uint32) ([]byte, uint32) {
-	n := uint32(len(sortedExports))
+// Layout choices:
+//   - Base = lowest ordinal. NumberOfFunctions = highest - lowest + 1
+//     (so AddressOfFunctions is dense across the range; gaps between
+//     ordinals show up as zero slots, which the loader treats as
+//     "not exported at this ordinal").
+//   - AddressOfNames sorted alphabetically (Windows loader does a
+//     binary search by name).
+//   - Ordinal-only entries (Name == "") get a forwarder string of
+//     "<target>.#<ordinal>" and no slot in AddressOfNames.
+//
+// sectionVA is the RVA at which the bytes will be loaded.
+func buildExportData(targetName string, sortedExports []Export, scheme PathScheme, sectionVA uint32) ([]byte, uint32) {
 	const exportDirSz = 40
 
-	addrFuncsOffset := uint32(exportDirSz)   // immediately after the directory struct
-	addrNamesOffset := addrFuncsOffset + 4*n // uint32 per function
-	addrOrdsOffset := addrNamesOffset + 4*n  // uint32 per name
-	stringsOffset := addrOrdsOffset + 2*n    // uint16 per ordinal
+	base := uint32(sortedExports[0].Ordinal)
+	maxOrd := uint32(sortedExports[len(sortedExports)-1].Ordinal)
+	numFunctions := maxOrd - base + 1
 
-	// Strings table layout (concatenated, NUL-terminated):
-	//   1. DLL name ("<targetName>\0")
-	//   2. forwarder string per export (sorted order)
-	//   3. export name per export (sorted order)
-	// Items 2 and 3 are interleaved per-export so we keep one loop.
+	named := make([]Export, 0, len(sortedExports))
+	for _, e := range sortedExports {
+		if e.Name != "" {
+			named = append(named, e)
+		}
+	}
+	sort.Slice(named, func(i, j int) bool { return named[i].Name < named[j].Name })
+	numNames := uint32(len(named))
+
+	addrFuncsOffset := uint32(exportDirSz)
+	addrNamesOffset := addrFuncsOffset + 4*numFunctions
+	addrOrdsOffset := addrNamesOffset + 4*numNames
+	stringsOffset := addrOrdsOffset + 2*numNames
+
 	dllNameRVA := sectionVA + stringsOffset
 	dllNameBytes := append([]byte(targetName), 0)
 	cursor := stringsOffset + uint32(len(dllNameBytes))
 
 	prefix := forwarderPrefix(scheme, targetName)
 
-	forwarderRVAs := make([]uint32, n)
-	exportNameRVAs := make([]uint32, n)
+	forwarderRVA := make([]uint32, numFunctions) // 0 means "no export at this ordinal"
 	var stringsBuf bytes.Buffer
 	stringsBuf.Write(dllNameBytes)
 
-	for i, name := range sortedExports {
-		fwd := prefix + name
-		forwarderRVAs[i] = sectionVA + cursor
+	// sortedExports is ascending by ordinal and non-empty (normaliseExports
+	// enforces both), so e.Ordinal >= base for every iteration — the slot
+	// subtraction below cannot underflow.
+	for _, e := range sortedExports {
+		fwd := forwarderTarget(prefix, e)
+		slot := uint32(e.Ordinal) - base
+		forwarderRVA[slot] = sectionVA + cursor
 		stringsBuf.WriteString(fwd)
 		stringsBuf.WriteByte(0)
 		cursor += uint32(len(fwd) + 1)
+	}
 
-		exportNameRVAs[i] = sectionVA + cursor
-		stringsBuf.WriteString(name)
+	nameRVA := make([]uint32, len(named))
+	for i, e := range named {
+		nameRVA[i] = sectionVA + cursor
+		stringsBuf.WriteString(e.Name)
 		stringsBuf.WriteByte(0)
-		cursor += uint32(len(name) + 1)
+		cursor += uint32(len(e.Name) + 1)
 	}
 
 	out := make([]byte, stringsOffset)
@@ -278,31 +395,34 @@ func buildExportData(targetName string, sortedExports []string, scheme PathSchem
 	binary.LittleEndian.PutUint32(out[4:], 0)                          // TimeDateStamp
 	binary.LittleEndian.PutUint16(out[8:], 0)                          // MajorVersion
 	binary.LittleEndian.PutUint16(out[10:], 0)                         // MinorVersion
-	binary.LittleEndian.PutUint32(out[12:], dllNameRVA)                // Name (RVA to dll name string)
-	binary.LittleEndian.PutUint32(out[16:], 1)                         // Base (ordinal 1 .. N)
-	binary.LittleEndian.PutUint32(out[20:], n)                         // NumberOfFunctions
-	binary.LittleEndian.PutUint32(out[24:], n)                         // NumberOfNames
+	binary.LittleEndian.PutUint32(out[12:], dllNameRVA)                // Name
+	binary.LittleEndian.PutUint32(out[16:], base)                      // Base
+	binary.LittleEndian.PutUint32(out[20:], numFunctions)              // NumberOfFunctions
+	binary.LittleEndian.PutUint32(out[24:], numNames)                  // NumberOfNames
 	binary.LittleEndian.PutUint32(out[28:], sectionVA+addrFuncsOffset) // AddressOfFunctions
 	binary.LittleEndian.PutUint32(out[32:], sectionVA+addrNamesOffset) // AddressOfNames
 	binary.LittleEndian.PutUint32(out[36:], sectionVA+addrOrdsOffset)  // AddressOfNameOrdinals
 
-	// AddressOfFunctions: forwarder RVAs (forwarder iff RVA falls inside
-	// the export directory data range, which we ensure by choosing the
-	// export-table data-directory size to span the entire .rdata content).
-	for i, rva := range forwarderRVAs {
-		binary.LittleEndian.PutUint32(out[addrFuncsOffset+uint32(i)*4:], rva)
+	for slot, rva := range forwarderRVA {
+		binary.LittleEndian.PutUint32(out[addrFuncsOffset+uint32(slot)*4:], rva)
 	}
-	for i, rva := range exportNameRVAs {
-		binary.LittleEndian.PutUint32(out[addrNamesOffset+uint32(i)*4:], rva)
-	}
-	// AddressOfNameOrdinals — identity map since we sorted both names
-	// and forwarder slots into the same alphabetic order.
-	for i := uint32(0); i < n; i++ {
-		binary.LittleEndian.PutUint16(out[addrOrdsOffset+i*2:], uint16(i))
+	for i, e := range named {
+		binary.LittleEndian.PutUint32(out[addrNamesOffset+uint32(i)*4:], nameRVA[i])
+		binary.LittleEndian.PutUint16(out[addrOrdsOffset+uint32(i)*2:], uint16(uint32(e.Ordinal)-base))
 	}
 
 	out = append(out, stringsBuf.Bytes()...)
 	return out, uint32(len(out))
+}
+
+// forwarderTarget produces the right-hand side of a forwarder string
+// for one export — "<target>.<name>" for named entries,
+// "<target>.#<ordinal>" for ordinal-only.
+func forwarderTarget(prefix string, e Export) string {
+	if e.Name != "" {
+		return prefix + e.Name
+	}
+	return prefix + "#" + strconv.FormatUint(uint64(e.Ordinal), 10)
 }
 
 // forwarderPrefix returns the constant prefix prepended to each export
@@ -514,11 +634,6 @@ func buildImportData(payload string, baseRVA uint32) ([]byte, importLayout) {
 		payloadStringRVA: baseRVA + payloadOffset,
 	}
 }
-
-// dllMainStubLen is the fixed size of the x64 DllMain stub
-// [buildDllMainStub] emits — surfaced for the section-virtual-size
-// computation in [assembleWithPayload].
-const dllMainStubLen = 32
 
 // buildDllMainStub emits a 32-byte x64 entry-point that:
 //   - returns TRUE for every reason ≠ DLL_PROCESS_ATTACH;

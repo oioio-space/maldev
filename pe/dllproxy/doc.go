@@ -26,8 +26,12 @@
 // The natural pipeline is:
 //
 //   - Discover an opportunity via [recon/dllhijack].
-//   - Read the target DLL's exports via [pe/parse.File.Exports].
-//   - Hand them to [Generate] together with the target's filename.
+//   - Read the target DLL's exports via [pe/parse.File.Exports]
+//     (names only) or [pe/parse.File.ExportEntries] (names + ordinals
+//     + forwarders — required when the target ships ordinal-only
+//     exports such as msvcrt or ws2_32).
+//   - Hand them to [Generate] (string names) or [GenerateExt] (rich
+//     [Export] entries) together with the target's filename.
 //   - Drop the result at the opportunity's HijackedPath.
 //
 // # MITRE ATT&CK

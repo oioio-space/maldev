@@ -219,6 +219,130 @@ func TestBuildDllMainStub_Layout(t *testing.T) {
 	assert.Equal(t, int32(iatEntryRVA)-int32(textRVA+22), callDisp)
 }
 
+// TestGenerateExt_OrdinalOnly verifies the ordinal-only forwarder
+// path: an export with no Name and Ordinal=42 must end up as a
+// `<target>.#42` forwarder, no entry in AddressOfNames, and the right
+// slot in AddressOfFunctions (slot index = ordinal - Base).
+func TestGenerateExt_OrdinalOnly(t *testing.T) {
+	out, err := GenerateExt(
+		"target.dll",
+		[]Export{
+			{Name: "Foo", Ordinal: 1},
+			{Ordinal: 42}, // ordinal-only
+			{Name: "Bar", Ordinal: 7},
+		},
+		Options{},
+	)
+	require.NoError(t, err)
+
+	f, err := pe.NewFile(bytes.NewReader(out))
+	require.NoError(t, err)
+	defer f.Close()
+
+	oh := f.OptionalHeader.(*pe.OptionalHeader64)
+	edirRVA := oh.DataDirectory[pe.IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress
+	sec := sectionContainingRVA(f, edirRVA)
+	require.NotNil(t, sec)
+	data, err := sec.Data()
+	require.NoError(t, err)
+	rvaToOff := func(rva uint32) uint32 { return rva - sec.VirtualAddress }
+
+	base := binary.LittleEndian.Uint32(data[rvaToOff(edirRVA+16):])
+	numFuncs := binary.LittleEndian.Uint32(data[rvaToOff(edirRVA+20):])
+	numNames := binary.LittleEndian.Uint32(data[rvaToOff(edirRVA+24):])
+
+	// ordinals 1, 7, 42 → Base=1, NumFuncs=42 (1..42 dense range with
+	// 39 zero slots). NumNames=2 (Foo + Bar; ordinal-only stripped).
+	assert.Equal(t, uint32(1), base)
+	assert.Equal(t, uint32(42), numFuncs)
+	assert.Equal(t, uint32(2), numNames)
+
+	// Walk forwarders, indexed by ordinal.
+	addrFuncs := binary.LittleEndian.Uint32(data[rvaToOff(edirRVA+28):])
+	getFwd := func(ordinal uint32) string {
+		slot := ordinal - base
+		fwdRVA := binary.LittleEndian.Uint32(data[rvaToOff(addrFuncs+slot*4):])
+		if fwdRVA == 0 {
+			return ""
+		}
+		return readZString(data, rvaToOff(fwdRVA))
+	}
+	assert.Equal(t, `\\.\GLOBALROOT\SystemRoot\System32\target.dll.Foo`, getFwd(1))
+	assert.Equal(t, `\\.\GLOBALROOT\SystemRoot\System32\target.dll.Bar`, getFwd(7))
+	assert.Equal(t, `\\.\GLOBALROOT\SystemRoot\System32\target.dll.#42`, getFwd(42))
+	assert.Equal(t, "", getFwd(2), "ordinal 2 has no export — slot must be zero")
+}
+
+// TestGenerateExt_AutoOrdinals checks that Export entries left at
+// Ordinal=0 get sequential ordinals starting at 1 (or after the
+// highest explicit ordinal), preserving Phase 1 behaviour for
+// Generate (which forwards to GenerateExt).
+func TestGenerateExt_AutoOrdinals(t *testing.T) {
+	out, err := GenerateExt(
+		"t.dll",
+		[]Export{{Name: "Alpha"}, {Name: "Beta"}, {Name: "Gamma", Ordinal: 99}},
+		Options{},
+	)
+	require.NoError(t, err)
+
+	f, err := pe.NewFile(bytes.NewReader(out))
+	require.NoError(t, err)
+	defer f.Close()
+
+	oh := f.OptionalHeader.(*pe.OptionalHeader64)
+	edirRVA := oh.DataDirectory[pe.IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress
+	sec := sectionContainingRVA(f, edirRVA)
+	data, _ := sec.Data()
+	rvaToOff := func(rva uint32) uint32 { return rva - sec.VirtualAddress }
+
+	base := binary.LittleEndian.Uint32(data[rvaToOff(edirRVA+16):])
+	numFuncs := binary.LittleEndian.Uint32(data[rvaToOff(edirRVA+20):])
+	// Auto-assigned start at 1; explicit Gamma at 99 stretches range
+	// to 1..99. Alpha=1, Beta=2, Gamma=99.
+	assert.Equal(t, uint32(1), base)
+	assert.Equal(t, uint32(99), numFuncs)
+}
+
+func TestGenerateExt_Errors(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []Export
+		want error
+	}{
+		{
+			"name and ordinal both blank",
+			[]Export{{Name: "Foo"}, {}},
+			ErrInvalidExport,
+		},
+		{
+			"duplicate ordinals",
+			[]Export{{Name: "A", Ordinal: 5}, {Name: "B", Ordinal: 5}},
+			ErrInvalidExport,
+		},
+		{
+			"empty list",
+			nil,
+			ErrEmptyExports,
+		},
+		{
+			"empty target",
+			[]Export{{Name: "Foo"}},
+			ErrEmptyTargetName, // injected via target=""
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			target := "t.dll"
+			if tc.want == ErrEmptyTargetName {
+				target = ""
+			}
+			_, err := GenerateExt(target, tc.in, Options{})
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, tc.want), "got %v, want errors.Is %v", err, tc.want)
+		})
+	}
+}
+
 // TestGenerate_LargeExportSet stress-tests the layout with a size in
 // the same order as real Windows DLLs (kernel32 ~1500 exports, ole32
 // ~2000). Asserts we don't break the file-alignment / section-size

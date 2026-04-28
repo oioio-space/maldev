@@ -111,8 +111,16 @@ type Options struct {
     PayloadDLL string     // when set, embed a DllMain that LoadLibraryA's it
 }
 
+type Export struct {
+    Name    string  // "" for ordinal-only exports
+    Ordinal uint16  // 0 → emitter assigns the next free slot from 1
+}
+
 func Generate(targetName string, exports []string, opts Options) ([]byte, error)
+func GenerateExt(targetName string, exports []Export, opts Options) ([]byte, error)
 ```
+
+`Generate` is sugar over `GenerateExt`: it wraps `[]string` into `[]Export{{Name: n}}` and lets the emitter auto-assign ordinals from 1. Use `GenerateExt` directly when proxying a target with ordinal-only exports (msvcrt, ws2_32, …) or when ordinals must match the legitimate target's table.
 
 Sentinel errors (use `errors.Is`):
 
@@ -120,7 +128,8 @@ Sentinel errors (use `errors.Is`):
 var (
     ErrEmptyExports     // no exports supplied
     ErrEmptyTargetName  // blank target name
-    ErrI386NotSupported // Phase 3
+    ErrInvalidExport    // entry has neither name nor ordinal, or duplicate ordinals
+    ErrI386NotSupported // 32-bit not yet implemented
 )
 ```
 
@@ -160,6 +169,34 @@ for _, opp := range opps {
     _ = os.WriteFile(opp.HijackedPath, proxy, 0o644)
 }
 ```
+
+### Mixed named + ordinal-only exports
+
+Some Windows DLLs (msvcrt, ws2_32, comctl32 in legacy comdlg roles) ship a substantial fraction of exports as ordinal-only — they appear in `IMAGE_EXPORT_DIRECTORY.AddressOfFunctions` but have no entry in `AddressOfNames`. Proxying these targets requires the loader to find the right slot when a victim imports `target.dll!#42` instead of `target.dll!Foo`.
+
+```go
+import (
+    "github.com/oioio-space/maldev/pe/dllproxy"
+    "github.com/oioio-space/maldev/pe/parse"
+)
+
+f, _ := parse.Open(`C:\Windows\System32\msvcrt.dll`)
+entries, _ := f.ExportEntries() // []parse.Export with Name+Ordinal+Forwarder
+
+mapped := make([]dllproxy.Export, len(entries))
+for i, e := range entries {
+    mapped[i] = dllproxy.Export{Name: e.Name, Ordinal: e.Ordinal}
+}
+
+proxy, _ := dllproxy.GenerateExt("msvcrt.dll", mapped, dllproxy.Options{})
+```
+
+The emitter:
+
+- Sorts entries by ordinal ascending.
+- Sets `Base = lowest_ordinal`, `NumberOfFunctions = highest_ordinal − Base + 1`. Sparse slots (ordinals not present in input) leave their `AddressOfFunctions` entry zero — the loader treats those as "not exported at this ordinal", same as a real DLL.
+- Emits forwarder strings in the form `<target>.<name>` for named entries and `<target>.#<ordinal>` for ordinal-only.
+- Builds `AddressOfNames` from the named subset only, sorted alphabetically (loader binary search).
 
 ### Advanced — DllMain payload load
 
@@ -223,8 +260,8 @@ proxy, err := dllproxy.Generate(
 
 ## Limitations
 
-- **AMD64 only**. 32-bit targets need a different optional-header size (224 vs 240) + `PE32` magic. Tracked as Phase 3.
-- **Named exports only**. Ordinal-only and COM-private exports (`DllRegisterServer`, `DllGetClassObject`) are skipped — Phase 3 work.
+- **AMD64 only**. 32-bit (PE32) emission is queued — different optional-header size (224 vs 240), no `LARGE_ADDRESS_AWARE`, ImageBase 0x10000000.
+- **COM-private semantics**. The MSVC `,PRIVATE` linker directive only excludes a symbol from the import library so downstream `.lib`-based linkers ignore it; at runtime the export is binary-identical to a regular named export. `pe/dllproxy` does not need a separate code path — pass `DllRegisterServer` & friends as ordinary `Export{Name: …}` entries.
 - **No CheckSum / no DOS stub**. Windows tolerates both; signed DLLs would need a recomputed checksum, which is out of scope (use `pe/cert` if signing is in play).
 - **Forwarder paths are plaintext** in `.rdata` — easy YARA target. String obfuscation is a Phase 2 candidate.
 
