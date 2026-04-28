@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/gopher-pirate.png" alt="maldev pirate gopher mascot" width="128"/>
+</p>
+
 # maldev
 
 > Modular Go library for offensive-security research. 180 packages cover the
