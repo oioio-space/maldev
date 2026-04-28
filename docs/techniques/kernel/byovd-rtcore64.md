@@ -1,12 +1,20 @@
+---
+last_reviewed: 2026-04-27
+reflects_commit: 57c853b
+mitre: T1014, T1543.003, T1068
+detection_level: very-noisy
+---
+
 # BYOVD — RTCore64 (CVE-2019-16098)
 
-[<- Back to Evasion](README.md)
+[← kernel techniques](README.md) · [docs/index](../../index.md)
 
 **MITRE ATT&CK:** [T1014 — Rootkit](https://attack.mitre.org/techniques/T1014/) +
-[T1543.003 — Create or Modify System Process: Windows Service](https://attack.mitre.org/techniques/T1543/003/)
+[T1543.003 — Create or Modify System Process: Windows Service](https://attack.mitre.org/techniques/T1543/003/) +
+[T1068 — Exploitation for Privilege Escalation](https://attack.mitre.org/techniques/T1068/)
 **Package:** `kernel/driver/rtcore64`
 **Platform:** Windows amd64
-**Detection:** High during driver load; Medium steady-state
+**Detection:** very-noisy during driver load; moderate steady-state
 
 ---
 

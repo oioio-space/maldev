@@ -51,7 +51,7 @@ Cross-categorised pages currently living here (packages live elsewhere):
 | Page | Actual package | Note |
 |---|---|---|
 | [../recon/anti-analysis.md](../recon/anti-analysis.md) | `recon/antidebug`, `recon/antivm` | moved to recon/ — debugger + VM detection |
-| [byovd-rtcore64.md](byovd-rtcore64.md) | `kernel/driver/rtcore64` | BYOVD primitive used by kcallback + lsassdump |
+| [../kernel/byovd-rtcore64.md](../kernel/byovd-rtcore64.md) | `kernel/driver/rtcore64` | moved to kernel/ — BYOVD primitive used by kcallback + lsassdump |
 | [../recon/dll-hijack.md](../recon/dll-hijack.md) | `recon/dllhijack` | moved to recon/ — discovery is recon, exploitation is evasion |
 | [../process/fakecmd.md](../process/fakecmd.md) | `process/tamper/fakecmd` | PEB CommandLine spoof — moved to process/ |
 | [../process/hideprocess.md](../process/hideprocess.md) | `process/tamper/hideprocess` | NtQSI patch to hide PIDs — moved to process/ |

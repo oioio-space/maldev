@@ -30,7 +30,7 @@ reflects_commit: 11543a1
 | 1 — README + index + 3 role pages | ✅ done | `07ced18` | Replaces dense Technique Reference table with role-based entry points (operator / researcher / detection-eng) and a navigation spine in `docs/index.md`. |
 | 2 — `cleanup/*` demonstrator area | ✅ done | `11838e3` | All 7 packages refactored to template (doc.go + tech md + example_test.go). 4 NEW tech pages: ads, bsod, service, wipe. |
 | 3 — `cmd/docgen` + pre-commit + CI drift check | ✅ done | `b2e0464` | Drift check wired into `scripts/pre-commit` and `.github/workflows/docs.yml`. README package map fix in `0587c76`. |
-| 4 — sweep remaining 10 areas | 🟡 in-progress | — | See "Phase 4 progress" below. |
+| 4 — sweep remaining 10 areas | ✅ done | `57c853b..` | All areas swept (cleanup, evasion, inject, layer-0, c2, collection, credentials, pe, persistence, process, recon, runtime, win, kernel, privesc, ui). Polish round for evasion legacy md pages deferred to Phase 6. |
 | 5 — transversal guides | ⬜ pending | — | architecture.md, getting-started.md, mitre.md (regen), testing.md, coverage-workflow.md. |
 | 6 — final cross-link + breadcrumb + dead-link audit | ⬜ pending | — | Repo-wide pass. Includes `last_reviewed` bump on every page. |
 | 3b — gh-pages mdBook deploy | ⬜ deferred | — | After Phase 6 stabilises, add the gh-pages workflow that builds an mdBook from `docs/`. |
@@ -63,9 +63,9 @@ Each area gets:
 | `recon/*` | ✅ 9/9 | ✅ 8/8 + README | ✅ 9/9 | Done (commits f31fca1..ad40545). doc.go aligned + 9 NEW example_test.go + 8 tech md (5 ports from evasion/: anti-analysis, dll-hijack, hw-breakpoints, sandbox, timing · 3 NEW: drive, folder, network) + new README under docs/techniques/recon/. evasion/README cross-categorised table updated. |
 | `runtime/*` | ✅ 2/2 | ✅ 2/2 | ✅ 2/2 | Done (`11543a1`). bof + clr aligned to template, full Mermaid + API Reference. |
 | `win/*` | ✅ 8/8 | 🟡 4/8 | ✅ 8/8 | doc.go + example_test.go landed for all 8. Tech md: api/syscall/ntapi covered by `docs/techniques/syscalls/*`; token/impersonate/privilege covered by `docs/techniques/tokens/*`. **Missing**: dedicated pages for domain + version (host fingerprinting). |
-| `kernel/driver/*` | ⬜ 0/2 | ⬜ 0/1 | ⬜ 0/2 | Single tech page (byovd-rtcore64.md) currently under `docs/techniques/evasion/`. |
-| `privesc/*` | ⬜ 0/2 | ⬜ 0/1 | ⬜ 0/2 | Audit flagged 1 missing page (cve202430088). uac is folded into docs/privilege.md only. |
-| `ui` | ⬜ 0/1 | ⬜ 0/0 | ⬜ 0/1 | Tiny — MessageBoxW + sounds. No tech page yet. |
+| `kernel/driver/*` | ✅ 2/2 | ✅ 1/1 + README | ✅ 2/2 | Done. doc.go aligned for both `kernel/driver` umbrella + `rtcore64` sub-package. New `docs/techniques/kernel/README.md` + `byovd-rtcore64.md` moved from `docs/techniques/evasion/` (front-matter + breadcrumb fixed). evasion/README cross-categorised table updated to delegate. Existing rtcore64_example_test.go retained. |
+| `privesc/*` | ✅ 2/2 | ✅ 2/2 + README | ✅ 2/2 | Done. doc.go aligned for cve202430088 + uac. New `docs/techniques/privesc/{README,uac,cve202430088}.md` with full Mermaid + API Reference + 4-tier examples + OPSEC table + MITRE rollup. uac.md documents all 5 entry points (FODHelper / SLUI / SilentCleanup / EventVwr / EventVwrLogon) with build-window tables. cve202430088.md includes BSOD-risk warnings + chain-fall-through example. Existing example_test.go files retained. |
+| `ui` | ✅ 1/1 | n/a | ✅ 1/1 | doc.go already templated upstream. example_test.go present. No dedicated tech md — utility surface only. |
 | `useragent`, `random` | ✅ 2/2 | n/a | ✅ 2/2 | Folded into Layer 0 row above. `random/doc.go` + `useragent/doc.go` templated; example_test.go present. |
 
 ## Resuming after a break

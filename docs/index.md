@@ -53,6 +53,7 @@ OPSEC / MITRE / Limitations / See also).
 |---|---|
 | [T1003.001](https://attack.mitre.org/techniques/T1003/001/) | [`credentials/lsassdump`](../credentials/lsassdump) · [`credentials/sekurlsa`](../credentials/sekurlsa) |
 | [T1003.002](https://attack.mitre.org/techniques/T1003/002/) | [`credentials/samdump`](../credentials/samdump) |
+| [T1014](https://attack.mitre.org/techniques/T1014/) | [`kernel/driver`](../kernel/driver) · [`kernel/driver/rtcore64`](../kernel/driver/rtcore64) |
 | [T1016](https://attack.mitre.org/techniques/T1016/) | [`recon/network`](../recon/network) · [`win/domain`](../win/domain) |
 | [T1021.002](https://attack.mitre.org/techniques/T1021/002/) | [`c2/transport/namedpipe`](../c2/transport/namedpipe) |
 | [T1027](https://attack.mitre.org/techniques/T1027/) | [`crypto`](../crypto) · [`encode`](../encode) · [`evasion/sleepmask`](../evasion/sleepmask) · [`win/api`](../win/api) |
@@ -76,7 +77,7 @@ OPSEC / MITRE / Limitations / See also).
 | [T1059.001](https://attack.mitre.org/techniques/T1059/001/) | [`c2/shell`](../c2/shell) |
 | [T1059.003](https://attack.mitre.org/techniques/T1059/003/) | [`c2/shell`](../c2/shell) |
 | [T1059.004](https://attack.mitre.org/techniques/T1059/004/) | [`c2/shell`](../c2/shell) |
-| [T1068](https://attack.mitre.org/techniques/T1068/) | [`credentials/lsassdump`](../credentials/lsassdump) |
+| [T1068](https://attack.mitre.org/techniques/T1068/) | [`credentials/lsassdump`](../credentials/lsassdump) · [`kernel/driver`](../kernel/driver) · [`kernel/driver/rtcore64`](../kernel/driver/rtcore64) · [`privesc/cve202430088`](../privesc/cve202430088) |
 | [T1070](https://attack.mitre.org/techniques/T1070/) | [`cleanup/memory`](../cleanup/memory) |
 | [T1070.004](https://attack.mitre.org/techniques/T1070/004/) | [`cleanup/selfdelete`](../cleanup/selfdelete) · [`cleanup/wipe`](../cleanup/wipe) |
 | [T1070.006](https://attack.mitre.org/techniques/T1070/006/) | [`cleanup/timestomp`](../cleanup/timestomp) |
@@ -92,7 +93,7 @@ OPSEC / MITRE / Limitations / See also).
 | [T1115](https://attack.mitre.org/techniques/T1115/) | [`collection`](../collection) · [`collection/clipboard`](../collection/clipboard) |
 | [T1120](https://attack.mitre.org/techniques/T1120/) | [`recon/drive`](../recon/drive) |
 | [T1134](https://attack.mitre.org/techniques/T1134/) | [`win/privilege`](../win/privilege) · [`win/token`](../win/token) |
-| [T1134.001](https://attack.mitre.org/techniques/T1134/001/) | [`process/session`](../process/session) · [`win/impersonate`](../win/impersonate) · [`win/token`](../win/token) |
+| [T1134.001](https://attack.mitre.org/techniques/T1134/001/) | [`privesc/cve202430088`](../privesc/cve202430088) · [`process/session`](../process/session) · [`win/impersonate`](../win/impersonate) · [`win/token`](../win/token) |
 | [T1134.002](https://attack.mitre.org/techniques/T1134/002/) | [`process`](../process) · [`process/session`](../process/session) · [`win/impersonate`](../win/impersonate) · [`win/token`](../win/token) |
 | [T1134.004](https://attack.mitre.org/techniques/T1134/004/) | [`win/impersonate`](../win/impersonate) |
 | [T1134.005](https://attack.mitre.org/techniques/T1134/005/) | [`win/token`](../win/token) |
@@ -102,10 +103,10 @@ OPSEC / MITRE / Limitations / See also).
 | [T1497.001](https://attack.mitre.org/techniques/T1497/001/) | [`recon/antivm`](../recon/antivm) |
 | [T1497.003](https://attack.mitre.org/techniques/T1497/003/) | [`recon/timing`](../recon/timing) |
 | [T1529](https://attack.mitre.org/techniques/T1529/) | [`cleanup/bsod`](../cleanup/bsod) |
-| [T1543.003](https://attack.mitre.org/techniques/T1543/003/) | [`cleanup/service`](../cleanup/service) · [`persistence`](../persistence) · [`persistence/service`](../persistence/service) |
+| [T1543.003](https://attack.mitre.org/techniques/T1543/003/) | [`cleanup/service`](../cleanup/service) · [`kernel/driver`](../kernel/driver) · [`kernel/driver/rtcore64`](../kernel/driver/rtcore64) · [`persistence`](../persistence) · [`persistence/service`](../persistence/service) |
 | [T1547.001](https://attack.mitre.org/techniques/T1547/001/) | [`persistence`](../persistence) · [`persistence/registry`](../persistence/registry) · [`persistence/startup`](../persistence/startup) |
 | [T1547.009](https://attack.mitre.org/techniques/T1547/009/) | [`persistence`](../persistence) · [`persistence/lnk`](../persistence/lnk) · [`persistence/startup`](../persistence/startup) |
-| [T1548.002](https://attack.mitre.org/techniques/T1548/002/) | [`recon/dllhijack`](../recon/dllhijack) · [`win/privilege`](../win/privilege) |
+| [T1548.002](https://attack.mitre.org/techniques/T1548/002/) | [`privesc/uac`](../privesc/uac) · [`recon/dllhijack`](../recon/dllhijack) · [`win/privilege`](../win/privilege) |
 | [T1550.002](https://attack.mitre.org/techniques/T1550/002/) | [`credentials/sekurlsa`](../credentials/sekurlsa) |
 | [T1553.002](https://attack.mitre.org/techniques/T1553/002/) | [`pe`](../pe) · [`pe/cert`](../pe/cert) |
 | [T1558.001](https://attack.mitre.org/techniques/T1558/001/) | [`credentials/goldenticket`](../credentials/goldenticket) |
@@ -260,11 +261,12 @@ integrity verification, API hashing, and similarity detection |
 | [`inject`](https://pkg.go.dev/github.com/oioio-space/maldev/inject) | noisy | provides unified shellcode injection across Windows
 and Linux with a fluent builder, decorator middleware, and automatic
 fallback between methods |
-| [`kernel/driver`](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver) | — | defines the kernel-memory primitive interfaces consumed
-by EDR-bypass packages that need arbitrary kernel reads or writes
-(kcallback, lsassdump PPL-bypass, callback-array tampering, etc.) |
-| [`kernel/driver/rtcore64`](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver/rtcore64) | — | wraps the MSI Afterburner RTCore64.sys signed driver
-(CVE-2019-16098) as a kernel/driver.ReadWriter primitive |
+| [`kernel/driver`](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver) | very-noisy | defines the kernel-memory primitive interfaces
+consumed by EDR-bypass packages that need arbitrary kernel reads
+or writes (kcallback, lsassdump PPL-bypass, callback-array
+tampering, …) |
+| [`kernel/driver/rtcore64`](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver/rtcore64) | very-noisy | wraps the MSI Afterburner RTCore64.sys signed
+driver (CVE-2019-16098) as a [kernel/driver.ReadWriter] primitive |
 | [`pe`](https://pkg.go.dev/github.com/oioio-space/maldev/pe) | Varies | is the umbrella for Portable Executable analysis,
 manipulation, and conversion utilities |
 | [`pe/cert`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert) | quiet | manipulates the PE Authenticode security directory
@@ -307,11 +309,14 @@ mechanism available, running as SYSTEM at boot |
 | [`persistence/startup`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup) | moderate | implements StartUp-folder persistence via LNK
 shortcut files — Windows Shell launches every shortcut in the
 folder at user logon |
-| [`privesc/cve202430088`](https://pkg.go.dev/github.com/oioio-space/maldev/privesc/cve202430088) | — | implements CVE-2024-30088, a Windows kernel TOCTOU
-race condition in AuthzBasepCopyoutInternalSecurityAttributes that allows
-local privilege escalation to SYSTEM |
-| [`privesc/uac`](https://pkg.go.dev/github.com/oioio-space/maldev/privesc/uac) | — | implements UAC (User Account Control) bypass techniques
-for executing programs with elevated privileges without a UAC prompt |
+| [`privesc/cve202430088`](https://pkg.go.dev/github.com/oioio-space/maldev/privesc/cve202430088) | noisy | implements CVE-2024-30088 — a Windows kernel
+TOCTOU race in `AuthzBasepCopyoutInternalSecurityAttributes` that
+yields local privilege escalation to NT AUTHORITY\SYSTEM by
+overwriting the calling thread's primary token with `lsass.exe`'s
+SYSTEM token |
+| [`privesc/uac`](https://pkg.go.dev/github.com/oioio-space/maldev/privesc/uac) | noisy | implements four classic UAC-bypass primitives that
+hijack auto-elevating Windows binaries to spawn an elevated
+process without a consent prompt |
 | [`process`](https://pkg.go.dev/github.com/oioio-space/maldev/process) | Varies | is the umbrella for cross-platform process
 enumeration / management, plus the Windows-specific
 process-tamper sub-tree |
