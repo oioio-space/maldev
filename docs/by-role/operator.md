@@ -35,7 +35,8 @@ Plug it once, every package below it inherits the syscall stealth.
 
 | Stance | Method | Trade-off |
 |---|---|---|
-| Quietest | `MethodIndirect` + `Chain(NewHashGate(), NewHellsGate())` | No win32u trampoline, ROR13-resolved SSN, falls back to syscall instructions in ntdll |
+| Quietest | `MethodIndirectAsm` + `Chain(NewHashGate(), NewHellsGate())` | Go-asm stub (no heap stub, no `VirtualProtect` cycle), ROR13-resolved SSN, randomised gadget inside ntdll |
+| Quiet, heap stub | `MethodIndirect` + `Chain(NewHashGate(), NewHellsGate())` | Heap stub byte-patched + `RW↔RX` per call; same ntdll gadget end-effect |
 | Quiet, simpler | `MethodDirect` + `NewHellsGate()` | Direct syscall instruction, no fallback. Triggers some EDR call-stack heuristics |
 | Loud, debug | `MethodWinAPI` (default) | Standard CRT call. Useful when iterating; drop before delivery |
 

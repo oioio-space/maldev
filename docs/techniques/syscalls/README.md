@@ -57,7 +57,8 @@ graph TD
 | WinAPI | None | N/A | N/A | Lowest |
 | NativeAPI | kernel32 | N/A | N/A | Low |
 | Direct | All userland | No | No | Medium |
-| Indirect | All userland | Yes | Yes | Highest |
+| Indirect | All userland | Yes | Yes | High (heap stub, RW↔RX cycle) |
+| IndirectAsm | All userland | Yes | Yes | Highest (Go-asm stub, no writable code) |
 
 | Resolver | Unhooked ntdll | JMP-hooked ntdll | Fully hooked ntdll | String-free |
 |----------|---------------|------------------|-------------------|-------------|
@@ -71,7 +72,7 @@ graph TD
 
 | Document | Description |
 |----------|-------------|
-| [Direct & Indirect Syscalls](direct-indirect.md) | The four invocation methods and when to use each |
+| [Direct & Indirect Syscalls](direct-indirect.md) | The five invocation methods (incl. Go-asm IndirectAsm) and when to use each |
 | [API Hashing](api-hashing.md) | PEB walk + ROR13 hashing to eliminate plaintext strings |
 | [SSN Resolvers](ssn-resolvers.md) | Hell's Gate, Halo's Gate, Tartarus Gate, HashGate |
 

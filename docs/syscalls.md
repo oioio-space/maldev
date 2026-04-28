@@ -61,6 +61,9 @@ The SSN (Syscall Service Number) is an index into the kernel's System Service De
 | NativeAPI | `MethodNativeAPI` | Yes | No | -- | -- |
 | Direct | `MethodDirect` | Yes | Yes | No | -- |
 | Indirect | `MethodIndirect` | Yes | Yes | Yes | Yes |
+| IndirectAsm | `MethodIndirectAsm` | Yes | Yes | Yes | Yes |
+
+`MethodIndirectAsm` is functionally identical to `MethodIndirect` — the syscall executes inside ntdll's `.text` via a `syscall;ret` gadget — but the SSN+gadget transition lives in a Go-assembly stub instead of a heap-allocated byte-patched stub. No writable code page in the implant, no per-call `VirtualProtect` cycle. amd64 only. See [techniques/syscalls/direct-indirect.md](techniques/syscalls/direct-indirect.md#methodindirectasm-vs-methodindirect) for the OPSEC trade-off.
 
 ### MethodWinAPI
 
@@ -225,7 +228,7 @@ func New(method Method, r SSNResolver) *Caller
 ```
 
 **Parameters:**
-- `method` -- One of `MethodWinAPI`, `MethodNativeAPI`, `MethodDirect`, `MethodIndirect`.
+- `method` -- One of `MethodWinAPI`, `MethodNativeAPI`, `MethodDirect`, `MethodIndirect`, `MethodIndirectAsm`.
 - `r` -- An `SSNResolver`. Only required for `MethodDirect` and `MethodIndirect` (pass `nil` for WinAPI/NativeAPI).
 
 ### Call

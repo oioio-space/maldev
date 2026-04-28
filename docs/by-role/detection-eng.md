@@ -46,7 +46,8 @@ public packages by detection level. Until then, see each package's
 | `MethodWinAPI` | Standard CRT call | None — looks like any benign program |
 | `MethodNativeAPI` | `ntdll!Nt*` direct call | Frequency-based: a process making 200+ NT calls/sec is unusual |
 | `MethodDirect` | `syscall` instruction inside loaded module | EDR call-stack walking detects RIP not in ntdll. **D3-PCM (Process Code Modification)** |
-| `MethodIndirect` | `syscall` instruction inside ntdll (jumped to from caller) | Hardest to detect from user-mode. Kernel-mode ETW (TI events) sees the issuing thread. **D3-PSM (Process Spawn Monitoring)** |
+| `MethodIndirect` | `syscall` instruction inside ntdll (jumped to from caller via heap stub) | Hard to detect from user-mode. Heap stub page is RW↔RX-cycled per call — `VirtualProtect` rate may be a heuristic. Kernel-mode ETW (TI events) sees the issuing thread. **D3-PSM (Process Spawn Monitoring)** |
+| `MethodIndirectAsm` | Same end-effect as `MethodIndirect` but stub lives in implant `.text` (Go-asm, fixed RVA) | No `VirtualProtect` heuristic. YARA on the asm stub bytes still possible — morph or strip. **D3-PSM** |
 
 > [!NOTE]
 > ETW Threat Intelligence provider (Microsoft-Windows-Threat-Intelligence)
