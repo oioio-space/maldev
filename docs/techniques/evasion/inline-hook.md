@@ -86,7 +86,7 @@ Uses `golang.org/x/arch/x86/x86asm` to:
 
 No manual `stealLength` calculation needed.
 
-## API
+## API Reference
 
 ```go
 func Install(targetAddr uintptr, handler interface{}) (*Hook, error)
@@ -97,6 +97,37 @@ func (h *Hook) Remove() error
 func (h *Hook) Trampoline() uintptr
 func (h *Hook) Target() uintptr
 ```
+
+### `Install(targetAddr, handler) (*Hook, error)`
+
+**Parameters:**
+- `targetAddr` — absolute address of the Windows function to patch
+  (resolve via `windows.NewLazyDLL("kernel32.dll").NewProc("DeleteFileW").Addr()`).
+- `handler` — Go function whose signature matches the target. Use
+  `interface{}` so callers don't pay the cost of typed-callback
+  boilerplate; `syscall.NewCallback` synthesises the C-ABI thunk.
+
+**Returns:** `*Hook` ready for `.Remove()` / `.Trampoline()`. Errors
+on prologue-decode failure (RIP-relative jump in first 5 bytes that
+can't be relocated), relay-allocation failure (no ±2 GB page
+available), or write failure.
+
+**Side effects:** mutates the first 5 bytes of `targetAddr` (saved
+inside the Hook for restore), allocates two RX pages within ±2 GB of
+the target.
+
+### `InstallByName(dllName, funcName, handler)`
+
+Convenience wrapper that resolves `dllName!funcName` via
+`win/api.ResolveByHash` (string-free at runtime when called with
+build-time constants) before calling `Install`.
+
+### `Hook.Remove() / Hook.Trampoline() / Hook.Target()`
+
+`Remove` restores the original 5 bytes and frees the relay/trampoline
+pages. `Trampoline` returns the address callable from the handler to
+invoke the original function (mandatory if you want pass-through).
+`Target` returns the resolved target address (handy for logging).
 
 ## Usage
 

@@ -56,7 +56,7 @@ OPSEC / MITRE / Limitations / See also).
 | [T1014](https://attack.mitre.org/techniques/T1014/) | [`kernel/driver`](../kernel/driver) · [`kernel/driver/rtcore64`](../kernel/driver/rtcore64) |
 | [T1016](https://attack.mitre.org/techniques/T1016/) | [`recon/network`](../recon/network) · [`win/domain`](../win/domain) |
 | [T1021.002](https://attack.mitre.org/techniques/T1021/002/) | [`c2/transport/namedpipe`](../c2/transport/namedpipe) |
-| [T1027](https://attack.mitre.org/techniques/T1027/) | [`crypto`](../crypto) · [`encode`](../encode) · [`evasion/sleepmask`](../evasion/sleepmask) · [`win/api`](../win/api) |
+| [T1027](https://attack.mitre.org/techniques/T1027/) | [`crypto`](../crypto) · [`encode`](../encode) · [`evasion/hook/shellcode`](../evasion/hook/shellcode) · [`evasion/sleepmask`](../evasion/sleepmask) · [`win/api`](../win/api) |
 | [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | [`pe`](../pe) · [`pe/morph`](../pe/morph) · [`pe/parse`](../pe/parse) · [`pe/strip`](../pe/strip) |
 | [T1027.005](https://attack.mitre.org/techniques/T1027/005/) | [`pe/strip`](../pe/strip) · [`process/tamper/herpaderping`](../process/tamper/herpaderping) · [`process/tamper/hideprocess`](../process/tamper/hideprocess) · [`recon/hwbp`](../recon/hwbp) |
 | [T1027.007](https://attack.mitre.org/techniques/T1027/007/) | [`win/syscall`](../win/syscall) |
@@ -78,10 +78,10 @@ OPSEC / MITRE / Limitations / See also).
 | [T1059.003](https://attack.mitre.org/techniques/T1059/003/) | [`c2/shell`](../c2/shell) |
 | [T1059.004](https://attack.mitre.org/techniques/T1059/004/) | [`c2/shell`](../c2/shell) |
 | [T1068](https://attack.mitre.org/techniques/T1068/) | [`credentials/lsassdump`](../credentials/lsassdump) · [`kernel/driver`](../kernel/driver) · [`kernel/driver/rtcore64`](../kernel/driver/rtcore64) · [`privesc/cve202430088`](../privesc/cve202430088) |
-| [T1070](https://attack.mitre.org/techniques/T1070/) | [`cleanup/memory`](../cleanup/memory) |
-| [T1070.004](https://attack.mitre.org/techniques/T1070/004/) | [`cleanup/selfdelete`](../cleanup/selfdelete) · [`cleanup/wipe`](../cleanup/wipe) |
-| [T1070.006](https://attack.mitre.org/techniques/T1070/006/) | [`cleanup/timestomp`](../cleanup/timestomp) |
-| [T1071](https://attack.mitre.org/techniques/T1071/) | [`c2`](../c2) · [`c2/transport`](../c2/transport) |
+| [T1070](https://attack.mitre.org/techniques/T1070/) | [`cleanup`](../cleanup) · [`cleanup/memory`](../cleanup/memory) |
+| [T1070.004](https://attack.mitre.org/techniques/T1070/004/) | [`cleanup`](../cleanup) · [`cleanup/selfdelete`](../cleanup/selfdelete) · [`cleanup/wipe`](../cleanup/wipe) |
+| [T1070.006](https://attack.mitre.org/techniques/T1070/006/) | [`cleanup`](../cleanup) · [`cleanup/timestomp`](../cleanup/timestomp) |
+| [T1071](https://attack.mitre.org/techniques/T1071/) | [`c2`](../c2) · [`c2/transport`](../c2/transport) · [`evasion/hook/bridge`](../evasion/hook/bridge) |
 | [T1071.001](https://attack.mitre.org/techniques/T1071/001/) | [`c2`](../c2) · [`c2/meterpreter`](../c2/meterpreter) · [`c2/transport/namedpipe`](../c2/transport/namedpipe) · [`useragent`](../useragent) |
 | [T1078](https://attack.mitre.org/techniques/T1078/) | [`win/privilege`](../win/privilege) |
 | [T1082](https://attack.mitre.org/techniques/T1082/) | [`win/domain`](../win/domain) · [`win/version`](../win/version) |
@@ -99,11 +99,11 @@ OPSEC / MITRE / Limitations / See also).
 | [T1134.005](https://attack.mitre.org/techniques/T1134/005/) | [`win/token`](../win/token) |
 | [T1136.001](https://attack.mitre.org/techniques/T1136/001/) | [`persistence`](../persistence) · [`persistence/account`](../persistence/account) |
 | [T1204.002](https://attack.mitre.org/techniques/T1204/002/) | [`persistence`](../persistence) · [`persistence/lnk`](../persistence/lnk) |
-| [T1497](https://attack.mitre.org/techniques/T1497/) | [`recon/sandbox`](../recon/sandbox) |
+| [T1497](https://attack.mitre.org/techniques/T1497/) | [`evasion`](../evasion) · [`recon/sandbox`](../recon/sandbox) |
 | [T1497.001](https://attack.mitre.org/techniques/T1497/001/) | [`recon/antivm`](../recon/antivm) |
 | [T1497.003](https://attack.mitre.org/techniques/T1497/003/) | [`recon/timing`](../recon/timing) |
-| [T1529](https://attack.mitre.org/techniques/T1529/) | [`cleanup/bsod`](../cleanup/bsod) |
-| [T1543.003](https://attack.mitre.org/techniques/T1543/003/) | [`cleanup/service`](../cleanup/service) · [`kernel/driver`](../kernel/driver) · [`kernel/driver/rtcore64`](../kernel/driver/rtcore64) · [`persistence`](../persistence) · [`persistence/service`](../persistence/service) |
+| [T1529](https://attack.mitre.org/techniques/T1529/) | [`cleanup`](../cleanup) · [`cleanup/bsod`](../cleanup/bsod) |
+| [T1543.003](https://attack.mitre.org/techniques/T1543/003/) | [`cleanup`](../cleanup) · [`cleanup/service`](../cleanup/service) · [`kernel/driver`](../kernel/driver) · [`kernel/driver/rtcore64`](../kernel/driver/rtcore64) · [`persistence`](../persistence) · [`persistence/service`](../persistence/service) |
 | [T1547.001](https://attack.mitre.org/techniques/T1547/001/) | [`persistence`](../persistence) · [`persistence/registry`](../persistence/registry) · [`persistence/startup`](../persistence/startup) |
 | [T1547.009](https://attack.mitre.org/techniques/T1547/009/) | [`persistence`](../persistence) · [`persistence/lnk`](../persistence/lnk) · [`persistence/startup`](../persistence/startup) |
 | [T1548.002](https://attack.mitre.org/techniques/T1548/002/) | [`privesc/uac`](../privesc/uac) · [`recon/dllhijack`](../recon/dllhijack) · [`win/privilege`](../win/privilege) |
@@ -111,19 +111,19 @@ OPSEC / MITRE / Limitations / See also).
 | [T1553.002](https://attack.mitre.org/techniques/T1553/002/) | [`pe`](../pe) · [`pe/cert`](../pe/cert) |
 | [T1558.001](https://attack.mitre.org/techniques/T1558/001/) | [`credentials/goldenticket`](../credentials/goldenticket) |
 | [T1558.003](https://attack.mitre.org/techniques/T1558/003/) | [`credentials/sekurlsa`](../credentials/sekurlsa) |
-| [T1562.001](https://attack.mitre.org/techniques/T1562/001/) | [`evasion/acg`](../evasion/acg) · [`evasion/amsi`](../evasion/amsi) · [`evasion/blockdlls`](../evasion/blockdlls) · [`evasion/cet`](../evasion/cet) · [`evasion/etw`](../evasion/etw) · [`evasion/kcallback`](../evasion/kcallback) · [`evasion/preset`](../evasion/preset) · [`evasion/unhook`](../evasion/unhook) |
+| [T1562.001](https://attack.mitre.org/techniques/T1562/001/) | [`evasion`](../evasion) · [`evasion/acg`](../evasion/acg) · [`evasion/amsi`](../evasion/amsi) · [`evasion/blockdlls`](../evasion/blockdlls) · [`evasion/cet`](../evasion/cet) · [`evasion/etw`](../evasion/etw) · [`evasion/kcallback`](../evasion/kcallback) · [`evasion/preset`](../evasion/preset) · [`evasion/unhook`](../evasion/unhook) |
 | [T1562.002](https://attack.mitre.org/techniques/T1562/002/) | [`process`](../process) · [`process/tamper/phant0m`](../process/tamper/phant0m) |
 | [T1564](https://attack.mitre.org/techniques/T1564/) | [`cleanup/service`](../cleanup/service) · [`process/tamper/fakecmd`](../process/tamper/fakecmd) |
 | [T1564.001](https://attack.mitre.org/techniques/T1564/001/) | [`process`](../process) · [`process/tamper/hideprocess`](../process/tamper/hideprocess) |
-| [T1564.004](https://attack.mitre.org/techniques/T1564/004/) | [`cleanup/ads`](../cleanup/ads) |
+| [T1564.004](https://attack.mitre.org/techniques/T1564/004/) | [`cleanup`](../cleanup) · [`cleanup/ads`](../cleanup/ads) |
 | [T1571](https://attack.mitre.org/techniques/T1571/) | [`c2`](../c2) · [`c2/multicat`](../c2/multicat) |
 | [T1573](https://attack.mitre.org/techniques/T1573/) | [`c2`](../c2) · [`c2/transport`](../c2/transport) |
 | [T1573.001](https://attack.mitre.org/techniques/T1573/001/) | [`c2/cert`](../c2/cert) |
 | [T1573.002](https://attack.mitre.org/techniques/T1573/002/) | [`c2`](../c2) · [`c2/cert`](../c2/cert) · [`c2/transport`](../c2/transport) |
 | [T1574.001](https://attack.mitre.org/techniques/T1574/001/) | [`recon/dllhijack`](../recon/dllhijack) |
-| [T1574.012](https://attack.mitre.org/techniques/T1574/012/) | [`evasion/hook`](../evasion/hook) |
+| [T1574.012](https://attack.mitre.org/techniques/T1574/012/) | [`evasion`](../evasion) · [`evasion/hook`](../evasion/hook) · [`evasion/hook/bridge`](../evasion/hook/bridge) · [`evasion/hook/shellcode`](../evasion/hook/shellcode) |
 | [T1620](https://attack.mitre.org/techniques/T1620/) | [`pe/srdi`](../pe/srdi) · [`runtime/bof`](../runtime/bof) · [`runtime/clr`](../runtime/clr) |
-| [T1622](https://attack.mitre.org/techniques/T1622/) | [`recon/antidebug`](../recon/antidebug) · [`recon/hwbp`](../recon/hwbp) |
+| [T1622](https://attack.mitre.org/techniques/T1622/) | [`evasion`](../evasion) · [`recon/antidebug`](../recon/antidebug) · [`recon/hwbp`](../recon/hwbp) |
 
 <!-- END AUTOGEN: mitre-index -->
 
@@ -157,8 +157,8 @@ certificate pinning, and uTLS for JA3/JA4 fingerprint randomisation |
 | [`c2/transport/namedpipe`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport/namedpipe) | quiet | provides a Windows named-pipe transport
 implementing the [github.com/oioio-space/maldev/c2/transport]
 `Transport` and `Listener` interfaces |
-| [`cleanup`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup) | — | provides on-host artifact removal and anti-forensics
-utilities used after an operation completes |
+| [`cleanup`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup) | quiet | is the umbrella for on-host artefact removal /
+anti-forensics primitives that run after an operation completes |
 | [`cleanup/ads`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/ads) | quiet | provides CRUD operations for NTFS Alternate Data Streams |
 | [`cleanup/bsod`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/bsod) | very-noisy | triggers a Blue Screen of Death via NtRaiseHardError as a
 last-resort cleanup primitive |
@@ -214,9 +214,7 @@ encryption / decryption and lightweight obfuscation |
 | [`encode`](https://pkg.go.dev/github.com/oioio-space/maldev/encode) | very-quiet | provides encoding / decoding utilities for payload
 transformation: Base64 (standard + URL-safe), UTF-16LE (Windows API
 strings), ROT13, and PowerShell `-EncodedCommand` format |
-| [`evasion`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion) | — | defines the Technique interface and shared primitives used
-by the sub-packages to bypass defensive software (AMSI, ETW, inline hooks,
-sandbox/debugger/VM checks) |
+| [`evasion`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion) | per | is the umbrella for active EDR / AV evasion |
 | [`evasion/acg`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/acg) | quiet | enables Arbitrary Code Guard for the current process so
 the kernel refuses any further `VirtualAlloc(PAGE_EXECUTE)` /
 `VirtualProtect(PAGE_EXECUTE)` requests |
@@ -239,10 +237,12 @@ by patching the ETW write helpers in `ntdll.dll` with
 patch the prologue with a JMP to a Go callback, automatically generate
 a trampoline for calling the original, and fix up RIP-relative
 instructions in the stolen prologue |
-| [`evasion/hook/bridge`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/bridge) | — | provides a bidirectional control channel between a hook
-handler running in a target process and the implant that injected it |
-| [`evasion/hook/shellcode`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/shellcode) | — | provides pre-fabricated x64 shellcode templates for
-use as handlers in RemoteInstall |
+| [`evasion/hook/bridge`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/bridge) | moderate | is the bidirectional control channel between a
+hook handler installed inside a target process and the implant
+that placed it |
+| [`evasion/hook/shellcode`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/shellcode) | noisy | ships pre-fabricated x64 position-independent
+shellcode blobs used as handler bodies for
+[github.com/oioio-space/maldev/evasion/hook].`RemoteInstall` |
 | [`evasion/kcallback`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/kcallback) | very-noisy | enumerates and removes kernel-mode callback
 registrations that EDR products use to observe process/thread/image-
 load events from the kernel side |
