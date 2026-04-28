@@ -139,7 +139,7 @@ If you know the technique you want, jump straight to the matching package:
 | Sleep with masked memory | `evasion/sleepmask` | [Sleep Mask](techniques/evasion/sleep-mask.md) |
 | Spoof a callstack frame | `evasion/callstack` | [Callstack Spoof](techniques/evasion/callstack-spoof.md) |
 | Remove EDR kernel callbacks | `evasion/kcallback` | [Kernel-Callback Removal](techniques/evasion/kernel-callback-removal.md) |
-| BYOVD kernel R/W | `kernel/driver` (`rtcore64`) | [BYOVD RTCore64](techniques/evasion/byovd-rtcore64.md) |
+| BYOVD kernel R/W | `kernel/driver` (`rtcore64`) | [BYOVD RTCore64](techniques/kernel/byovd-rtcore64.md) |
 | Direct/indirect syscalls | `win/syscall` | [Syscall Methods](techniques/syscalls/README.md) |
 | Inject shellcode | `inject/*` (15 methods) | [Injection](techniques/injection/README.md) |
 | Reflectively load a PE | `pe/srdi` | [PE → Shellcode](techniques/pe/pe-to-shellcode.md) |

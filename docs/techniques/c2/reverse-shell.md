@@ -307,5 +307,5 @@ host process that legitimately spawns command interpreters
 - [Multicat](multicat.md) — operator listener.
 - [Malleable profiles](malleable-profiles.md) — HTTP-shaped variant.
 - [`evasion/preset`](../evasion/README.md) — apply before `Start`.
-- [`process/spoofparent`](../process/ppid-spoofing.md) — alternative
+- [`process/spoofparent`](../evasion/ppid-spoofing.md) — alternative
   PPID spoofing implementation outside the shell package.

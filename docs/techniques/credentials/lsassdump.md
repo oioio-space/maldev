@@ -359,7 +359,7 @@ See [`ExampleDumpToFile`](../../../credentials/lsassdump/lsassdump_example_test.
   MINIDUMP.
 - [`credentials/goldenticket`](goldenticket.md) — downstream
   consumer of an extracted krbtgt hash.
-- [`kernel/driver/rtcore64`](../evasion/byovd-rtcore64.md) —
+- [`kernel/driver/rtcore64`](../kernel/byovd-rtcore64.md) —
   PPL-bypass driver primitive.
 - [`evasion/stealthopen`](../evasion/stealthopen.md) —
   path-based file-hook bypass for `ntoskrnl.exe` reads.

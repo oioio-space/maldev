@@ -88,7 +88,7 @@ Some techniques fail on newer Windows builds. Tracked deltas:
 
 | Technique | Win10 22H2 | Win11 24H2 (build 26100) | Notes |
 |---|---|---|---|
-| `process/tamper/herpaderping.ModeRun` | ✅ | ❌ | Win11 image-load notify hardening — use [ModeGhosting](../techniques/evasion/herpaderping.md#modeghosting) |
+| `process/tamper/herpaderping.ModeRun` | ✅ | ❌ | Win11 image-load notify hardening — use [ModeGhosting](../techniques/process/herpaderping.md#modeghosting) |
 | `cleanup/selfdelete.DeleteFile` | ✅ | ⚠️ | `MoveFileEx(MOVEFILE_DELAY_UNTIL_REBOOT)` rename-on-reboot semantics changed |
 | `process/tamper/fakecmd.SpoofPID` | ✅ | ❌ | `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` tightened |
 | `inject.CallerMatrix_RemoteInject` (some methods + Direct/Indirect) | ✅ | ⚠️ | Cross-process write + thread-create primitives |

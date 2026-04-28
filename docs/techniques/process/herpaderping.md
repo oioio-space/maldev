@@ -236,7 +236,7 @@ See [`ExampleRun`](../../../process/tamper/herpaderping/herpaderping_example_tes
 
 ## See also
 
-- [`inject`](../inject/README.md) — alternative for in-process
+- [`inject`](../injection/README.md) — alternative for in-process
   payload delivery (no fresh process).
 - [`process/tamper/fakecmd`](fakecmd.md) — pair to spoof the
   spawned process's PEB CommandLine.

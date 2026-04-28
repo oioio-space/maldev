@@ -66,7 +66,7 @@ flowchart LR
 | …make Process Explorer render the implant as svchost | [preset blank-import](masquerade.md) |
 | …clone any PE's identity programmatically | [`masquerade.Clone`](masquerade.md) / [`Build`](masquerade.md) |
 | …convert a PE / .NET / script to position-independent shellcode | [`srdi.ConvertFile`](pe-to-shellcode.md) |
-| …feed shellcode to remote-process injection | [`pe/srdi`](pe-to-shellcode.md) → [`inject`](../inject/README.md) |
+| …feed shellcode to remote-process injection | [`pe/srdi`](pe-to-shellcode.md) → [`inject`](../injection/README.md) |
 | …enumerate sections / exports for tooling | [`pe/parse`](../../../pe/parse) |
 
 ## MITRE ATT&CK
@@ -105,6 +105,6 @@ For payload delivery (separate from build):
 - [Detection eng path: PE-level artefacts](../../by-role/detection-eng.md).
 - [`runtime/bof`](../runtime/) — COFF (BOF) loader; consumes BOF objects produced upstream.
 - [`runtime/clr`](../runtime/) — in-process .NET hosting; consumes managed payloads.
-- [`inject`](../inject/README.md) — execution surface for `pe/srdi` shellcode.
+- [`inject`](../injection/README.md) — execution surface for `pe/srdi` shellcode.
 - [`crypto`](../crypto/README.md) — payload encryption pre-conversion.
 - [`hash`](../hash/README.md) — measure SHA-256 vs fuzzy-hash deltas after morph.

@@ -176,7 +176,7 @@ the stream layout matches `MiniDumpWriteDump(MiniDumpWithFullMemory)`.
   upstream (PsActiveProcessHead walk / handle-table parse / bring
   your own primitive) — different attack chains use different
   walks, so wrapping that lookup is not part of the surface. See
-  [BYOVD — RTCore64](../evasion/byovd-rtcore64.md) for the
+  [BYOVD — RTCore64](../kernel/byovd-rtcore64.md) for the
   driver-side primitive and `kernel/driver/rtcore64`'s SCM lifecycle.
 - **Module enumeration** uses `K32EnumProcessModulesEx` (psapi), which
   is path-hooked by some EDRs. A PEB-walk variant (`InMemoryOrderModuleList`)

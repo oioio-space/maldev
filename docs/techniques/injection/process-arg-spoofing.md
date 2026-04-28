@@ -166,7 +166,7 @@ if err != nil { return err }
 
 ### Advanced (PPID spoof + arg spoof)
 
-Combine with [`process/spoofparent`](../process/ppid-spoofing.md) to
+Combine with [`process/spoofparent`](../evasion/ppid-spoofing.md) to
 also lie about the parent process — the audit trail then shows a
 plausible parent + plausible args.
 
@@ -268,7 +268,7 @@ the PEB beat this technique.
   in the spoofed-args child.
 - [Thread Hijack](thread-hijack.md) — alternate trigger for the
   suspended child.
-- [`process/spoofparent`](../process/ppid-spoofing.md) — pair to
+- [`process/spoofparent`](../evasion/ppid-spoofing.md) — pair to
   spoof the parent as well.
 - [Adam Chester / xpn, *Process arg spoofing*, 2018](https://blog.xpnsec.com/how-to-argue-like-cobalt-strike/)
   — original public write-up.

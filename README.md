@@ -101,7 +101,7 @@ injector.Inject(shellcode)
 | **Privesc** | [docs/privilege.md](docs/privilege.md) | `uac`, `cve202430088` — 4 UAC bypasses, CVE-2024-30088 LPE |
 | **Cleanup** | [techniques/cleanup/](docs/techniques/cleanup/README.md) | `selfdelete`, `memory`, `timestomp`, `wipe`, `ads`, `bsod`, `service` — self-delete, secure wipe, timestomp, ADS streams, controlled BSOD |
 | **Collection** | [techniques/collection/](docs/techniques/collection/README.md) | `keylog`, `clipboard`, `screenshot` — keyboard hook, clipboard watch, multi-monitor screenshot |
-| **Kernel BYOVD** | [techniques/evasion/byovd-rtcore64.md](docs/techniques/evasion/byovd-rtcore64.md) | `rtcore64` — RTCore64 (CVE-2019-16098) read/write primitives (move to `techniques/kernel/` planned) |
+| **Kernel BYOVD** | [techniques/kernel/](docs/techniques/kernel/README.md) | `kernel/driver`, `kernel/driver/rtcore64` — RTCore64 (CVE-2019-16098) read/write primitives |
 | **Tokens & Privileges** | [techniques/tokens/](docs/techniques/tokens/README.md) | `win/token`, `win/privilege`, `win/impersonate` — token theft, impersonation, privilege escalation |
 | **Crypto / encode / hash** | [techniques/crypto/](docs/techniques/crypto/README.md) · [techniques/encode/](docs/techniques/encode/README.md) | `crypto`, `encode`, `hash` — AES-GCM, ChaCha20, XTEA, S-Box · Base64, UTF-16LE · ROR13, ssdeep, TLSH |
 

@@ -227,7 +227,7 @@ See [`ExampleConvertFile`](../../../pe/srdi/srdi_example_test.go)
 
 ## See also
 
-- [`inject`](../inject/README.md) — execution surface for the
+- [`inject`](../injection/README.md) — execution surface for the
   produced shellcode.
 - [`crypto`](../crypto/README.md) — payload encryption pre-conversion.
 - [`evasion/sleepmask`](../evasion/sleep-mask.md) — hide the

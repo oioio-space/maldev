@@ -60,7 +60,7 @@ flowchart LR
 | …forge a Golden Ticket | [`goldenticket.Forge`](goldenticket.md) → [`Submit`](goldenticket.md) |
 | …pass-the-hash into a live LSASS | [`sekurlsa.Pass`](sekurlsa.md) / `PassImpersonate` |
 | …pass-the-ticket | [`sekurlsa.KerberosTicket.ToKirbi`](sekurlsa.md) → [`goldenticket.Submit`](goldenticket.md) |
-| …bypass PPL on lsass.exe | [`lsassdump.Unprotect`](lsassdump.md) + [`kernel/driver/rtcore64`](../evasion/byovd-rtcore64.md) |
+| …bypass PPL on lsass.exe | [`lsassdump.Unprotect`](lsassdump.md) + [`kernel/driver/rtcore64`](../kernel/byovd-rtcore64.md) |
 
 ## MITRE ATT&CK
 
@@ -78,7 +78,7 @@ flowchart LR
 
 - [Operator path: credential harvest scenario](../../by-role/operator.md#credential-harvest)
 - [Detection eng path: credential-access artifacts](../../by-role/detection-eng.md#credential-access)
-- [`kernel/driver/rtcore64`](../evasion/byovd-rtcore64.md) — BYOVD primitive for PPL unprotect
+- [`kernel/driver/rtcore64`](../kernel/byovd-rtcore64.md) — BYOVD primitive for PPL unprotect
 - [`evasion/stealthopen`](../evasion/stealthopen.md) — path-based file-hook bypass for `ntoskrnl.exe` discovery reads
 - [`recon/shadowcopy`](../recon/) — VSS-based hive acquisition for `samdump`
 - [`docs/credentials.md`](../../credentials.md) — flat API reference (legacy)

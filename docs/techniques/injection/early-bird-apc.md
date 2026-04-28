@@ -159,7 +159,7 @@ return inj.Inject(shellcode)
 
 The package does not change the parent of the spawned child by itself;
 to set a non-`explorer.exe` parent (e.g. spawn under `services.exe`),
-combine with [`process/spoofparent`](../process/ppid-spoofing.md):
+combine with [`process/spoofparent`](../evasion/ppid-spoofing.md):
 
 ```go
 // Pseudo-code illustrating the chain — the actual API is in
@@ -237,7 +237,7 @@ syscalls so the userland-hook variant of the chain is invisible.
   on existing PIDs (Win10 1903+).
 - [Thread Hijack](thread-hijack.md) — alternative use of the suspended
   child: redirect the existing thread instead of queuing an APC.
-- [`process/spoofparent`](../process/ppid-spoofing.md) — combine to
+- [`process/spoofparent`](../evasion/ppid-spoofing.md) — combine to
   set the parent of the sacrificial child.
 - [FireEye, *Early Bird APC*, 2018](https://www.mandiant.com/resources/blog/early-bird-injection)
   — original public write-up.

@@ -224,7 +224,7 @@ binaries that spawn workers immediately).
 - [CreateRemoteThread](create-remote-thread.md) — the loud baseline.
 - [Process Argument Spoofing](process-arg-spoofing.md) — pair to mask
   the child's command line as a benign tool.
-- [`process/spoofparent`](../process/ppid-spoofing.md) — pair to set a
+- [`process/spoofparent`](../evasion/ppid-spoofing.md) — pair to set a
   realistic parent for the sacrificial child.
 - [SafeBreach Labs, *Process Hollowing & Doppelgänging*, 2017](https://www.safebreach.com/blog/2017/12/safebreach-labs-discovers-doppelganging-stealth-injection/)
   — taxonomy of register-mutation injection.

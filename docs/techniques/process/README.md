@@ -110,5 +110,5 @@ rises significantly.
   phant0m for full logging silence.
 - [`credentials/lsassdump`](../credentials/lsassdump.md) — primary
   consumer of `process/enum`.
-- [`inject`](../inject/README.md) — alternative to
+- [`inject`](../injection/README.md) — alternative to
   `process/tamper/herpaderping` for in-process delivery.
