@@ -188,7 +188,7 @@ File offset 0x200  .rdata content (variable)
 | 8 | Phase 1 commit + push | ✅ | `4e1f195` |
 | 9 | Phase 2: DllMain payload — design notes locked | ✅ | embedded in this plan |
 | 10 | Phase 2: .text + .idata emitted, payload load verified on Win10 | ✅ | TestE2E_Phase2_PayloadLoaded PASS |
-| 11 | Phase 2 commit + push | 🟡 | preparing |
+| 11 | Phase 2 commit + push | ✅ | `bad3cc0` |
 
 ## Resuming on another machine
 
