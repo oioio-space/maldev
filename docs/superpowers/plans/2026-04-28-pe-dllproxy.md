@@ -185,7 +185,7 @@ File offset 0x200  .rdata content (variable)
 | 5 | Round-trip unit test passes on host (Linux) using stdlib debug/pe | ✅ | (folded into 8) |
 | 6 | E2E test on Win10 VM with version.dll target | ✅ | TestE2E_VersionDllForwarder PASS |
 | 7 | docgen: index.md + mitre.md regenerated; tech md created | ✅ | (folded into 8) |
-| 8 | Phase 1 commit + push | 🟡 | preparing |
+| 8 | Phase 1 commit + push | ✅ | `4e1f195` |
 | 9 | Phase 2: DllMain payload — design notes locked | ☐ | — |
 | 10 | Phase 2: .text + .idata emitted, payload load verified on Win10 | ☐ | — |
 | 11 | Phase 2 commit + push | ☐ | — |
