@@ -16,10 +16,17 @@
 // once loaded; the real target executes as if loaded directly.
 //
 // With [Options.PayloadDLL] set, the emitter additionally embeds a
-// 32-byte x64 DllMain stub plus an import directory referencing
-// kernel32!LoadLibraryA. On DLL_PROCESS_ATTACH the stub calls
-// `LoadLibraryA(payload)` and returns TRUE — the loader pulls the
-// extra DLL into the victim process before user code resumes.
+// small DllMain stub (32 bytes on AMD64, 28 bytes on I386) plus an
+// import directory referencing kernel32!LoadLibraryA. On
+// DLL_PROCESS_ATTACH the stub calls `LoadLibraryA(payload)` and
+// returns TRUE — the loader pulls the extra DLL into the victim
+// process before user code resumes.
+//
+// Both PE32 (32-bit, [MachineI386]) and PE32+ (64-bit,
+// [MachineAMD64], default) outputs are supported. The 32-bit path is
+// for hijacking legacy WOW64 victims — same forwarder semantics, same
+// payload-loader contract, different optional-header layout and
+// stdcall-flavoured stub.
 //
 // # Composition
 //

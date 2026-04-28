@@ -35,7 +35,7 @@ func TestGenerate_Errors(t *testing.T) {
 	}{
 		{"empty target", "", []string{"Foo"}, Options{}, ErrEmptyTargetName},
 		{"empty exports", "version.dll", nil, Options{}, ErrEmptyExports},
-		{"i386 unsupported", "version.dll", []string{"Foo"}, Options{Machine: MachineI386}, ErrI386NotSupported},
+		{"unknown machine", "version.dll", []string{"Foo"}, Options{Machine: Machine(0xDEAD)}, ErrUnsupportedMachine},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -219,6 +219,93 @@ func TestBuildDllMainStub_Layout(t *testing.T) {
 	assert.Equal(t, int32(iatEntryRVA)-int32(textRVA+22), callDisp)
 }
 
+// TestGenerate_I386_Forwarder builds a PE32 forwarder-only image and
+// asserts the structural differences vs PE32+: OptionalHeader32
+// (Magic 0x10B), 32-bit ImageBase, IMAGE_FILE_32BIT_MACHINE flag in
+// the COFF Characteristics. Forwarder strings must still resolve to
+// the same target paths.
+func TestGenerate_I386_Forwarder(t *testing.T) {
+	out, err := Generate(
+		"version.dll",
+		[]string{"GetFileVersionInfoSizeA", "VerQueryValueA"},
+		Options{Machine: MachineI386},
+	)
+	require.NoError(t, err)
+
+	f, err := pe.NewFile(bytes.NewReader(out))
+	require.NoError(t, err)
+	defer f.Close()
+
+	assert.Equal(t, uint16(MachineI386), f.FileHeader.Machine)
+	assert.Equal(t, uint16(pe.IMAGE_FILE_EXECUTABLE_IMAGE|pe.IMAGE_FILE_32BIT_MACHINE|pe.IMAGE_FILE_DLL),
+		f.FileHeader.Characteristics)
+
+	oh, ok := f.OptionalHeader.(*pe.OptionalHeader32)
+	require.True(t, ok, "expected PE32 (not PE32+) optional header")
+	assert.Equal(t, uint16(0x10B), oh.Magic)
+	assert.Equal(t, uint32(imageBase32), oh.ImageBase)
+	assert.Equal(t, uint32(0), oh.AddressOfEntryPoint, "phase 1 path has no DllMain")
+
+	got := walkForwarders(t, out)
+	wantPrefix := `\\.\GLOBALROOT\SystemRoot\System32\version.dll.`
+	assert.Equal(t, wantPrefix+"GetFileVersionInfoSizeA", got["GetFileVersionInfoSizeA"])
+	assert.Equal(t, wantPrefix+"VerQueryValueA", got["VerQueryValueA"])
+}
+
+// TestGenerate_I386_PayloadStub builds a PE32 image with a payload DLL.
+// Validates: two sections (.text + .rdata), entry point inside .text,
+// IMPORT + IAT data dirs populated, and the i386 stub starts with the
+// canonical `mov eax, [esp+8]; cmp eax, 1; jne` sequence.
+func TestGenerate_I386_PayloadStub(t *testing.T) {
+	out, err := Generate(
+		"version.dll",
+		[]string{"VerQueryValueA"},
+		Options{Machine: MachineI386, PayloadDLL: "evil.dll"},
+	)
+	require.NoError(t, err)
+
+	f, err := pe.NewFile(bytes.NewReader(out))
+	require.NoError(t, err)
+	defer f.Close()
+
+	require.Len(t, f.Sections, 2)
+	oh := f.OptionalHeader.(*pe.OptionalHeader32)
+	assert.NotZero(t, oh.AddressOfEntryPoint)
+	assert.NotZero(t, oh.DataDirectory[pe.IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress)
+	assert.NotZero(t, oh.DataDirectory[pe.IMAGE_DIRECTORY_ENTRY_IAT].VirtualAddress)
+
+	textBytes, err := f.Sections[0].Data()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(textBytes), 9)
+	assert.Equal(t, []byte{0x8B, 0x44, 0x24, 0x08}, textBytes[0:4], "mov eax, [esp+8]")
+	assert.Equal(t, []byte{0x83, 0xF8, 0x01}, textBytes[4:7], "cmp eax, 1")
+	assert.Equal(t, byte(0x75), textBytes[7], "jne")
+}
+
+// TestBuildDllMainStubI386_Layout: byte-by-byte verification of the
+// 28-byte i386 stub plus the absolute-address patch sites.
+func TestBuildDllMainStubI386_Layout(t *testing.T) {
+	const (
+		payloadAbs = 0x10003000
+		iatAbs     = 0x10002400
+	)
+	stub := buildDllMainStubI386(payloadAbs, iatAbs)
+	require.Len(t, stub, 28)
+
+	assert.Equal(t, []byte{0x8B, 0x44, 0x24, 0x08}, stub[0:4])
+	assert.Equal(t, []byte{0x83, 0xF8, 0x01}, stub[4:7])
+	assert.Equal(t, []byte{0x75, 0x0B}, stub[7:9])
+	assert.Equal(t, byte(0x68), stub[9])
+	assert.Equal(t, []byte{0xFF, 0x15}, stub[14:16])
+	assert.Equal(t, []byte{0xB8, 0x01, 0x00, 0x00, 0x00}, stub[20:25])
+	assert.Equal(t, []byte{0xC2, 0x0C, 0x00}, stub[25:28])
+
+	gotPayload := binary.LittleEndian.Uint32(stub[10:14])
+	gotIAT := binary.LittleEndian.Uint32(stub[16:20])
+	assert.Equal(t, uint32(payloadAbs), gotPayload)
+	assert.Equal(t, uint32(iatAbs), gotIAT)
+}
+
 // TestGenerateExt_OrdinalOnly verifies the ordinal-only forwarder
 // path: an export with no Name and Ordinal=42 must end up as a
 // `<target>.#42` forwarder, no entry in AddressOfNames, and the right
@@ -289,8 +376,7 @@ func TestGenerateExt_AutoOrdinals(t *testing.T) {
 	require.NoError(t, err)
 	defer f.Close()
 
-	oh := f.OptionalHeader.(*pe.OptionalHeader64)
-	edirRVA := oh.DataDirectory[pe.IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress
+	edirRVA, _ := exportDir(f)
 	sec := sectionContainingRVA(f, edirRVA)
 	data, _ := sec.Data()
 	rvaToOff := func(rva uint32) uint32 { return rva - sec.VirtualAddress }
@@ -370,9 +456,7 @@ func walkForwarders(t *testing.T, image []byte) map[string]string {
 	require.NoError(t, err)
 	defer f.Close()
 
-	oh := f.OptionalHeader.(*pe.OptionalHeader64)
-	edirRVA := oh.DataDirectory[pe.IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress
-	edirSize := oh.DataDirectory[pe.IMAGE_DIRECTORY_ENTRY_EXPORT].Size
+	edirRVA, edirSize := exportDir(f)
 
 	sec := sectionContainingRVA(f, edirRVA)
 	require.NotNil(t, sec, "section holding export directory not found")
@@ -412,8 +496,7 @@ func walkExportNames(t *testing.T, image []byte) []string {
 	require.NoError(t, err)
 	defer f.Close()
 
-	oh := f.OptionalHeader.(*pe.OptionalHeader64)
-	edirRVA := oh.DataDirectory[pe.IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress
+	edirRVA, _ := exportDir(f)
 	sec := sectionContainingRVA(f, edirRVA)
 	data, _ := sec.Data()
 	rvaToOff := func(rva uint32) uint32 { return rva - sec.VirtualAddress }
@@ -427,6 +510,21 @@ func walkExportNames(t *testing.T, image []byte) []string {
 		out[i] = readZString(data, rvaToOff(nameRVA))
 	}
 	return out
+}
+
+// exportDir extracts the export directory's RVA + size from either a
+// PE32 or PE32+ optional header. The two structs share the layout but
+// have distinct Go types in stdlib debug/pe.
+func exportDir(f *pe.File) (rva, size uint32) {
+	switch oh := f.OptionalHeader.(type) {
+	case *pe.OptionalHeader64:
+		d := oh.DataDirectory[pe.IMAGE_DIRECTORY_ENTRY_EXPORT]
+		return d.VirtualAddress, d.Size
+	case *pe.OptionalHeader32:
+		d := oh.DataDirectory[pe.IMAGE_DIRECTORY_ENTRY_EXPORT]
+		return d.VirtualAddress, d.Size
+	}
+	return 0, 0
 }
 
 func sectionContainingRVA(f *pe.File, rva uint32) *pe.Section {
