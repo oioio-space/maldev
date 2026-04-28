@@ -179,7 +179,7 @@ Click any package name to jump to its area-doc or technique page.
 | [`evasion/callstack`](techniques/evasion/callstack-spoof.md) | `SpoofCall` synthetic frames |
 | [`evasion/kcallback`](techniques/evasion/kernel-callback-removal.md) | `Enumerate`, `Remove`, `Restore` (BYOVD) |
 | [`evasion/preset`](techniques/evasion/preset.md) | `Apply`, `ApplyAll` orchestration |
-| [`evasion/byovd`](techniques/evasion/byovd-rtcore64.md) | RTCore64 BYOVD driver lifecycle |
+| [`kernel/driver/rtcore64`](techniques/kernel/byovd-rtcore64.md) | RTCore64 BYOVD driver lifecycle (moved out of evasion/ — Layer 1 BYOVD primitive) |
 | [`evasion/stealthopen`](techniques/evasion/stealthopen.md) | `Opener` interface + transactional NTFS |
 | [`process/tamper/fakecmd`](techniques/process/fakecmd.md) | PEB CommandLine spoof |
 | [`process/tamper/hideprocess`](techniques/process/hideprocess.md) | Process Hacker / Explorer in-memory patch |
@@ -192,8 +192,8 @@ Click any package name to jump to its area-doc or technique page.
 | [`runtime/bof`](runtime.md) | Beacon Object File loader |
 | [`credentials/lsassdump`](techniques/collection/lsass-dump.md) | LSASS minidump producer + PPL bypass |
 | [`credentials/sekurlsa`](techniques/credentials/sekurlsa.md) | MINIDUMP → MSV1_0 NT-hash extractor (cross-platform) |
-| [`privesc/uac`](privilege.md) | 4 UAC bypass primitives |
-| [`privesc/cve202430088`](privilege.md) | Kernel LPE PoC |
+| [`privesc/uac`](techniques/privesc/uac.md) | 4 UAC bypass primitives + EventVwrLogon alt-creds variant |
+| [`privesc/cve202430088`](techniques/privesc/cve202430088.md) | CVE-2024-30088 kernel TOCTOU → SYSTEM token swap |
 
 ### Layer 2 — Post-exploitation
 
@@ -202,6 +202,9 @@ Click any package name to jump to its area-doc or technique page.
 | [`persistence/registry`](techniques/persistence/registry.md) | `Run`, `RunOnce`, image-file-execution-options |
 | [`persistence/startup`](techniques/persistence/startup-folder.md) | `.lnk` drop in user/all-users Startup |
 | [`persistence/scheduler`](techniques/persistence/task-scheduler.md) | `schtasks` wrapper with trigger options |
+| [`persistence/service`](techniques/persistence/service.md) | SCM service install (auto-start / on-demand / kernel-driver) |
+| [`persistence/lnk`](techniques/persistence/lnk.md) | Shortcut creation with hidden window + minimised state |
+| [`persistence/account`](techniques/persistence/account.md) | Local user / group manipulation via `NetUserAdd` / `NetLocalGroupAddMembers` |
 | [`collection/clipboard`](techniques/collection/clipboard.md) | `ReadText`, `Watch` |
 | [`collection/keylog`](techniques/collection/keylogging.md) | Low-level WH_KEYBOARD_LL hook + Ctrl+V capture |
 | [`collection/screenshot`](techniques/collection/screenshot.md) | Per-monitor + virtual-desktop PNG capture |

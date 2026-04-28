@@ -6,9 +6,11 @@
 
 | ATT&CK ID | Technique Name | Package(s) | D3FEND Countermeasure |
 |-----------|---------------|------------|----------------------|
-| T1027 | Obfuscated Files or Information | `evasion/sleepmask`, `pe/strip`, `crypto` (TEA/XTEA/ArithShift/SBox/MatrixTransform) | D3-SMRA (System Memory Range Analysis) |
-| T1027.013 | Encrypted/Encoded File | `crypto`, `encode` | D3-FCA (File Content Analysis) |
+| T1016 | System Network Configuration Discovery | `recon/network` (interfaces, gateway, DNS, public IP), `win/domain` (paired use) | D3-NTPM (Network Traffic Pattern Matching) |
+| T1027 | Obfuscated Files or Information | `evasion/sleepmask`, `pe/strip`, `crypto` (TEA/XTEA/ArithShift/SBox/MatrixTransform), `win/api` (PEB-walk hash imports) | D3-SMRA (System Memory Range Analysis) |
 | T1027.002 | Software Packing | `pe/morph` | D3-SEA (Static Executable Analysis) |
+| T1027.007 | Dynamic API Resolution | `win/api` (Hell's/Halo's/Tartarus/HashGate resolvers), `win/syscall` (SSN gating chain) | D3-SCA (System Call Analysis) |
+| T1027.013 | Encrypted/Encoded File | `crypto`, `encode` | D3-FCA (File Content Analysis) |
 | T1036 | Masquerading | `evasion/stealthopen`, `evasion/callstack` (call-stack spoof metadata) | D3-FHA (File Hash Analysis) |
 | T1036.005 | Masquerading: Match Legitimate Name or Location | `process/tamper/fakecmd` (self + remote via `SpoofPID`), `pe/masquerade` | D3-PLA (Process Listing Analysis) |
 | T1047.001 | Boot or Logon Autostart Execution: Registry Run Keys | `persistence/registry` | D3-SBV (Service Binary Verification) |
@@ -23,6 +25,8 @@
 | T1055.003 | Thread Execution Hijacking | `inject` (ThreadHijack) | D3-PSA |
 | T1055.004 | Asynchronous Procedure Call | `inject` (QueueUserAPC, EarlyBirdAPC, NtQueueApcThreadEx) | D3-PSA |
 | T1055.012 | Process Hollowing | `inject` (SpawnWithSpoofedArgs) | D3-PSMD (Process Spawn Monitoring) |
+| T1068 | Exploitation for Privilege Escalation | `privesc/cve202430088` (kernel TOCTOU race), `kernel/driver/rtcore64` (BYOVD IOCTL R/W) | D3-EAL (Exploit Activity Logging), D3-DLIC (Driver Load Integrity Checking) |
+| T1078 | Valid Accounts | `win/privilege` (alt-creds spawn via Secondary Logon), `win/impersonate` (alt-creds → thread context swap) | D3-UAP (User Account Profiling) |
 | T1056.001 | Input Capture: Keylogging | `collection/keylog` | D3-KBIM (Keyboard Input Monitoring) |
 | T1057 | Process Discovery | `process/enum` | D3-PLA (Process Listing Analysis) |
 | T1059 | Command and Scripting Interpreter | `c2/shell`, `c2/meterpreter`, `runtime/bof` | D3-EFA (Executable File Analysis) |
@@ -37,8 +41,9 @@
 | T1115 | Clipboard Data | `collection/clipboard` | D3-DA (Dynamic Analysis) |
 | T1120 | Peripheral Device Discovery | `recon/drive` | D3-PDD (Peripheral Device Discovery) |
 | T1134 | Access Token Manipulation | `win/token`, `win/privilege` | D3-TAAN (Token Auth Normalization) |
-| T1134.001 | Token Impersonation/Theft | `win/impersonate`, `win/token` | D3-TAAN |
-| T1134.002 | Create Process with Token | `process/session` | D3-TAAN |
+| T1134.001 | Token Impersonation/Theft | `win/impersonate`, `win/token`, `privesc/cve202430088` (`_EPROCESS.Token` swap) | D3-TAAN |
+| T1134.002 | Create Process with Token | `process/session`, `win/privilege` (Secondary Logon path) | D3-TAAN |
+| T1134.004 | Parent PID Spoofing | `c2/shell` (PPID spoofing chain), `win/impersonate` (RunAsTrustedInstaller lineage) | D3-PSA (Process Spawn Analysis) |
 | T1136.001 | Create Account: Local Account | `persistence/account` | D3-UAP (User Account Profiling) |
 | T1204.002 | User Execution: Malicious File | `persistence/lnk` | D3-EFA (Executable File Analysis) |
 | T1497 | Virtualization/Sandbox Evasion | `recon/sandbox` | D3-DA (Dynamic Analysis) |

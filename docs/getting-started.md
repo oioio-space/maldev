@@ -31,15 +31,22 @@ graph LR
     A --> E[cleanup/ — cover tracks]
 ```
 
-### The Three Levels of Stealth
+### The Five Levels of Stealth
 
-Every technique has a **detection level**. Choose based on your threat model:
+Every technique has a **detection level** declared in its `doc.go`.
+Choose based on your threat model:
 
 | Level | Meaning | Example |
-|-------|---------|---------|
-| **Low** | Normal system behavior | Reading drive letters, checking version |
-| **Medium** | Suspicious but common | Memory allocation, thread creation |
-| **High** | Highly monitored | Cross-process injection, ntdll unhooking |
+|---|---|---|
+| **very-quiet** | Indistinguishable from baseline activity | `RtlGetVersion`, `NetGetJoinInformation` |
+| **quiet** | Used routinely but in attacker-shaped patterns | Indirect syscall, hash-resolved import |
+| **moderate** | Watched by EDR but common in benign software | RWX `VirtualAlloc`, thread creation |
+| **noisy** | Pattern is in every vendor's signature DB | Cross-process inject, UAC bypass |
+| **very-noisy** | Triggers an alert by default | `NtLoadDriver` for an unsigned driver, `NtUnloadDriver` |
+
+Find the detection level for any package on its tech-md page (e.g.,
+[`docs/techniques/evasion/amsi-bypass.md`](techniques/evasion/amsi-bypass.md))
+and in its `doc.go` `# Detection level` section.
 
 ### The Caller Pattern
 
