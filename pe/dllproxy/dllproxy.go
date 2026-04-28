@@ -2,6 +2,7 @@ package dllproxy
 
 import (
 	"bytes"
+	"debug/pe"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -13,9 +14,9 @@ type Machine uint16
 
 const (
 	// MachineAMD64 emits a PE32+ x86-64 DLL. Default and only Phase 1 target.
-	MachineAMD64 Machine = 0x8664
+	MachineAMD64 Machine = pe.IMAGE_FILE_MACHINE_AMD64
 	// MachineI386 is reserved for Phase 3 — 32-bit support.
-	MachineI386 Machine = 0x14c
+	MachineI386 Machine = pe.IMAGE_FILE_MACHINE_I386
 )
 
 // String returns the canonical COFF machine name.
@@ -130,42 +131,38 @@ func Generate(targetName string, exports []string, opts Options) ([]byte, error)
 	return assemblePE(rdata, edirRange, opts.Machine), nil
 }
 
-// PE / COFF / Optional-Header constants used by the emitter.
+// PE / COFF / Optional-Header constants used by the emitter. Anything
+// stdlib `debug/pe` exposes is referenced through that package; only
+// the few it omits ship as locals.
 const (
 	dosMagic    = 0x5A4D     // "MZ"
 	peSignature = 0x00004550 // "PE\0\0"
 
-	imageFileDLL               = 0x2000
-	imageFileExecutable        = 0x0002
-	imageFileLargeAddressAware = 0x0020
-	imageFileCharacteristics   = imageFileExecutable | imageFileLargeAddressAware | imageFileDLL
-	imageDLLCharacteristicsNXC = 0x0100 // NX_COMPAT
-	imageSubsystemWindowsGUI   = 2
-	imageOptionalHdr64Magic    = 0x020B
-	imageScnCntInitializedData = 0x00000040
-	imageScnMemRead            = 0x40000000
-	imageRDataCharacteristics  = imageScnCntInitializedData | imageScnMemRead
-	imageDirectoryEntryExport  = 0
-	imageNumberOfDirectoryRVAs = 16
+	imageFileCharacteristics   = pe.IMAGE_FILE_EXECUTABLE_IMAGE | pe.IMAGE_FILE_LARGE_ADDRESS_AWARE | pe.IMAGE_FILE_DLL
+	imageDLLCharacteristicsNXC = pe.IMAGE_DLLCHARACTERISTICS_NX_COMPAT
+	imageRDataCharacteristics  = pe.IMAGE_SCN_CNT_INITIALIZED_DATA | pe.IMAGE_SCN_MEM_READ
+	imageOptionalHdr64Magic    = 0x020B // not exposed by stdlib debug/pe
+	imageNumberOfDirectoryRVAs = 16     // not exposed by stdlib debug/pe
 
-	dosHeaderSize       = 64
-	coffHeaderSize      = 20
-	optionalHeader64Sz  = 240
-	sectionHeaderSize   = 40
-	dataDirectoryEntrySz = 8
+	dosHeaderSize      = 64
+	coffHeaderSize     = 20
+	optionalHeader64Sz = 240
+	sectionHeaderSize  = 40
 
 	fileAlignment    = 0x200
 	sectionAlignment = 0x1000
 	imageBase64      = 0x180000000
 )
 
-// rdataRange records the file-relative offsets and resulting RVAs of the
-// IMAGE_EXPORT_DIRECTORY data, used to populate the optional-header
-// data directory entry [0].
+// rdataRange records where the IMAGE_EXPORT_DIRECTORY lives inside the
+// .rdata section. By design, the export directory spans the *entire*
+// .rdata content (forwarder strings + name strings included) so that
+// every forwarder RVA falls inside the data-directory range — that's
+// the loader-side rule for forwarder detection. Hence dirRVA + dirSize
+// also describe the section's full virtual extent.
 type rdataRange struct {
-	exportDirRVA  uint32
-	exportDirSize uint32
-	virtualSize   uint32
+	dirRVA  uint32
+	dirSize uint32
 }
 
 // buildRData produces the in-memory layout of the proxy DLL's single
@@ -215,7 +212,6 @@ func buildRData(targetName string, sortedExports []string, scheme PathScheme) ([
 		cursor += uint32(len(name) + 1)
 	}
 
-	// Now assemble the .rdata buffer.
 	out := make([]byte, stringsOffset)
 
 	// IMAGE_EXPORT_DIRECTORY
@@ -246,15 +242,9 @@ func buildRData(targetName string, sortedExports []string, scheme PathScheme) ([
 		binary.LittleEndian.PutUint16(out[addrOrdsOffset+i*2:], uint16(i))
 	}
 
-	// Append the strings table.
 	out = append(out, stringsBuf.Bytes()...)
 
-	r := rdataRange{
-		exportDirRVA:  sectionVA, // export directory begins at start of .rdata
-		exportDirSize: uint32(len(out)),
-		virtualSize:   uint32(len(out)),
-	}
-	return out, r, nil
+	return out, rdataRange{dirRVA: sectionVA, dirSize: uint32(len(out))}, nil
 }
 
 // forwarderPrefix returns the constant prefix prepended to each export
@@ -269,91 +259,74 @@ func forwarderPrefix(scheme PathScheme, targetName string) string {
 }
 
 // assemblePE stamps the headers around the supplied .rdata content and
-// returns the final PE image.
+// returns the final PE image. Headers are written through stdlib
+// [debug/pe] structs so on-disk layout matches the spec without any
+// hand-counted offsets.
 func assemblePE(rdata []byte, r rdataRange, machine Machine) []byte {
 	const peHeaderOffset = dosHeaderSize // e_lfanew = 0x40
+
 	headersEnd := uint32(peHeaderOffset + 4 + coffHeaderSize + optionalHeader64Sz + sectionHeaderSize)
 	sizeOfHeaders := alignUp(headersEnd, fileAlignment)
-
 	rdataFileSize := alignUp(uint32(len(rdata)), fileAlignment)
-	rdataVirtualSize := r.virtualSize
-	rdataVirtualAddress := uint32(sectionAlignment)
+	rdataVA := uint32(sectionAlignment)
+	imageSize := alignUp(rdataVA+r.dirSize, sectionAlignment)
 
-	imageSize := alignUp(rdataVirtualAddress+rdataVirtualSize, sectionAlignment)
+	coff := pe.FileHeader{
+		Machine:              uint16(machine),
+		NumberOfSections:     1,
+		SizeOfOptionalHeader: optionalHeader64Sz,
+		Characteristics:      imageFileCharacteristics,
+	}
+	opt := pe.OptionalHeader64{
+		Magic:                       imageOptionalHdr64Magic,
+		MajorLinkerVersion:          14,
+		SizeOfInitializedData:       r.dirSize,
+		ImageBase:                   imageBase64,
+		SectionAlignment:            sectionAlignment,
+		FileAlignment:               fileAlignment,
+		MajorOperatingSystemVersion: 6,
+		MajorSubsystemVersion:       6,
+		SizeOfImage:                 imageSize,
+		SizeOfHeaders:               sizeOfHeaders,
+		Subsystem:                   pe.IMAGE_SUBSYSTEM_WINDOWS_GUI,
+		DllCharacteristics:          imageDLLCharacteristicsNXC,
+		SizeOfStackReserve:          0x100000,
+		SizeOfStackCommit:           0x1000,
+		SizeOfHeapReserve:           0x100000,
+		SizeOfHeapCommit:            0x1000,
+		NumberOfRvaAndSizes:         imageNumberOfDirectoryRVAs,
+	}
+	opt.DataDirectory[pe.IMAGE_DIRECTORY_ENTRY_EXPORT] = pe.DataDirectory{
+		VirtualAddress: r.dirRVA,
+		Size:           r.dirSize,
+	}
+	sec := pe.SectionHeader32{
+		Name:             [8]uint8{'.', 'r', 'd', 'a', 't', 'a'},
+		VirtualSize:      r.dirSize,
+		VirtualAddress:   rdataVA,
+		SizeOfRawData:    rdataFileSize,
+		PointerToRawData: sizeOfHeaders,
+		Characteristics:  imageRDataCharacteristics,
+	}
+
+	// Encode headers into the leading sizeOfHeaders bytes.
+	hdr := bytes.NewBuffer(make([]byte, 0, sizeOfHeaders))
+	hdr.Write(make([]byte, peHeaderOffset)) // DOS header zero-pad — overwritten below
+	binary.Write(hdr, binary.LittleEndian, uint32(peSignature))
+	binary.Write(hdr, binary.LittleEndian, &coff)
+	binary.Write(hdr, binary.LittleEndian, &opt)
+	binary.Write(hdr, binary.LittleEndian, &sec)
 
 	out := make([]byte, sizeOfHeaders+rdataFileSize)
+	copy(out, hdr.Bytes())
 
-	// DOS header — only the fields the loader checks.
+	// DOS header — only the two fields the loader actually reads.
 	binary.LittleEndian.PutUint16(out[0:], dosMagic)
 	binary.LittleEndian.PutUint32(out[0x3c:], peHeaderOffset)
 
-	// PE signature
-	binary.LittleEndian.PutUint32(out[peHeaderOffset:], peSignature)
-
-	coffOff := peHeaderOffset + 4
-	// COFF header
-	binary.LittleEndian.PutUint16(out[coffOff:], uint16(machine))
-	binary.LittleEndian.PutUint16(out[coffOff+2:], 1) // NumberOfSections
-	binary.LittleEndian.PutUint32(out[coffOff+4:], 0) // TimeDateStamp
-	binary.LittleEndian.PutUint32(out[coffOff+8:], 0) // PointerToSymbolTable
-	binary.LittleEndian.PutUint32(out[coffOff+12:], 0) // NumberOfSymbols
-	binary.LittleEndian.PutUint16(out[coffOff+16:], optionalHeader64Sz)
-	binary.LittleEndian.PutUint16(out[coffOff+18:], imageFileCharacteristics)
-
-	// Optional header (PE32+)
-	optOff := coffOff + coffHeaderSize
-	binary.LittleEndian.PutUint16(out[optOff+0:], imageOptionalHdr64Magic)
-	out[optOff+2] = 14 // MajorLinkerVersion
-	out[optOff+3] = 0  // MinorLinkerVersion
-	binary.LittleEndian.PutUint32(out[optOff+4:], 0)                  // SizeOfCode
-	binary.LittleEndian.PutUint32(out[optOff+8:], rdataVirtualSize)   // SizeOfInitializedData
-	binary.LittleEndian.PutUint32(out[optOff+12:], 0)                 // SizeOfUninitializedData
-	binary.LittleEndian.PutUint32(out[optOff+16:], 0)                 // AddressOfEntryPoint = 0 (no DllMain)
-	binary.LittleEndian.PutUint32(out[optOff+20:], 0)                 // BaseOfCode
-	binary.LittleEndian.PutUint64(out[optOff+24:], imageBase64)       // ImageBase (PE32+: uint64)
-	binary.LittleEndian.PutUint32(out[optOff+32:], sectionAlignment)  // SectionAlignment
-	binary.LittleEndian.PutUint32(out[optOff+36:], fileAlignment)     // FileAlignment
-	binary.LittleEndian.PutUint16(out[optOff+40:], 6)                 // MajorOperatingSystemVersion
-	binary.LittleEndian.PutUint16(out[optOff+42:], 0)                 // MinorOperatingSystemVersion
-	binary.LittleEndian.PutUint16(out[optOff+44:], 0)                 // MajorImageVersion
-	binary.LittleEndian.PutUint16(out[optOff+46:], 0)                 // MinorImageVersion
-	binary.LittleEndian.PutUint16(out[optOff+48:], 6)                 // MajorSubsystemVersion
-	binary.LittleEndian.PutUint16(out[optOff+50:], 0)                 // MinorSubsystemVersion
-	binary.LittleEndian.PutUint32(out[optOff+52:], 0)                 // Win32VersionValue (reserved)
-	binary.LittleEndian.PutUint32(out[optOff+56:], imageSize)         // SizeOfImage
-	binary.LittleEndian.PutUint32(out[optOff+60:], sizeOfHeaders)     // SizeOfHeaders
-	binary.LittleEndian.PutUint32(out[optOff+64:], 0)                 // CheckSum (Windows tolerates 0 for unsigned DLLs)
-	binary.LittleEndian.PutUint16(out[optOff+68:], imageSubsystemWindowsGUI)
-	binary.LittleEndian.PutUint16(out[optOff+70:], imageDLLCharacteristicsNXC)
-	binary.LittleEndian.PutUint64(out[optOff+72:], 0x100000)          // SizeOfStackReserve
-	binary.LittleEndian.PutUint64(out[optOff+80:], 0x1000)            // SizeOfStackCommit
-	binary.LittleEndian.PutUint64(out[optOff+88:], 0x100000)          // SizeOfHeapReserve
-	binary.LittleEndian.PutUint64(out[optOff+96:], 0x1000)            // SizeOfHeapCommit
-	binary.LittleEndian.PutUint32(out[optOff+104:], 0)                // LoaderFlags
-	binary.LittleEndian.PutUint32(out[optOff+108:], imageNumberOfDirectoryRVAs)
-
-	// DataDirectory[16] — only entry [0] (Export) is populated.
-	dataDirOff := optOff + 112
-	binary.LittleEndian.PutUint32(out[dataDirOff+imageDirectoryEntryExport*dataDirectoryEntrySz:], r.exportDirRVA)
-	binary.LittleEndian.PutUint32(out[dataDirOff+imageDirectoryEntryExport*dataDirectoryEntrySz+4:], r.exportDirSize)
-
-	// Section header — single ".rdata" entry.
-	secOff := optOff + optionalHeader64Sz
-	copy(out[secOff:secOff+8], []byte(".rdata\x00\x00"))
-	binary.LittleEndian.PutUint32(out[secOff+8:], rdataVirtualSize)
-	binary.LittleEndian.PutUint32(out[secOff+12:], rdataVirtualAddress)
-	binary.LittleEndian.PutUint32(out[secOff+16:], rdataFileSize)
-	binary.LittleEndian.PutUint32(out[secOff+20:], sizeOfHeaders) // PointerToRawData
-	binary.LittleEndian.PutUint32(out[secOff+24:], 0)             // PointerToRelocations
-	binary.LittleEndian.PutUint32(out[secOff+28:], 0)             // PointerToLinenumbers
-	binary.LittleEndian.PutUint16(out[secOff+32:], 0)             // NumberOfRelocations
-	binary.LittleEndian.PutUint16(out[secOff+34:], 0)             // NumberOfLinenumbers
-	binary.LittleEndian.PutUint32(out[secOff+36:], imageRDataCharacteristics)
-
-	// Section data — copy .rdata bytes at PointerToRawData; trailing
-	// space already zero from make().
+	// Section data follows the header block; trailing pad bytes stay
+	// zero from the make() above.
 	copy(out[sizeOfHeaders:], rdata)
-
 	return out
 }
 

@@ -57,9 +57,11 @@
 // # See also
 //
 //   - docs/techniques/recon/dll-hijack.md
+//   - [github.com/oioio-space/maldev/pe/dllproxy] — pure-Go forwarder DLL emitter, the natural payload generator for Opportunities surfaced here
 //   - [github.com/oioio-space/maldev/pe/imports] — sibling PE import-table walker
 //   - [github.com/oioio-space/maldev/persistence/service] — install hijacks via service binary path
 //
+// [github.com/oioio-space/maldev/pe/dllproxy]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy
 // [github.com/oioio-space/maldev/pe/imports]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports
 // [github.com/oioio-space/maldev/persistence/service]: https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service
 package dllhijack

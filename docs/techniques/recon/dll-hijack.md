@@ -167,6 +167,7 @@ if err == nil && res.Triggered {
 
 ## See also
 
+- [`pe/dllproxy`](../pe/dll-proxy.md) — pure-Go forwarder DLL emitter; the natural payload generator for the Opportunities discovered here.
 - [`pe/imports`](../pe/imports.md) — sibling import-table walker.
 - [`pe/cert`](../pe/certificate-theft.md) — sign the hijack DLL.
 - [`pe/masquerade`](../pe/masquerade.md) — clone target DLL identity.

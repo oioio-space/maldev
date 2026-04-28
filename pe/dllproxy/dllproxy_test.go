@@ -5,6 +5,7 @@ import (
 	"debug/pe"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -124,7 +125,7 @@ func TestGenerate_SortsExports(t *testing.T) {
 func TestGenerate_LargeExportSet(t *testing.T) {
 	exports := make([]string, 2000)
 	for i := range exports {
-		exports[i] = "Func" + padLeft(i, 5)
+		exports[i] = fmt.Sprintf("Func%05d", i)
 	}
 	out, err := Generate("big.dll", exports, Options{})
 	require.NoError(t, err)
@@ -220,11 +221,3 @@ func readZString(buf []byte, off uint32) string {
 	return string(buf[off:end])
 }
 
-func padLeft(n, width int) string {
-	s := ""
-	for i := 0; i < width; i++ {
-		s = string(rune('0'+n%10)) + s
-		n /= 10
-	}
-	return s
-}
