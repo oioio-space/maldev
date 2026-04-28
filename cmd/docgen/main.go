@@ -156,12 +156,21 @@ func parsePackage(importPath, dir string) (PackageDoc, error) {
 }
 
 // firstSentence returns the first sentence of pkg-doc, stripping the
-// "Package <name> " prefix. The split is on `. ` or `.\n` (period
-// followed by whitespace) so abbreviations like "X.509" don't truncate.
+// "Package <name> " prefix and collapsing internal whitespace runs
+// (newlines from the comment word-wrap, tabs, multi-space) to single
+// spaces. The split is on `. ` or `.\n` (period followed by whitespace)
+// so abbreviations like "X.509" don't truncate. If the first paragraph
+// ends without a period (e.g., a lead-in colon followed by a bullet
+// list), the whole paragraph is returned — that prevents bullet-list
+// fragments from leaking into the index summary.
 func firstSentence(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return ""
+	}
+	// Cap the search to the first paragraph (delimited by a blank line).
+	if pb := strings.Index(text, "\n\n"); pb > 0 {
+		text = text[:pb]
 	}
 	// Find the first period followed by whitespace (or end of string).
 	cut := -1
@@ -174,16 +183,64 @@ func firstSentence(text string) string {
 			break
 		}
 	}
-	if cut <= 0 {
-		return ""
+	var s string
+	if cut > 0 {
+		s = text[:cut]
+	} else {
+		// No sentence-ending period in the first paragraph — take the
+		// whole paragraph and trim a trailing colon (lead-in style).
+		s = strings.TrimRight(text, " \t\n:")
 	}
-	s := text[:cut]
 	if strings.HasPrefix(s, "Package ") {
 		if sp := strings.Index(s[len("Package "):], " "); sp > 0 {
 			s = strings.TrimSpace(s[len("Package ")+sp+1:])
 		}
 	}
-	return s
+	return collapseWhitespace(s)
+}
+
+// collapseWhitespace replaces every run of whitespace (space, tab,
+// newline) with a single space — so a multi-line comment summary
+// renders correctly inside a single markdown table cell.
+func collapseWhitespace(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	prevSpace := false
+	for _, r := range s {
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			if !prevSpace {
+				b.WriteByte(' ')
+				prevSpace = true
+			}
+			continue
+		}
+		b.WriteRune(r)
+		prevSpace = false
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// canonicalDetectionLevels is the closed set declared in
+// docs/conventions/documentation.md. Anything else is normalised to
+// "—" so the table column stays scannable.
+var canonicalDetectionLevels = map[string]bool{
+	"very-quiet": true,
+	"quiet":      true,
+	"moderate":   true,
+	"noisy":      true,
+	"very-noisy": true,
+}
+
+// normalizeDetectionLevel returns one of the five canonical levels
+// or "—" for umbrella packages, varies-per-subpackage docs, and
+// anything that doesn't match.
+func normalizeDetectionLevel(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.TrimRight(s, ".,;:")
+	if canonicalDetectionLevels[s] {
+		return s
+	}
+	return "—"
 }
 
 var (
@@ -229,22 +286,97 @@ func parseDetectionLevel(text string) string {
 // filterPublic removes packages a documentation reader doesn't browse:
 // - internal/* (Go-tooling-reserved)
 // - scripts/* (test harnesses)
+// - cmd/* (binaries — irrelevant for a library import map)
 // - pe/masquerade/preset/* and pe/masquerade/internal/* (preset blank-imports)
 // - testutil/clrhost (test helper)
+// - the root "." module entry (no useful one-liner, dilutes the index)
 func filterPublic(pkgs []PackageDoc) []PackageDoc {
 	var out []PackageDoc
 	for _, p := range pkgs {
 		rel := p.RelativePath
-		if strings.HasPrefix(rel, "internal/") ||
+		if rel == "." ||
+			strings.HasPrefix(rel, "internal/") ||
 			strings.HasPrefix(rel, "scripts/") ||
+			strings.HasPrefix(rel, "cmd/") ||
 			strings.HasPrefix(rel, "pe/masquerade/preset/") ||
 			strings.HasPrefix(rel, "pe/masquerade/internal/") ||
+			rel == "testutil" ||
 			rel == "testutil/clrhost" {
 			continue
 		}
 		out = append(out, p)
 	}
 	return out
+}
+
+// areaOf returns the top-level area name a package belongs to —
+// the first path segment, with stand-alone Layer-0 / utility
+// packages collapsed into a synthetic "_layer-0" group.
+func areaOf(rel string) string {
+	switch rel {
+	case "crypto", "encode", "hash", "random", "useragent":
+		return "_layer-0"
+	case "ui":
+		return "_utility"
+	case "inject":
+		return "inject"
+	}
+	if i := strings.Index(rel, "/"); i > 0 {
+		return rel[:i]
+	}
+	return rel
+}
+
+// areaTitle is the human-facing label for an area key from areaOf.
+func areaTitle(area string) string {
+	switch area {
+	case "_layer-0":
+		return "Layer 0 — pure-Go primitives (`crypto`, `encode`, `hash`, `random`, `useragent`)"
+	case "_utility":
+		return "UI utilities"
+	case "c2":
+		return "C2 — `c2/*`"
+	case "cleanup":
+		return "Cleanup — `cleanup/*`"
+	case "collection":
+		return "Collection — `collection/*`"
+	case "credentials":
+		return "Credentials — `credentials/*`"
+	case "evasion":
+		return "Evasion — `evasion/*`"
+	case "inject":
+		return "Injection — `inject`"
+	case "kernel":
+		return "Kernel BYOVD — `kernel/driver/*`"
+	case "pe":
+		return "PE manipulation — `pe/*`"
+	case "persistence":
+		return "Persistence — `persistence/*`"
+	case "privesc":
+		return "Privilege escalation — `privesc/*`"
+	case "process":
+		return "Process — `process/*` + `process/tamper/*`"
+	case "recon":
+		return "Recon — `recon/*`"
+	case "runtime":
+		return "Runtime loaders — `runtime/*`"
+	case "win":
+		return "Windows primitives — `win/*`"
+	default:
+		return area
+	}
+}
+
+// areaOrder is the canonical display order for the grouped package
+// index. Areas not listed fall through to alphabetical at the end.
+var areaOrder = []string{
+	"_layer-0",
+	"win", "kernel",
+	"evasion", "inject", "pe", "runtime",
+	"recon", "process", "credentials", "collection",
+	"cleanup", "persistence", "privesc",
+	"c2",
+	"_utility",
 }
 
 // applyAutogenBlocks reads path, replaces every `<!-- BEGIN AUTOGEN: name
@@ -293,21 +425,61 @@ func replaceBlock(src, begin, end, body string) string {
 // --- Renderers --------------------------------------------------------------
 
 func renderPackageIndex(pkgs []PackageDoc) string {
-	var b bytes.Buffer
-	b.WriteString("\n| Package | Detection | Summary |\n|---|---|---|\n")
+	// Bucket packages by area, preserving alphabetical order inside.
+	byArea := map[string][]PackageDoc{}
 	for _, p := range pkgs {
-		det := p.DetectionLevel
-		if det == "" {
-			det = "—"
+		a := areaOf(p.RelativePath)
+		byArea[a] = append(byArea[a], p)
+	}
+	for a := range byArea {
+		sort.Slice(byArea[a], func(i, j int) bool {
+			return byArea[a][i].RelativePath < byArea[a][j].RelativePath
+		})
+	}
+	// Drive the loop from areaOrder; trailing unknown areas alphabetised.
+	rendered := map[string]bool{}
+	var areas []string
+	for _, a := range areaOrder {
+		if _, ok := byArea[a]; ok {
+			areas = append(areas, a)
+			rendered[a] = true
 		}
-		summary := p.OneLiner
-		if summary == "" {
-			summary = "(no doc.go summary)"
+	}
+	var leftover []string
+	for a := range byArea {
+		if !rendered[a] {
+			leftover = append(leftover, a)
 		}
-		fmt.Fprintf(&b, "| [`%s`](https://pkg.go.dev/%s) | %s | %s |\n",
-			p.RelativePath, p.ImportPath, det, summary)
+	}
+	sort.Strings(leftover)
+	areas = append(areas, leftover...)
+
+	var b bytes.Buffer
+	b.WriteString("\n_Each area is collapsed by default — click to expand. Detection level is the canonical 5-level scale (`very-quiet` → `very-noisy`); umbrella / variable packages show as `—`._\n")
+	for _, area := range areas {
+		group := byArea[area]
+		fmt.Fprintf(&b, "\n<details><summary><strong>%s</strong> — %d package%s</summary>\n\n",
+			areaTitle(area), len(group), pluralS(len(group)))
+		b.WriteString("| Package | Detection | Summary |\n|---|---|---|\n")
+		for _, p := range group {
+			det := normalizeDetectionLevel(p.DetectionLevel)
+			summary := p.OneLiner
+			if summary == "" {
+				summary = "_(no doc.go summary)_"
+			}
+			fmt.Fprintf(&b, "| [`%s`](https://pkg.go.dev/%s) | %s | %s |\n",
+				p.RelativePath, p.ImportPath, det, summary)
+		}
+		b.WriteString("\n</details>\n")
 	}
 	return b.String()
+}
+
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 func renderMITREIndex(pkgs []PackageDoc) string {

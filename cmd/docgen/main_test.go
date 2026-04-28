@@ -13,7 +13,9 @@ func TestFirstSentence(t *testing.T) {
 		"Package amsi patches AmsiScanBuffer.":      "patches AmsiScanBuffer",
 		"Package x y. z.":                           "y",
 		"some prose without Package prefix.":        "some prose without Package prefix",
-		"Package no period":                         "",
+		// No sentence-ending period — first-paragraph fallback returns the
+		// remainder after stripping "Package <name> ".
+		"Package no period":                         "period",
 		"Package cert generates self-signed X.509 certificates.": "generates self-signed X.509 certificates",
 		"Package x version 1.2.3.4 spans dots.":     "version 1.2.3.4 spans dots",
 	}
@@ -97,8 +99,11 @@ func TestFilterPublic(t *testing.T) {
 		{RelativePath: "cleanup/ads"},
 		{RelativePath: "internal/krb5/types"},
 		{RelativePath: "scripts/x64dbg-harness/inject"},
+		{RelativePath: "cmd/rshell"},
+		{RelativePath: "."},
 		{RelativePath: "pe/masquerade/preset/cmd"},
 		{RelativePath: "pe/masquerade/internal/gen"},
+		{RelativePath: "testutil"},
 		{RelativePath: "testutil/clrhost"},
 		{RelativePath: "evasion/amsi"},
 	}
@@ -110,5 +115,102 @@ func TestFilterPublic(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("filterPublic = %v, want %v", got, want)
+	}
+}
+
+func TestCollapseWhitespace(t *testing.T) {
+	cases := map[string]string{
+		"":                                "",
+		"   \n\n  ":                       "",
+		"a b c":                           "a b c",
+		"a   b\n c":                       "a b c",
+		"line one\nline two\n\tline three": "line one line two line three",
+		"  trim  edges  ":                 "trim edges",
+	}
+	for in, want := range cases {
+		if got := collapseWhitespace(in); got != want {
+			t.Errorf("collapseWhitespace(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestFirstSentence_CollapsesNewlines(t *testing.T) {
+	// Reproduces the prior bug: word-wrapped doc.go comments produced
+	// summaries with embedded newlines that broke markdown table cells.
+	in := "Package x provides a long\n description that wraps\n  across lines. More."
+	want := "provides a long description that wraps across lines"
+	if got := firstSentence(in); got != want {
+		t.Errorf("firstSentence wrapped: got %q, want %q", got, want)
+	}
+}
+
+func TestFirstSentence_LeadInColon(t *testing.T) {
+	// Reproduces the pe/strip bug: doc.go intro that ends with ':' and
+	// is followed by a bullet list previously bled into the summary.
+	// Now the first-paragraph cap stops the cut before the bullets.
+	in := `Package strip sanitises Go-built PE binaries by removing
+toolchain artefacts that fingerprint the producer:
+
+  - The Go pclntab (Go 1.16+ magic bytes) — wiped, breaking
+    redress, GoReSym, and IDA's "go_parser" plugin.`
+	want := "sanitises Go-built PE binaries by removing toolchain artefacts that fingerprint the producer"
+	if got := firstSentence(in); got != want {
+		t.Errorf("firstSentence lead-in colon: got %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeDetectionLevel(t *testing.T) {
+	cases := map[string]string{
+		"":           "—",
+		"very-quiet": "very-quiet",
+		"quiet":      "quiet",
+		"moderate":   "moderate",
+		"noisy":      "noisy",
+		"very-noisy": "very-noisy",
+		"Quiet":      "quiet",  // case-insensitive
+		"NOISY.":     "noisy",  // trailing punctuation tolerated
+		"Varies":     "—",      // legacy non-canonical → dash
+		"per":        "—",      // umbrella packages
+		"Low":        "—",      // pre-refactor wording
+	}
+	for in, want := range cases {
+		if got := normalizeDetectionLevel(in); got != want {
+			t.Errorf("normalizeDetectionLevel(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestAreaOf(t *testing.T) {
+	cases := map[string]string{
+		"crypto":            "_layer-0",
+		"encode":            "_layer-0",
+		"hash":              "_layer-0",
+		"random":            "_layer-0",
+		"useragent":         "_layer-0",
+		"ui":                "_utility",
+		"inject":            "inject",
+		"c2/shell":          "c2",
+		"evasion/amsi":      "evasion",
+		"win/api":           "win",
+		"kernel/driver":     "kernel",
+		"recon/sandbox":     "recon",
+		"process/tamper/fakecmd": "process",
+	}
+	for in, want := range cases {
+		if got := areaOf(in); got != want {
+			t.Errorf("areaOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestPluralS(t *testing.T) {
+	if got := pluralS(0); got != "s" {
+		t.Errorf("pluralS(0) = %q", got)
+	}
+	if got := pluralS(1); got != "" {
+		t.Errorf("pluralS(1) = %q", got)
+	}
+	if got := pluralS(2); got != "s" {
+		t.Errorf("pluralS(2) = %q", got)
 	}
 }
