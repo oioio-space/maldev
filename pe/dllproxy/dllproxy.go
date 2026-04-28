@@ -166,7 +166,7 @@ func assembleWithPayload(targetName string, sortedExports []string, opts Options
 	importPart, irng := buildImportData(opts.PayloadDLL, rdataVA+exportSize)
 	rdata := append(exportPart, importPart...)
 
-	textBytes := buildDllMainStub(irng.payloadStringRVA, irng.iatEntryRVA, textVA)
+	textBytes := buildDllMainStub(irng.payloadStringRVA, irng.iatRVA, textVA)
 
 	var dataDirs [16]pe.DataDirectory
 	dataDirs[pe.IMAGE_DIRECTORY_ENTRY_EXPORT] = pe.DataDirectory{
@@ -237,10 +237,10 @@ func buildExportData(targetName string, sortedExports []string, scheme PathSchem
 	n := uint32(len(sortedExports))
 	const exportDirSz = 40
 
-	addrFuncsOffset := uint32(exportDirSz)              // immediately after the directory struct
-	addrNamesOffset := addrFuncsOffset + 4*n            // uint32 per function
-	addrOrdsOffset := addrNamesOffset + 4*n             // uint32 per name
-	stringsOffset := addrOrdsOffset + 2*n               // uint16 per ordinal
+	addrFuncsOffset := uint32(exportDirSz)   // immediately after the directory struct
+	addrNamesOffset := addrFuncsOffset + 4*n // uint32 per function
+	addrOrdsOffset := addrNamesOffset + 4*n  // uint32 per name
+	stringsOffset := addrOrdsOffset + 2*n    // uint16 per ordinal
 
 	// Strings table layout (concatenated, NUL-terminated):
 	//   1. DLL name ("<targetName>\0")
@@ -274,17 +274,17 @@ func buildExportData(targetName string, sortedExports []string, scheme PathSchem
 	out := make([]byte, stringsOffset)
 
 	// IMAGE_EXPORT_DIRECTORY
-	binary.LittleEndian.PutUint32(out[0:], 0)                                // Characteristics
-	binary.LittleEndian.PutUint32(out[4:], 0)                                // TimeDateStamp
-	binary.LittleEndian.PutUint16(out[8:], 0)                                // MajorVersion
-	binary.LittleEndian.PutUint16(out[10:], 0)                               // MinorVersion
-	binary.LittleEndian.PutUint32(out[12:], dllNameRVA)                      // Name (RVA to dll name string)
-	binary.LittleEndian.PutUint32(out[16:], 1)                               // Base (ordinal 1 .. N)
-	binary.LittleEndian.PutUint32(out[20:], n)                               // NumberOfFunctions
-	binary.LittleEndian.PutUint32(out[24:], n)                               // NumberOfNames
-	binary.LittleEndian.PutUint32(out[28:], sectionVA+addrFuncsOffset)       // AddressOfFunctions
-	binary.LittleEndian.PutUint32(out[32:], sectionVA+addrNamesOffset)       // AddressOfNames
-	binary.LittleEndian.PutUint32(out[36:], sectionVA+addrOrdsOffset)        // AddressOfNameOrdinals
+	binary.LittleEndian.PutUint32(out[0:], 0)                          // Characteristics
+	binary.LittleEndian.PutUint32(out[4:], 0)                          // TimeDateStamp
+	binary.LittleEndian.PutUint16(out[8:], 0)                          // MajorVersion
+	binary.LittleEndian.PutUint16(out[10:], 0)                         // MinorVersion
+	binary.LittleEndian.PutUint32(out[12:], dllNameRVA)                // Name (RVA to dll name string)
+	binary.LittleEndian.PutUint32(out[16:], 1)                         // Base (ordinal 1 .. N)
+	binary.LittleEndian.PutUint32(out[20:], n)                         // NumberOfFunctions
+	binary.LittleEndian.PutUint32(out[24:], n)                         // NumberOfNames
+	binary.LittleEndian.PutUint32(out[28:], sectionVA+addrFuncsOffset) // AddressOfFunctions
+	binary.LittleEndian.PutUint32(out[32:], sectionVA+addrNamesOffset) // AddressOfNames
+	binary.LittleEndian.PutUint32(out[36:], sectionVA+addrOrdsOffset)  // AddressOfNameOrdinals
 
 	// AddressOfFunctions: forwarder RVAs (forwarder iff RVA falls inside
 	// the export directory data range, which we ensure by choosing the
@@ -434,13 +434,14 @@ func alignUp(n, align uint32) uint32 {
 
 // importLayout records the in-image RVAs the DllMain stub needs to
 // know about (IAT slot for LoadLibraryA, payload-name string) and the
-// import-directory range the loader walks.
+// import-directory range the loader walks. Phase 2 imports a single
+// function, so the stub's IAT-slot RVA equals the IAT-table RVA — no
+// separate field for the per-entry slot.
 type importLayout struct {
 	descriptorRVA    uint32
 	descriptorSize   uint32
 	iatRVA           uint32
 	iatSize          uint32
-	iatEntryRVA      uint32
 	payloadStringRVA uint32
 }
 
@@ -483,13 +484,15 @@ func buildImportData(payload string, baseRVA uint32) ([]byte, importLayout) {
 	out := make([]byte, totalSize)
 
 	// IMAGE_IMPORT_DESCRIPTOR — kernel32 entry.
-	binary.LittleEndian.PutUint32(out[0:], baseRVA+iltOffset)        // OriginalFirstThunk → ILT
-	binary.LittleEndian.PutUint32(out[4:], 0)                        // TimeDateStamp
-	binary.LittleEndian.PutUint32(out[8:], 0)                        // ForwarderChain
+	binary.LittleEndian.PutUint32(out[0:], baseRVA+iltOffset)          // OriginalFirstThunk → ILT
+	binary.LittleEndian.PutUint32(out[4:], 0)                          // TimeDateStamp
+	binary.LittleEndian.PutUint32(out[8:], 0)                          // ForwarderChain
 	binary.LittleEndian.PutUint32(out[12:], baseRVA+uint32(dllOffset)) // Name → "kernel32.dll"
-	binary.LittleEndian.PutUint32(out[16:], baseRVA+iatOffset)       // FirstThunk → IAT
+	binary.LittleEndian.PutUint32(out[16:], baseRVA+iatOffset)         // FirstThunk → IAT
 
-	// Trailing 20 zero bytes from make() act as the null IID terminator.
+	// PE spec requires the IMAGE_IMPORT_DESCRIPTOR array to end with a
+	// zeroed entry; we leave the trailing 20 bytes as the zero-init from
+	// make() rather than write 20 explicit zeros.
 
 	// ILT entry: low 31 bits = RVA to hint/name, high bit clear = "by name".
 	binary.LittleEndian.PutUint64(out[iltOffset:], uint64(baseRVA+hintOffset))
@@ -508,7 +511,6 @@ func buildImportData(payload string, baseRVA uint32) ([]byte, importLayout) {
 		descriptorSize:   iidArrayLen,
 		iatRVA:           baseRVA + iatOffset,
 		iatSize:          iatSize,
-		iatEntryRVA:      baseRVA + iatOffset, // single import — slot is at iatRVA
 		payloadStringRVA: baseRVA + payloadOffset,
 	}
 }
