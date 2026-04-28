@@ -90,17 +90,42 @@ func main() {
 	}
 }
 
-// loadPackages runs `go list ./...` and parses each importable package's
-// doc.go (or first file with a package comment) for the structured fields.
+// loadPackages runs `go list ./...` under both GOOS=linux and GOOS=windows
+// and parses each importable package's doc.go (or first file with a package
+// comment) for the structured fields. Running under both GOOSes is required
+// because OS-only packages (`//go:build windows` or `//go:build linux`)
+// would otherwise be invisible to whichever listing matches the host —
+// dropping their MITRE / detection-level rows from the regenerated indices.
 func loadPackages() ([]PackageDoc, error) {
 	// `-e` so packages with stale imports (e.g. some scripts/x64dbg-harness
 	// entries) don't abort the whole listing.
-	out, err := exec.Command("go", "list", "-e", "-f", "{{.ImportPath}}\t{{.Dir}}", "./...").Output()
+	listFor := func(goos string) ([]string, error) {
+		cmd := exec.Command("go", "list", "-e", "-f", "{{.ImportPath}}\t{{.Dir}}", "./...")
+		cmd.Env = append(os.Environ(), "GOOS="+goos)
+		out, err := cmd.Output()
+		if err != nil {
+			return nil, fmt.Errorf("go list (GOOS=%s): %w", goos, err)
+		}
+		return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
+	}
+	linuxLines, err := listFor("linux")
 	if err != nil {
-		return nil, fmt.Errorf("go list: %w", err)
+		return nil, err
+	}
+	windowsLines, err := listFor("windows")
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var lines []string
+	for _, l := range append(linuxLines, windowsLines...) {
+		if !seen[l] {
+			seen[l] = true
+			lines = append(lines, l)
+		}
 	}
 	var pkgs []PackageDoc
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, line := range lines {
 		fields := strings.Split(line, "\t")
 		if len(fields) != 2 {
 			continue
