@@ -17,6 +17,11 @@ reflects_commit: master
 
 Pure-Go emitter that produces a valid Windows DLL forwarding every export to a legitimate target via the GLOBALROOT absolute-path trick. No MSVC, no MinGW, no toolchain — `[]byte` in, `[]byte` out. Pair with `recon/dllhijack` for end-to-end discovery + payload-write hijack chains, runnable from any host.
 
+Two emission modes:
+
+- **Forwarder-only** (`Options.PayloadDLL == ""`): single `.rdata` section, no DllMain. Invisible at runtime once loaded; the real target executes as if loaded directly.
+- **+ Payload load** (`Options.PayloadDLL = "evil.dll"`): adds a `.text` section with a 32-byte x64 stub that `LoadLibraryA(payload)` on `DLL_PROCESS_ATTACH`, plus an import directory referencing `kernel32!LoadLibraryA`.
+
 ---
 
 ## Primer
@@ -42,7 +47,9 @@ flowchart LR
 
 ## How It Works
 
-The emitter produces a minimal PE32+ image with a single `.rdata` section. No `.text`, no `.idata`, `AddressOfEntryPoint = 0` — Windows accepts this layout (a DLL with no entry point loads silently without invoking DllMain, per the PE spec).
+The forwarder-only mode produces a minimal PE32+ image with a single `.rdata` section. No `.text`, no `.idata`, `AddressOfEntryPoint = 0` — Windows accepts this layout (a DLL with no entry point loads silently without invoking DllMain, per the PE spec).
+
+The payload-load mode adds a `.text` section with the DllMain stub, an import directory in `.rdata` referencing `kernel32!LoadLibraryA`, and the payload-name string the stub feeds to `LoadLibraryA`.
 
 ### File layout
 
@@ -101,7 +108,7 @@ func (p PathScheme) String() string
 type Options struct {
     Machine    Machine    // zero → MachineAMD64
     PathScheme PathScheme // zero → PathSchemeGlobalRoot
-    PayloadDLL string     // Phase 2 only — currently rejected
+    PayloadDLL string     // when set, embed a DllMain that LoadLibraryA's it
 }
 
 func Generate(targetName string, exports []string, opts Options) ([]byte, error)
@@ -111,10 +118,9 @@ Sentinel errors (use `errors.Is`):
 
 ```go
 var (
-    ErrEmptyExports       // no exports supplied
-    ErrEmptyTargetName    // blank target name
-    ErrI386NotSupported   // Phase 3
-    ErrPayloadUnsupported // Phase 2
+    ErrEmptyExports     // no exports supplied
+    ErrEmptyTargetName  // blank target name
+    ErrI386NotSupported // Phase 3
 )
 ```
 
@@ -155,6 +161,32 @@ for _, opp := range opps {
 }
 ```
 
+### Advanced — DllMain payload load
+
+```go
+proxy, err := dllproxy.Generate(
+    target,
+    exports,
+    dllproxy.Options{PayloadDLL: "implant.dll"},
+)
+```
+
+The proxy now contains a tiny x64 entry point that runs once on `DLL_PROCESS_ATTACH`:
+
+```text
+cmp edx, 1                       ; fdwReason == DLL_PROCESS_ATTACH ?
+jne ret_true
+sub rsp, 28h                     ; Win64 shadow space + 16-byte align
+lea rcx, [rip+payload_string]    ; LPCSTR lpLibFileName
+call qword ptr [rip+iat_loadlibrarya]
+add rsp, 28h
+ret_true:
+mov eax, 1
+ret
+```
+
+The Windows loader resolves the IAT slot for `kernel32!LoadLibraryA` before our entry point runs, so the indirect call lands directly in `kernel32`. Failure of `LoadLibraryA` is silent — the proxy still returns TRUE, the legitimate forwarders still work, the only signal is the absence of the payload.
+
 ### Advanced — alternate path scheme
 
 `PathSchemeSystem32` produces shorter, more readable forwarder strings but **recurses into self if deployed in System32**. Safe only for hijack opportunities outside System32 (almost all real ones).
@@ -191,7 +223,6 @@ proxy, err := dllproxy.Generate(
 
 ## Limitations
 
-- **Phase 1**: forwarder-only. No DllMain payload — useful for stealthy persistence but cannot trigger arbitrary code on its own. Phase 2 will add `Options.PayloadDLL` for `LoadLibraryA` on `DLL_PROCESS_ATTACH`.
 - **AMD64 only**. 32-bit targets need a different optional-header size (224 vs 240) + `PE32` magic. Tracked as Phase 3.
 - **Named exports only**. Ordinal-only and COM-private exports (`DllRegisterServer`, `DllGetClassObject`) are skipped — Phase 3 work.
 - **No CheckSum / no DOS stub**. Windows tolerates both; signed DLLs would need a recomputed checksum, which is out of scope (use `pe/cert` if signing is in play).

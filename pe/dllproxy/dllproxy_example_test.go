@@ -24,6 +24,23 @@ func ExampleGenerate() {
 	fmt.Printf("emitted %d bytes\n", len(out))
 }
 
+// Generate_payload: Options.PayloadDLL adds a 32-byte x64 DllMain that
+// LoadLibraryA's the supplied filename on DLL_PROCESS_ATTACH. The
+// loader resolves the kernel32!LoadLibraryA IAT slot before the stub
+// runs, so no manual import resolution is needed.
+func ExampleGenerate_payload() {
+	out, err := dllproxy.Generate(
+		"version.dll",
+		[]string{"GetFileVersionInfoSizeA"},
+		dllproxy.Options{PayloadDLL: "implant.dll"},
+	)
+	if err != nil {
+		fmt.Println("generate:", err)
+		return
+	}
+	fmt.Printf("emitted %d bytes (forwarder + payload-loader)\n", len(out))
+}
+
 // Generate_pathScheme: PathSchemeSystem32 swaps the GLOBALROOT prefix
 // for a plain `C:\Windows\System32\…` path. Use only for hijack
 // opportunities outside System32 — recurses into self otherwise.

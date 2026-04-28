@@ -11,10 +11,15 @@
 // the loader resolves the forward — the canonical "perfect proxy"
 // trick from mrexodia/perfect-dll-proxy.
 //
-// Phase 1 emits forwarders only, no DllMain — the proxy is invisible
-// at runtime once loaded; the real target executes as if loaded
-// directly. Phase 2 will add an optional [Options.PayloadDLL] field
-// that embeds a `LoadLibraryA(payload)` call in DllMain.
+// With [Options.PayloadDLL] empty (the default), the emitter produces
+// a forwarder-only PE — no DllMain, no imports, invisible at runtime
+// once loaded; the real target executes as if loaded directly.
+//
+// With [Options.PayloadDLL] set, the emitter additionally embeds a
+// 32-byte x64 DllMain stub plus an import directory referencing
+// kernel32!LoadLibraryA. On DLL_PROCESS_ATTACH the stub calls
+// `LoadLibraryA(payload)` and returns TRUE — the loader pulls the
+// extra DLL into the victim process before user code resumes.
 //
 // # Composition
 //

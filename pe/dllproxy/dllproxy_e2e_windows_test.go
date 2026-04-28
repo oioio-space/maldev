@@ -69,3 +69,54 @@ func TestE2E_VersionDllForwarder(t *testing.T) {
 	assert.Equal(t, realAddr, addr,
 		"forwarder did not resolve to the real System32 export")
 }
+
+// TestE2E_Phase2_PayloadLoaded is the Phase 2 proof: emit a proxy whose
+// DllMain LoadLibraryA's a sentinel system DLL, LoadLibrary the proxy,
+// then assert the payload was actually loaded into the test process.
+//
+// Sentinel choice: `winmm.dll` — present in every Windows since XP, not
+// pulled in by the Go test runner's default imports, and side-effect-
+// free to load. Before the test runs we sanity-check it is not already
+// in the address space; after the proxy load we expect a non-NULL
+// module handle.
+func TestE2E_Phase2_PayloadLoaded(t *testing.T) {
+	const (
+		target  = "version.dll"
+		payload = "winmm.dll"
+	)
+
+	if isModuleLoaded(payload) {
+		t.Skipf("%s already loaded — cannot prove Phase 2 caused the load", payload)
+	}
+
+	system32 := filepath.Join(os.Getenv("SystemRoot"), "System32", target)
+	f, err := parse.Open(system32)
+	require.NoError(t, err)
+	defer f.Close()
+	exports, err := f.Exports()
+	require.NoError(t, err)
+
+	proxy, err := dllproxy.Generate(target, exports, dllproxy.Options{PayloadDLL: payload})
+	require.NoError(t, err)
+
+	tmp := t.TempDir()
+	proxyPath := filepath.Join(tmp, target)
+	require.NoError(t, os.WriteFile(proxyPath, proxy, 0o644))
+
+	mod, err := windows.LoadLibrary(proxyPath)
+	require.NoError(t, err, "Windows loader rejected the Phase 2 PE")
+	defer windows.FreeLibrary(mod)
+
+	require.True(t, isModuleLoaded(payload),
+		"GetModuleHandle(%q) returned NULL — payload was not loaded by DllMain", payload)
+}
+
+// isModuleLoaded reports whether `name` is currently in the test
+// process's module list, without taking a reference (FLAGS=0). Wraps
+// kernel32!GetModuleHandleExW because x/sys/windows in our pinned Go
+// 1.21 baseline doesn't ship a string-flavoured GetModuleHandle.
+func isModuleLoaded(name string) bool {
+	var h windows.Handle
+	err := windows.GetModuleHandleEx(0, windows.StringToUTF16Ptr(name), &h)
+	return err == nil && h != 0
+}
