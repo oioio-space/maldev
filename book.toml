@@ -1,0 +1,31 @@
+[book]
+title = "maldev"
+description = "Authorized offensive security research library — modular Go techniques for malware development, EDR evasion, and red-team operations."
+authors = ["oioio-space"]
+language = "en"
+multilingual = false
+src = "docs"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/oioio-space/maldev"
+git-repository-icon = "fa-github"
+edit-url-template = "https://github.com/oioio-space/maldev/edit/master/{path}"
+no-section-label = true
+mathjax-support = true
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.search]
+enable = true
+limit-results = 30
+heading-split-level = 3
+
+[output.html.playground]
+runnable = false
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"

@@ -1,0 +1,74 @@
+name: mdbook
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "docs/**"
+      - "book.toml"
+      - ".github/workflows/mdbook.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build mdBook
+    runs-on: ubuntu-latest
+    env:
+      MDBOOK_VERSION: "0.4.40"
+      MDBOOK_MERMAID_VERSION: "0.14.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mdBook + mdbook-mermaid
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin"
+          curl -fsSL "https://github.com/badboy/mdbook-mermaid/releases/download/v${MDBOOK_MERMAID_VERSION}/mdbook-mermaid-v${MDBOOK_MERMAID_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Strip YAML front-matter and rewrite repo-root links
+        # 1. mdBook renders front-matter blocks as visible "---" text — strip them.
+        # 2. ../README.md (and deeper variants) land outside the book root once
+        #    deployed to gh-pages; rewrite to the absolute GitHub URL so they
+        #    resolve.
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' f; do
+            if head -1 "$f" | grep -q '^---$'; then
+              awk 'BEGIN{seen=0} /^---$/ {seen++; if (seen<=2) next} seen>=2 {print}' "$f" > "$f.tmp"
+              mv "$f.tmp" "$f"
+            fi
+            sed -i -E 's|\(\.\./(\.\./)*README\.md\)|(https://github.com/oioio-space/maldev)|g' "$f"
+          done < <(find docs -name "*.md" -print0)
+
+      - name: Install mdbook-mermaid assets
+        run: mdbook-mermaid install .
+
+      - name: Build book
+        run: mdbook build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: book
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
