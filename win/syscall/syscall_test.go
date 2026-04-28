@@ -57,6 +57,110 @@ func TestMethodString(t *testing.T) {
 	assert.Equal(t, "NativeAPI", MethodNativeAPI.String())
 	assert.Equal(t, "Direct", MethodDirect.String())
 	assert.Equal(t, "Indirect", MethodIndirect.String())
+	assert.Equal(t, "IndirectAsm", MethodIndirectAsm.String())
+}
+
+// TestMethodIndirectAsm exercises the Go-asm indirect syscall stub end-to-end
+// by invoking NtClose with a bogus handle. The kernel must return a non-zero
+// NTSTATUS (STATUS_INVALID_HANDLE = 0xC0000008 typically) — proving the call
+// reached ring 0 and came back through our gadget without crashing.
+func TestMethodIndirectAsm(t *testing.T) {
+	c := New(MethodIndirectAsm, Chain(NewHashGate(), NewHellsGate()))
+	r, err := c.Call("NtClose", 0xDEAD)
+	require.Error(t, err, "NtClose(0xDEAD) should fail")
+	assert.NotZero(t, r, "NTSTATUS should be non-zero for invalid handle")
+}
+
+// TestMethodIndirectAsm_CallByHash exercises the CallByHash path through the
+// asm stub — the binary contains only the uint32 hash, no "NtClose" string.
+func TestMethodIndirectAsm_CallByHash(t *testing.T) {
+	c := New(MethodIndirectAsm, nil)
+	r, err := c.CallByHash(ror13str("NtClose"), 0xDEAD)
+	require.Error(t, err)
+	assert.NotZero(t, r)
+}
+
+// TestPickSyscallGadget_Pool verifies the gadget pool captures more than one
+// `syscall;ret` triple in ntdll's .text and that successive picks vary
+// (otherwise the random selection is broken).
+func TestPickSyscallGadget_Pool(t *testing.T) {
+	first, err := pickSyscallGadget()
+	require.NoError(t, err)
+	require.NotZero(t, first)
+
+	require.Greater(t, len(gadgetPool), 1, "expected multiple gadgets in ntdll .text — pool diversity is the whole point")
+
+	// 16 picks against a pool > 1 should hit at least 2 distinct addresses
+	// with overwhelming probability (P(all same) = 1/N^15 → effectively 0).
+	seen := map[uintptr]struct{}{first: {}}
+	for i := 0; i < 16; i++ {
+		g, err := pickSyscallGadget()
+		require.NoError(t, err)
+		seen[g] = struct{}{}
+	}
+	assert.Greater(t, len(seen), 1, "16 random picks all returned the same gadget — randomisation broken")
+}
+
+// TestNewHashGateWith_CustomHash plugs a non-ROR13 hash (FNV-1a 32-bit) into
+// the resolver and asserts the SSN returned matches what HellsGate produces.
+// This is the swappable-hash contract: any deterministic [string]→uint32
+// function works, as long as both ends agree.
+func TestNewHashGateWith_CustomHash(t *testing.T) {
+	fnv1a := func(s string) uint32 {
+		const offset, prime = uint32(2166136261), uint32(16777619)
+		h := offset
+		for i := 0; i < len(s); i++ {
+			h ^= uint32(s[i])
+			h *= prime
+		}
+		return h
+	}
+
+	r := NewHashGateWith(fnv1a)
+	ssn, err := r.Resolve("NtClose")
+	require.NoError(t, err)
+	assert.Greater(t, ssn, uint16(0))
+
+	// Must agree with the canonical Hell's Gate SSN.
+	hg := NewHellsGate()
+	hellSSN, err := hg.Resolve("NtClose")
+	require.NoError(t, err)
+	assert.Equal(t, hellSSN, ssn, "custom-hash HashGate must match HellsGate on the resolved SSN")
+}
+
+// TestCallerWithHashFunc exercises CallByHash when both ends use a custom
+// hash function (here: FNV-1a). If the resolver inside CallByHash did not
+// honour Caller.hashFunc, the export-table walk would fail.
+func TestCallerWithHashFunc(t *testing.T) {
+	fnv1a := func(s string) uint32 {
+		const offset, prime = uint32(2166136261), uint32(16777619)
+		h := offset
+		for i := 0; i < len(s); i++ {
+			h ^= uint32(s[i])
+			h *= prime
+		}
+		return h
+	}
+
+	c := New(MethodIndirectAsm, nil).WithHashFunc(fnv1a)
+	r, err := c.CallByHash(fnv1a("NtClose"), 0xDEAD)
+	require.Error(t, err, "NtClose(0xDEAD) should fail")
+	assert.NotZero(t, r)
+}
+
+// TestHashROR13_MatchesPackageDefault verifies the exported HashROR13 var is
+// the same algorithm the package uses by default — feeding it through the
+// custom-hash path must yield identical results to the fast path.
+func TestHashROR13_MatchesPackageDefault(t *testing.T) {
+	r := NewHashGateWith(HashROR13)
+	ssn, err := r.Resolve("NtClose")
+	require.NoError(t, err)
+
+	def := NewHashGate()
+	defSSN, err := def.Resolve("NtClose")
+	require.NoError(t, err)
+
+	assert.Equal(t, defSSN, ssn)
 }
 
 func TestHashGateResolver(t *testing.T) {

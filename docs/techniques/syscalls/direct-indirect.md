@@ -33,7 +33,7 @@ ret
 
 The SSN is an index into the kernel's System Service Descriptor Table (SSDT). EDR products hook these functions by overwriting the prologue bytes with a JMP to their monitoring code.
 
-The four methods in `win/syscall` differ in how they reach the `syscall` instruction:
+The five methods in `win/syscall` differ in how they reach the `syscall` instruction:
 
 ```mermaid
 flowchart LR
@@ -78,12 +78,23 @@ graph TD
     style INDIRECT fill:#94a,color:#fff
 ```
 
-| Method | Constant | Bypass kernel32 | Bypass ntdll | Survive memory scan | Survive stack analysis |
-|--------|----------|-----------------|-------------|--------------------|-----------------------|
-| WinAPI | `MethodWinAPI` | No | No | N/A | N/A |
-| NativeAPI | `MethodNativeAPI` | Yes | No | N/A | N/A |
-| Direct | `MethodDirect` | Yes | Yes | No | No |
-| Indirect | `MethodIndirect` | Yes | Yes | Yes | Yes |
+| Method | Constant | Bypass kernel32 | Bypass ntdll | Survive memory scan | Survive stack analysis | Per-call VirtualProtect |
+|--------|----------|-----------------|-------------|--------------------|-----------------------|-------------------------|
+| WinAPI | `MethodWinAPI` | No | No | N/A | N/A | No |
+| NativeAPI | `MethodNativeAPI` | Yes | No | N/A | N/A | No |
+| Direct | `MethodDirect` | Yes | Yes | No | No | Yes (RW↔RX) |
+| Indirect | `MethodIndirect` | Yes | Yes | Yes | Yes | Yes (RW↔RX) |
+| IndirectAsm | `MethodIndirectAsm` | Yes | Yes | **Yes** | **Yes** | **No** |
+
+### MethodIndirectAsm vs MethodIndirect
+
+Both end the same way — `syscall` executes inside ntdll's `.text` from a randomly picked `syscall;ret` gadget — but the path to the gadget is different.
+
+`MethodIndirect` builds a 21-byte stub (`mov r10,rcx; mov eax,SSN; mov r11,gadget; jmp r11`) into a heap page, flips the page `RW→RX→RW` around `SyscallN`, and returns. That heap page is writable code in the implant's address space, and the protection cycle calls `VirtualProtect` twice per syscall — both are classic EDR signals.
+
+`MethodIndirectAsm` ships the same logic as Go assembly inside the binary's `.text` section. SSN and gadget address are passed as register arguments — no patching, no writable code page, no `VirtualProtect`. The trade-off is that the stub lives at a fixed RVA inside the implant binary, so a YARA rule could match its bytes; mitigate by morphing the function or stripping symbols.
+
+The gadget address is drawn at random per call from the full pool of `0F 05 C3` triples in ntdll (`pickSyscallGadget`), so successive syscalls from the same caller don't all return to the same RVA.
 
 ---
 
@@ -134,6 +145,35 @@ defer caller.Close()
 
 ret, err := caller.Call("NtCreateThreadEx", /* args... */)
 ```
+
+### IndirectAsm + custom hash function
+
+```go
+import wsyscall "github.com/oioio-space/maldev/win/syscall"
+
+// Build-time hash function — every binary built with a different `key`
+// produces different funcHash constants, so static signatures on the
+// well-known ROR13 values stop matching.
+fnv1a := func(s string) uint32 {
+    h := uint32(2166136261)
+    for i := 0; i < len(s); i++ {
+        h ^= uint32(s[i])
+        h *= 16777619
+    }
+    return h
+}
+
+caller := wsyscall.New(
+    wsyscall.MethodIndirectAsm,
+    wsyscall.NewHashGateWith(fnv1a),
+).WithHashFunc(fnv1a)
+
+// fnv1a("NtAllocateVirtualMemory") is computed at build-time by the
+// optimizer when fed a string constant — no plaintext name in .rdata.
+ret, err := caller.CallByHash(fnv1a("NtAllocateVirtualMemory"), /* args */)
+```
+
+Both ends MUST agree: `NewHashGateWith(fn)` for the resolver to walk the export table, `WithHashFunc(fn)` for `CallByHash` to do the same lookup. Pass `nil` (or call `NewHashGate()`) for the default ROR13 path.
 
 ### String-Free: CallByHash
 
@@ -234,10 +274,11 @@ func main() {
 type Method int
 
 const (
-    MethodWinAPI    Method = iota // Standard kernel32/ntdll (hookable)
-    MethodNativeAPI               // ntdll NtXxx (bypass kernel32 hooks)
-    MethodDirect                  // Private syscall stub (bypass all userland)
-    MethodIndirect                // JMP to ntdll gadget (most stealthy)
+    MethodWinAPI      Method = iota // Standard kernel32/ntdll (hookable)
+    MethodNativeAPI                 // ntdll NtXxx (bypass kernel32 hooks)
+    MethodDirect                    // Private syscall stub (bypass all userland)
+    MethodIndirect                  // Heap stub jumps into ntdll gadget
+    MethodIndirectAsm               // Go-asm stub jumps into ntdll gadget — no heap stub, no VirtualProtect
 )
 ```
 
@@ -245,6 +286,7 @@ const (
 
 ```go
 func New(method Method, r SSNResolver) *Caller
+func (c *Caller) WithHashFunc(fn HashFunc) *Caller
 func (c *Caller) Call(ntFuncName string, args ...uintptr) (uintptr, error)
 func (c *Caller) CallByHash(funcHash uint32, args ...uintptr) (uintptr, error)
 func (c *Caller) Close()
@@ -261,5 +303,16 @@ func NewHellsGate() *HellsGateResolver
 func NewHalosGate() *HalosGateResolver
 func NewTartarus() *TartarusGateResolver
 func NewHashGate() *HashGateResolver
+func NewHashGateWith(fn HashFunc) *HashGateResolver
 func Chain(resolvers ...SSNResolver) *ChainResolver
 ```
+
+### Custom hashing
+
+```go
+type HashFunc func(name string) uint32
+
+func HashROR13(name string) uint32 // package default, satisfies HashFunc
+```
+
+Pass the same `HashFunc` to both `NewHashGateWith` (so the resolver hashes export-table names with it during the PEB walk) and `Caller.WithHashFunc` (so `CallByHash` uses it for its own ntdll export lookup). Build with a per-implant `fn` and the well-known ROR13 constants of NT function names stop appearing in the binary's `.rdata`.

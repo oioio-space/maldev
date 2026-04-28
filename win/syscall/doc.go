@@ -1,7 +1,7 @@
-// Package syscall provides four strategies for invoking Windows NT
+// Package syscall provides five strategies for invoking Windows NT
 // syscalls — from a hookable `kernel32` call to fully indirect SSN
-// dispatch through an in-ntdll `syscall;ret` gadget — under one
-// uniform [Caller] interface.
+// dispatch through an in-ntdll `syscall;ret` gadget (heap stub or
+// Go-assembly stub) — under one uniform [Caller] interface.
 //
 // The [Caller] type is what every downstream maldev component
 // consumes: pass a `*Caller` (or `nil` for the WinAPI default) and
@@ -19,6 +19,16 @@
 //   - [MethodIndirect] — jumps into an unmodified `syscall;ret`
 //     gadget inside the legitimate ntdll image. Defeats call-stack
 //     analysis (return address falls inside ntdll, not the implant).
+//     Heap stub is byte-patched and cycled RW↔RX per call.
+//   - [MethodIndirectAsm] — same end effect as MethodIndirect, but
+//     the SSN+gadget transition lives in a Go-assembly stub: no
+//     writable code page in the implant, no per-call VirtualProtect
+//     dance, cleaner call stack. amd64 only.
+//
+// The gadget address used by MethodIndirect / MethodIndirectAsm is
+// drawn at random from a pool of every `syscall;ret` triple in
+// ntdll's `.text` section, so successive calls do not all return to
+// the same ntdll RVA.
 //
 // # SSN resolvers
 //
@@ -30,7 +40,9 @@
 //     installs, extract the SSN from the original prologue.
 //   - [HashGateResolver] — fully string-free: resolve `Nt*`
 //     functions via [github.com/oioio-space/maldev/win/api] PEB walk
-//     + ROR13 export hash, then read the SSN.
+//     + ROR13 export hash, then read the SSN. Use [NewHashGateWith]
+//     with a custom [HashFunc] (or set one on [Caller.WithHashFunc])
+//     to defeat static fingerprinting on well-known ROR13 constants.
 //   - [ChainResolver] — try resolvers in sequence; first hit wins.
 //
 // # MITRE ATT&CK
