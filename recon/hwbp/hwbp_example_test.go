@@ -16,7 +16,7 @@ func ExampleDetect() {
 		return
 	}
 	for _, bp := range bps {
-		fmt.Printf("DR%d → %x (TID %d)\n", bp.Register, bp.Address, bp.TID)
+		fmt.Printf("DR%d → %x (TID %d)\n", bp.Register, bp.Address, bp.ThreadID)
 	}
 }
 

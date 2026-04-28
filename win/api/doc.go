@@ -1,33 +1,54 @@
 //go:build windows
 
-// Package api is the single source of truth for all Windows DLL handles,
-// procedure references, and shared structures used across the maldev library.
+// Package api is the single source of truth for Windows DLL handles,
+// procedure references, and structures shared across maldev. Also
+// implements the PEB-walk + ROR13 export-hash primitive used by every
+// downstream package that needs string-free import resolution.
 //
-// Platform: Windows
-// Detection: Low -- loading system DLLs is normal process behavior.
+// All other maldev modules import DLL handles and lazy procs from
+// here instead of declaring their own [windows.LazyDLL] instances.
+// This prevents duplicate handles, ensures every system DLL is
+// resolved through [windows.NewLazySystemDLL] (System32-only search
+// path — defeats DLL planting in CWD), and gives a single audit
+// surface for the library's import footprint.
 //
-// All other maldev modules MUST import DLL handles and procedure pointers
-// from this package instead of declaring their own LazyDLL instances.
-// This prevents duplicate handles and ensures consistent DLL search path
-// restriction via NewLazySystemDLL (which limits loading to System32).
+// Exported handles: Kernel32, Ntdll, Advapi32, User32, Shell32,
+// Userenv, Netapi32 — populated lazily on first reference, never
+// reloaded.
 //
-// Exported DLL handles: Kernel32, Ntdll, Advapi32, User32, Shell32, Userenv, Netapi32.
+// API hashing — [ResolveByHash] walks the PEB
+// `InLoadOrderModuleList` to find a loaded DLL by ROR13 hash, then
+// scans its export directory to find a function by ROR13 hash. The
+// resulting `uintptr` is the in-process address of the export, with
+// no plaintext API name in the binary. Pre-computed constants for
+// common modules and APIs (HashKernel32, HashLoadLibraryA,
+// HashNtAllocateVirtualMemory, …) ship in `resolve_windows.go`.
 //
-// # API Hashing (PEB Walk)
+// # MITRE ATT&CK
 //
-// Technique: Runtime function resolution via PEB walk and ROR13 export hashing.
-// MITRE ATT&CK: T1106 (Native API)
-// Detection: Low — PEB and export table are user-mode readable memory.
+//   - T1106 (Native API) — direct Windows API invocation, including
+//     hash-resolved imports
+//   - T1027 (Obfuscated Files or Information) — string-free import
+//     resolution via export hashing
 //
-// ResolveByHash, ModuleByHash, and ExportByHash walk the PEB's
-// InLoadOrderModuleList to find loaded DLLs by hash, then parse the PE
-// export directory to find functions by hash. No plaintext API names
-// are needed — only uint32 ROR13 hashes. Pre-computed constants are
-// provided for common modules (HashKernel32, HashNtdll) and functions
-// (HashLoadLibraryA, HashGetProcAddress, HashNtAllocateVirtualMemory, etc.).
+// # Detection level
 //
-// Example:
+// very-quiet
 //
-//	addr, err := api.ResolveByHash(api.HashKernel32, api.HashLoadLibraryA)
-//	// addr is the address of LoadLibraryA — no string "LoadLibraryA" in the binary
+// Loading System32 DLLs is normal process behaviour; PEB walk + export
+// table read are user-mode-readable memory. No syscall, no telemetry
+// trail.
+//
+// # Example
+//
+// See [ExampleResolveByHash] and [ExamplePatchProc] in api_example_test.go.
+//
+// # See also
+//
+//   - docs/techniques/syscalls/api-hashing.md
+//   - [github.com/oioio-space/maldev/win/syscall] — direct/indirect SSN syscalls layered on top
+//   - [github.com/oioio-space/maldev/win/ntapi] — typed wrappers around the resolved exports
+//
+// [github.com/oioio-space/maldev/win/syscall]: https://pkg.go.dev/github.com/oioio-space/maldev/win/syscall
+// [github.com/oioio-space/maldev/win/ntapi]: https://pkg.go.dev/github.com/oioio-space/maldev/win/ntapi
 package api

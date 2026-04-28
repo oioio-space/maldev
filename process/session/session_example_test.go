@@ -17,7 +17,7 @@ func ExampleList() {
 		return
 	}
 	for _, i := range infos {
-		fmt.Printf("session %d: %s\n", i.SessionID, i.Username)
+		fmt.Printf("session %d: %s\\%s\n", i.ID, i.Domain, i.User)
 	}
 }
 

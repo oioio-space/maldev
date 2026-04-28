@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-04-27
-reflects_commit: ad40545
+reflects_commit: 11543a1
 ---
 
 # Documentation refactor — progress tracker
@@ -61,8 +61,8 @@ Each area gets:
 | `persistence/*` | ✅ 7/7 | ✅ 6/6 + README | ✅ 6/6 | Done. doc.go aligned + 6 tech md (3 NEW: account, lnk, service · 3 rewrites: registry, startup-folder, task-scheduler) + README rewrite (Mermaid trigger→mech→compose flow + redundancy recipe + MITRE+D3FEND). Note: `persistence/account/` directory declares `package user` (Win32 API surface name). |
 | `process/*` | ✅ 7/7 | ✅ 6/6 + README | ✅ 6/6 | Done. doc.go aligned + 6 tech md (3 NEW: enum, session, herpaderping · 3 moved+rewritten from evasion/: fakecmd, hideprocess, phant0m) + new README under fresh `docs/techniques/process/` directory. evasion/README cross-refs updated to point at `../process/<name>.md`. evasion area's "cross-categorised" table now correctly delegates these 3 pages to their owner directory. |
 | `recon/*` | ✅ 9/9 | ✅ 8/8 + README | ✅ 9/9 | Done (commits f31fca1..ad40545). doc.go aligned + 9 NEW example_test.go + 8 tech md (5 ports from evasion/: anti-analysis, dll-hijack, hw-breakpoints, sandbox, timing · 3 NEW: drive, folder, network) + new README under docs/techniques/recon/. evasion/README cross-categorised table updated. |
-| `runtime/*` | ⬜ 0/2 | ⬜ 0/2 | ⬜ 0/2 | bof, clr — both have existing tech pages. |
-| `win/*` | ⬜ 0/8 | ⬜ 0/3 | ⬜ 0/8 | win/syscall + win/ntapi + win/api covered by `docs/techniques/syscalls/*`. The other 5 (domain, impersonate, privilege, token, version) lack per-package pages. |
+| `runtime/*` | ✅ 2/2 | ✅ 2/2 | ✅ 2/2 | Done (`11543a1`). bof + clr aligned to template, full Mermaid + API Reference. |
+| `win/*` | ✅ 8/8 | 🟡 4/8 | ✅ 8/8 | doc.go + example_test.go landed for all 8. Tech md: api/syscall/ntapi covered by `docs/techniques/syscalls/*`; token/impersonate/privilege covered by `docs/techniques/tokens/*`. **Missing**: dedicated pages for domain + version (host fingerprinting). |
 | `kernel/driver/*` | ⬜ 0/2 | ⬜ 0/1 | ⬜ 0/2 | Single tech page (byovd-rtcore64.md) currently under `docs/techniques/evasion/`. |
 | `privesc/*` | ⬜ 0/2 | ⬜ 0/1 | ⬜ 0/2 | Audit flagged 1 missing page (cve202430088). uac is folded into docs/privilege.md only. |
 | `ui` | ⬜ 0/1 | ⬜ 0/0 | ⬜ 0/1 | Tiny — MessageBoxW + sounds. No tech page yet. |
