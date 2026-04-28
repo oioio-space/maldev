@@ -189,6 +189,10 @@ File offset 0x200  .rdata content (variable)
 | 9 | Phase 2: DllMain payload — design notes locked | ✅ | embedded in this plan |
 | 10 | Phase 2: .text + .idata emitted, payload load verified on Win10 | ✅ | TestE2E_Phase2_PayloadLoaded PASS |
 | 11 | Phase 2 commit + push | ✅ | `bad3cc0` |
+| 12 | Phase 3a — ordinal-only exports (pe/parse.ExportEntries + dllproxy.GenerateExt + Export type) | ✅ | `2639017` |
+| 13 | Phase 3b — PE32 (i386) emission, OptionalHeader32 + 28-byte stdcall stub | ✅ | `c8736b2` |
+| 14 | Phase 3c — COM-private clarification (folded into 3a doc — MSVC `,PRIVATE` is IMPLIB-only, no PE-format counterpart) | ✅ | `2639017` |
+| 15 | Phase 3 future work — live 32-bit LoadLibrary E2E (cross-compiled GOARCH=386 harness) | ☐ | infrastructure work |
 
 ## Resuming on another machine
 
