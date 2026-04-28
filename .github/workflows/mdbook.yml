@@ -37,16 +37,20 @@ jobs:
             | tar -xz -C "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Strip YAML front-matter and rewrite links for mdBook
-        # 1. mdBook renders front-matter blocks as visible "---" text — strip them.
-        # 2. ../README.md (and deeper variants) land outside the book root once
-        #    deployed to gh-pages; rewrite to the absolute GitHub URL.
-        # 3. mdBook renames each `README.md` to `index.html` in the output but
-        #    only rewrites `.md` → `.html` in inline links. So a source link
-        #    `(foo/README.md)` becomes the broken href `foo/README.html`. Pre-
-        #    rewrite those to `(foo/index.md)` so mdBook's `.md` → `.html` pass
-        #    yields the correct `foo/index.html`. The repo-root README link
-        #    rewrite above must run FIRST (otherwise this step would touch it).
+      - name: Strip front-matter, rewrite links, rename README.md → index.md
+        # 1. mdBook renders YAML front-matter as visible "---" text — strip.
+        # 2. ../README.md (and deeper variants) land outside the gh-pages
+        #    root once deployed; rewrite to the absolute repo URL.
+        # 3. Rewrite intra-doc `(path/README.md)` references to `(path/index.md)`
+        #    — mdBook only swaps `.md` → `.html`, so without this step those
+        #    end up as broken `path/README.html` URLs (mdBook actually emits
+        #    `path/index.html` for area pages).
+        # 4. Rename the area README.md files themselves to index.md so the
+        #    SUMMARY entries (which we also rewrite) resolve to a real chapter
+        #    body. Without the rename mdBook treats them as empty draft
+        #    chapters and the area page renders blank.
+        # The repo-root rewrite (step 2) MUST run before the README → index
+        # link rewrite (step 3) to avoid double-touching it.
         run: |
           set -euo pipefail
           while IFS= read -r -d '' f; do
@@ -60,6 +64,12 @@ jobs:
             sed -i -E 's|\(README\.md\)|(index.md)|g' "$f"
             sed -i -E 's|\(README\.md#([^)]+)\)|(index.md#\1)|g' "$f"
           done < <(find docs -name "*.md" -print0)
+          # Now physically rename README.md → index.md so chapter resolution
+          # finds a non-empty body. The repo's source still ships README.md;
+          # the rename only affects the build copy in this CI job.
+          while IFS= read -r -d '' f; do
+            mv "$f" "$(dirname "$f")/index.md"
+          done < <(find docs -name 'README.md' -print0)
 
       - name: Install mdbook-mermaid assets
         run: mdbook-mermaid install .
