@@ -8,7 +8,10 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/oioio-space/maldev.svg)](https://pkg.go.dev/github.com/oioio-space/maldev)
 [![Go Report Card](https://goreportcard.com/badge/github.com/oioio-space/maldev)](https://goreportcard.com/report/github.com/oioio-space/maldev)
+[![Docs](https://img.shields.io/badge/docs-oioio--space.github.io%2Fmaldev-blue)](https://oioio-space.github.io/maldev/)
 [![License: research](https://img.shields.io/badge/license-research--only-blue)](LICENSE)
+
+📖 **Browse the full handbook online: <https://oioio-space.github.io/maldev/>**
 
 ## What is this?
 
