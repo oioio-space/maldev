@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 )
 
 const (
@@ -108,20 +109,45 @@ func loadPackages() ([]PackageDoc, error) {
 		}
 		return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
 	}
-	linuxLines, err := listFor("linux")
-	if err != nil {
-		return nil, err
+	// Run the two listings in parallel — independent invocations of `go list`
+	// share no state and roughly halve the cold-start latency of docgen.
+	type result struct {
+		lines []string
+		err   error
 	}
-	windowsLines, err := listFor("windows")
-	if err != nil {
-		return nil, err
+	results := make(map[string]result, 2)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, goos := range []string{"linux", "windows"} {
+		wg.Add(1)
+		go func(goos string) {
+			defer wg.Done()
+			lines, err := listFor(goos)
+			mu.Lock()
+			results[goos] = result{lines, err}
+			mu.Unlock()
+		}(goos)
+	}
+	wg.Wait()
+	// Tolerate partial failure — an EDR / sandboxed CI may refuse one GOOS
+	// while the other works. Only abort if both branches failed.
+	if results["linux"].err != nil && results["windows"].err != nil {
+		return nil, fmt.Errorf("both go list runs failed: linux=%v, windows=%v",
+			results["linux"].err, results["windows"].err)
+	}
+	for _, goos := range []string{"linux", "windows"} {
+		if results[goos].err != nil {
+			fmt.Fprintf(os.Stderr, "warn: go list GOOS=%s: %v (continuing with the other listing)\n", goos, results[goos].err)
+		}
 	}
 	seen := map[string]bool{}
 	var lines []string
-	for _, l := range append(linuxLines, windowsLines...) {
-		if !seen[l] {
-			seen[l] = true
-			lines = append(lines, l)
+	for _, goos := range []string{"linux", "windows"} {
+		for _, l := range results[goos].lines {
+			if !seen[l] {
+				seen[l] = true
+				lines = append(lines, l)
+			}
 		}
 	}
 	var pkgs []PackageDoc
