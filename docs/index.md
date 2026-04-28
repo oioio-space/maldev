@@ -120,7 +120,8 @@ OPSEC / MITRE / Limitations / See also).
 | [T1573](https://attack.mitre.org/techniques/T1573/) | [`c2`](../c2) · [`c2/transport`](../c2/transport) |
 | [T1573.001](https://attack.mitre.org/techniques/T1573/001/) | [`c2/cert`](../c2/cert) |
 | [T1573.002](https://attack.mitre.org/techniques/T1573/002/) | [`c2`](../c2) · [`c2/cert`](../c2/cert) · [`c2/transport`](../c2/transport) |
-| [T1574.001](https://attack.mitre.org/techniques/T1574/001/) | [`recon/dllhijack`](../recon/dllhijack) |
+| [T1574.001](https://attack.mitre.org/techniques/T1574/001/) | [`pe/dllproxy`](../pe/dllproxy) · [`recon/dllhijack`](../recon/dllhijack) |
+| [T1574.002](https://attack.mitre.org/techniques/T1574/002/) | [`pe/dllproxy`](../pe/dllproxy) |
 | [T1574.012](https://attack.mitre.org/techniques/T1574/012/) | [`evasion`](../evasion) · [`evasion/hook`](../evasion/hook) · [`evasion/hook/bridge`](../evasion/hook/bridge) · [`evasion/hook/shellcode`](../evasion/hook/shellcode) |
 | [T1620](https://attack.mitre.org/techniques/T1620/) | [`pe/srdi`](../pe/srdi) · [`runtime/bof`](../runtime/bof) · [`runtime/clr`](../runtime/clr) |
 | [T1622](https://attack.mitre.org/techniques/T1622/) | [`evasion`](../evasion) · [`recon/antidebug`](../recon/antidebug) · [`recon/hwbp`](../recon/hwbp) |
@@ -204,12 +205,13 @@ _Each area is collapsed by default — click to expand. Detection level is the c
 
 </details>
 
-<details><summary><strong>PE manipulation — `pe/*`</strong> — 8 packages</summary>
+<details><summary><strong>PE manipulation — `pe/*`</strong> — 9 packages</summary>
 
 | Package | Detection | Summary |
 |---|---|---|
 | [`pe`](https://pkg.go.dev/github.com/oioio-space/maldev/pe) | — | is the umbrella for Portable Executable analysis, manipulation, and conversion utilities |
 | [`pe/cert`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert) | quiet | manipulates the PE Authenticode security directory — read, copy, strip, and write WIN_CERTIFICATE blobs without any Windows crypto API |
+| [`pe/dllproxy`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy) | very-quiet | emits a valid Windows DLL — as raw bytes, no external toolchain — that forwards every named export back to a legitimate target DLL |
 | [`pe/imports`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports) | very-quiet | enumerates a PE's import directory — every DLL dependency and every imported function name — without invoking any Windows API |
 | [`pe/masquerade`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade) | quiet | clones a Windows PE's identity — manifest, icons, VERSIONINFO, optional Authenticode certificate — into a linkable `.syso` COFF object so a Go binary picks them up at compile time |
 | [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) | moderate | mutates UPX-packed PE headers so automatic unpackers fail to recognise the input |

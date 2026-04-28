@@ -102,6 +102,7 @@
   - [Imports enumeration](techniques/pe/imports.md)
   - [Certificate theft](techniques/pe/certificate-theft.md)
   - [PE → shellcode](techniques/pe/pe-to-shellcode.md)
+  - [DLL proxy generator](techniques/pe/dll-proxy.md)
 
 - [Persistence](techniques/persistence/README.md)
   - [Registry](techniques/persistence/registry.md)

@@ -178,14 +178,14 @@ File offset 0x200  .rdata content (variable)
 
 | # | Milestone | Status | Commit |
 |---|---|---|---|
-| 1 | Plan committed to docs/superpowers/plans/ | ☐ | — |
-| 2 | Skeleton: doc.go + dllproxy.go with stubs + Options/Machine/PathScheme types | ☐ | — |
-| 3 | Header emission: DOS + PE/COFF + Optional + section table | ☐ | — |
-| 4 | .rdata emission: export directory + forwarder strings | ☐ | — |
-| 5 | Round-trip unit test passes on host (Linux) using stdlib debug/pe | ☐ | — |
-| 6 | E2E test on Win10 VM with version.dll target | ☐ | — |
-| 7 | docgen: index.md + mitre.md regenerated; tech md created | ☐ | — |
-| 8 | Phase 1 commit + push | ☐ | — |
+| 1 | Plan committed to docs/superpowers/plans/ | ✅ | `464b9ff` |
+| 2 | Skeleton: doc.go + dllproxy.go with stubs + Options/Machine/PathScheme types | ✅ | (folded into 8) |
+| 3 | Header emission: DOS + PE/COFF + Optional + section table | ✅ | (folded into 8) |
+| 4 | .rdata emission: export directory + forwarder strings | ✅ | (folded into 8) |
+| 5 | Round-trip unit test passes on host (Linux) using stdlib debug/pe | ✅ | (folded into 8) |
+| 6 | E2E test on Win10 VM with version.dll target | ✅ | TestE2E_VersionDllForwarder PASS |
+| 7 | docgen: index.md + mitre.md regenerated; tech md created | ✅ | (folded into 8) |
+| 8 | Phase 1 commit + push | 🟡 | preparing |
 | 9 | Phase 2: DllMain payload — design notes locked | ☐ | — |
 | 10 | Phase 2: .text + .idata emitted, payload load verified on Win10 | ☐ | — |
 | 11 | Phase 2 commit + push | ☐ | — |

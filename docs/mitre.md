@@ -62,7 +62,8 @@ reflects_commit: a705c32
 | T1553.002 | Subvert Trust Controls: Code Signing | `pe/cert` | D3-SEA (Static Executable Analysis) |
 | T1562.001 | Disable or Modify Tools | `evasion/amsi`, `evasion/etw`, `evasion/unhook`, `evasion/acg`, `evasion/blockdlls`, `evasion/kcallback` (kernel callback enumeration) | D3-AIPA (Application Integrity Analysis) |
 | T1562.002 | Disable Windows Event Logging | `process/tamper/phant0m` | D3-EAL (Execution Activity Logging) |
-| T1574.001 | Hijack Execution Flow: DLL Search Order Hijacking | `recon/dllhijack` (discovery) | D3-PFV (Process File Verification) |
+| T1574.001 | Hijack Execution Flow: DLL Search Order Hijacking | `recon/dllhijack` (discovery) · `pe/dllproxy` (payload generator) | D3-PFV (Process File Verification) |
+| T1574.002 | Hijack Execution Flow: DLL Side-Loading | `pe/dllproxy` (forwarder DLL emitter) | D3-PFV (Process File Verification) |
 | T1574.012 | Hijack Execution Flow: Inline Hooking | `evasion/hook` | D3-AIPA (Application Integrity Analysis) |
 | T1564 | Hide Artifacts | `cleanup/service` | D3-FRA |
 | T1564.001 | Hide Artifacts: Hidden Process | `process/tamper/hideprocess` | D3-PLA (Process Listing Analysis) |

@@ -54,6 +54,7 @@ flowchart LR
 | [`pe/cert`](../../../pe/cert) | [certificate-theft.md](certificate-theft.md) | quiet | Authenticode security-directory read / copy / strip / write |
 | [`pe/masquerade`](../../../pe/masquerade) | [masquerade.md](masquerade.md) | quiet | manifest + icon + VERSIONINFO clone via `.syso` (preset or programmatic) |
 | [`pe/srdi`](../../../pe/srdi) | [pe-to-shellcode.md](pe-to-shellcode.md) | moderate | PE / .NET / script → Donut shellcode |
+| [`pe/dllproxy`](../../../pe/dllproxy) | [dll-proxy.md](dll-proxy.md) | very-quiet | Pure-Go forwarder DLL emitter for DLL-hijack payloads |
 
 ## Quick decision tree
 
@@ -68,6 +69,7 @@ flowchart LR
 | …convert a PE / .NET / script to position-independent shellcode | [`srdi.ConvertFile`](pe-to-shellcode.md) |
 | …feed shellcode to remote-process injection | [`pe/srdi`](pe-to-shellcode.md) → [`inject`](../injection/README.md) |
 | …enumerate sections / exports for tooling | [`pe/parse`](../../../pe/parse) |
+| …emit a forwarder DLL for hijack payloads (no MSVC) | [`dllproxy.Generate`](dll-proxy.md) |
 
 ## MITRE ATT&CK
 
@@ -78,6 +80,8 @@ flowchart LR
 | [T1036.005](https://attack.mitre.org/techniques/T1036/005/) | Masquerading: Match Legitimate Name or Location | `pe/masquerade` | [D3-EAL](https://d3fend.mitre.org/technique/d3f:ExecutableAllowlisting/), [D3-SEA](https://d3fend.mitre.org/technique/d3f:StaticExecutableAnalysis/) |
 | [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | Process Injection: Dynamic-link Library Injection | `pe/srdi` (consumer) | [D3-PA](https://d3fend.mitre.org/technique/d3f:ProcessAnalysis/) |
 | [T1106](https://attack.mitre.org/techniques/T1106/) | Native API | `pe/imports` | [D3-SEA](https://d3fend.mitre.org/technique/d3f:StaticExecutableAnalysis/) |
+| [T1574.001](https://attack.mitre.org/techniques/T1574/001/) | DLL Search Order Hijacking | `pe/dllproxy` | [D3-PFV](https://d3fend.mitre.org/technique/d3f:ProcessFileVerification/) |
+| [T1574.002](https://attack.mitre.org/techniques/T1574/002/) | DLL Side-Loading | `pe/dllproxy` | [D3-PFV](https://d3fend.mitre.org/technique/d3f:ProcessFileVerification/) |
 | [T1553.002](https://attack.mitre.org/techniques/T1553/002/) | Subvert Trust Controls: Code Signing | `pe/cert` | [D3-EAL](https://d3fend.mitre.org/technique/d3f:ExecutableAllowlisting/) |
 | [T1620](https://attack.mitre.org/techniques/T1620/) | Reflective Code Loading | `pe/srdi` | [D3-FCA](https://d3fend.mitre.org/technique/d3f:FileContentAnalysis/), [D3-PA](https://d3fend.mitre.org/technique/d3f:ProcessAnalysis/) |
 
