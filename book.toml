@@ -7,7 +7,7 @@ multilingual = false
 src = "docs"
 
 [output.html]
-default-theme = "navy"
+default-theme = "light"
 preferred-dark-theme = "navy"
 git-repository-url = "https://github.com/oioio-space/maldev"
 git-repository-icon = "fa-github"
