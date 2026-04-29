@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/process/session
-last_reviewed: 2026-04-27
-reflects_commit: d57d000
+last_reviewed: 2026-04-29
+reflects_commit: 9f64b5b
 ---
 
 # Session enumeration & cross-session execution
@@ -82,8 +82,17 @@ sequenceDiagram
 | [`Threads(pid uint32) ([]uint32, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/process/session#Threads) | Per-process thread ID listing |
 | [`ImagePath(pid uint32) (string, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/process/session#ImagePath) | Resolve full image path via `QueryFullProcessImageName` |
 | [`Modules(pid uint32) ([]Module, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/process/session#Modules) | Loaded modules list |
-| [`CreateProcessOnActiveSessions(tok, exe, args)`](https://pkg.go.dev/github.com/oioio-space/maldev/process/session#CreateProcessOnActiveSessions) | Spawn under another user's token + desktop |
+| [`CreateProcessOnActiveSessions(tok, exe, args)`](https://pkg.go.dev/github.com/oioio-space/maldev/process/session#CreateProcessOnActiveSessions) | Spawn under another user's token + parent's desktop (default — typically `Winsta0\Default` for an interactive logon) |
+| [`CreateProcessOnActiveSessionsWith(tok, exe, args, opts)`](https://pkg.go.dev/github.com/oioio-space/maldev/process/session#CreateProcessOnActiveSessionsWith) | [Options]-aware variant — set `Options.Desktop` to override the destination winstation\\desktop (`STARTUPINFOW.lpDesktop`) |
 | [`ImpersonateThreadOnActiveSession(tok, fn)`](https://pkg.go.dev/github.com/oioio-space/maldev/process/session#ImpersonateThreadOnActiveSession) | Run `fn` on locked OS thread under `tok`'s credentials |
+
+### `type Options`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/process/session#Options)
+
+| Field | Description |
+|---|---|
+| `Desktop` | Destination `winstation\desktop` name passed via `STARTUPINFOW.lpDesktop`. Empty (default) inherits the caller's station+desktop — `Winsta0\Default` for an interactive logon, `Service-0x0-3e7$\Default` for SYSTEM service contexts. Set this to redirect spawned UI onto a hidden desktop or a specific service station. |
 
 ## Examples
 
@@ -148,6 +157,39 @@ _ = session.ImpersonateThreadOnActiveSession(tok, func() error {
 })
 ```
 
+### Advanced — alternate desktop / station
+
+`CreateProcessOnActiveSessionsWith` opens the door to redirecting
+the spawned process onto a non-default desktop. Two operator
+scenarios:
+
+```go
+import (
+    "github.com/oioio-space/maldev/process/session"
+    "github.com/oioio-space/maldev/win/token"
+)
+
+tok, _ := token.WTSQueryUserToken(sessionID)
+
+// 1) Spawn onto the SYSTEM service station (when running as SYSTEM
+//    and you want the new process to live alongside services
+//    instead of jumping into the user's interactive desktop).
+_ = session.CreateProcessOnActiveSessionsWith(tok,
+    `C:\Windows\System32\cmd.exe`,
+    nil,
+    session.Options{Desktop: `Service-0x0-3e7$\Default`},
+)
+
+// 2) Spawn onto a hidden desktop you set up upstream via
+//    CreateDesktopW so the UI is invisible to the user even if the
+//    binary creates windows.
+_ = session.CreateProcessOnActiveSessionsWith(tok,
+    `C:\Users\Public\impl.exe`,
+    nil,
+    session.Options{Desktop: `Winsta0\maldev-stealth`},
+)
+```
+
 See [`ExampleList`](../../../process/session/session_example_test.go)
 + [`ExampleCreateProcessOnActiveSessions`](../../../process/session/session_example_test.go).
 
@@ -197,9 +239,15 @@ See [`ExampleList`](../../../process/session/session_example_test.go)
 - **Profile loading is heavy.** `LoadUserProfile` mounts the
   user's hive; on hosts where the user is rarely active this
   can take seconds.
-- **Desktop / station hard-coded to default.** Spawning into
-  alternate desktops (Winlogon's Secure Desktop, the Lock
-  Screen) is out of scope.
+- **Desktop / station defaults to inherit from the caller.**
+  `CreateProcessOnActiveSessions` (legacy entry point) leaves
+  `STARTUPINFOW.lpDesktop` NULL, which inherits the caller's
+  station+desktop — typically `Winsta0\Default` for an interactive
+  logon. Use `CreateProcessOnActiveSessionsWith` +
+  `Options.Desktop` to override (operator-controlled hidden
+  desktops, SYSTEM service stations, etc.). Pre-existing
+  Winlogon-owned desktops (Secure Desktop, Lock Screen) still
+  reject CreateProcessAsUser by ACL — that boundary stays.
 - **No reverse path.** Once impersonating, this package's
   callback model auto-reverts; long-running impersonation
   requires manual `RevertToSelf` discipline elsewhere.

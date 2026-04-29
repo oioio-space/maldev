@@ -46,3 +46,27 @@ func TestImpersonateThreadOnActiveSession(t *testing.T) {
 	t.Logf("effective token owner during impersonation: %s\\%s", capturedDomain, capturedUser)
 	assert.NotEmpty(t, capturedUser, "expected a non-empty username from the effective token")
 }
+
+// TestOptions_DesktopFieldTypeCheck is a compile-time guard so the
+// Options.Desktop field doesn't drift type or get renamed without
+// callers noticing.
+func TestOptions_DesktopFieldTypeCheck(t *testing.T) {
+	var opts Options
+	opts.Desktop = `Winsta0\Default`
+	if opts.Desktop != `Winsta0\Default` {
+		t.Errorf("Desktop = %q, want round-trip", opts.Desktop)
+	}
+}
+
+// TestCreateProcessOnActiveSessionsWith_NilOptionsLegacy compiles a
+// call site equivalent to the legacy entry point so any signature
+// drift on CreateProcessOnActiveSessionsWith breaks the build, not
+// just the runtime.
+func TestCreateProcessOnActiveSessionsWith_NilOptionsLegacy(t *testing.T) {
+	// Compile-only — running it would need a user token; nil triggers
+	// a nil-pointer deref before the SCM call we're guarding the API
+	// shape against.
+	_ = func(tok *token.Token) error {
+		return CreateProcessOnActiveSessionsWith(tok, "x", nil, Options{})
+	}
+}
