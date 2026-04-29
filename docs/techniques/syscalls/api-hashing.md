@@ -12,6 +12,29 @@ reflects_commit: a705c32
 
 ---
 
+## What api-hashing is NOT
+
+> [!IMPORTANT]
+> `api-hashing` is **only** the symbol-resolution axis (concern #3
+> in [README.md](README.md)). It answers "how do I find the right
+> export without a plaintext string?".
+>
+> It does **not** decide:
+>
+> - **how the syscall fires** — that's the calling method
+>   (`MethodWinAPI` / `MethodNativeAPI` / `MethodDirect` /
+>   `MethodIndirect` / `MethodIndirectAsm`). See
+>   [direct-indirect.md](direct-indirect.md).
+> - **where the SSN comes from** — that's the SSN resolver
+>   (`HellsGate` / `HalosGate` / `TartarusGate` / `Chain`). See
+>   [ssn-resolvers.md](ssn-resolvers.md). `HashGate` is the
+>   resolver that *uses* api-hashing to find the Nt* prologue.
+>
+> Tuning hashing alone does not give you a stealthier syscall —
+> a hash-resolved `MethodWinAPI` call still goes through every
+> kernel32/ntdll hook in the process. Pair api-hashing with the
+> calling method and SSN resolver you want.
+
 ## Primer
 
 When your program calls `VirtualAlloc`, the string `"VirtualAlloc"` appears in the binary. Any analyst running `strings` on your executable can see exactly which dangerous APIs you use.

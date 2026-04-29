@@ -12,6 +12,30 @@ reflects_commit: a705c32
 
 ---
 
+## What direct/indirect syscalls is NOT
+
+> [!IMPORTANT]
+> Direct/indirect syscalls is **only** the calling-method axis
+> (concern #1 in [README.md](README.md)). It answers "how do I
+> *issue* the syscall — through kernel32, through ntdll, or
+> straight from the implant's own page?".
+>
+> It does **not** decide:
+>
+> - **where the SSN comes from** — that's the SSN resolver
+>   ([ssn-resolvers.md](ssn-resolvers.md)). `MethodDirect` /
+>   `MethodIndirect` / `MethodIndirectAsm` all *consume* an SSN
+>   they didn't compute themselves.
+> - **how the Nt\* export is found** — that's
+>   [api-hashing.md](api-hashing.md). The calling method is
+>   identical whether the symbol came from a string lookup or a
+>   ROR13 hash.
+>
+> Picking `MethodIndirectAsm` alone does not make your implant
+> string-free or hook-resilient against pre-injection ntdll
+> patches — pair it with `HashGate` (resolver) for the full
+> stack.
+
 ## Primer
 
 When your program needs Windows to do something (allocate memory, create a thread), it normally goes through the official front desk -- `kernel32.dll` and `ntdll.dll`. EDR products stand at this front desk, logging every request.

@@ -5,11 +5,47 @@ reflects_commit: a705c32
 
 # Syscall Methods & SSN Resolvers
 
-[<- Back to README](../../../README.md)
+[← maldev README](../../../README.md) · [docs/index](../../index.md)
 
-The `win/syscall` package provides four syscall invocation methods and five SSN resolvers. Together they allow any injection or evasion code to transparently switch between standard WinAPI calls and stealthy indirect syscalls that defeat EDR hooking.
+The `win/syscall` package composes **three orthogonal concerns**
+behind a single `*Caller`. Operators tune each axis independently;
+downstream packages (`inject/*`, `evasion/*`, `c2/shell`) accept a
+`*Caller` and inherit the chosen posture without recompiling.
 
----
+## Three concerns (read this first)
+
+```mermaid
+flowchart LR
+    subgraph callsite [Call site<br>e.g. inject.RemoteThread]
+        C["*wsyscall.Caller"]
+    end
+    subgraph axis1 [1. Calling method<br>HOW the syscall fires]
+        A1["MethodWinAPI / NativeAPI / Direct /<br>Indirect / IndirectAsm"]
+    end
+    subgraph axis2 [2. SSN resolver<br>WHERE the syscall number comes from]
+        A2["HellsGate / HalosGate / Tartarus /<br>HashGate / Chain"]
+    end
+    subgraph axis3 [3. API hashing<br>HOW the symbol is found without a string]
+        A3["ROR13 / FNV / Jenkins / custom HashFunc"]
+    end
+    C --> A1
+    C --> A2
+    A2 --> A3
+```
+
+The three axes answer different questions:
+
+| Axis | Question it answers | Pages |
+|---|---|---|
+| **1 — Calling method** | How does the implant *issue* the syscall once the SSN is known? Which userland boundary do we cross / skip? | [direct-indirect.md](direct-indirect.md) |
+| **2 — SSN resolver** | Where does the SSN come from? What happens when the canonical source (the unhooked ntdll prologue) is unavailable? | [ssn-resolvers.md](ssn-resolvers.md) |
+| **3 — API hashing** | How do we identify the right Nt* export without a plaintext name in the binary? | [api-hashing.md](api-hashing.md) |
+
+Tuning one axis does NOT imply tuning the others. You can:
+
+- pick `MethodIndirect` (axis 1) with `HellsGate` (axis 2) — no api-hashing.
+- pick `MethodWinAPI` (axis 1) with `HashGate` (axis 2 — uses axis 3 internally).
+- swap the hash function on `HashGate` (axis 3) without touching axis 1 / 2.
 
 ## Architecture Overview
 

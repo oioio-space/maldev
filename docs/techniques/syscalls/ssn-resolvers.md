@@ -12,6 +12,30 @@ reflects_commit: a705c32
 
 ---
 
+## What SSN resolvers are NOT
+
+> [!IMPORTANT]
+> SSN resolvers is **only** the syscall-number-discovery axis
+> (concern #2 in [README.md](README.md)). It answers "where does
+> the syscall service number come from when the canonical source
+> (the unhooked ntdll prologue) is unavailable?".
+>
+> It does **not** decide:
+>
+> - **how the syscall fires once the SSN is known** — that's the
+>   calling method ([direct-indirect.md](direct-indirect.md)).
+>   `HellsGate` is happy to feed an SSN to `MethodWinAPI` — the
+>   call still goes through every hook.
+> - **how the Nt\* export is identified** — that's
+>   [api-hashing.md](api-hashing.md). `HashGate` is the resolver
+>   that *uses* api-hashing internally; the rest still need a
+>   plaintext name.
+>
+> Switching from `HellsGate` to `TartarusGate` does not change
+> what hooks see; it only changes where the SSN was read. Pair
+> the resolver with the calling method that matches your
+> stealth target.
+
 ## Primer
 
 Every Windows kernel function has a secret number called the SSN (Syscall Service Number). When you want to call the kernel directly (bypassing EDR hooks), you need to know this number. The problem is, these numbers are not documented and change between Windows versions.
