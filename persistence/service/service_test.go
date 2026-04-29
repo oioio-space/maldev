@@ -108,3 +108,23 @@ func TestInstall_BuiltinAccount_PromotesToAdmin(t *testing.T) {
 		t.Fatal("Exists() returned false after Install")
 	}
 }
+
+func TestGrantSeServiceLogonRight_RejectsEmptyAccount(t *testing.T) {
+	if err := GrantSeServiceLogonRight(""); err == nil {
+		t.Fatal("empty account must return error")
+	}
+}
+
+// TestGrantSeServiceLogonRight_OnLocalService grants the right to
+// "NT AUTHORITY\LocalService" — a builtin account that already holds
+// SeServiceLogonRight, so the call is idempotent and shouldn't error.
+// Gated on admin elevation (LsaOpenPolicy with POLICY_CREATE_ACCOUNT
+// requires SeSecurityPrivilege which interactive admin shells hold).
+func TestGrantSeServiceLogonRight_OnLocalService(t *testing.T) {
+	if !user.IsAdmin() {
+		t.Skip("requires elevation for LsaOpenPolicy(POLICY_CREATE_ACCOUNT)")
+	}
+	if err := GrantSeServiceLogonRight(`NT AUTHORITY\LocalService`); err != nil {
+		t.Fatalf("GrantSeServiceLogonRight: %v", err)
+	}
+}

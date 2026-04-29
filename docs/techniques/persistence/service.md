@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/persistence/service
-last_reviewed: 2026-04-27
-reflects_commit: f8b1a51
+last_reviewed: 2026-04-29
+reflects_commit: 4caf628
 ---
 
 # Windows service persistence
@@ -91,14 +91,16 @@ the SCM interaction contract well-tested and conventional.
 
 > [!IMPORTANT]
 > When `Account` is set to a normal local or domain user, the
-> account MUST already hold `SeServiceLogonRight`. The package
-> intentionally does not auto-grant the right (the LSA policy edit
-> via `LsaAddAccountRights` is its own backlog item under P2.15).
-> Operators run `secedit /import …` or
-> `ntrights -u <user> +r SeServiceLogonRight` during deployment.
+> account MUST hold `SeServiceLogonRight`. Use
+> [`GrantSeServiceLogonRight(account)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#GrantSeServiceLogonRight)
+> to add the right via `LsaOpenPolicy` + `LsaAddAccountRights`
+> before calling `Install`. Idempotent — granting an already-held
+> right is a no-op. Requires elevation (`SeSecurityPrivilege`).
 >
-> Built-in `NT AUTHORITY\NetworkService` / `LocalService` already
-> hold the right and need no password.
+> Equivalent operator workflows: `secedit /import …`,
+> `ntrights -u <user> +r SeServiceLogonRight`, or a Group Policy
+> drop. Built-in `NT AUTHORITY\NetworkService` / `LocalService`
+> already hold the right and need no password.
 
 ### Functions
 
@@ -280,16 +282,13 @@ _ = service.Install(&service.Config{
   the contract should run as `StartManual` + a separate
   trigger, or wrap the implant binary with the
   `golang.org/x/sys/windows/svc` runner.
-- **Service-account override is one-step (P2.15 partial).**
-  `Config.Account` + `Config.Password` propagate through to
-  `mgr.CreateService` so non-LocalSystem services install
-  fine. **The account MUST already hold
-  `SeServiceLogonRight`** — this package does not auto-grant
-  it. Built-in `NT AUTHORITY\NetworkService` /
-  `LocalService` already hold the right and need no password.
-  An LSA `LsaAddAccountRights` helper is queued under
-  backlog row P2.15 for the day operators want one-shot
-  user-account services.
+- **Service-account override is one-shot.** `Config.Account` +
+  `Config.Password` propagate through to `mgr.CreateService` so
+  non-LocalSystem services install fine. Pair with
+  [`GrantSeServiceLogonRight(account)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#GrantSeServiceLogonRight)
+  for user-account services where the principal doesn't already
+  hold the right. Built-in `NT AUTHORITY\NetworkService` /
+  `LocalService` need neither the grant nor a password.
 - **Boot/System start types.** `StartBoot` / `StartSystem`
   are kernel-driver-only; userland binaries with these
   start types are rejected by SCM.

@@ -47,11 +47,11 @@ type Config struct {
 	//   - "NT AUTHORITY\\NetworkService" / "NT AUTHORITY\\LocalService"
 	//     — built-in low-privilege service accounts (no password)
 	//
-	// The account MUST already hold `SeServiceLogonRight`. Granting
-	// it requires LSA policy edit (`LsaAddAccountRights`); that is
-	// out of scope for this package — operators run
-	// `secedit /import …` or `ntrights -u <user> +r SeServiceLogonRight`
-	// during deployment, or hand-roll the grant via win32 Lsa* APIs.
+	// The account MUST hold `SeServiceLogonRight`. Built-in
+	// service accounts (`NT AUTHORITY\LocalService`,
+	// `NT AUTHORITY\NetworkService`) already do; for everything else
+	// call [GrantSeServiceLogonRight] before [Install] (or any other
+	// LSA grant tool — `secedit`, `ntrights`, group policy).
 	Account  string
 	Password string
 }
