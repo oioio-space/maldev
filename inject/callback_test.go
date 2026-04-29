@@ -91,3 +91,51 @@ func TestExecuteCallbackNtNotifyChangeDirectory(t *testing.T) {
 	defer windows.VirtualFree(sc, 0, windows.MEM_RELEASE)
 	require.NoError(t, ExecuteCallback(sc, CallbackNtNotifyChangeDirectory))
 }
+
+func TestMethodEnforcesCET(t *testing.T) {
+	cases := []struct {
+		method CallbackMethod
+		want   bool
+	}{
+		{CallbackEnumWindows, false},
+		{CallbackCreateTimerQueue, false},
+		{CallbackCertEnumSystemStore, false},
+		{CallbackReadDirectoryChanges, false},
+		{CallbackRtlRegisterWait, true},
+		{CallbackNtNotifyChangeDirectory, true},
+	}
+	for _, tc := range cases {
+		if got := MethodEnforcesCET(tc.method); got != tc.want {
+			t.Errorf("MethodEnforcesCET(%s) = %t, want %t", tc.method, got, tc.want)
+		}
+	}
+}
+
+// TestExecuteCallbackBytes_NoCallback_AllocOnly verifies the path
+// without firing real shellcode. We pass a non-CET-affected method
+// (EnumWindows) so the cet.Wrap branch stays inactive, supply a
+// `xor eax, eax; ret` stub that immediately stops enumeration, and
+// confirm the helper allocates + invokes without error.
+func TestExecuteCallbackBytes_NoCallback_AllocOnly(t *testing.T) {
+	testutil.RequireIntrusive(t)
+	sc := []byte{0x33, 0xC0, 0xC3} // xor eax,eax ; ret -- returns FALSE
+	require.NoError(t, ExecuteCallbackBytes(sc, CallbackEnumWindows))
+}
+
+// TestExecuteCallbackBytes_CETAffectedMethod verifies that calling
+// ExecuteCallbackBytes with a CET-affected method works on a
+// non-CET-enforced host (where Wrap is a no-op) and is at least
+// well-formed on enforced hosts (real fire-the-callback verification
+// stays in the live VM matrix tests).
+func TestExecuteCallbackBytes_CETAffectedMethod(t *testing.T) {
+	testutil.RequireIntrusive(t)
+	sc := allocateBytes()
+	require.NoError(t, ExecuteCallbackBytes(sc, CallbackRtlRegisterWait))
+}
+
+// allocateBytes produces a tiny benign shellcode slice — same canary
+// the existing tests use, kept inline so this test file does not depend
+// on testutil internals.
+func allocateBytes() []byte {
+	return []byte{0xC3} // ret
+}

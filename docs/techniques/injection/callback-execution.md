@@ -71,10 +71,26 @@ APC dispatcher.
 > enabled, two of the six methods (`CallbackRtlRegisterWait`,
 > `CallbackNtNotifyChangeDirectory`) require the shellcode to start
 > with the `ENDBR64` instruction (`F3 0F 1E FA`) or the kernel
-> terminates the process with `STATUS_STACK_BUFFER_OVERRUN`. Call
-> [`evasion/cet.Wrap(sc)`](../evasion/cet.md) on the shellcode before
-> passing it through, or [`evasion/cet.Disable()`](../evasion/cet.md)
-> once at start-up.
+> terminates the process with `STATUS_STACK_BUFFER_OVERRUN`.
+>
+> The package now ships a CET-aware helper that handles this
+> automatically:
+>
+> ```go
+> // Auto-prepends ENDBR64 when MethodEnforcesCET(method) AND cet.Enforced().
+> err := inject.ExecuteCallbackBytes(shellcode, inject.CallbackRtlRegisterWait)
+> ```
+>
+> `ExecuteCallbackBytes(sc, method)` checks `MethodEnforcesCET(method)` and
+> [`cet.Enforced()`](../evasion/cet.md) and, when both hold, calls
+> [`cet.Wrap(sc)`](../evasion/cet.md) before allocating + invoking
+> `ExecuteCallback`. On non-CET hosts it's equivalent to a plain alloc +
+> ExecuteCallback chain.
+>
+> Operators who want manual control still call
+> [`evasion/cet.Wrap(sc)`](../evasion/cet.md) themselves and feed the result
+> to `ExecuteCallback(addr, method)`, or [`evasion/cet.Disable()`](../evasion/cet.md)
+> once at start-up to opt the whole process out.
 
 ## API Reference
 
