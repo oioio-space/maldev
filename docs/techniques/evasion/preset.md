@@ -40,7 +40,10 @@ flowchart LR
 
 - `preset.Minimal()` — AMSI + ETW only. No disk reads, no mitigation policies.
 - `preset.Stealth()` — Minimal + classic unhook of the 10 functions in `unhook.CommonHookedFunctions`.
-- `preset.Aggressive()` — full AMSI, full ETW, full `.text` unhook, ACG, BlockDLLs. Irreversible.
+- `preset.Hardened()` — full AMSI + full ETW + full ntdll unhook + CET opt-out. CET-aware sweet spot: APC-delivered shellcode survives Win11 24H2+ ENDBR64 enforcement without losing the ability to inject afterwards.
+- `preset.Aggressive()` — Hardened + ACG + BlockDLLs. Irreversible.
+
+`preset.CETOptOut()` — standalone Technique callers can pull into a custom stack. No-op when CET is not enforced.
 
 Order matters for Aggressive — ACG and BlockDLLs permanently restrict the process, so all RWX allocation and injection must be done before applying it.
 
