@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/persistence/lnk
 last_reviewed: 2026-04-29
-reflects_commit: ffd940c
+reflects_commit: 087539d
 ---
 
 # LNK shortcut creation
@@ -306,6 +306,19 @@ See [`ExampleNew`](../../../persistence/lnk/lnk_example_test.go).
   past those interfaces.
 - **No LNK reading.** This package writes only; reading existing
   LNKs requires a separate parser.
+- **`Save` and `BuildBytes` are NOT byte-identical.**
+  `WScript.Shell.IWshShortcut.Save(path)` auto-computes
+  `RELATIVE_PATH` from its `path` argument (used by the Windows
+  shell as a fallback resolver if the absolute target moves).
+  `BuildBytes` runs `IPersistStream::Save` against an in-memory
+  IStream — no `path` reference is available, so the
+  `HasRelativePath` flag stays clear and the corresponding
+  StringData block is omitted (~50–100 bytes shorter output).
+  Operators that need byte-equivalence under forensic comparison
+  must either use `Save` or extend the builder with a typed
+  `SetRelativePath` accessor (backlog item). Verified by
+  `TestBuildBytes_DivergesFromSave_OnRelativePath` against the
+  Windows10 VM target (commit `dde3f5c..`).
 - **MOTW absent.** Locally-created LNKs carry no
   `Zone.Identifier` ADS — useful for the operator, but a
   forensic tell when correlating LNKs against download history.

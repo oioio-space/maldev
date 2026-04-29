@@ -213,8 +213,12 @@ func asUnknown(p uintptr) *ole.IUnknown {
 // via IShellLinkW + IPersistStream::Save into an HGLOBAL-backed
 // IStream. No filesystem call is made.
 //
-// Output is bit-identical to what [Shortcut.Save] writes — IPersistStream
-// is the same serialiser the shell invokes when IPersistFile::Save runs.
+// IPersistStream is the same serialiser the shell invokes when
+// IPersistFile::Save runs, so the structural shape of the bytes is
+// equivalent. Note: WScript.Shell.IWshShortcut.Save also auto-computes
+// RELATIVE_PATH from its `path` argument; BuildBytes runs against an
+// in-memory IStream (no path reference) and therefore omits that
+// StringData block. See TestBuildBytes_DivergesFromSave_OnRelativePath.
 //
 // Use case: embed bytes in a payload, hand to a C2 transport, feed to
 // an operator-controlled write primitive (encrypted ADS, in-memory
