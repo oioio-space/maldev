@@ -1,6 +1,7 @@
 package stealthopen
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -145,3 +146,59 @@ func (f *fakeCreator) Create(path string) (io.WriteCloser, error) {
 	f.paths = append(f.paths, path)
 	return f.wc, f.err
 }
+
+func TestWriteAll_NilCreatorWritesViaStandard(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "all.bin")
+	if err := WriteAll(nil, path, []byte("hello")); err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != "hello" {
+		t.Errorf("contents = %q, want %q", got, "hello")
+	}
+}
+
+func TestWriteAll_DelegatesToCreator(t *testing.T) {
+	var buf recordingWriteCloser
+	fc := &fakeCreator{wc: &buf}
+	const path = `C:\fake\out.bin`
+	if err := WriteAll(fc, path, []byte("payload")); err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+	if len(fc.paths) != 1 || fc.paths[0] != path {
+		t.Errorf("Create paths = %v, want [%q]", fc.paths, path)
+	}
+	if !buf.closed {
+		t.Error("Close not called on the WriteCloser returned by Create")
+	}
+	if buf.String() != "payload" {
+		t.Errorf("written = %q, want %q", buf.String(), "payload")
+	}
+}
+
+func TestWriteAll_PropagatesCreateError(t *testing.T) {
+	wantErr := errCreateFailed
+	fc := &fakeCreator{err: wantErr}
+	if err := WriteAll(fc, "x", []byte("y")); err != wantErr {
+		t.Errorf("err = %v, want %v", err, wantErr)
+	}
+}
+
+// recordingWriteCloser is a bytes.Buffer with a Close that records
+// invocation order — lets WriteAll tests verify Close was called.
+type recordingWriteCloser struct {
+	bytes.Buffer
+	closed bool
+}
+
+func (r *recordingWriteCloser) Close() error { r.closed = true; return nil }
+
+var errCreateFailed = stubError("stealthopen_test: create failed")
+
+type stubError string
+
+func (s stubError) Error() string { return string(s) }

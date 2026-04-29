@@ -85,3 +85,23 @@ func UseCreator(creator Creator) Creator {
 	}
 	return &StandardCreator{}
 }
+
+// WriteAll is the write-side equivalent of [OpenRead]: route a fully
+// in-memory []byte through UseCreator(creator).Create(path), close the
+// writer (errors propagate via Close so flush/commit semantics of
+// custom Creators are observed), and return the first non-nil error.
+//
+// Use it for the byte-ready case (LNK, ADS, .kirbi, PE rewrites, etc.).
+// Streaming producers (lsass minidump, .syso COFF) should keep the
+// inline UseCreator+Create+stream pattern instead.
+func WriteAll(creator Creator, path string, data []byte) error {
+	wc, err := UseCreator(creator).Create(path)
+	if err != nil {
+		return err
+	}
+	if _, err := wc.Write(data); err != nil {
+		_ = wc.Close()
+		return err
+	}
+	return wc.Close()
+}
