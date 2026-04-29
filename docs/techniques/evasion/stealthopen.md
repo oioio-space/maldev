@@ -237,7 +237,10 @@ through OpenFileById).
 
 ## API Reference
 
-See [evasion.md](../../evasion.md) (table row: `evasion/stealthopen`)
+See the [package godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/stealthopen).
+The `Opener` interface is the seam — pass any implementation
+(`stealthopen.New(...)`, a test spy, etc.) to consumers that
+accept it (`cleanup/wipe`, `persistence/lnk` once P2.16 lands).
 
 ## See also
 

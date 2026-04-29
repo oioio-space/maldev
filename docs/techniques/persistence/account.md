@@ -195,7 +195,7 @@ See [`ExampleAdd`](../../../persistence/account/account_example_test.go).
   implant under the new account.
 - [`credentials`](../credentials/README.md) — alternative
   credential acquisition with lower noise.
-- [`privesc`](../../privilege.md) — pair to obtain admin for the
+- [`privesc`](../privesc/README.md) — pair to obtain admin for the
   initial Add.
 - [`cleanup`](../cleanup/README.md) — remove the account at
   operation end.

@@ -80,4 +80,4 @@ if info, _ := version.CVE202430088(); info.Vulnerable {
 
 - [`docs/techniques/tokens/`](../tokens/) — token-level primitives
 - [`docs/techniques/win/version.md`](../win/version.md) — pre-flight version + UBR probe
-- [`docs/privilege.md`](../../privilege.md) — operator-facing privilege overview
+- [`docs/techniques/tokens/`](../tokens/README.md) — Layer-1 token primitives that gate every privesc path

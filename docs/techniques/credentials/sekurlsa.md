@@ -5,7 +5,7 @@ reflects_commit: a705c32
 
 # LSASS Parsing — In-Process Credential Extraction
 
-[<- Back to Credentials](../../credentials.md)
+[← Credentials area README](README.md) · [docs/index](../../index.md)
 
 **MITRE ATT&CK:** [T1003.001 — OS Credential Dumping: LSASS Memory](https://attack.mitre.org/techniques/T1003/001/)
 **Package:** `credentials/sekurlsa`
@@ -142,8 +142,8 @@ import (
 
 func init() {
     // Win11 24H2 (build 26100) — patterns derived offline from the
-    // Microsoft-shipped lsasrv.dll for this CU. See docs/credentials.md
-    // for the workflow.
+    // Microsoft-shipped lsasrv.dll for this CU. See README.md for
+    // the workflow.
     _ = sekurlsa.RegisterTemplate(&sekurlsa.Template{
         BuildMin:                26100,
         BuildMax:                26100,
@@ -288,7 +288,7 @@ defer lsassdump.Reprotect(tok, &d)
 
 ## API Reference
 
-See [`docs/credentials.md`](../../credentials.md) for the inline API
+See [`docs/credentials.md`](README.md) for the inline API
 reference. Sentinel errors (`ErrNotMinidump`, `ErrUnsupportedBuild`,
 `ErrLSASRVNotFound`, `ErrMSV1_0NotFound`, `ErrKeyExtractFailed`) are
 all `errors.Is`-dispatchable.

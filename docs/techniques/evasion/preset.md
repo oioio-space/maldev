@@ -304,7 +304,11 @@ remediation without overlapping.
 
 ## API Reference
 
-See [evasion.md](../../evasion.md#preset----composable-technique-presets)
+See the [package godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/preset) for the
+canonical `Apply(c Caller) error` / `ApplyAll(c Caller) map[string]error`
+surface. Each preset (`Minimal`, `Stealth`, `Aggressive`)
+returns a `[]evasion.Technique` ready to plug into
+`evasion.ApplyAll`.
 
 ## See also
 

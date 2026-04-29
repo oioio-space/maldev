@@ -149,17 +149,17 @@ If you know the technique you want, jump straight to the matching package:
 | Inject shellcode | `inject/*` (15 methods) | [Injection](techniques/injection/README.md) |
 | Reflectively load a PE | `pe/srdi` | [PE → Shellcode](techniques/pe/pe-to-shellcode.md) |
 | Strip Go fingerprints | `pe/strip` | [Strip + Sanitize](techniques/pe/strip-sanitize.md) |
-| Run a .NET assembly in-process | `runtime/clr` | [Runtime](runtime.md) |
-| Run a Beacon Object File | `runtime/bof` | [Runtime](runtime.md) |
+| Run a .NET assembly in-process | `runtime/clr` | [Runtime](techniques/runtime/README.md) |
+| Run a Beacon Object File | `runtime/bof` | [Runtime](techniques/runtime/README.md) |
 | Dump LSASS | `credentials/lsassdump` | [LSASS Dump](techniques/collection/lsass-dump.md) |
 | Parse a MINIDUMP for NT hashes | `credentials/sekurlsa` | [LSASS Parse](techniques/credentials/sekurlsa.md) |
-| Bypass UAC | `privesc/uac` | [Privilege](privilege.md) |
+| Bypass UAC | `privesc/uac` | [Privilege](techniques/privesc/README.md) |
 | Spoof a process command-line | `process/tamper/fakecmd` | [FakeCmd](techniques/process/fakecmd.md) |
 | Suspend Event Log threads | `process/tamper/phant0m` | [Phant0m](techniques/process/phant0m.md) |
 | Persistence — registry | `persistence/registry` | [Registry](techniques/persistence/registry.md) |
 | Persistence — Startup folder | `persistence/startup` | [Startup Folder](techniques/persistence/startup-folder.md) |
 | Persistence — scheduled task | `persistence/scheduler` | [Task Scheduler](techniques/persistence/task-scheduler.md) |
-| Capture clipboard / keys / screen | `collection/{clipboard,keylog,screenshot}` | [Collection](collection.md) |
+| Capture clipboard / keys / screen | `collection/{clipboard,keylog,screenshot}` | [Collection](techniques/collection/README.md) |
 | Reverse shell | `c2/shell` | [Reverse Shell](techniques/c2/reverse-shell.md) |
 | Metasploit staging | `c2/meterpreter` | [Meterpreter](techniques/c2/meterpreter.md) |
 | Multi-session listener (operator side) | `c2/multicat` | [Multicat](techniques/c2/multicat.md) |

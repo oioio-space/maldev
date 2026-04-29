@@ -122,5 +122,5 @@ errs := persistence.InstallAll(mechs)
   signature.
 - [`cleanup`](../cleanup/README.md) — remove persistence
   artefacts at op end.
-- [`privesc`](../../privilege.md) — pair to obtain the admin /
+- [`privesc`](../privesc/README.md) — pair to obtain the admin /
   SYSTEM tokens HKLM-scope and SCM persistence require.

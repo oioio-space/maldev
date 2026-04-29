@@ -189,12 +189,12 @@ Click any package name to jump to its area-doc or technique page.
 | [`process/tamper/fakecmd`](techniques/process/fakecmd.md) | PEB CommandLine spoof |
 | [`process/tamper/hideprocess`](techniques/process/hideprocess.md) | Process Hacker / Explorer in-memory patch |
 | [`process/tamper/phant0m`](techniques/process/phant0m.md) | Suspend EventLog threads |
-| [`recon/*`](recon.md) | antidebug, antivm, sandbox, timing, hwbp, dllhijack, drive, folder, network |
-| [`inject/`](injection.md) | 15 injection methods (CRT, EarlyBird, ETW thread, KernelCallbackTable, ModuleStomp, NtQueueApcEx, RemoteThread, SectionMap, ThreadHijack, ThreadPool, …) |
-| [`pe/*`](pe.md) | parse, strip, morph (UPX), srdi, cert, masquerade, imports |
-| [`cleanup/*`](cleanup.md) | memory wipe, self-delete, timestomp, ADS |
-| [`runtime/clr`](runtime.md) | In-process .NET CLR host |
-| [`runtime/bof`](runtime.md) | Beacon Object File loader |
+| [`recon/*`](techniques/recon/README.md) | antidebug, antivm, sandbox, timing, hwbp, dllhijack, drive, folder, network |
+| [`inject/`](techniques/injection/README.md) | 15 injection methods (CRT, EarlyBird, ETW thread, KernelCallbackTable, ModuleStomp, NtQueueApcEx, RemoteThread, SectionMap, ThreadHijack, ThreadPool, …) |
+| [`pe/*`](techniques/pe/README.md) | parse, strip, morph (UPX), srdi, cert, masquerade, imports |
+| [`cleanup/*`](techniques/cleanup/README.md) | memory wipe, self-delete, timestomp, ADS |
+| [`runtime/clr`](techniques/runtime/README.md) | In-process .NET CLR host |
+| [`runtime/bof`](techniques/runtime/README.md) | Beacon Object File loader |
 | [`credentials/lsassdump`](techniques/collection/lsass-dump.md) | LSASS minidump producer + PPL bypass |
 | [`credentials/sekurlsa`](techniques/credentials/sekurlsa.md) | MINIDUMP → MSV1_0 NT-hash extractor (cross-platform) |
 | [`privesc/uac`](techniques/privesc/uac.md) | 4 UAC bypass primitives + EventVwrLogon alt-creds variant |

@@ -105,7 +105,7 @@ injector.Inject(shellcode)
 | **Credentials** | [techniques/credentials/](docs/techniques/credentials/README.md) | `lsassdump`, `sekurlsa`, `samdump`, `goldenticket` — LSASS dump, MSV/Kerberos parser, SAM offline parse, Golden Ticket forge |
 | **Recon** | [techniques/recon/](docs/techniques/recon/README.md) | `antidebug`, `antivm`, `sandbox`, `timing`, `hwbp`, `dllhijack`, `drive`, `folder`, `network` — environment checks, HW breakpoint inspection, DLL-search-order discovery |
 | **Process tamper** | [techniques/process/](docs/techniques/process/README.md) | `enum`, `session`, `tamper/herpaderping`, `tamper/fakecmd`, `tamper/hideprocess`, `tamper/phant0m` — herpaderping/ghosting, PEB CommandLine spoof, hide PID, kill EventLog |
-| **Privesc** | [docs/privilege.md](docs/privilege.md) | `uac`, `cve202430088` — 4 UAC bypasses, CVE-2024-30088 LPE |
+| **Privesc** | [techniques/privesc/](docs/techniques/privesc/README.md) | `uac`, `cve202430088` — 4 UAC bypasses, CVE-2024-30088 LPE |
 | **Cleanup** | [techniques/cleanup/](docs/techniques/cleanup/README.md) | `selfdelete`, `memory`, `timestomp`, `wipe`, `ads`, `bsod`, `service` — self-delete, secure wipe, timestomp, ADS streams, controlled BSOD |
 | **Collection** | [techniques/collection/](docs/techniques/collection/README.md) | `keylog`, `clipboard`, `screenshot` — keyboard hook, clipboard watch, multi-monitor screenshot |
 | **Kernel BYOVD** | [techniques/kernel/](docs/techniques/kernel/README.md) | `kernel/driver`, `kernel/driver/rtcore64` — RTCore64 (CVE-2019-16098) read/write primitives |
