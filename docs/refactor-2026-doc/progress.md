@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-04-29
-reflects_commit: 33a98ea
+reflects_commit: 9b9a45f
 ---
 
 # Documentation refactor — progress tracker
@@ -39,7 +39,7 @@ reflects_commit: 33a98ea
 | 2 — `cleanup/*` demonstrator area | ✅ done | `11838e3` | All 7 packages refactored to template (doc.go + tech md + example_test.go). 4 NEW tech pages: ads, bsod, service, wipe. |
 | 3 — `cmd/docgen` + pre-commit + CI drift check | ✅ done | `b2e0464` | Drift check wired into `scripts/pre-commit` and `.github/workflows/docs.yml`. README package map fix in `0587c76`. |
 | 4 — sweep remaining 10 areas | ✅ done | `57c853b..` | All areas swept (cleanup, evasion, inject, layer-0, c2, collection, credentials, pe, persistence, process, recon, runtime, win, kernel, privesc, ui). Polish round for evasion legacy md pages deferred to Phase 6. |
-| 5 — transversal guides | 🟡 in-progress | — | mitre.md updated (T1016, T1027.007, T1068, T1078, T1134.001/002/004 enrichment). getting-started.md detection scale aligned to canonical 5-level. architecture.md per-package quick-reference fixed (kernel/driver/rtcore64 row, privesc → new tech md links, persistence/service+lnk+account rows added). testing.md, coverage-workflow.md still need a pass. |
+| 5 — transversal guides | ✅ done | `d64d554, 9b9a45f` | mitre.md updated (T1016, T1027.007, T1068, T1078, T1134.001/002/004 enrichment). getting-started.md detection scale aligned to canonical 5-level. architecture.md per-package quick-reference fixed (kernel/driver/rtcore64 row, privesc → new tech md links, persistence/service+lnk+account rows added). testing.md polished (Opener/Creator pair, 7 new LNK rows incl. WriteVia + Hotkey parser). coverage-workflow.md flagged with [!NOTE] callout pointing readers to testing.md for post-2026-04-22 infra (win/com.Error, stealthopen.Creator, LNK three-sink); a re-baseline run is deferred to a separate VM session. |
 | 6 — final cross-link + breadcrumb + dead-link audit | ✅ done | `d1ff2d7..a705c32, 6b` | Repo-wide dead-link sweep (8 broken refs fixed) + repo-wide front-matter pass: 45 `docs/**.md` pages now carry `last_reviewed: 2026-04-27 / reflects_commit: a705c32`. Every `docs/` page now has uniform front-matter — index entries, by-role pages, area docs, transversal guides, technique md, examples. |
 | 3b — gh-pages mdBook deploy | ✅ done | `40cdcd9` | Live at <https://oioio-space.github.io/maldev/>. `book.toml` + `docs/SUMMARY.md` (176 entries) + `.github/workflows/mdbook.yml`. CI installs mdBook 0.4.40 + mdbook-mermaid 0.14.0 on push to `master`, strips YAML front-matter from copied md, rewrites `../README.md` → absolute GitHub URL, deploys to GitHub Pages via `actions/deploy-pages@v4`. Pages enabled with `gh api -X POST repos/.../pages -f build_type=workflow`. First successful deploy: workflow run 25037092496, build 12s + deploy 11s. |
 
