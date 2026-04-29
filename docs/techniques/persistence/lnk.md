@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/persistence/lnk
-last_reviewed: 2026-04-27
-reflects_commit: f8b1a51
+last_reviewed: 2026-04-29
+reflects_commit: ffd940c
 ---
 
 # LNK shortcut creation
@@ -10,9 +10,12 @@ reflects_commit: f8b1a51
 
 ## TL;DR
 
-Create Windows `.lnk` shortcut files via COM/OLE automation
-through `WScript.Shell`. Fluent builder API
-(`New().SetTargetPath().SetArguments().Save()`). Used as the
+Create Windows `.lnk` shortcut files via COM/OLE automation.
+Fluent builder with three sinks: `Save(path)` (disk via
+`WScript.Shell`), `BuildBytes()` (raw bytes, **zero-disk** via
+`IShellLinkW` + `IPersistStream::Save` on an HGLOBAL-backed
+`IStream`), and `WriteTo(io.Writer)` (same zero-disk path,
+streamed to any operator-controlled writer). Used as the
 primitive for [`persistence/startup`](startup-folder.md), and
 standalone for `T1204.002` user-execution traps (Desktop / Quick
 Launch / Documents drops). Windows-only.
@@ -56,6 +59,18 @@ are per-thread. Every call to `Save` tears the apartment down so
 the package leaves no apartment state behind. All COM resources
 are released even on the error path.
 
+For `BuildBytes` / `WriteTo`, the path swaps `WScript.Shell` for
+a direct `CoCreateInstance(CLSID_ShellLink, IID_IShellLinkW)`,
+configures the shortcut via raw vtable calls (`SetPath`,
+`SetArguments`, `SetWorkingDirectory`, `SetDescription`,
+`SetIconLocation`, `SetShowCmd`), then `QueryInterface`-s for
+`IPersistStream` and calls `Save(stream)` against an `IStream`
+created by `CreateStreamOnHGlobal(NULL, fDeleteOnRelease=TRUE)`.
+Bytes are extracted from the underlying `HGLOBAL` via
+`GetHGlobalFromStream` / `GlobalLock` before the stream — and
+thus the HGLOBAL — is released. **No filesystem call is
+made at any point.**
+
 ## API Reference
 
 | Symbol | Description |
@@ -64,11 +79,14 @@ are released even on the error path.
 | [`New() *Shortcut`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#New) | Fresh builder |
 | `(*Shortcut).SetTargetPath(string)` | Required — the launched binary |
 | `(*Shortcut).SetArguments(string)` | Command-line passed to target |
-| `(*Shortcut).SetWorkingDirectory(string)` | CWD for the launched process |
+| `(*Shortcut).SetWorkingDir(string)` | CWD for the launched process |
 | `(*Shortcut).SetDescription(string)` | Tooltip text |
-| `(*Shortcut).SetIconLocation(path string, index int)` | Icon donor (PE path + resource index) |
+| `(*Shortcut).SetIconLocation(string)` | Icon donor (`"path,index"` packing — `"shell32.dll,3"`) |
+| `(*Shortcut).SetHotkey(string)` | Keyboard shortcut (`"Ctrl+Alt+T"`) |
 | `(*Shortcut).SetWindowStyle(WindowStyle)` | `StyleNormal` / `StyleMaximized` / `StyleMinimized` |
-| `(*Shortcut).Save(path string) error` | Persist to `path` |
+| `(*Shortcut).Save(path string) error` | Persist to `path` (disk, via `WScript.Shell`) |
+| `(*Shortcut).BuildBytes() ([]byte, error)` | Serialise to raw bytes — **zero-disk** (IShellLinkW + IPersistStream + HGLOBAL IStream) |
+| `(*Shortcut).WriteTo(w io.Writer) (int64, error)` | Same zero-disk path, streamed to any `io.Writer` |
 
 ### `type WindowStyle int`
 
@@ -102,7 +120,7 @@ launcher.
 _ = lnk.New().
     SetTargetPath(`C:\ProgramData\Microsoft\winupdate.exe`).
     SetArguments("--update").
-    SetIconLocation(`C:\Windows\System32\notepad.exe`, 0).
+    SetIconLocation(`C:\Windows\System32\notepad.exe,0`).
     SetDescription("Notes").
     SetWindowStyle(lnk.StyleMinimized).
     Save(`C:\Users\Public\Desktop\Notes.lnk`)
@@ -127,10 +145,46 @@ qLaunch := filepath.Join(appData,
 
 _ = lnk.New().
     SetTargetPath(`C:\ProgramData\Microsoft\winupdate.exe`).
-    SetIconLocation(`C:\Windows\System32\mmc.exe`, 0).
+    SetIconLocation(`C:\Windows\System32\mmc.exe,0`).
     SetDescription("Computer Management").
     SetWindowStyle(lnk.StyleNormal).
     Save(filepath.Join(qLaunch, "Computer Management.lnk"))
+```
+
+### Zero-disk — bytes for C2 staging
+
+Build the LNK fully in memory via `IShellLinkW` +
+`IPersistStream::Save` on an HGLOBAL-backed `IStream`. No file
+is opened, created, or read on disk at any point — useful when
+the operator wants to encrypt/transport/embed the artefact
+through their own write primitive.
+
+```go
+import (
+    "bytes"
+
+    "github.com/oioio-space/maldev/persistence/lnk"
+)
+
+raw, err := lnk.New().
+    SetTargetPath(`C:\Windows\System32\cmd.exe`).
+    SetArguments("/c whoami").
+    SetWindowStyle(lnk.StyleMinimized).
+    BuildBytes()
+if err != nil {
+    return err
+}
+// `raw` is a fully-formed LNK byte stream, ready for embedding,
+// encryption, or transport over a C2 channel.
+
+// Or stream directly into any io.Writer (encrypted ADS, in-memory
+// mount, custom anti-EDR Opener, …).
+var buf bytes.Buffer
+if _, err := lnk.New().
+    SetTargetPath(`C:\Windows\System32\cmd.exe`).
+    WriteTo(&buf); err != nil {
+    return err
+}
 ```
 
 See [`ExampleNew`](../../../persistence/lnk/lnk_example_test.go).
@@ -179,17 +233,33 @@ See [`ExampleNew`](../../../persistence/lnk/lnk_example_test.go).
 - **Windows-only.** No cross-platform stub — calls are guarded
   by `//go:build windows`.
 - **COM apartment overhead.** `runtime.LockOSThread` is held
-  for the duration of the builder; high-frequency LNK creation
-  paths benefit from batching.
-- **No raw-binary writer.** Callers needing to set fields the
-  IWshShortcut interface doesn't expose (e.g. custom
-  `LinkFlags`, raw `EXTRA_DATA_BLOCK`s) need a separate parser
-  / writer.
+  for the duration of every sink (`Save`, `BuildBytes`,
+  `WriteTo`); high-frequency LNK creation paths benefit from
+  batching builders behind a single COM init.
+- **Zero-disk path is amd64-only in practice.** `BuildBytes` /
+  `WriteTo` use raw COM vtable calls via `syscall.SyscallN` and
+  rely on the Windows x64 ABI — the calls compile under
+  `GOARCH=386` but argument passing for `IShellLinkW` setters
+  has not been verified on 32-bit. Treat 64-bit Windows as the
+  supported target.
+- **Custom `LinkFlags` / `EXTRA_DATA_BLOCK`s.** Callers needing
+  fields neither `IWshShortcut` nor `IShellLinkW` expose (custom
+  flags, signed property store entries, console block tweaks)
+  still need a separate parser / writer — neither sink reaches
+  past those interfaces.
 - **No LNK reading.** This package writes only; reading existing
   LNKs requires a separate parser.
 - **MOTW absent.** Locally-created LNKs carry no
   `Zone.Identifier` ADS — useful for the operator, but a
   forensic tell when correlating LNKs against download history.
+- **Hotkey parser scope.** Both sinks honour `SetHotkey`. The
+  `BuildBytes` path translates the WSH string (`"Ctrl+Alt+T"`,
+  `"Shift+F1"`, `"Alt+1"`) into the packed `WORD` form
+  (`HOTKEYF_* << 8 | VK_*`) expected by `IShellLinkW::SetHotkey`.
+  Recognised modifiers: `Ctrl`/`Control`, `Alt`, `Shift`, `Ext`.
+  Recognised keys: A–Z, 0–9, F1–F24. Anything else (numpad, OEM,
+  multimedia VKs) is silently dropped — extend `parseHotkey` if
+  needed.
 
 ## See also
 

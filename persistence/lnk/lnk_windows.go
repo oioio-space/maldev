@@ -60,9 +60,17 @@ func (s *Shortcut) SetWorkingDir(dir string) *Shortcut {
 	return s
 }
 
-// SetIconLocation sets the icon path (e.g. "shell32.dll,3").
+// SetIconLocation sets the icon path packed WSH-style ("shell32.dll,3").
+// For a typed two-argument form see [Shortcut.SetIconLocationIndexed].
 func (s *Shortcut) SetIconLocation(icon string) *Shortcut {
 	s.iconLocation = icon
+	return s
+}
+
+// SetIconLocationIndexed packs (path, index) into the WSH-style
+// "path,index" form expected by both serialisation sinks.
+func (s *Shortcut) SetIconLocationIndexed(path string, index int) *Shortcut {
+	s.iconLocation = fmt.Sprintf("%s,%d", path, index)
 	return s
 }
 
@@ -158,3 +166,4 @@ func (s *Shortcut) Save(path string) error {
 
 	return nil
 }
+

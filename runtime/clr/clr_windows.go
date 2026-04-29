@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/oioio-space/maldev/win/api"
+	"github.com/oioio-space/maldev/win/com"
 	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
@@ -444,7 +445,7 @@ func createMetaHost() (uintptr, error) {
 		uintptr(unsafe.Pointer(&metaHost)),
 	)
 	if r != sOK {
-		return 0, fmt.Errorf("CLRCreateInstance: HRESULT 0x%X", uint32(r))
+		return 0, com.Error("CLRCreateInstance", r)
 	}
 	return metaHost, nil
 }
@@ -473,7 +474,7 @@ func enumerateRuntimes(metaHost uintptr) ([]string, error) {
 		uintptr(unsafe.Pointer(&enumUnk)),
 	)
 	if r != sOK {
-		return nil, fmt.Errorf("EnumerateInstalledRuntimes: HRESULT 0x%X", uint32(r))
+		return nil, com.Error("EnumerateInstalledRuntimes", r)
 	}
 	defer releaseCOM(enumUnk)
 
@@ -492,7 +493,7 @@ func enumerateRuntimes(metaHost uintptr) ([]string, error) {
 			break
 		}
 		if r != sOK {
-			return versions, fmt.Errorf("IEnumUnknown.Next: HRESULT 0x%X", uint32(r))
+			return versions, com.Error("IEnumUnknown.Next", r)
 		}
 		ver := runtimeVersion(runtimeInfo)
 		releaseCOM(runtimeInfo)
@@ -517,7 +518,7 @@ func metaHostRuntime(metaHost uintptr, version string) (uintptr, error) {
 		uintptr(unsafe.Pointer(&runtimeInfo)),
 	)
 	if r != sOK {
-		return 0, fmt.Errorf("ICLRMetaHost.GetRuntime(%s): HRESULT 0x%X", version, uint32(r))
+		return 0, com.Error(fmt.Sprintf("ICLRMetaHost.GetRuntime(%s)", version), r)
 	}
 	return runtimeInfo, nil
 }
@@ -526,7 +527,7 @@ func runtimeInfoBindLegacyV2(runtimeInfo uintptr) error {
 	vtbl := (*iCLRRuntimeInfoVtbl)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(runtimeInfo))))
 	r, _, _ := syscall.SyscallN(vtbl.BindAsLegacyV2Runtime, runtimeInfo)
 	if r != sOK {
-		return fmt.Errorf("BindAsLegacyV2Runtime: HRESULT 0x%X", uint32(r))
+		return com.Error("BindAsLegacyV2Runtime", r)
 	}
 	return nil
 }
@@ -545,7 +546,7 @@ func runtimeInfoCorHost(runtimeInfo uintptr) (uintptr, error) {
 		return 0, ErrLegacyRuntimeUnavailable
 	}
 	if r != sOK {
-		return 0, fmt.Errorf("ICLRRuntimeInfo.GetInterface(ICorRuntimeHost): HRESULT 0x%X", uint32(r))
+		return 0, com.Error("ICLRRuntimeInfo.GetInterface(ICorRuntimeHost)", r)
 	}
 	return host, nil
 }
@@ -554,7 +555,7 @@ func corHostStart(host uintptr) error {
 	vtbl := (*iCorRuntimeHostVtbl)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(host))))
 	r, _, _ := syscall.SyscallN(vtbl.Start, host)
 	if r != sOK && uint32(r) != corProfERuntimeUninitialized {
-		return fmt.Errorf("ICorRuntimeHost.Start: HRESULT 0x%X", uint32(r))
+		return com.Error("ICorRuntimeHost.Start", r)
 	}
 	return nil
 }
@@ -584,7 +585,7 @@ func (rt *Runtime) defaultDomainDispatch() (*ole.IDispatch, error) {
 		uintptr(unsafe.Pointer(&domainUnk)),
 	)
 	if r != sOK {
-		return nil, fmt.Errorf("ICorRuntimeHost.GetDefaultDomain: HRESULT 0x%X", uint32(r))
+		return nil, com.Error("ICorRuntimeHost.GetDefaultDomain", r)
 	}
 	defer releaseCOM(domainUnk)
 
@@ -651,7 +652,7 @@ func newByteSafeArray(data []byte) (uintptr, error) {
 	r, _, _ := api.ProcSafeArrayAccessData.Call(sa, uintptr(unsafe.Pointer(&dataPtr)))
 	if r != sOK {
 		api.ProcSafeArrayDestroy.Call(sa) //nolint:errcheck
-		return 0, fmt.Errorf("SafeArrayAccessData: HRESULT 0x%X", uint32(r))
+		return 0, com.Error("SafeArrayAccessData", r)
 	}
 	dst := unsafe.Slice((*byte)(unsafe.Pointer(dataPtr)), len(data))
 	copy(dst, data)
@@ -679,7 +680,7 @@ func newBstrSafeArray(strs []string) (uintptr, error) {
 		api.ProcSysFreeString.Call(bstr) //nolint:errcheck — PutElement copies the BSTR
 		if r != sOK {
 			api.ProcSafeArrayDestroy.Call(sa) //nolint:errcheck
-			return 0, fmt.Errorf("SafeArrayPutElement[%d]: HRESULT 0x%X", i, uint32(r))
+			return 0, com.Error(fmt.Sprintf("SafeArrayPutElement[%d]", i), r)
 		}
 	}
 	return sa, nil
@@ -702,7 +703,7 @@ func newVariantSafeArrayWithOne(elemVT ole.VT, innerSafeArray uintptr) (uintptr,
 	)
 	if r != sOK {
 		api.ProcSafeArrayDestroy.Call(sa) //nolint:errcheck
-		return 0, fmt.Errorf("SafeArrayPutElement(VARIANT): HRESULT 0x%X", uint32(r))
+		return 0, com.Error("SafeArrayPutElement(VARIANT)", r)
 	}
 	return sa, nil
 }

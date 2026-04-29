@@ -20,6 +20,7 @@ var (
 	Crypt32  = windows.NewLazySystemDLL("crypt32.dll")
 	Gdi32    = windows.NewLazySystemDLL("gdi32.dll")
 	Mscoree  = windows.NewLazySystemDLL("mscoree.dll")
+	Ole32    = windows.NewLazySystemDLL("ole32.dll")
 	Oleaut32 = windows.NewLazySystemDLL("oleaut32.dll")
 	Wtsapi32 = windows.NewLazySystemDLL("wtsapi32.dll")
 )

@@ -1,12 +1,19 @@
 // Package lnk creates Windows shortcut (.lnk) files via COM/OLE
 // automation — fluent builder API, fully Windows-only.
 //
-// Initialises a single-threaded COM apartment, instantiates
-// `WScript.Shell`, calls `CreateShortcut` to obtain an
-// `IWshShortcut` dispatch interface, sets properties (target,
-// arguments, icon, working dir, window style) via
-// `IDispatch::PutProperty`, and persists the .lnk to disk via
-// `Save`. The COM apartment is torn down after each `Save`.
+// Initialises a single-threaded COM apartment and offers three
+// serialisation sinks:
+//
+//   - [Shortcut.Save] — disk persistence via `WScript.Shell` /
+//     `IWshShortcut::Save(path)`.
+//   - [Shortcut.BuildBytes] — zero-disk; returns raw LNK bytes
+//     via `IShellLinkW` + `IPersistStream::Save` on a memory
+//     `IStream` (`CreateStreamOnHGlobal`). No filesystem call.
+//   - [Shortcut.WriteTo] — same zero-disk path streamed to any
+//     `io.Writer` (encrypted ADS, in-memory mount, custom
+//     anti-EDR Opener, C2 transport).
+//
+// The COM apartment is torn down after each call.
 //
 // Used directly by [github.com/oioio-space/maldev/persistence/startup]
 // to drop StartUp-folder shortcuts; can also be invoked

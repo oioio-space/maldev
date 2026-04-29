@@ -150,12 +150,13 @@ _Each area is collapsed by default — click to expand. Detection level is the c
 
 </details>
 
-<details><summary><strong>Windows primitives — `win/*`</strong> — 9 packages</summary>
+<details><summary><strong>Windows primitives — `win/*`</strong> — 10 packages</summary>
 
 | Package | Detection | Summary |
 |---|---|---|
 | [`win`](https://pkg.go.dev/github.com/oioio-space/maldev/win) | — | is the parent umbrella for Windows-only primitives |
 | [`win/api`](https://pkg.go.dev/github.com/oioio-space/maldev/win/api) | very-quiet | is the single source of truth for Windows DLL handles, procedure references, and structures shared across maldev |
+| [`win/com`](https://pkg.go.dev/github.com/oioio-space/maldev/win/com) | — | holds Windows COM helpers shared across maldev |
 | [`win/domain`](https://pkg.go.dev/github.com/oioio-space/maldev/win/domain) | very-quiet | queries Windows domain-membership state — whether the host is workgroup-only, joined to an Active Directory domain, or in an unknown state |
 | [`win/impersonate`](https://pkg.go.dev/github.com/oioio-space/maldev/win/impersonate) | moderate | runs callbacks under an alternate Windows security context — by credential, by stolen token, or by piggy- backing on a target PID |
 | [`win/ntapi`](https://pkg.go.dev/github.com/oioio-space/maldev/win/ntapi) | quiet | exposes a small set of typed Go wrappers over `ntdll!Nt*` functions that maldev components use frequently — memory allocation, write/protect, thread creation, and system information query |
