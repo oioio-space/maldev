@@ -16,8 +16,14 @@ no-section-label = true
 mathjax-support = true
 
 [output.html.fold]
+# `level = 0` (strict `>`): every chapter that has sub-items folds by
+# default. Childless top-level entries (Getting Started, By Role,
+# Reference) stay visible because mdBook's fold check requires
+# `has_sub_items`. Net effect: under "Techniques", every area page
+# (C2 / Cleanup / Evasion / …) shows collapsed; readers click to
+# expand the per-technique list they actually need.
 enable = true
-level = 1
+level = 0
 
 [output.html.search]
 enable = true
