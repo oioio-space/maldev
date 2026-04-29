@@ -13,7 +13,7 @@ reflects_commit: f8b1a51
 Write the implant's path to one of the four canonical Run /
 RunOnce registry keys (HKCU + HKLM, persistent + one-shot).
 Windows launches every value at user logon. HKCU does not need
-admin; HKLM does. Implements [`persistence.Mechanism`](../../../persistence)
+admin; HKLM does. Implements [`persistence.Mechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence)
 for redundant composition.
 
 ## Primer

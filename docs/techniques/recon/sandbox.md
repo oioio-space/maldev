@@ -15,7 +15,7 @@ Aggregates 7 check dimensions
 ([antidebug](anti-analysis.md), [antivm](anti-analysis.md),
 hardware thresholds, suspicious user/host names, analysis-tool
 processes, fake-domain DNS interception, time-based) into a
-single [`Checker.IsSandboxed`](../../../recon/sandbox) result.
+single [`Checker.IsSandboxed`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox) result.
 Returns `(true, reason, err)` so callers can bail and log
 why.
 

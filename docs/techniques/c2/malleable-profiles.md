@@ -35,7 +35,7 @@ holds:
 - **`Headers`** — custom request headers (`Referer`, `Accept`,
   `Cache-Control`).
 - **`UserAgent`** — pinned User-Agent string. Pair with
-  [`useragent`](../../../useragent) for randomised real-browser UAs.
+  [`useragent`](https://pkg.go.dev/github.com/oioio-space/maldev/useragent) for randomised real-browser UAs.
 - **`DataEncoder` / `DataDecoder`** — optional transforms applied to
   payload bytes before the request body is built / after the response
   body is parsed. Lets the operator wrap C2 in (e.g.) a fake JSON
@@ -193,7 +193,7 @@ sh.Wait()
 | Artefact | Where defenders look |
 |---|---|
 | Identical URI in every C2 cycle | NIDS clustering — rotate through `GetURIs` and randomise |
-| Stale User-Agent strings | Defenders periodically refresh "real browser UA" lists; pair with [`useragent`](../../../useragent) for fresh entries |
+| Stale User-Agent strings | Defenders periodically refresh "real browser UA" lists; pair with [`useragent`](https://pkg.go.dev/github.com/oioio-space/maldev/useragent) for fresh entries |
 | `Referer` always identical or absent | Behavioural NIDS; vary the `Referer` per cycle if possible |
 | POST/GET ratio mismatched with cover content (e.g. constant POSTs to a "static asset" URI) | Heuristic — match GET/POST distribution to the cover content |
 | Body size patterns (every request exactly 32 KB) | Add randomised padding inside `DataEncoder` |
@@ -234,6 +234,6 @@ layer.
 
 - [Transport](transport.md) — base `Transport` interface and uTLS
   integration via `WithTLSConfig`.
-- [`useragent`](../../../useragent) — random real-browser UAs.
+- [`useragent`](https://pkg.go.dev/github.com/oioio-space/maldev/useragent) — random real-browser UAs.
 - [Cobalt Strike, *Malleable C2 Profile reference*](https://hstechdocs.helpsystems.com/manuals/cobaltstrike/current/userguide/content/topics/malleable-c2_main.htm)
   — primer on the technique class (different DSL, same idea).

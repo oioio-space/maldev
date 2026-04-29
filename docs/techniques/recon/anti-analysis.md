@@ -10,8 +10,8 @@ reflects_commit: f31fca1
 
 ## TL;DR
 
-Cross-platform debugger detection ([`antidebug`](../../../recon/antidebug))
-+ multi-vendor VM/hypervisor detection ([`antivm`](../../../recon/antivm)).
+Cross-platform debugger detection ([`antidebug`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antidebug))
++ multi-vendor VM/hypervisor detection ([`antivm`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm)).
 Single-shot primitives the implant runs at startup; bail if a
 debugger is attached or the host fingerprints as VirtualBox /
 VMware / Hyper-V / Parallels / Xen / QEMU / Docker / WSL.
@@ -119,7 +119,7 @@ if name, _ := antivm.Detect(cfg); name != "" {
 ### Advanced — orchestrator integration
 
 See [`recon/sandbox`](sandbox.md) for the multi-factor
-[`Checker.IsSandboxed`](../../../recon/sandbox) — debugger +
+[`Checker.IsSandboxed`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox) — debugger +
 VM detection are two of the seven dimensions it composes.
 
 ## OPSEC & Detection

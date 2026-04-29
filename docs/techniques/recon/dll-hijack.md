@@ -12,10 +12,10 @@ reflects_commit: f31fca1
 
 Discover DLL-search-order hijack opportunities across services,
 running processes, scheduled tasks, and `autoElevate=true`
-binaries. [`ScanAll`](../../../recon/dllhijack) returns
+binaries. [`ScanAll`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack) returns
 `Opportunity` records carrying the writable hijack path + the
-legitimate resolved DLL location. [`Validate`](../../../recon/dllhijack)
-proves the hijack works by dropping a canary; [`Rank`](../../../recon/dllhijack)
+legitimate resolved DLL location. [`Validate`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack)
+proves the hijack works by dropping a canary; [`Rank`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack)
 prioritises by integrity gain.
 
 ## Primer

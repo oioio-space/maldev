@@ -37,7 +37,7 @@ decrypt → wipe key → inject → wipe plaintext.
 
 | Package | Tech page | Detection | One-liner |
 |---|---|---|---|
-| [`crypto`](../../../crypto) | [payload-encryption.md](payload-encryption.md) | very-quiet | AEAD (AES-GCM, ChaCha20), stream/block (RC4, TEA, XTEA), signature-breaking transforms (S-Box, Matrix, XOR, ArithShift) |
+| [`crypto`](https://pkg.go.dev/github.com/oioio-space/maldev/crypto) | [payload-encryption.md](payload-encryption.md) | very-quiet | AEAD (AES-GCM, ChaCha20), stream/block (RC4, TEA, XTEA), signature-breaking transforms (S-Box, Matrix, XOR, ArithShift) |
 
 The package mixes three layers; the technique page documents each layer
 separately.

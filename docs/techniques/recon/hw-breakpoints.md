@@ -12,9 +12,9 @@ reflects_commit: f31fca1
 
 EDRs (notably CrowdStrike Falcon) place hardware breakpoints on
 NT function prologues using DR0-DR3 — invisible to the classic
-ntdll-on-disk-unhook pass. [`Detect`](../../../recon/hwbp)
+ntdll-on-disk-unhook pass. [`Detect`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp)
 reads DR0-DR3 across every thread and returns those pointing
-into ntdll; [`ClearAll`](../../../recon/hwbp) zeros them via
+into ntdll; [`ClearAll`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp) zeros them via
 `SetThreadContext`.
 
 ## Primer

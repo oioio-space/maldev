@@ -203,6 +203,27 @@ func TestAreaOf(t *testing.T) {
 	}
 }
 
+func TestRenderMITRE_AbsolutePkgGoDevURLs(t *testing.T) {
+	// Pre-fix bug: links rendered as `(../<pkg>)` resolved outside the
+	// gh-pages book root (mdBook deploy) and 404'd. Now every package
+	// link in the autogen MITRE blocks must be an absolute pkg.go.dev URL.
+	pkgs := []PackageDoc{
+		{
+			ImportPath:   "github.com/oioio-space/maldev/c2/shell",
+			RelativePath: "c2/shell",
+			MITREIDs:     []string{"T1059"},
+		},
+	}
+	for _, body := range []string{renderMITREIndex(pkgs), renderMITRETable(pkgs)} {
+		if !strings.Contains(body, "(https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell)") {
+			t.Errorf("expected pkg.go.dev URL in renderer output, got:\n%s", body)
+		}
+		if strings.Contains(body, "(../c2/shell)") {
+			t.Errorf("legacy `../<pkg>` link still present in output:\n%s", body)
+		}
+	}
+}
+
 func TestPluralS(t *testing.T) {
 	if got := pluralS(0); got != "s" {
 		t.Errorf("pluralS(0) = %q", got)

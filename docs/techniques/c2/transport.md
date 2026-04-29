@@ -14,7 +14,7 @@ Pluggable network layer behind every reverse shell or stager. Three
 flavours: raw TCP, TLS with optional SHA-256 fingerprint pinning, and
 uTLS that emits a TLS ClientHello byte-for-byte identical to Chrome /
 Firefox / iOS Safari (defeats JA3/JA4-based detection). Pair with
-[`c2/cert`](../../../c2/cert) to generate the operator's mTLS material
+[`c2/cert`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/cert) to generate the operator's mTLS material
 and pin it on the implant side.
 
 ## Primer
@@ -291,7 +291,7 @@ content inspection.
 - [Malleable profiles](malleable-profiles.md) — HTTP-shaped variant
   on top of any transport.
 - [Named pipe](namedpipe.md) — local IPC alternative on Windows.
-- [`useragent`](../../../useragent) — pair with HTTP transports for
+- [`useragent`](https://pkg.go.dev/github.com/oioio-space/maldev/useragent) — pair with HTTP transports for
   realistic User-Agent headers.
 - [refraction-networking/utls](https://github.com/refraction-networking/utls)
   — upstream of `NewUTLS`.

@@ -54,15 +54,15 @@ flowchart TB
 
 | Package | Tech page | Detection | One-liner |
 |---|---|---|---|
-| [`recon/antidebug`](../../../recon/antidebug) | [anti-analysis.md](anti-analysis.md) | quiet | Cross-platform debugger detection (PEB / TracerPid) |
-| [`recon/antivm`](../../../recon/antivm) | [anti-analysis.md](anti-analysis.md) | quiet | Multi-vendor hypervisor detection (7 dimensions) |
-| [`recon/sandbox`](../../../recon/sandbox) | [sandbox.md](sandbox.md) | quiet | Multi-factor sandbox orchestrator |
-| [`recon/timing`](../../../recon/timing) | [timing.md](timing.md) | quiet | CPU-burn defeats Sleep-hook fast-forward |
-| [`recon/dllhijack`](../../../recon/dllhijack) | [dll-hijack.md](dll-hijack.md) | moderate | Discover DLL search-order hijack opportunities |
-| [`recon/hwbp`](../../../recon/hwbp) | [hw-breakpoints.md](hw-breakpoints.md) | moderate | Detect + clear EDR HWBPs in DR0-DR3 |
-| [`recon/drive`](../../../recon/drive) | [drive.md](drive.md) | very-quiet | Drive enum + USB-insert watcher (Windows) |
-| [`recon/folder`](../../../recon/folder) | [folder.md](folder.md) | very-quiet | Windows special-folder path resolution |
-| [`recon/network`](../../../recon/network) | [network.md](network.md) | very-quiet | Cross-platform interface IPs + IsLocal |
+| [`recon/antidebug`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antidebug) | [anti-analysis.md](anti-analysis.md) | quiet | Cross-platform debugger detection (PEB / TracerPid) |
+| [`recon/antivm`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm) | [anti-analysis.md](anti-analysis.md) | quiet | Multi-vendor hypervisor detection (7 dimensions) |
+| [`recon/sandbox`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox) | [sandbox.md](sandbox.md) | quiet | Multi-factor sandbox orchestrator |
+| [`recon/timing`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing) | [timing.md](timing.md) | quiet | CPU-burn defeats Sleep-hook fast-forward |
+| [`recon/dllhijack`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack) | [dll-hijack.md](dll-hijack.md) | moderate | Discover DLL search-order hijack opportunities |
+| [`recon/hwbp`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp) | [hw-breakpoints.md](hw-breakpoints.md) | moderate | Detect + clear EDR HWBPs in DR0-DR3 |
+| [`recon/drive`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive) | [drive.md](drive.md) | very-quiet | Drive enum + USB-insert watcher (Windows) |
+| [`recon/folder`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/folder) | [folder.md](folder.md) | very-quiet | Windows special-folder path resolution |
+| [`recon/network`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/network) | [network.md](network.md) | very-quiet | Cross-platform interface IPs + IsLocal |
 
 ## Quick decision tree
 

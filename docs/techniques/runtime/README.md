@@ -16,8 +16,8 @@ heavily monitored.
 
 | Package | Tech page | Detection | One-liner |
 |---|---|---|---|
-| [`runtime/bof`](../../../runtime/bof) | [bof-loader.md](bof-loader.md) | quiet | Beacon Object File / COFF loader for in-memory x64 object-file execution |
-| [`runtime/clr`](../../../runtime/clr) | [clr.md](clr.md) | moderate | In-process .NET CLR hosting via `ICLRMetaHost` / `ICorRuntimeHost` |
+| [`runtime/bof`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof) | [bof-loader.md](bof-loader.md) | quiet | Beacon Object File / COFF loader for in-memory x64 object-file execution |
+| [`runtime/clr`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr) | [clr.md](clr.md) | moderate | In-process .NET CLR hosting via `ICLRMetaHost` / `ICorRuntimeHost` |
 
 ## Quick decision tree
 

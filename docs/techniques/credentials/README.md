@@ -44,10 +44,10 @@ flowchart LR
 
 | Package | Tech page | Detection | One-liner |
 |---|---|---|---|
-| [`credentials/lsassdump`](../../../credentials/lsassdump) | [lsassdump.md](lsassdump.md) | noisy | `NtGetNextProcess` + in-process MINIDUMP + EPROCESS PPL unprotect via RTCore64 |
-| [`credentials/sekurlsa`](../../../credentials/sekurlsa) | [sekurlsa.md](sekurlsa.md) | quiet (parser only) | Pure-Go MSV1_0 / Wdigest / Kerberos / DPAPI / TSPkg / CloudAP / LiveSSP / CredMan walkers + LSA-crypto unwrap + PTH write-back + Kerberos kirbi export |
-| [`credentials/samdump`](../../../credentials/samdump) | [samdump.md](samdump.md) | quiet (offline) / noisy (LiveDump) | Offline SAM hive dump — REGF parser + boot-key permutation + AES/RC4 hashed-bootkey + per-RID DES de-permutation |
-| [`credentials/goldenticket`](../../../credentials/goldenticket) | [goldenticket.md](goldenticket.md) | noisy (visible TGT lifetime) | PAC marshaling + KRB5 `Forge` + LSA `Submit` for Golden Ticket attacks |
+| [`credentials/lsassdump`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/lsassdump) | [lsassdump.md](lsassdump.md) | noisy | `NtGetNextProcess` + in-process MINIDUMP + EPROCESS PPL unprotect via RTCore64 |
+| [`credentials/sekurlsa`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/sekurlsa) | [sekurlsa.md](sekurlsa.md) | quiet (parser only) | Pure-Go MSV1_0 / Wdigest / Kerberos / DPAPI / TSPkg / CloudAP / LiveSSP / CredMan walkers + LSA-crypto unwrap + PTH write-back + Kerberos kirbi export |
+| [`credentials/samdump`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/samdump) | [samdump.md](samdump.md) | quiet (offline) / noisy (LiveDump) | Offline SAM hive dump — REGF parser + boot-key permutation + AES/RC4 hashed-bootkey + per-RID DES de-permutation |
+| [`credentials/goldenticket`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/goldenticket) | [goldenticket.md](goldenticket.md) | noisy (visible TGT lifetime) | PAC marshaling + KRB5 `Forge` + LSA `Submit` for Golden Ticket attacks |
 
 ## Quick decision tree
 

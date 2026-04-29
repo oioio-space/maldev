@@ -26,7 +26,7 @@ flowchart TD
 
 | Package | Tech page | Detection | One-liner |
 |---|---|---|---|
-| [`hash`](../../../hash) | [cryptographic-hashes.md](cryptographic-hashes.md) · [fuzzy-hashing.md](fuzzy-hashing.md) | very-quiet | MD5/SHA-* (integrity), ROR13 (API hashing), ssdeep + TLSH (similarity) |
+| [`hash`](https://pkg.go.dev/github.com/oioio-space/maldev/hash) | [cryptographic-hashes.md](cryptographic-hashes.md) · [fuzzy-hashing.md](fuzzy-hashing.md) | very-quiet | MD5/SHA-* (integrity), ROR13 (API hashing), ssdeep + TLSH (similarity) |
 
 ## Quick decision tree
 

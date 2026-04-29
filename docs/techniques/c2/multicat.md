@@ -186,5 +186,5 @@ Cloudflare worker), put it behind a single jump host.
 - [Reverse shell](reverse-shell.md) — agent counterpart.
 - [Transport](transport.md) — listener factories
   (`NewTCPListener`, `NewTLSListener`).
-- [`cmd/rshell`](../../../cmd/rshell) — reference TUI built on
+- [`cmd/rshell`](https://pkg.go.dev/github.com/oioio-space/maldev/cmd/rshell) — reference TUI built on
   multicat.

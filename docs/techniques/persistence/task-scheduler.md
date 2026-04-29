@@ -13,7 +13,7 @@ reflects_commit: f8b1a51
 Create, list, run, and delete Windows scheduled tasks via the
 COM `ITaskService` API — no `schtasks.exe` child process.
 Supports logon, startup, daily, and one-shot time triggers, plus
-a `Hidden` flag. Implements [`persistence.Mechanism`](../../../persistence).
+a `Hidden` flag. Implements [`persistence.Mechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence).
 Trade-off vs `persistence/service`: same SYSTEM-scope reach with
 broader trigger options and lower direct-spawn telemetry, but
 Event 4698 still emits.

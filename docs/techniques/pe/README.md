@@ -47,14 +47,14 @@ flowchart LR
 
 | Package | Tech page | Detection | One-liner |
 |---|---|---|---|
-| [`pe/parse`](../../../pe/parse) | (covered here + doc.go) | very-quiet | Read-only `debug/pe` wrapper for section / export / raw-byte access |
-| [`pe/imports`](../../../pe/imports) | [imports.md](imports.md) | very-quiet | Cross-platform import-table enumeration |
-| [`pe/strip`](../../../pe/strip) | [strip-sanitize.md](strip-sanitize.md) | quiet | Go pclntab wipe + section rename + timestamp scrub |
-| [`pe/morph`](../../../pe/morph) | [morph.md](morph.md) | moderate | UPX header signature mutation |
-| [`pe/cert`](../../../pe/cert) | [certificate-theft.md](certificate-theft.md) | quiet | Authenticode security-directory read / copy / strip / write |
-| [`pe/masquerade`](../../../pe/masquerade) | [masquerade.md](masquerade.md) | quiet | manifest + icon + VERSIONINFO clone via `.syso` (preset or programmatic) |
-| [`pe/srdi`](../../../pe/srdi) | [pe-to-shellcode.md](pe-to-shellcode.md) | moderate | PE / .NET / script → Donut shellcode |
-| [`pe/dllproxy`](../../../pe/dllproxy) | [dll-proxy.md](dll-proxy.md) | very-quiet | Pure-Go forwarder DLL emitter for DLL-hijack payloads |
+| [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) | (covered here + doc.go) | very-quiet | Read-only `debug/pe` wrapper for section / export / raw-byte access |
+| [`pe/imports`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports) | [imports.md](imports.md) | very-quiet | Cross-platform import-table enumeration |
+| [`pe/strip`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip) | [strip-sanitize.md](strip-sanitize.md) | quiet | Go pclntab wipe + section rename + timestamp scrub |
+| [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) | [morph.md](morph.md) | moderate | UPX header signature mutation |
+| [`pe/cert`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert) | [certificate-theft.md](certificate-theft.md) | quiet | Authenticode security-directory read / copy / strip / write |
+| [`pe/masquerade`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade) | [masquerade.md](masquerade.md) | quiet | manifest + icon + VERSIONINFO clone via `.syso` (preset or programmatic) |
+| [`pe/srdi`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi) | [pe-to-shellcode.md](pe-to-shellcode.md) | moderate | PE / .NET / script → Donut shellcode |
+| [`pe/dllproxy`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy) | [dll-proxy.md](dll-proxy.md) | very-quiet | Pure-Go forwarder DLL emitter for DLL-hijack payloads |
 
 ## Quick decision tree
 
@@ -68,7 +68,7 @@ flowchart LR
 | …clone any PE's identity programmatically | [`masquerade.Clone`](masquerade.md) / [`Build`](masquerade.md) |
 | …convert a PE / .NET / script to position-independent shellcode | [`srdi.ConvertFile`](pe-to-shellcode.md) |
 | …feed shellcode to remote-process injection | [`pe/srdi`](pe-to-shellcode.md) → [`inject`](../injection/README.md) |
-| …enumerate sections / exports for tooling | [`pe/parse`](../../../pe/parse) |
+| …enumerate sections / exports for tooling | [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) |
 | …emit a forwarder DLL for hijack payloads (no MSVC) | [`dllproxy.Generate`](dll-proxy.md) |
 
 ## MITRE ATT&CK

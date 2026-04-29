@@ -31,7 +31,7 @@ Encrypt first, then encode. Decode last, then decrypt.
 
 | Package | Tech page | Detection | One-liner |
 |---|---|---|---|
-| [`encode`](../../../encode) | [encode.md](encode.md) | very-quiet | Base64 (std + URL), UTF-16LE, ROT13, PowerShell `-EncodedCommand` |
+| [`encode`](https://pkg.go.dev/github.com/oioio-space/maldev/encode) | [encode.md](encode.md) | very-quiet | Base64 (std + URL), UTF-16LE, ROT13, PowerShell `-EncodedCommand` |
 
 ## Quick decision tree
 

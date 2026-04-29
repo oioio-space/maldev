@@ -14,7 +14,7 @@ Install a Windows service via the Service Control Manager so the
 implant runs as `LocalSystem` at every boot. Highest-trust
 persistence available; also the loudest — service creation emits
 System Event 7045 + Security Event 4697 on every modern Windows
-host. Implements [`persistence.Mechanism`](../../../persistence)
+host. Implements [`persistence.Mechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence)
 for composition with other persistence primitives.
 
 ## Primer

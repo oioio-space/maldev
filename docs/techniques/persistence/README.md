@@ -9,9 +9,9 @@ reflects_commit: f8b1a51
 
 The `persistence/*` package tree groups Windows-only mechanisms
 that re-launch an implant across reboots and user logons. The
-[`Mechanism`](../../../persistence) interface is the composition
+[`Mechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence) interface is the composition
 primitive: each sub-package returns a `Mechanism`, and
-[`InstallAll`](../../../persistence) / `VerifyAll` /
+[`InstallAll`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence) / `VerifyAll` /
 `UninstallAll` operate on a flat slice — operators typically
 install two or three mechanisms in parallel so failure of any
 single one (cleanup sweep, AV remediation, EDR auto-roll-back)
@@ -57,12 +57,12 @@ flowchart TB
 
 | Package | Tech page | Detection | One-liner |
 |---|---|---|---|
-| [`persistence/registry`](../../../persistence/registry) | [registry.md](registry.md) | moderate | HKCU + HKLM Run / RunOnce key persistence |
-| [`persistence/startup`](../../../persistence/startup) | [startup-folder.md](startup-folder.md) | moderate | StartUp-folder LNK persistence (user + machine) |
-| [`persistence/scheduler`](../../../persistence/scheduler) | [task-scheduler.md](task-scheduler.md) | moderate | COM-based scheduled tasks; logon / startup / daily / time triggers |
-| [`persistence/service`](../../../persistence/service) | [service.md](service.md) | noisy | Windows service via SCM (SYSTEM-scope) |
-| [`persistence/lnk`](../../../persistence/lnk) | [lnk.md](lnk.md) | quiet | Underlying LNK creation primitive (used by startup, also for T1204.002 user-execution traps) |
-| [`persistence/account`](../../../persistence/account) | [account.md](account.md) | noisy | Local user account add / delete / group membership |
+| [`persistence/registry`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry) | [registry.md](registry.md) | moderate | HKCU + HKLM Run / RunOnce key persistence |
+| [`persistence/startup`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup) | [startup-folder.md](startup-folder.md) | moderate | StartUp-folder LNK persistence (user + machine) |
+| [`persistence/scheduler`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler) | [task-scheduler.md](task-scheduler.md) | moderate | COM-based scheduled tasks; logon / startup / daily / time triggers |
+| [`persistence/service`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service) | [service.md](service.md) | noisy | Windows service via SCM (SYSTEM-scope) |
+| [`persistence/lnk`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk) | [lnk.md](lnk.md) | quiet | Underlying LNK creation primitive (used by startup, also for T1204.002 user-execution traps) |
+| [`persistence/account`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account) | [account.md](account.md) | noisy | Local user account add / delete / group membership |
 
 ## Quick decision tree
 
@@ -73,7 +73,7 @@ flowchart TB
 | …trigger before user logon (boot / startup) | [`scheduler` with `WithTriggerStartup`](task-scheduler.md) or [`service`](service.md) |
 | …schedule recurring callbacks | [`scheduler.Create` with `WithTriggerDaily`](task-scheduler.md) |
 | …run as SYSTEM | [`service`](service.md) or [`scheduler` with startup trigger](task-scheduler.md) |
-| …compose multiple mechanisms with redundancy | [`persistence.InstallAll`](../../../persistence) |
+| …compose multiple mechanisms with redundancy | [`persistence.InstallAll`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence) |
 | …leave a credential that survives implant removal | [`account.Add` + `SetAdmin`](account.md) (loud) |
 | …drop a user-execution trap (Desktop / Quick Launch) | [`lnk.New`](lnk.md) |
 

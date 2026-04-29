@@ -51,80 +51,80 @@ OPSEC / MITRE / Limitations / See also).
 
 | T-ID | Packages |
 |---|---|
-| [T1003.001](https://attack.mitre.org/techniques/T1003/001/) | [`credentials/lsassdump`](../credentials/lsassdump) · [`credentials/sekurlsa`](../credentials/sekurlsa) |
-| [T1003.002](https://attack.mitre.org/techniques/T1003/002/) | [`credentials/samdump`](../credentials/samdump) |
-| [T1014](https://attack.mitre.org/techniques/T1014/) | [`kernel/driver`](../kernel/driver) · [`kernel/driver/rtcore64`](../kernel/driver/rtcore64) |
-| [T1016](https://attack.mitre.org/techniques/T1016/) | [`recon/network`](../recon/network) · [`win/domain`](../win/domain) |
-| [T1021.002](https://attack.mitre.org/techniques/T1021/002/) | [`c2/transport/namedpipe`](../c2/transport/namedpipe) |
-| [T1027](https://attack.mitre.org/techniques/T1027/) | [`crypto`](../crypto) · [`encode`](../encode) · [`evasion/hook/shellcode`](../evasion/hook/shellcode) · [`evasion/sleepmask`](../evasion/sleepmask) · [`win/api`](../win/api) |
-| [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | [`pe`](../pe) · [`pe/morph`](../pe/morph) · [`pe/parse`](../pe/parse) · [`pe/strip`](../pe/strip) |
-| [T1027.005](https://attack.mitre.org/techniques/T1027/005/) | [`pe/strip`](../pe/strip) · [`process/tamper/herpaderping`](../process/tamper/herpaderping) · [`process/tamper/hideprocess`](../process/tamper/hideprocess) · [`recon/hwbp`](../recon/hwbp) |
-| [T1027.007](https://attack.mitre.org/techniques/T1027/007/) | [`win/syscall`](../win/syscall) |
-| [T1027.013](https://attack.mitre.org/techniques/T1027/013/) | [`crypto`](../crypto) |
-| [T1036](https://attack.mitre.org/techniques/T1036/) | [`evasion/callstack`](../evasion/callstack) · [`evasion/stealthopen`](../evasion/stealthopen) |
-| [T1036.005](https://attack.mitre.org/techniques/T1036/005/) | [`pe`](../pe) · [`pe/masquerade`](../pe/masquerade) · [`process`](../process) · [`process/tamper/fakecmd`](../process/tamper/fakecmd) |
-| [T1053.005](https://attack.mitre.org/techniques/T1053/005/) | [`persistence`](../persistence) · [`persistence/scheduler`](../persistence/scheduler) |
-| [T1055](https://attack.mitre.org/techniques/T1055/) | [`c2/meterpreter`](../c2/meterpreter) · [`inject`](../inject) · [`process/tamper/herpaderping`](../process/tamper/herpaderping) |
-| [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | [`inject`](../inject) · [`pe`](../pe) · [`pe/srdi`](../pe/srdi) |
-| [T1055.003](https://attack.mitre.org/techniques/T1055/003/) | [`inject`](../inject) |
-| [T1055.004](https://attack.mitre.org/techniques/T1055/004/) | [`inject`](../inject) |
-| [T1055.012](https://attack.mitre.org/techniques/T1055/012/) | [`inject`](../inject) |
-| [T1055.013](https://attack.mitre.org/techniques/T1055/013/) | [`process`](../process) · [`process/tamper/herpaderping`](../process/tamper/herpaderping) |
-| [T1055.015](https://attack.mitre.org/techniques/T1055/015/) | [`inject`](../inject) |
-| [T1056.001](https://attack.mitre.org/techniques/T1056/001/) | [`collection`](../collection) · [`collection/keylog`](../collection/keylog) |
-| [T1057](https://attack.mitre.org/techniques/T1057/) | [`process`](../process) · [`process/enum`](../process/enum) |
-| [T1059](https://attack.mitre.org/techniques/T1059/) | [`c2`](../c2) · [`c2/meterpreter`](../c2/meterpreter) · [`c2/shell`](../c2/shell) · [`runtime/bof`](../runtime/bof) · [`runtime/clr`](../runtime/clr) |
-| [T1059.001](https://attack.mitre.org/techniques/T1059/001/) | [`c2/shell`](../c2/shell) |
-| [T1059.003](https://attack.mitre.org/techniques/T1059/003/) | [`c2/shell`](../c2/shell) |
-| [T1059.004](https://attack.mitre.org/techniques/T1059/004/) | [`c2/shell`](../c2/shell) |
-| [T1068](https://attack.mitre.org/techniques/T1068/) | [`credentials/lsassdump`](../credentials/lsassdump) · [`kernel/driver`](../kernel/driver) · [`kernel/driver/rtcore64`](../kernel/driver/rtcore64) · [`privesc/cve202430088`](../privesc/cve202430088) |
-| [T1070](https://attack.mitre.org/techniques/T1070/) | [`cleanup`](../cleanup) · [`cleanup/memory`](../cleanup/memory) |
-| [T1070.004](https://attack.mitre.org/techniques/T1070/004/) | [`cleanup`](../cleanup) · [`cleanup/selfdelete`](../cleanup/selfdelete) · [`cleanup/wipe`](../cleanup/wipe) |
-| [T1070.006](https://attack.mitre.org/techniques/T1070/006/) | [`cleanup`](../cleanup) · [`cleanup/timestomp`](../cleanup/timestomp) |
-| [T1071](https://attack.mitre.org/techniques/T1071/) | [`c2`](../c2) · [`c2/transport`](../c2/transport) · [`evasion/hook/bridge`](../evasion/hook/bridge) |
-| [T1071.001](https://attack.mitre.org/techniques/T1071/001/) | [`c2`](../c2) · [`c2/meterpreter`](../c2/meterpreter) · [`c2/transport/namedpipe`](../c2/transport/namedpipe) · [`useragent`](../useragent) |
-| [T1078](https://attack.mitre.org/techniques/T1078/) | [`win/privilege`](../win/privilege) |
-| [T1082](https://attack.mitre.org/techniques/T1082/) | [`win/domain`](../win/domain) · [`win/version`](../win/version) |
-| [T1083](https://attack.mitre.org/techniques/T1083/) | [`recon/drive`](../recon/drive) · [`recon/folder`](../recon/folder) |
-| [T1095](https://attack.mitre.org/techniques/T1095/) | [`c2`](../c2) · [`c2/meterpreter`](../c2/meterpreter) · [`c2/transport`](../c2/transport) |
-| [T1098](https://attack.mitre.org/techniques/T1098/) | [`persistence/account`](../persistence/account) |
-| [T1106](https://attack.mitre.org/techniques/T1106/) | [`pe`](../pe) · [`pe/imports`](../pe/imports) · [`win/api`](../win/api) · [`win/ntapi`](../win/ntapi) · [`win/syscall`](../win/syscall) |
-| [T1113](https://attack.mitre.org/techniques/T1113/) | [`collection`](../collection) · [`collection/screenshot`](../collection/screenshot) |
-| [T1115](https://attack.mitre.org/techniques/T1115/) | [`collection`](../collection) · [`collection/clipboard`](../collection/clipboard) |
-| [T1120](https://attack.mitre.org/techniques/T1120/) | [`recon/drive`](../recon/drive) |
-| [T1134](https://attack.mitre.org/techniques/T1134/) | [`win/privilege`](../win/privilege) · [`win/token`](../win/token) |
-| [T1134.001](https://attack.mitre.org/techniques/T1134/001/) | [`privesc/cve202430088`](../privesc/cve202430088) · [`process/session`](../process/session) · [`win/impersonate`](../win/impersonate) · [`win/token`](../win/token) |
-| [T1134.002](https://attack.mitre.org/techniques/T1134/002/) | [`process`](../process) · [`process/session`](../process/session) · [`win/impersonate`](../win/impersonate) · [`win/token`](../win/token) |
-| [T1134.004](https://attack.mitre.org/techniques/T1134/004/) | [`win/impersonate`](../win/impersonate) |
-| [T1134.005](https://attack.mitre.org/techniques/T1134/005/) | [`win/token`](../win/token) |
-| [T1136.001](https://attack.mitre.org/techniques/T1136/001/) | [`persistence`](../persistence) · [`persistence/account`](../persistence/account) |
-| [T1204.002](https://attack.mitre.org/techniques/T1204/002/) | [`persistence`](../persistence) · [`persistence/lnk`](../persistence/lnk) |
-| [T1497](https://attack.mitre.org/techniques/T1497/) | [`evasion`](../evasion) · [`recon/sandbox`](../recon/sandbox) |
-| [T1497.001](https://attack.mitre.org/techniques/T1497/001/) | [`recon/antivm`](../recon/antivm) |
-| [T1497.003](https://attack.mitre.org/techniques/T1497/003/) | [`recon/timing`](../recon/timing) |
-| [T1529](https://attack.mitre.org/techniques/T1529/) | [`cleanup`](../cleanup) · [`cleanup/bsod`](../cleanup/bsod) |
-| [T1543.003](https://attack.mitre.org/techniques/T1543/003/) | [`cleanup`](../cleanup) · [`cleanup/service`](../cleanup/service) · [`kernel/driver`](../kernel/driver) · [`kernel/driver/rtcore64`](../kernel/driver/rtcore64) · [`persistence`](../persistence) · [`persistence/service`](../persistence/service) |
-| [T1547.001](https://attack.mitre.org/techniques/T1547/001/) | [`persistence`](../persistence) · [`persistence/registry`](../persistence/registry) · [`persistence/startup`](../persistence/startup) |
-| [T1547.009](https://attack.mitre.org/techniques/T1547/009/) | [`persistence`](../persistence) · [`persistence/lnk`](../persistence/lnk) · [`persistence/startup`](../persistence/startup) |
-| [T1548.002](https://attack.mitre.org/techniques/T1548/002/) | [`privesc/uac`](../privesc/uac) · [`recon/dllhijack`](../recon/dllhijack) · [`win/privilege`](../win/privilege) |
-| [T1550.002](https://attack.mitre.org/techniques/T1550/002/) | [`credentials/sekurlsa`](../credentials/sekurlsa) |
-| [T1553.002](https://attack.mitre.org/techniques/T1553/002/) | [`pe`](../pe) · [`pe/cert`](../pe/cert) |
-| [T1558.001](https://attack.mitre.org/techniques/T1558/001/) | [`credentials/goldenticket`](../credentials/goldenticket) |
-| [T1558.003](https://attack.mitre.org/techniques/T1558/003/) | [`credentials/sekurlsa`](../credentials/sekurlsa) |
-| [T1562.001](https://attack.mitre.org/techniques/T1562/001/) | [`evasion`](../evasion) · [`evasion/acg`](../evasion/acg) · [`evasion/amsi`](../evasion/amsi) · [`evasion/blockdlls`](../evasion/blockdlls) · [`evasion/cet`](../evasion/cet) · [`evasion/etw`](../evasion/etw) · [`evasion/kcallback`](../evasion/kcallback) · [`evasion/preset`](../evasion/preset) · [`evasion/unhook`](../evasion/unhook) |
-| [T1562.002](https://attack.mitre.org/techniques/T1562/002/) | [`process`](../process) · [`process/tamper/phant0m`](../process/tamper/phant0m) |
-| [T1564](https://attack.mitre.org/techniques/T1564/) | [`cleanup/service`](../cleanup/service) · [`process/tamper/fakecmd`](../process/tamper/fakecmd) |
-| [T1564.001](https://attack.mitre.org/techniques/T1564/001/) | [`process`](../process) · [`process/tamper/hideprocess`](../process/tamper/hideprocess) |
-| [T1564.004](https://attack.mitre.org/techniques/T1564/004/) | [`cleanup`](../cleanup) · [`cleanup/ads`](../cleanup/ads) |
-| [T1571](https://attack.mitre.org/techniques/T1571/) | [`c2`](../c2) · [`c2/multicat`](../c2/multicat) |
-| [T1573](https://attack.mitre.org/techniques/T1573/) | [`c2`](../c2) · [`c2/transport`](../c2/transport) |
-| [T1573.001](https://attack.mitre.org/techniques/T1573/001/) | [`c2/cert`](../c2/cert) |
-| [T1573.002](https://attack.mitre.org/techniques/T1573/002/) | [`c2`](../c2) · [`c2/cert`](../c2/cert) · [`c2/transport`](../c2/transport) |
-| [T1574.001](https://attack.mitre.org/techniques/T1574/001/) | [`pe/dllproxy`](../pe/dllproxy) · [`recon/dllhijack`](../recon/dllhijack) |
-| [T1574.002](https://attack.mitre.org/techniques/T1574/002/) | [`pe/dllproxy`](../pe/dllproxy) |
-| [T1574.012](https://attack.mitre.org/techniques/T1574/012/) | [`evasion`](../evasion) · [`evasion/hook`](../evasion/hook) · [`evasion/hook/bridge`](../evasion/hook/bridge) · [`evasion/hook/shellcode`](../evasion/hook/shellcode) |
-| [T1620](https://attack.mitre.org/techniques/T1620/) | [`pe/srdi`](../pe/srdi) · [`runtime/bof`](../runtime/bof) · [`runtime/clr`](../runtime/clr) |
-| [T1622](https://attack.mitre.org/techniques/T1622/) | [`evasion`](../evasion) · [`recon/antidebug`](../recon/antidebug) · [`recon/hwbp`](../recon/hwbp) |
+| [T1003.001](https://attack.mitre.org/techniques/T1003/001/) | [`credentials/lsassdump`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/lsassdump) · [`credentials/sekurlsa`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/sekurlsa) |
+| [T1003.002](https://attack.mitre.org/techniques/T1003/002/) | [`credentials/samdump`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/samdump) |
+| [T1014](https://attack.mitre.org/techniques/T1014/) | [`kernel/driver`](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver) · [`kernel/driver/rtcore64`](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver/rtcore64) |
+| [T1016](https://attack.mitre.org/techniques/T1016/) | [`recon/network`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/network) · [`win/domain`](https://pkg.go.dev/github.com/oioio-space/maldev/win/domain) |
+| [T1021.002](https://attack.mitre.org/techniques/T1021/002/) | [`c2/transport/namedpipe`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport/namedpipe) |
+| [T1027](https://attack.mitre.org/techniques/T1027/) | [`crypto`](https://pkg.go.dev/github.com/oioio-space/maldev/crypto) · [`encode`](https://pkg.go.dev/github.com/oioio-space/maldev/encode) · [`evasion/hook/shellcode`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/shellcode) · [`evasion/sleepmask`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/sleepmask) · [`win/api`](https://pkg.go.dev/github.com/oioio-space/maldev/win/api) |
+| [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | [`pe`](https://pkg.go.dev/github.com/oioio-space/maldev/pe) · [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) · [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) · [`pe/strip`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip) |
+| [T1027.005](https://attack.mitre.org/techniques/T1027/005/) | [`pe/strip`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip) · [`process/tamper/herpaderping`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/herpaderping) · [`process/tamper/hideprocess`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess) · [`recon/hwbp`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp) |
+| [T1027.007](https://attack.mitre.org/techniques/T1027/007/) | [`win/syscall`](https://pkg.go.dev/github.com/oioio-space/maldev/win/syscall) |
+| [T1027.013](https://attack.mitre.org/techniques/T1027/013/) | [`crypto`](https://pkg.go.dev/github.com/oioio-space/maldev/crypto) |
+| [T1036](https://attack.mitre.org/techniques/T1036/) | [`evasion/callstack`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/callstack) · [`evasion/stealthopen`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/stealthopen) |
+| [T1036.005](https://attack.mitre.org/techniques/T1036/005/) | [`pe`](https://pkg.go.dev/github.com/oioio-space/maldev/pe) · [`pe/masquerade`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade) · [`process`](https://pkg.go.dev/github.com/oioio-space/maldev/process) · [`process/tamper/fakecmd`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/fakecmd) |
+| [T1053.005](https://attack.mitre.org/techniques/T1053/005/) | [`persistence`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence) · [`persistence/scheduler`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler) |
+| [T1055](https://attack.mitre.org/techniques/T1055/) | [`c2/meterpreter`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/meterpreter) · [`inject`](https://pkg.go.dev/github.com/oioio-space/maldev/inject) · [`process/tamper/herpaderping`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/herpaderping) |
+| [T1055.001](https://attack.mitre.org/techniques/T1055/001/) | [`inject`](https://pkg.go.dev/github.com/oioio-space/maldev/inject) · [`pe`](https://pkg.go.dev/github.com/oioio-space/maldev/pe) · [`pe/srdi`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi) |
+| [T1055.003](https://attack.mitre.org/techniques/T1055/003/) | [`inject`](https://pkg.go.dev/github.com/oioio-space/maldev/inject) |
+| [T1055.004](https://attack.mitre.org/techniques/T1055/004/) | [`inject`](https://pkg.go.dev/github.com/oioio-space/maldev/inject) |
+| [T1055.012](https://attack.mitre.org/techniques/T1055/012/) | [`inject`](https://pkg.go.dev/github.com/oioio-space/maldev/inject) |
+| [T1055.013](https://attack.mitre.org/techniques/T1055/013/) | [`process`](https://pkg.go.dev/github.com/oioio-space/maldev/process) · [`process/tamper/herpaderping`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/herpaderping) |
+| [T1055.015](https://attack.mitre.org/techniques/T1055/015/) | [`inject`](https://pkg.go.dev/github.com/oioio-space/maldev/inject) |
+| [T1056.001](https://attack.mitre.org/techniques/T1056/001/) | [`collection`](https://pkg.go.dev/github.com/oioio-space/maldev/collection) · [`collection/keylog`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/keylog) |
+| [T1057](https://attack.mitre.org/techniques/T1057/) | [`process`](https://pkg.go.dev/github.com/oioio-space/maldev/process) · [`process/enum`](https://pkg.go.dev/github.com/oioio-space/maldev/process/enum) |
+| [T1059](https://attack.mitre.org/techniques/T1059/) | [`c2`](https://pkg.go.dev/github.com/oioio-space/maldev/c2) · [`c2/meterpreter`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/meterpreter) · [`c2/shell`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell) · [`runtime/bof`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof) · [`runtime/clr`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr) |
+| [T1059.001](https://attack.mitre.org/techniques/T1059/001/) | [`c2/shell`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell) |
+| [T1059.003](https://attack.mitre.org/techniques/T1059/003/) | [`c2/shell`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell) |
+| [T1059.004](https://attack.mitre.org/techniques/T1059/004/) | [`c2/shell`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell) |
+| [T1068](https://attack.mitre.org/techniques/T1068/) | [`credentials/lsassdump`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/lsassdump) · [`kernel/driver`](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver) · [`kernel/driver/rtcore64`](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver/rtcore64) · [`privesc/cve202430088`](https://pkg.go.dev/github.com/oioio-space/maldev/privesc/cve202430088) |
+| [T1070](https://attack.mitre.org/techniques/T1070/) | [`cleanup`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup) · [`cleanup/memory`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/memory) |
+| [T1070.004](https://attack.mitre.org/techniques/T1070/004/) | [`cleanup`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup) · [`cleanup/selfdelete`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/selfdelete) · [`cleanup/wipe`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/wipe) |
+| [T1070.006](https://attack.mitre.org/techniques/T1070/006/) | [`cleanup`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup) · [`cleanup/timestomp`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/timestomp) |
+| [T1071](https://attack.mitre.org/techniques/T1071/) | [`c2`](https://pkg.go.dev/github.com/oioio-space/maldev/c2) · [`c2/transport`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport) · [`evasion/hook/bridge`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/bridge) |
+| [T1071.001](https://attack.mitre.org/techniques/T1071/001/) | [`c2`](https://pkg.go.dev/github.com/oioio-space/maldev/c2) · [`c2/meterpreter`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/meterpreter) · [`c2/transport/namedpipe`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport/namedpipe) · [`useragent`](https://pkg.go.dev/github.com/oioio-space/maldev/useragent) |
+| [T1078](https://attack.mitre.org/techniques/T1078/) | [`win/privilege`](https://pkg.go.dev/github.com/oioio-space/maldev/win/privilege) |
+| [T1082](https://attack.mitre.org/techniques/T1082/) | [`win/domain`](https://pkg.go.dev/github.com/oioio-space/maldev/win/domain) · [`win/version`](https://pkg.go.dev/github.com/oioio-space/maldev/win/version) |
+| [T1083](https://attack.mitre.org/techniques/T1083/) | [`recon/drive`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive) · [`recon/folder`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/folder) |
+| [T1095](https://attack.mitre.org/techniques/T1095/) | [`c2`](https://pkg.go.dev/github.com/oioio-space/maldev/c2) · [`c2/meterpreter`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/meterpreter) · [`c2/transport`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport) |
+| [T1098](https://attack.mitre.org/techniques/T1098/) | [`persistence/account`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account) |
+| [T1106](https://attack.mitre.org/techniques/T1106/) | [`pe`](https://pkg.go.dev/github.com/oioio-space/maldev/pe) · [`pe/imports`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports) · [`win/api`](https://pkg.go.dev/github.com/oioio-space/maldev/win/api) · [`win/ntapi`](https://pkg.go.dev/github.com/oioio-space/maldev/win/ntapi) · [`win/syscall`](https://pkg.go.dev/github.com/oioio-space/maldev/win/syscall) |
+| [T1113](https://attack.mitre.org/techniques/T1113/) | [`collection`](https://pkg.go.dev/github.com/oioio-space/maldev/collection) · [`collection/screenshot`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/screenshot) |
+| [T1115](https://attack.mitre.org/techniques/T1115/) | [`collection`](https://pkg.go.dev/github.com/oioio-space/maldev/collection) · [`collection/clipboard`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/clipboard) |
+| [T1120](https://attack.mitre.org/techniques/T1120/) | [`recon/drive`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive) |
+| [T1134](https://attack.mitre.org/techniques/T1134/) | [`win/privilege`](https://pkg.go.dev/github.com/oioio-space/maldev/win/privilege) · [`win/token`](https://pkg.go.dev/github.com/oioio-space/maldev/win/token) |
+| [T1134.001](https://attack.mitre.org/techniques/T1134/001/) | [`privesc/cve202430088`](https://pkg.go.dev/github.com/oioio-space/maldev/privesc/cve202430088) · [`process/session`](https://pkg.go.dev/github.com/oioio-space/maldev/process/session) · [`win/impersonate`](https://pkg.go.dev/github.com/oioio-space/maldev/win/impersonate) · [`win/token`](https://pkg.go.dev/github.com/oioio-space/maldev/win/token) |
+| [T1134.002](https://attack.mitre.org/techniques/T1134/002/) | [`process`](https://pkg.go.dev/github.com/oioio-space/maldev/process) · [`process/session`](https://pkg.go.dev/github.com/oioio-space/maldev/process/session) · [`win/impersonate`](https://pkg.go.dev/github.com/oioio-space/maldev/win/impersonate) · [`win/token`](https://pkg.go.dev/github.com/oioio-space/maldev/win/token) |
+| [T1134.004](https://attack.mitre.org/techniques/T1134/004/) | [`win/impersonate`](https://pkg.go.dev/github.com/oioio-space/maldev/win/impersonate) |
+| [T1134.005](https://attack.mitre.org/techniques/T1134/005/) | [`win/token`](https://pkg.go.dev/github.com/oioio-space/maldev/win/token) |
+| [T1136.001](https://attack.mitre.org/techniques/T1136/001/) | [`persistence`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence) · [`persistence/account`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account) |
+| [T1204.002](https://attack.mitre.org/techniques/T1204/002/) | [`persistence`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence) · [`persistence/lnk`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk) |
+| [T1497](https://attack.mitre.org/techniques/T1497/) | [`evasion`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion) · [`recon/sandbox`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox) |
+| [T1497.001](https://attack.mitre.org/techniques/T1497/001/) | [`recon/antivm`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm) |
+| [T1497.003](https://attack.mitre.org/techniques/T1497/003/) | [`recon/timing`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing) |
+| [T1529](https://attack.mitre.org/techniques/T1529/) | [`cleanup`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup) · [`cleanup/bsod`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/bsod) |
+| [T1543.003](https://attack.mitre.org/techniques/T1543/003/) | [`cleanup`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup) · [`cleanup/service`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/service) · [`kernel/driver`](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver) · [`kernel/driver/rtcore64`](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver/rtcore64) · [`persistence`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence) · [`persistence/service`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service) |
+| [T1547.001](https://attack.mitre.org/techniques/T1547/001/) | [`persistence`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence) · [`persistence/registry`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry) · [`persistence/startup`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup) |
+| [T1547.009](https://attack.mitre.org/techniques/T1547/009/) | [`persistence`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence) · [`persistence/lnk`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk) · [`persistence/startup`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup) |
+| [T1548.002](https://attack.mitre.org/techniques/T1548/002/) | [`privesc/uac`](https://pkg.go.dev/github.com/oioio-space/maldev/privesc/uac) · [`recon/dllhijack`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack) · [`win/privilege`](https://pkg.go.dev/github.com/oioio-space/maldev/win/privilege) |
+| [T1550.002](https://attack.mitre.org/techniques/T1550/002/) | [`credentials/sekurlsa`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/sekurlsa) |
+| [T1553.002](https://attack.mitre.org/techniques/T1553/002/) | [`pe`](https://pkg.go.dev/github.com/oioio-space/maldev/pe) · [`pe/cert`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert) |
+| [T1558.001](https://attack.mitre.org/techniques/T1558/001/) | [`credentials/goldenticket`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/goldenticket) |
+| [T1558.003](https://attack.mitre.org/techniques/T1558/003/) | [`credentials/sekurlsa`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/sekurlsa) |
+| [T1562.001](https://attack.mitre.org/techniques/T1562/001/) | [`evasion`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion) · [`evasion/acg`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/acg) · [`evasion/amsi`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/amsi) · [`evasion/blockdlls`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/blockdlls) · [`evasion/cet`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/cet) · [`evasion/etw`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/etw) · [`evasion/kcallback`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/kcallback) · [`evasion/preset`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/preset) · [`evasion/unhook`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook) |
+| [T1562.002](https://attack.mitre.org/techniques/T1562/002/) | [`process`](https://pkg.go.dev/github.com/oioio-space/maldev/process) · [`process/tamper/phant0m`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m) |
+| [T1564](https://attack.mitre.org/techniques/T1564/) | [`cleanup/service`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/service) · [`process/tamper/fakecmd`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/fakecmd) |
+| [T1564.001](https://attack.mitre.org/techniques/T1564/001/) | [`process`](https://pkg.go.dev/github.com/oioio-space/maldev/process) · [`process/tamper/hideprocess`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess) |
+| [T1564.004](https://attack.mitre.org/techniques/T1564/004/) | [`cleanup`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup) · [`cleanup/ads`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/ads) |
+| [T1571](https://attack.mitre.org/techniques/T1571/) | [`c2`](https://pkg.go.dev/github.com/oioio-space/maldev/c2) · [`c2/multicat`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/multicat) |
+| [T1573](https://attack.mitre.org/techniques/T1573/) | [`c2`](https://pkg.go.dev/github.com/oioio-space/maldev/c2) · [`c2/transport`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport) |
+| [T1573.001](https://attack.mitre.org/techniques/T1573/001/) | [`c2/cert`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/cert) |
+| [T1573.002](https://attack.mitre.org/techniques/T1573/002/) | [`c2`](https://pkg.go.dev/github.com/oioio-space/maldev/c2) · [`c2/cert`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/cert) · [`c2/transport`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport) |
+| [T1574.001](https://attack.mitre.org/techniques/T1574/001/) | [`pe/dllproxy`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy) · [`recon/dllhijack`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack) |
+| [T1574.002](https://attack.mitre.org/techniques/T1574/002/) | [`pe/dllproxy`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy) |
+| [T1574.012](https://attack.mitre.org/techniques/T1574/012/) | [`evasion`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion) · [`evasion/hook`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook) · [`evasion/hook/bridge`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/bridge) · [`evasion/hook/shellcode`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/shellcode) |
+| [T1620](https://attack.mitre.org/techniques/T1620/) | [`pe/srdi`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi) · [`runtime/bof`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof) · [`runtime/clr`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr) |
+| [T1622](https://attack.mitre.org/techniques/T1622/) | [`evasion`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion) · [`recon/antidebug`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antidebug) · [`recon/hwbp`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp) |
 
 <!-- END AUTOGEN: mitre-index -->
 

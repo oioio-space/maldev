@@ -30,13 +30,13 @@ or unregister → `selfdelete.Run` (or `bsod.Trigger` if egress is critical).
 
 | Package | Tech page | Detection | One-liner |
 |---|---|---|---|
-| [`cleanup/ads`](../../../cleanup/ads) | [ads.md](ads.md) | quiet | NTFS Alternate Data Streams CRUD |
-| [`cleanup/bsod`](../../../cleanup/bsod) | [bsod.md](bsod.md) | very-noisy | Trigger BSOD via NtRaiseHardError — last-resort kill switch |
-| [`cleanup/memory`](../../../cleanup/memory) | [memory-wipe.md](memory-wipe.md) | very-quiet | SecureZero / WipeAndFree / DoSecret for in-process secrets |
-| [`cleanup/selfdelete`](../../../cleanup/selfdelete) | [self-delete.md](self-delete.md) | moderate | Delete the running EXE via NTFS ADS rename + delete-on-close |
-| [`cleanup/service`](../../../cleanup/service) | [service.md](service.md) | noisy | Hide a Windows service via DACL manipulation |
-| [`cleanup/timestomp`](../../../cleanup/timestomp) | [timestomp.md](timestomp.md) | quiet | Reset `$STANDARD_INFORMATION` MAC timestamps |
-| [`cleanup/wipe`](../../../cleanup/wipe) | [wipe.md](wipe.md) | quiet | Multi-pass random overwrite then `os.Remove` |
+| [`cleanup/ads`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/ads) | [ads.md](ads.md) | quiet | NTFS Alternate Data Streams CRUD |
+| [`cleanup/bsod`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/bsod) | [bsod.md](bsod.md) | very-noisy | Trigger BSOD via NtRaiseHardError — last-resort kill switch |
+| [`cleanup/memory`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/memory) | [memory-wipe.md](memory-wipe.md) | very-quiet | SecureZero / WipeAndFree / DoSecret for in-process secrets |
+| [`cleanup/selfdelete`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/selfdelete) | [self-delete.md](self-delete.md) | moderate | Delete the running EXE via NTFS ADS rename + delete-on-close |
+| [`cleanup/service`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/service) | [service.md](service.md) | noisy | Hide a Windows service via DACL manipulation |
+| [`cleanup/timestomp`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/timestomp) | [timestomp.md](timestomp.md) | quiet | Reset `$STANDARD_INFORMATION` MAC timestamps |
+| [`cleanup/wipe`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/wipe) | [wipe.md](wipe.md) | quiet | Multi-pass random overwrite then `os.Remove` |
 
 ## Quick decision tree
 

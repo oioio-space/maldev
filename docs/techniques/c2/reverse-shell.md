@@ -273,7 +273,7 @@ See `ExampleNew` in
 
 **Hardening for the operator:** prefer uTLS over plain TLS; pair
 `PatchDefenses` and PPID spoofing; randomise `RetryDelay` with
-[`random.Duration`](../../../random); fold the shell into a longer-lived
+[`random.Duration`](https://pkg.go.dev/github.com/oioio-space/maldev/random); fold the shell into a longer-lived
 host process that legitimately spawns command interpreters
 (maintenance scripts, build agents).
 

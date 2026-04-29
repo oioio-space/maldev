@@ -10,8 +10,8 @@ reflects_commit: f31fca1
 
 ## TL;DR
 
-Cross-platform IP enumeration ([`InterfaceIPs`](../../../recon/network))
-and local-address detection ([`IsLocal`](../../../recon/network)).
+Cross-platform IP enumeration ([`InterfaceIPs`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/network))
+and local-address detection ([`IsLocal`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/network)).
 Used to fingerprint sandboxes (looped-back /29 networks),
 source-aware C2 (avoid beaconing the same IP), and "is this
 hostname us?" checks.

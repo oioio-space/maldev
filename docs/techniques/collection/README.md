@@ -40,9 +40,9 @@ flowchart LR
 
 | Package | Tech page | Detection | One-liner |
 |---|---|---|---|
-| [`collection/keylog`](../../../collection/keylog) | [keylogging.md](keylogging.md) | noisy | low-level keyboard hook with per-event window/process attribution and Ctrl+V clipboard capture |
-| [`collection/clipboard`](../../../collection/clipboard) | [clipboard.md](clipboard.md) | quiet | one-shot `ReadText` plus `Watch` channel driven by `GetClipboardSequenceNumber` polling |
-| [`collection/screenshot`](../../../collection/screenshot) | [screenshot.md](screenshot.md) | quiet | GDI `BitBlt` → PNG; primary, arbitrary rectangle, or per-monitor capture |
+| [`collection/keylog`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/keylog) | [keylogging.md](keylogging.md) | noisy | low-level keyboard hook with per-event window/process attribution and Ctrl+V clipboard capture |
+| [`collection/clipboard`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/clipboard) | [clipboard.md](clipboard.md) | quiet | one-shot `ReadText` plus `Watch` channel driven by `GetClipboardSequenceNumber` polling |
+| [`collection/screenshot`](https://pkg.go.dev/github.com/oioio-space/maldev/collection/screenshot) | [screenshot.md](screenshot.md) | quiet | GDI `BitBlt` → PNG; primary, arbitrary rectangle, or per-monitor capture |
 
 ## Quick decision tree
 
@@ -73,7 +73,7 @@ packages that own them.
 | Area concern | Tech page | Owning package |
 |---|---|---|
 | NTFS Alternate Data Streams (hide collected data in `:stream` suffixes) | [alternate-data-streams.md](alternate-data-streams.md) | [`cleanup/ads`](../cleanup/README.md) |
-| LSASS minidump (in-process MINIDUMP assembly via `NtReadVirtualMemory`) | [lsass-dump.md](lsass-dump.md) | [`credentials/lsassdump`](../../../credentials/lsassdump) |
+| LSASS minidump (in-process MINIDUMP assembly via `NtReadVirtualMemory`) | [lsass-dump.md](lsass-dump.md) | [`credentials/lsassdump`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/lsassdump) |
 
 > [!NOTE]
 > Both pages will move to their owning areas in Phase 6 of the doc

@@ -295,6 +295,6 @@ proxy, err := dllproxy.Generate(
 ## See also
 
 - [`recon/dllhijack`](../recon/dll-hijack.md) — discovery side of the same chain
-- [`pe/parse`](../../../pe/parse) — extracts the input export list
+- [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) — extracts the input export list
 - `mrexodia/perfect-dll-proxy` — original GLOBALROOT path trick (C++/Python)
 - `namazso/dll-proxy-generator` — Rust binary tool we're matching the output shape of

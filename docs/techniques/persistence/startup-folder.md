@@ -13,7 +13,7 @@ reflects_commit: f8b1a51
 Drop a `.lnk` shortcut into the user or machine StartUp folder.
 Windows Shell launches every shortcut it finds at user logon. No
 admin needed for user-scope; admin for machine-wide. Implements
-[`persistence.Mechanism`](../../../persistence). Sibling to
+[`persistence.Mechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence). Sibling to
 [`persistence/registry`](registry.md) — pair them for
 redundancy.
 

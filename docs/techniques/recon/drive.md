@@ -10,10 +10,10 @@ reflects_commit: f31fca1
 
 ## TL;DR
 
-Enumerate Windows logical drives ([`New`](../../../recon/drive)
-+ [`LogicalDriveLetters`](../../../recon/drive)) and watch for
-new drives ([`NewWatcher`](../../../recon/drive) + `Watch`). Each
-[`Info`](../../../recon/drive) carries letter, type
+Enumerate Windows logical drives ([`New`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive)
++ [`LogicalDriveLetters`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive)) and watch for
+new drives ([`NewWatcher`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive) + `Watch`). Each
+[`Info`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive) carries letter, type
 (`TypeFixed` / `TypeRemovable` / `TypeNetwork` / …), and volume
 metadata (label, serial, filesystem). Used for USB-insertion
 triggers, SMB-share discovery, and removable-media data

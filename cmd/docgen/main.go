@@ -552,7 +552,7 @@ func renderMITREIndex(pkgs []PackageDoc) string {
 		sort.Strings(paths)
 		var links []string
 		for _, p := range paths {
-			links = append(links, fmt.Sprintf("[`%s`](../%s)", p, p))
+			links = append(links, fmt.Sprintf("[`%s`](https://pkg.go.dev/%s/%s)", p, moduleRoot, p))
 		}
 		fmt.Fprintf(&b, "| [%s](https://attack.mitre.org/techniques/%s/) | %s |\n",
 			k, strings.ReplaceAll(k, ".", "/"), strings.Join(links, " · "))
@@ -580,7 +580,7 @@ func renderMITRETable(pkgs []PackageDoc) string {
 		sort.Strings(paths)
 		var links []string
 		for _, p := range paths {
-			links = append(links, fmt.Sprintf("[`%s`](../%s)", p, p))
+			links = append(links, fmt.Sprintf("[`%s`](https://pkg.go.dev/%s/%s)", p, moduleRoot, p))
 		}
 		fmt.Fprintf(&b, "| [%s](https://attack.mitre.org/techniques/%s/) | %s |\n",
 			k, strings.ReplaceAll(k, ".", "/"), strings.Join(links, " · "))

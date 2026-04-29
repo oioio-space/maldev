@@ -37,12 +37,12 @@ flowchart LR
 
 | Package | Tech page | Detection | One-liner |
 |---|---|---|---|
-| [`c2/shell`](../../../c2/shell) | [reverse-shell.md](reverse-shell.md) | noisy | reverse shell with PTY + auto-reconnect + AMSI/ETW evasion hooks |
-| [`c2/meterpreter`](../../../c2/meterpreter) | [meterpreter.md](meterpreter.md) | noisy | MSF stager (TCP / HTTP / HTTPS) with optional `inject.Injector` for stage delivery |
-| [`c2/transport`](../../../c2/transport) | [transport.md](transport.md) · [malleable-profiles.md](malleable-profiles.md) | moderate | pluggable TCP / TLS / uTLS + malleable HTTP profiles |
-| [`c2/transport/namedpipe`](../../../c2/transport/namedpipe) | [namedpipe.md](namedpipe.md) | quiet | Windows named-pipe transport (local IPC + SMB lateral) |
-| [`c2/cert`](../../../c2/cert) | [transport.md](transport.md) | quiet | self-signed X.509 generation + SHA-256 fingerprint pinning |
-| [`c2/multicat`](../../../c2/multicat) | [multicat.md](multicat.md) | quiet | operator-side multi-session listener (BANNER protocol) |
+| [`c2/shell`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell) | [reverse-shell.md](reverse-shell.md) | noisy | reverse shell with PTY + auto-reconnect + AMSI/ETW evasion hooks |
+| [`c2/meterpreter`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/meterpreter) | [meterpreter.md](meterpreter.md) | noisy | MSF stager (TCP / HTTP / HTTPS) with optional `inject.Injector` for stage delivery |
+| [`c2/transport`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport) | [transport.md](transport.md) · [malleable-profiles.md](malleable-profiles.md) | moderate | pluggable TCP / TLS / uTLS + malleable HTTP profiles |
+| [`c2/transport/namedpipe`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport/namedpipe) | [namedpipe.md](namedpipe.md) | quiet | Windows named-pipe transport (local IPC + SMB lateral) |
+| [`c2/cert`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/cert) | [transport.md](transport.md) | quiet | self-signed X.509 generation + SHA-256 fingerprint pinning |
+| [`c2/multicat`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/multicat) | [multicat.md](multicat.md) | quiet | operator-side multi-session listener (BANNER protocol) |
 
 ## Quick decision tree
 
@@ -75,7 +75,7 @@ flowchart LR
 - [Detection eng path: C2 telemetry](../../by-role/detection-eng.md)
 - [`evasion`](../evasion/README.md) — apply patches **before** the
   shell connects.
-- [`useragent`](../../../useragent) — pair with HTTP transports for
+- [`useragent`](https://pkg.go.dev/github.com/oioio-space/maldev/useragent) — pair with HTTP transports for
   realistic User-Agent headers.
 - [`inject`](../injection/README.md) — stage execution surface for
   `c2/meterpreter`.

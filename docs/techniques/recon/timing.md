@@ -12,8 +12,8 @@ reflects_commit: f31fca1
 
 Burn CPU for a real wall-clock duration to defeat sandboxes
 that fast-forward `Sleep()`. Two flavours: tight time-comparison
-loop ([`BusyWait`](../../../recon/timing)) or primality-testing
-loop ([`BusyWaitPrimality`](../../../recon/timing)) for a
+loop ([`BusyWait`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing)) or primality-testing
+loop ([`BusyWaitPrimality`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing)) for a
 math-like CPU pattern.
 
 ## Primer
@@ -28,10 +28,10 @@ faster") or use up their budget.
 
 Two implementations, both cross-platform:
 
-- [`BusyWait`](../../../recon/timing) — repeatedly compares
+- [`BusyWait`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing) — repeatedly compares
   `time.Now()` to the deadline. Pinning one core at 100% in a
   tight comparison is cheap to fingerprint behaviourally.
-- [`BusyWaitPrimality`](../../../recon/timing) — burns CPU via
+- [`BusyWaitPrimality`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing) — burns CPU via
   primality testing. Same wall-clock effect, more "math
   workload"-like CPU pattern.
 

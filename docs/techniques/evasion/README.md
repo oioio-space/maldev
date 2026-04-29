@@ -31,20 +31,20 @@ mask payload memory during sleep.
 
 | Package | Tech page | Detection | One-liner |
 |---|---|---|---|
-| [`evasion/acg`](../../../evasion/acg) | [acg-blockdlls.md](acg-blockdlls.md) | quiet | Arbitrary Code Guard — block dynamic-code allocation in own process |
-| [`evasion/amsi`](../../../evasion/amsi) | [amsi-bypass.md](amsi-bypass.md) | noisy | Patch `AmsiScanBuffer` / `AmsiOpenSession` for "always clean" verdicts |
-| [`evasion/blockdlls`](../../../evasion/blockdlls) | [acg-blockdlls.md](acg-blockdlls.md) | quiet | Microsoft-only DLL signature requirement |
-| [`evasion/callstack`](../../../evasion/callstack) | [callstack-spoof.md](callstack-spoof.md) | quiet | Call-stack spoof primitives — fake return addresses for syscalls |
-| [`evasion/cet`](../../../evasion/cet) | [cet.md](cet.md) | noisy | Intel CET shadow-stack opt-out + ENDBR64 marker for APC paths |
-| [`evasion/etw`](../../../evasion/etw) | [etw-patching.md](etw-patching.md) | moderate | Patch ntdll ETW write helpers with `xor rax,rax; ret` |
-| [`evasion/hook`](../../../evasion/hook) | [inline-hook.md](inline-hook.md) | quiet | Install your own inline hooks (probe, group, remote, bridge) |
-| [`evasion/hook/bridge`](../../../evasion/hook/bridge) | [inline-hook.md](inline-hook.md) | quiet | IPC bridge — out-of-process hook controller |
-| [`evasion/hook/shellcode`](../../../evasion/hook/shellcode) | [inline-hook.md](inline-hook.md) | quiet | x64 trampoline / prologue-steal generator |
-| [`evasion/kcallback`](../../../evasion/kcallback) | [kernel-callback-removal.md](kernel-callback-removal.md) | very-noisy | Enumerate / remove kernel callback registrations (BYOVD-pluggable) |
-| [`evasion/preset`](../../../evasion/preset) | [preset.md](preset.md) | varies | Curated `Minimal` / `Stealth` / `Aggressive` Technique bundles |
-| [`evasion/sleepmask`](../../../evasion/sleepmask) | [sleep-mask.md](sleep-mask.md) | quiet | Encrypt payload memory during sleep with EKKO / Foliage / Inline strategies |
-| [`evasion/stealthopen`](../../../evasion/stealthopen) | [stealthopen.md](stealthopen.md) | quiet | NTFS Object-ID file access — bypass path-based EDR file hooks |
-| [`evasion/unhook`](../../../evasion/unhook) | [ntdll-unhooking.md](ntdll-unhooking.md) | noisy | Restore `ntdll.dll` syscall stubs from disk or fresh child process |
+| [`evasion/acg`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/acg) | [acg-blockdlls.md](acg-blockdlls.md) | quiet | Arbitrary Code Guard — block dynamic-code allocation in own process |
+| [`evasion/amsi`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/amsi) | [amsi-bypass.md](amsi-bypass.md) | noisy | Patch `AmsiScanBuffer` / `AmsiOpenSession` for "always clean" verdicts |
+| [`evasion/blockdlls`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/blockdlls) | [acg-blockdlls.md](acg-blockdlls.md) | quiet | Microsoft-only DLL signature requirement |
+| [`evasion/callstack`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/callstack) | [callstack-spoof.md](callstack-spoof.md) | quiet | Call-stack spoof primitives — fake return addresses for syscalls |
+| [`evasion/cet`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/cet) | [cet.md](cet.md) | noisy | Intel CET shadow-stack opt-out + ENDBR64 marker for APC paths |
+| [`evasion/etw`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/etw) | [etw-patching.md](etw-patching.md) | moderate | Patch ntdll ETW write helpers with `xor rax,rax; ret` |
+| [`evasion/hook`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook) | [inline-hook.md](inline-hook.md) | quiet | Install your own inline hooks (probe, group, remote, bridge) |
+| [`evasion/hook/bridge`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/bridge) | [inline-hook.md](inline-hook.md) | quiet | IPC bridge — out-of-process hook controller |
+| [`evasion/hook/shellcode`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/shellcode) | [inline-hook.md](inline-hook.md) | quiet | x64 trampoline / prologue-steal generator |
+| [`evasion/kcallback`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/kcallback) | [kernel-callback-removal.md](kernel-callback-removal.md) | very-noisy | Enumerate / remove kernel callback registrations (BYOVD-pluggable) |
+| [`evasion/preset`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/preset) | [preset.md](preset.md) | varies | Curated `Minimal` / `Stealth` / `Aggressive` Technique bundles |
+| [`evasion/sleepmask`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/sleepmask) | [sleep-mask.md](sleep-mask.md) | quiet | Encrypt payload memory during sleep with EKKO / Foliage / Inline strategies |
+| [`evasion/stealthopen`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/stealthopen) | [stealthopen.md](stealthopen.md) | quiet | NTFS Object-ID file access — bypass path-based EDR file hooks |
+| [`evasion/unhook`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook) | [ntdll-unhooking.md](ntdll-unhooking.md) | noisy | Restore `ntdll.dll` syscall stubs from disk or fresh child process |
 
 Cross-categorised pages currently living here (packages live elsewhere):
 

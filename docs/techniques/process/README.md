@@ -45,12 +45,12 @@ flowchart TB
 
 | Package | Tech page | Detection | One-liner |
 |---|---|---|---|
-| [`process/enum`](../../../process/enum) | [enum.md](enum.md) | quiet | Cross-platform process list / find-by-name (Windows + Linux) |
-| [`process/session`](../../../process/session) | [session.md](session.md) | moderate | Windows session enum + cross-session CreateProcess / Impersonate |
-| [`process/tamper/fakecmd`](../../../process/tamper/fakecmd) | [fakecmd.md](fakecmd.md) | quiet | PEB CommandLine spoof (self + remote PID) |
-| [`process/tamper/herpaderping`](../../../process/tamper/herpaderping) | [herpaderping.md](herpaderping.md) | moderate | Kernel image-section cache exploit (Herpaderping + Ghosting) |
-| [`process/tamper/hideprocess`](../../../process/tamper/hideprocess) | [hideprocess.md](hideprocess.md) | moderate | Patch NtQSI in target → blind Task Manager / ProcExp |
-| [`process/tamper/phant0m`](../../../process/tamper/phant0m) | [phant0m.md](phant0m.md) | noisy | Terminate EventLog worker threads; SCM still shows RUNNING |
+| [`process/enum`](https://pkg.go.dev/github.com/oioio-space/maldev/process/enum) | [enum.md](enum.md) | quiet | Cross-platform process list / find-by-name (Windows + Linux) |
+| [`process/session`](https://pkg.go.dev/github.com/oioio-space/maldev/process/session) | [session.md](session.md) | moderate | Windows session enum + cross-session CreateProcess / Impersonate |
+| [`process/tamper/fakecmd`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/fakecmd) | [fakecmd.md](fakecmd.md) | quiet | PEB CommandLine spoof (self + remote PID) |
+| [`process/tamper/herpaderping`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/herpaderping) | [herpaderping.md](herpaderping.md) | moderate | Kernel image-section cache exploit (Herpaderping + Ghosting) |
+| [`process/tamper/hideprocess`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess) | [hideprocess.md](hideprocess.md) | moderate | Patch NtQSI in target → blind Task Manager / ProcExp |
+| [`process/tamper/phant0m`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m) | [phant0m.md](phant0m.md) | noisy | Terminate EventLog worker threads; SCM still shows RUNNING |
 
 ## Quick decision tree
 
