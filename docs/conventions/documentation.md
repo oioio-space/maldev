@@ -153,7 +153,30 @@ Each public exported symbol gets a fixed-shape entry:
 **Side effects:** <if any, e.g. allocates RWX memory, writes to %TEMP%>.
 
 **OPSEC:** <one-line summary of what this single call leaves behind>.
+
+**Required privileges:** one of `unprivileged` / `medium-IL` /
+`admin` / `SYSTEM` / `kernel`. Append the specific Windows
+privileges this call needs (e.g. `SeDebugPrivilege`,
+`SeLoadDriverPrivilege`) when applicable.
+
+**Platform:** `windows` / `linux` / `cross-platform`. Add the
+minimum build (e.g. `windows ≥ 10 1809`) when the call is
+build-gated.
 ```
+
+Privilege levels (closed set):
+
+- **`unprivileged`** — runs as any logged-on interactive user, no
+  UAC consent needed (e.g., reading own process memory, `domain.Name`).
+- **`medium-IL`** — same as unprivileged but explicitly relies on
+  the Medium integrity level (most user-mode primitives that touch
+  HKCU but not HKLM).
+- **`admin`** — High-IL token, post-UAC-consent or already
+  elevated. Hostile UAC-bypass primitives target this state.
+- **`SYSTEM`** — `NT AUTHORITY\SYSTEM` (winlogon-impersonation,
+  service install, kernel-callback writes through BYOVD).
+- **`kernel`** — needs a kernel R/W primitive (BYOVD via
+  `kernel/driver/*`, or a future loaded-driver path).
 
 Every package with public exports has a complete `## API Reference` section
 with one entry per exported symbol. No exceptions.
