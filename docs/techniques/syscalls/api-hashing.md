@@ -103,6 +103,39 @@ Two variants exist in maldev:
 - **ROR13** (`hash.ROR13`): ASCII, no null terminator -- used for export names
 - **ROR13Module** (`hash.ROR13Module`): UTF-16LE wide chars + null terminator -- used for PEB module names
 
+### Beyond ROR13 — defeating signature engines
+
+Many EDR signature engines key on the canonical ROR13 constants
+(`0x6A4ABC5B` for `kernel32`, `0x4FC8BB5A` for `LoadLibraryA`, …).
+If the engine sees those uint32s in a binary's `.rdata`, it
+flags the file regardless of the runtime behaviour.
+
+Pivoting to a different hash family makes the implant's
+constants statically distinct. The `hash` package ships:
+
+| Function | Output | Notes |
+|---|---|---|
+| [`hash.ROR13(name)`](https://pkg.go.dev/github.com/oioio-space/maldev/hash#ROR13) | `uint32` | Canonical shellcode hash; widest signature exposure. |
+| [`hash.JenkinsOAAT(name)`](https://pkg.go.dev/github.com/oioio-space/maldev/hash#JenkinsOAAT) | `uint32` | Bob Jenkins one-at-a-time + avalanche tail; cheap, no division, slightly better avalanche than ROR13. |
+| [`hash.FNV1a32(name)`](https://pkg.go.dev/github.com/oioio-space/maldev/hash#FNV1a32) | `uint32` | FNV-1a 32-bit; matches `hash/fnv` byte-for-byte. |
+| [`hash.FNV1a64(name)`](https://pkg.go.dev/github.com/oioio-space/maldev/hash#FNV1a64) | `uint64` | FNV-1a 64-bit. |
+| [`hash.DJB2(name)`](https://pkg.go.dev/github.com/oioio-space/maldev/hash#DJB2) | `uint32` | Bernstein `hash * 33 + c`; classic, weaker on short inputs. |
+| [`hash.CRC32(name)`](https://pkg.go.dev/github.com/oioio-space/maldev/hash#CRC32) | `uint32` | IEEE polynomial; backed by `hash/crc32` table. |
+
+Compose with [`win/syscall`](direct-indirect.md):
+
+```go
+caller := wsyscall.New(
+    wsyscall.MethodIndirectAsm,
+    wsyscall.NewHashGateWith(hash.JenkinsOAAT),
+).WithHashFunc(hash.JenkinsOAAT)
+```
+
+Both ends MUST agree: `NewHashGateWith(fn)` for the resolver,
+`WithHashFunc(fn)` for any `CallByHash` call. Pre-compute the
+hash constants once at build time (or via a `go generate` step)
+to keep the binary string-free.
+
 ### PE Export Resolution
 
 Once the module base is found, the code parses the PE export directory:
@@ -183,6 +216,47 @@ api.HashNtWriteVirtualMemory    // 0xC5108CC2
 ```
 
 ---
+
+## Combined Example: defeat ROR13 fingerprinting
+
+A ROR13-only signature engine sees the canonical
+`api.HashLoadLibraryA = 0xEC0E4E8E` constant in the binary's
+`.rdata` and flags the file. Switching the entire stack to
+JenkinsOAAT changes that constant to a fresh value the engine
+never trained on:
+
+```go
+package main
+
+import (
+    "fmt"
+
+    "github.com/oioio-space/maldev/hash"
+    wsyscall "github.com/oioio-space/maldev/win/syscall"
+)
+
+func main() {
+    // Both ends MUST agree on the hash family.
+    caller := wsyscall.New(
+        wsyscall.MethodIndirectAsm,
+        wsyscall.NewHashGateWith(hash.JenkinsOAAT),
+    ).WithHashFunc(hash.JenkinsOAAT)
+    defer caller.Close()
+
+    // Pre-compute the funcHash at build time. JenkinsOAAT yields a
+    // different uint32 than ROR13 for the same name, so existing
+    // signature databases targeting the ROR13 constant don't match.
+    ntClose := hash.JenkinsOAAT("NtClose") // = 0x???????? (your build's value)
+
+    if _, err := caller.CallByHash(ntClose, 0); err != nil {
+        fmt.Println("syscall:", err)
+    }
+}
+```
+
+`hash.FNV1a32`, `hash.DJB2`, `hash.CRC32`, and `hash.FNV1a64`
+swap in identically — pick the family least represented in the
+target signature corpus.
 
 ## Combined Example: String-Free Injection
 
@@ -269,7 +343,8 @@ func main() {
 
 - **ROR13 collisions**: Theoretically possible (32-bit hash space), though none exist for common NT function names
 - **PEB walk detectable**: ETW providers and some EDRs monitor PEB traversal patterns
-- **Hash constants are signatures**: Known hash values (e.g., `0xD33BCABD` for NtAllocateVirtualMemory) become YARA targets themselves
+- **Hash constants are signatures**: Known ROR13 values (e.g., `0xD33BCABD` for NtAllocateVirtualMemory) become YARA targets themselves — switch families (`hash.JenkinsOAAT` / `hash.FNV1a32` / `hash.DJB2` / `hash.CRC32`) to render those signatures useless against your binary
+- **No pre-computed Hash\* constants for non-ROR13 families**: `win/api.HashKernel32` / `HashLoadLibraryA` / etc. are ROR13-only. When pairing `wsyscall.NewHashGateWith(hash.JenkinsOAAT)` with `Caller.CallByHash`, callers compute the funcHash at build time themselves. A `cmd/hashgen` `go generate` step that emits per-family constant tables is queued under backlog row P2.24.
 - **Requires loaded modules**: Can only resolve functions from DLLs already in the PEB -- cannot load new DLLs by hash alone
 
 ---

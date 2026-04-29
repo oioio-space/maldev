@@ -186,8 +186,12 @@ See [`ExampleKill`](../../../process/tamper/phant0m/phant0m_example_test.go).
 - **`SeDebugPrivilege` required.** Implies SYSTEM or elevated
   admin context.
 - **x64 only.** TEB offset `0x1720` is x64-specific.
-- **SCM heartbeat may restart threads.** Pair with a ticker
-  re-kill loop.
+- **SCM heartbeat re-spawns workers.** Use `Heartbeat(ctx,
+  interval, caller)` to ticker-kill the workers as fast as SCM
+  re-spawns them. The first Kill is synchronous (returns its
+  error); subsequent Kills run on the ticker until ctx
+  cancellation. Without the heartbeat, the silence window
+  collapses within seconds.
 - **Per-thread fallback.** Without `I_QueryTagInformation`,
   the package terminates every thread in the EventLog PID —
   breaks co-hosted services.

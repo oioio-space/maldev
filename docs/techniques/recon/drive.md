@@ -140,7 +140,7 @@ for _, l := range letters {
 }
 ```
 
-### Advanced — USB-insert trigger
+### Advanced — USB-insert trigger (polling)
 
 ```go
 ctx, cancel := context.WithCancel(context.Background())
@@ -153,6 +153,30 @@ ch, _ := w.Watch(500 * time.Millisecond)
 for ev := range ch {
     if ev.Kind == drive.EventAdded {
         // stage data on the inserted USB
+        stageData(ev.Drive.Letter)
+    }
+}
+```
+
+### Advanced — event-driven (`WM_DEVICECHANGE`)
+
+Same use-case, zero-CPU at idle. Requires an interactive
+session — use the polling variant on services / SYSTEM contexts
+where `WM_DEVICECHANGE` doesn't broadcast.
+
+```go
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+
+w := drive.NewWatcher(ctx, func(d *drive.Info) bool {
+    return d.Type == drive.TypeRemovable
+})
+ch, err := w.WatchEvents(4) // buffer 4 — USB hub re-enum bursts
+if err != nil {
+    return err // ErrEventPumpFailed (wrapped) on RegisterClassExW / CreateWindowExW failure
+}
+for ev := range ch {
+    if ev.Kind == drive.EventAdded {
         stageData(ev.Drive.Letter)
     }
 }
@@ -186,14 +210,29 @@ for ev := range ch {
 
 ## Limitations
 
-- **Polling, not event-driven.** Win32 `WM_DEVICECHANGE` is
-  more efficient but requires a message pump; this package
-  picks polling for simplicity + headless-process compatibility.
+- **Two watcher modes, pick per session shape.** `Watch(interval)`
+  polls and works headless / in services / under SYSTEM (any
+  context with no message broadcast). `WatchEvents(buffer)`
+  uses `WM_DEVICECHANGE` and needs an interactive session —
+  service / SYSTEM contexts get no broadcast. Both modes share
+  the same `Snapshot` + diff machinery, so swapping is one
+  line.
+- **`WatchEvents` requires an OS-thread-locked goroutine.** The
+  Win32 message pump cannot migrate threads, so the pump
+  goroutine `runtime.LockOSThread`s for its entire lifetime.
+  This adds one OS thread to the implant for the duration of
+  the watcher.
+- **`WatchEvents` registers a window class.** The class
+  (`MaldevDriveWatcher`) is a uint atom in the per-process
+  user-atom table — invisible to `EnumWindows` but discoverable
+  by a debugger walking atom tables.
 - **Volume serial may be 0.** Some virtual drives (RAM disks,
   some VPN drives) report serial 0.
 - **Network drives cached.** Mapped network drives that drop
   off may take several poll cycles to surface as
-  `EventRemoved`.
+  `EventRemoved` under `Watch`. `WatchEvents` fires on
+  `WM_DEVICECHANGE`, which DOES broadcast network-drive
+  arrival / removal — better latency on this class.
 - **Windows only.** No Linux equivalent in this package; use
   `inotify` / `udev` directly.
 

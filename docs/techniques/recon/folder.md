@@ -175,8 +175,18 @@ the consumer (the writes the path drives).
 
 ## Limitations
 
-- **Deprecated API.** Microsoft recommends `SHGetKnownFolderPath`
-  (KNOWNFOLDERID); kept here for COM-free compatibility.
+- **CSIDL is the legacy path.** Microsoft recommends
+  KNOWNFOLDERID for new code. The package now ships both:
+  use [`GetKnown`](#getknownrfid-windowsguid-flags-knownfolderflag-string-error)
+  for new callers; `Get` stays for backwards compatibility.
+  KNOWNFOLDERID also exposes folders the legacy CSIDL set
+  cannot resolve (`FOLDERID_Downloads`, third-party Shell
+  extensions).
+- **`GetKnown` returns API-allocated PWSTR.** The wrapper
+  frees it via `CoTaskMemFree` on every call — never returns
+  a borrowed buffer the caller must clean up.
+- **MAX_PATH cap on `Get` only.** The legacy path truncates
+  paths longer than 260 chars (`Get`); `GetKnown` is uncapped.
 - **Some virtual folders return empty.** `CSIDL_NETWORK`,
   `CSIDL_PRINTERS`, and similar non-filesystem virtual folders
   return empty strings.

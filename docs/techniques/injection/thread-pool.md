@@ -127,6 +127,16 @@ if err := inject.ThreadPoolExec(shellcode); err != nil {
 }
 ```
 
+### Simple — future-proofed (CET-aware)
+
+```go
+// Same code, no per-call decisions. Wraps with cet.Wrap when
+// cet.Enforced() flips true on a future Win build; no-op today.
+if err := inject.ThreadPoolExecCET(shellcode); err != nil {
+    return err
+}
+```
+
 ### Composed (ModuleStomp + manual TpAllocWork)
 
 `ThreadPoolExec` is a one-shot helper. To make the callback target
@@ -212,9 +222,13 @@ shellcode region between activations
 - **Synchronous via `TpWaitForWork`.** The helper blocks until the
   callback returns. Long-running shellcode should detach internally
   (spawn a fiber or thread).
-- **No CET path.** Unlike `RtlRegisterWait`, the pool dispatcher does
-  not enforce `ENDBR64` on the callback in current shipping builds.
-  Verify on your target build before relying on this.
+- **CET dispatcher is not currently enforced** on the thread-pool
+  path (unlike `RtlRegisterWait`, which is). Plain `ThreadPoolExec`
+  works as-is. The future-proof `ThreadPoolExecCET` wrapper
+  auto-prepends `ENDBR64` via `cet.Wrap` when `cet.Enforced()`
+  returns true, so an implant built against this helper survives
+  the day Microsoft flips the dispatcher to ENDBR64-required.
+  Cost on non-enforced hosts: 4 bytes of shellcode prefix.
 - **Region not freed.** The RX page persists until process exit unless
   the implant calls [`cleanup/memory.WipeAndFree`](../cleanup/memory-wipe.md).
 - **Undocumented APIs.** `TpAllocWork` / `TpPostWork` /
