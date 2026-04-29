@@ -74,7 +74,6 @@ type Creator interface {
 // when a nil fallback is inconvenient at the call site.
 type StandardCreator struct{}
 
-// Create implements Creator.
 func (*StandardCreator) Create(path string) (io.WriteCloser, error) { return os.Create(path) }
 
 // UseCreator returns creator if non-nil, otherwise a zero-value

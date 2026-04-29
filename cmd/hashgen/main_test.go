@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -69,12 +68,3 @@ func TestPickAlgo_ProducesNonZeroForReferenceVectors(t *testing.T) {
 	}
 }
 
-func TestCollectSymbols_StdinDropsBlanksAndComments(t *testing.T) {
-	// Smoke test the comment/blank-line filter logic directly via
-	// the same scanner shape collectSymbols uses.
-	input := strings.NewReader("# comment\nLoadLibraryA\n\nGetProcAddress\n")
-	_ = input // collectSymbols reads os.Stdin; we exercise the logic via main_integration tests if needed.
-	// Compile-only sentinel — the filter logic lives inline in
-	// collectSymbols, exercised by the binary's e2e usage.
-	_ = collectSymbols
-}

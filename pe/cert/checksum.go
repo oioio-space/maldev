@@ -4,11 +4,13 @@ import (
 	"encoding/binary"
 )
 
-// peChecksumOffset returns the byte offset of the
-// IMAGE_OPTIONAL_HEADER.CheckSum field. The offset (64 bytes into the
-// optional header) is identical for PE32 and PE32+ — only the
-// preceding fields differ in width, summing to the same total.
-func peChecksumOffset(data []byte) (int, error) {
+// PEChecksumOffset returns the byte offset of the
+// IMAGE_OPTIONAL_HEADER.CheckSum field for the PE in data. The offset
+// (64 bytes into the optional header) is identical for PE32 and PE32+
+// — only the preceding fields differ in width, summing to the same
+// total. Returns [ErrInvalidPE] when data is too short or the PE
+// signature is missing at e_lfanew.
+func PEChecksumOffset(data []byte) (int, error) {
 	if len(data) < 0x40 {
 		return 0, ErrInvalidPE
 	}
@@ -56,7 +58,7 @@ func computePECheckSum(data []byte, checksumOffset int) uint32 {
 // Returns [ErrInvalidPE] if data is too short or the PE header is
 // missing.
 func PatchPECheckSum(data []byte) error {
-	off, err := peChecksumOffset(data)
+	off, err := PEChecksumOffset(data)
 	if err != nil {
 		return err
 	}

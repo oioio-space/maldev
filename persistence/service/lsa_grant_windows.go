@@ -5,6 +5,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -21,31 +22,11 @@ const SeServiceLogonRight = "SeServiceLogonRight"
 // errors raised in the same code flow.
 var ErrLsaCallFailed = errors.New("persistence/service: LSA call failed")
 
-// lsaUnicodeString mirrors LSA_UNICODE_STRING (NTSecAPI.h). All three
-// fields hold byte counts (Length / MaximumLength) — *not* WCHAR
-// counts — and Buffer points at a UTF-16 sequence that does not need
-// to be NUL-terminated.
-type lsaUnicodeString struct {
-	Length        uint16
-	MaximumLength uint16
-	Buffer        *uint16
-}
-
-// lsaObjectAttributes is enough for LSA — every field is documented
-// as "must be NULL" except RootDirectory (also NULL), so a zero value
-// suffices. Defined here to avoid a dependency on the wider
-// OBJECT_ATTRIBUTES marshalling.
-type lsaObjectAttributes struct {
-	Length                   uint32
-	RootDirectory            windows.Handle
-	ObjectName               *lsaUnicodeString
-	Attributes               uint32
-	SecurityDescriptor       uintptr
-	SecurityQualityOfService uintptr
-}
-
-// POLICY_CREATE_ACCOUNT (0x0010) | POLICY_LOOKUP_NAMES (0x0800) — the
-// minimum access mask required to add an account-rights record.
+// POLICY_CREATE_ACCOUNT (0x0010) | POLICY_LOOKUP_NAMES (0x0800).
+// LsaAddAccountRights only requires POLICY_CREATE_ACCOUNT once the
+// SID is pre-resolved; LOOKUP_NAMES is kept so future
+// LsaEnumerateAccountRights / LsaRemoveAccountRights callers don't
+// need to widen the mask.
 const policyCreateAccountAndLookupNames = 0x0010 | 0x0800
 
 var (
@@ -56,30 +37,6 @@ var (
 	procLsaNtStatusToWinError = advapi32.NewProc("LsaNtStatusToWinError")
 )
 
-// makeLsaUnicodeString returns a lsaUnicodeString backed by a freshly
-// allocated UTF-16 buffer. The caller must keep the returned []uint16
-// alive (via runtime.KeepAlive or by stack-rooting it) for the
-// lifetime of any pointer derived from the struct.
-func makeLsaUnicodeString(s string) (lsaUnicodeString, []uint16, error) {
-	if s == "" {
-		return lsaUnicodeString{}, nil, nil
-	}
-	buf, err := windows.UTF16FromString(s)
-	if err != nil {
-		return lsaUnicodeString{}, nil, fmt.Errorf("utf16(%q): %w", s, err)
-	}
-	// Drop the trailing NUL — LSA wants byte counts of the string body.
-	bodyLen := uint16(2 * (len(buf) - 1))
-	return lsaUnicodeString{
-		Length:        bodyLen,
-		MaximumLength: bodyLen,
-		Buffer:        &buf[0],
-	}, buf, nil
-}
-
-// ntStatusErr converts a non-zero NTSTATUS into a Go error. Goes
-// through LsaNtStatusToWinError (advapi32) so the resulting Win32
-// error code matches what `net helpmsg` decodes.
 func ntStatusErr(stage string, status uintptr) error {
 	if status == 0 {
 		return nil
@@ -108,14 +65,12 @@ func modifyAccountRights(account, right string) error {
 		return fmt.Errorf("persistence/service: account must not be empty")
 	}
 
-	// 1. Resolve account → SID via LookupAccountName.
 	sid, _, _, err := windows.LookupSID("", account)
 	if err != nil {
 		return fmt.Errorf("LookupSID(%q): %w", account, err)
 	}
 
-	// 2. Open the local LSA policy with the rights we need.
-	var oa lsaObjectAttributes
+	var oa windows.OBJECT_ATTRIBUTES
 	oa.Length = uint32(unsafe.Sizeof(oa))
 	var policy windows.Handle
 	status, _, _ := procLsaOpenPolicy.Call(
@@ -129,20 +84,17 @@ func modifyAccountRights(account, right string) error {
 	}
 	defer procLsaClose.Call(uintptr(policy))
 
-	// 3. Marshal the right name as an LSA_UNICODE_STRING array of length 1.
-	rightStr, rightBuf, err := makeLsaUnicodeString(right)
+	rightStr, err := windows.NewNTUnicodeString(right)
 	if err != nil {
-		return err
+		return fmt.Errorf("utf16(%q): %w", right, err)
 	}
-	rights := [1]lsaUnicodeString{rightStr}
-	_ = rightBuf // keep alive
-
-	// 4. LsaAddAccountRights(policy, sid, &rights[0], 1).
+	rights := [1]windows.NTUnicodeString{*rightStr}
 	status, _, _ = procLsaAddAccountRights.Call(
 		uintptr(policy),
 		uintptr(unsafe.Pointer(sid)),
 		uintptr(unsafe.Pointer(&rights[0])),
 		1,
 	)
+	runtime.KeepAlive(rightStr)
 	return ntStatusErr("LsaAddAccountRights", status)
 }

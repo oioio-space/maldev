@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/oioio-space/maldev/pe/cert"
 )
 
 func TestMachineString(t *testing.T) {
@@ -576,8 +578,8 @@ func TestGenerate_PatchCheckSum_NonZeroChecksum(t *testing.T) {
 	out, err := Generate("target.dll", []string{"foo"}, Options{PatchCheckSum: true})
 	require.NoError(t, err)
 
-	// CheckSum field is at e_lfanew + 4 (PE sig) + 20 (FileHeader) + 64 = +88.
-	off := int(binary.LittleEndian.Uint32(out[0x3C:])) + 88
+	off, err := cert.PEChecksumOffset(out)
+	require.NoError(t, err)
 	got := binary.LittleEndian.Uint32(out[off : off+4])
 	if got == 0 {
 		t.Error("PatchCheckSum left CheckSum at zero")
@@ -588,7 +590,8 @@ func TestGenerate_NoPatchCheckSum_ZeroChecksum(t *testing.T) {
 	out, err := Generate("target.dll", []string{"foo"}, Options{}) // PatchCheckSum: false
 	require.NoError(t, err)
 
-	off := int(binary.LittleEndian.Uint32(out[0x3C:])) + 88
+	off, err := cert.PEChecksumOffset(out)
+	require.NoError(t, err)
 	if got := binary.LittleEndian.Uint32(out[off : off+4]); got != 0 {
 		t.Errorf("CheckSum = 0x%X without PatchCheckSum, want 0", got)
 	}

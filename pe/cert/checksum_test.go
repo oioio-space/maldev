@@ -37,7 +37,7 @@ func TestPatchPECheckSum_IsIdempotent(t *testing.T) {
 	if err := PatchPECheckSum(pe); err != nil {
 		t.Fatalf("first patch: %v", err)
 	}
-	off, err := peChecksumOffset(pe)
+	off, err := PEChecksumOffset(pe)
 	if err != nil {
 		t.Fatalf("offset: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestPatchPECheckSum_VerificationProperty(t *testing.T) {
 	if err := PatchPECheckSum(pe); err != nil {
 		t.Fatalf("patch: %v", err)
 	}
-	off, _ := peChecksumOffset(pe)
+	off, _ := PEChecksumOffset(pe)
 	stored := binary.LittleEndian.Uint32(pe[off : off+4])
 
 	binary.LittleEndian.PutUint32(pe[off:off+4], 0)
