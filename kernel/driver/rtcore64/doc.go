@@ -8,9 +8,13 @@
 // [kernel/driver.Lifecycle], so callers can manage install/start/stop
 // uniformly across BYOVD primitives. Driver bytes are NOT embedded
 // by default — opt in by building with the `byovd_rtcore64` build
-// tag and providing a gitignored `embed_windows.go` that exposes the
-// driver via `embed.FS`. This keeps the open-source repo free of
-// MSI-redistribution concerns.
+// tag. RTCore64.sys ships in this directory and is wired through
+// `embed_byovd_rtcore64_windows.go` (`//go:embed RTCore64.sys`)
+// only under that tag, so default builds carry no driver bytes
+// and `Driver.Install` returns [ErrDriverBytesMissing] until the
+// caller opts in:
+//
+//	go build -tags=byovd_rtcore64 ./...
 //
 // Use cases:
 //
