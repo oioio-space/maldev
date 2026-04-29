@@ -36,28 +36,32 @@ Two paths: the **modern** [GetKnown] (KNOWNFOLDERID, recommended
 by Microsoft for new code) and the **legacy** [Get] (CSIDL, kept
 for backwards compatibility).
 
-### `GetKnown(rfid windows.GUID, flags KnownFolderFlag) (string, error)`
+### `GetKnown(rfid *windows.KNOWNFOLDERID, flags uint32) (string, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/folder#GetKnown)
 
-Resolves a `KNOWNFOLDERID` GUID to its filesystem path via
-`SHGetKnownFolderPath`. Handles the `PWSTR` ownership contract
-(API-allocated buffer freed via `CoTaskMemFree`) internally.
+Thin wrapper around `golang.org/x/sys/windows.KnownFolderPath` —
+that helper already handles the `SHGetKnownFolderPath` HRESULT
+contract + `CoTaskMemFree` of the API-allocated `PWSTR`. The
+package-local wrapper exists only to wrap the underlying error
+in [`ErrKnownFolderNotFound`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/folder#ErrKnownFolderNotFound)
+for `errors.Is` discrimination on the caller side.
 
 **Parameters:**
-- `rfid` — any of the exported `FOLDERID_*` GUIDs or a custom
-  `windows.GUID` (3rd-party Shell extensions register their own).
-- `flags` — bit-set of `KnownFolderFlag`. `0` for default,
-  `KFF_CREATE` to force directory creation, `KFF_DONT_VERIFY`
-  to skip the existence check.
+- `rfid` — pointer to one of the `windows.FOLDERID_*` constants
+  (e.g. `windows.FOLDERID_RoamingAppData`) or a `windows.KNOWNFOLDERID`
+  parsed from a custom GUID (3rd-party Shell extensions).
+- `flags` — bitwise OR of any `windows.KF_FLAG_*` bits — typically
+  `0` (default), `windows.KF_FLAG_CREATE` (force directory
+  creation), `windows.KF_FLAG_DONT_VERIFY` (skip existence check).
 
 **Returns:**
 - `string` — resolved path. Not `MAX_PATH`-capped.
-- `error` — `ErrKnownFolderNotFound` (wrapped) when Shell32
-  returns a non-success HRESULT.
+- `error` — wraps [`ErrKnownFolderNotFound`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/folder#ErrKnownFolderNotFound)
+  via `%w` when Shell32 returns a non-success HRESULT.
 
-**Side effects:** none beyond the Shell32 call. The internal
-`CoTaskMemFree` releases the API-allocated `PWSTR`.
+**Side effects:** none. `windows.KnownFolderPath` releases the
+API-allocated `PWSTR` internally.
 
 **OPSEC:** very-quiet. `SHGetKnownFolderPath` is in every
 modern installer / Office app / browser path.
@@ -92,12 +96,13 @@ new code; keep this for callers that already key on CSIDL.
 
 ### Common KNOWNFOLDERID constants
 
-`FOLDERID_Profile`, `FOLDERID_Desktop`, `FOLDERID_Documents`,
-`FOLDERID_Downloads`, `FOLDERID_LocalAppData`,
-`FOLDERID_RoamingAppData`, `FOLDERID_Programs`,
-`FOLDERID_Startup`, `FOLDERID_System`, `FOLDERID_Windows`,
-`FOLDERID_ProgramFiles`, `FOLDERID_ProgramFilesX86`,
-`FOLDERID_PublicDesktop`, `FOLDERID_CommonStartup`.
+Use any `windows.FOLDERID_*` GUID directly — the catalogue lives
+in [`golang.org/x/sys/windows`](https://pkg.go.dev/golang.org/x/sys/windows)
+and covers everything from `FOLDERID_Profile` /
+`FOLDERID_Desktop` / `FOLDERID_Documents` / `FOLDERID_Downloads`
+to per-extension entries that 3rd-party Shell extensions
+register. No package-local re-export — saves the maintenance
+burden of mirroring upstream.
 
 ### Common CSIDL constants (legacy)
 
@@ -111,14 +116,17 @@ new code; keep this for callers that already key on CSIDL.
 ### Simple — modern KNOWNFOLDERID
 
 ```go
-import "github.com/oioio-space/maldev/recon/folder"
+import (
+    "github.com/oioio-space/maldev/recon/folder"
+    "golang.org/x/sys/windows"
+)
 
-appdata, _   := folder.GetKnown(folder.FOLDERID_RoamingAppData, 0)
-downloads, _ := folder.GetKnown(folder.FOLDERID_Downloads, 0)
-system, _    := folder.GetKnown(folder.FOLDERID_System, 0)
+appdata, _   := folder.GetKnown(windows.FOLDERID_RoamingAppData, 0)
+downloads, _ := folder.GetKnown(windows.FOLDERID_Downloads, 0)
+system, _    := folder.GetKnown(windows.FOLDERID_System, 0)
 
 // Force creation (KFF_CREATE) when staging a per-user drop directory:
-stage, _ := folder.GetKnown(folder.FOLDERID_LocalAppData, folder.KFF_CREATE)
+stage, _ := folder.GetKnown(windows.FOLDERID_LocalAppData, windows.KF_FLAG_CREATE)
 ```
 
 ### Simple — legacy CSIDL

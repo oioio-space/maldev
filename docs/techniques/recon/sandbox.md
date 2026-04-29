@@ -88,7 +88,7 @@ or relaxing.
 | `process` | 13 | analysis tool (procmon / wireshark / …) running |
 | `username` | 12 | analyst-flavour user name |
 | `hostname` | 12 | analyst-flavour hostname |
-| `process-count` | 7 | unusually low PID population |
+| `process_count` | 7 | unusually low PID population |
 | `connectivity` | 6 | no real internet egress |
 | `ram` | 5 | below `MinRAMGB` |
 | `disk` | 5 | below `MinDiskGB` |

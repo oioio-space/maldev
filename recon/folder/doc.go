@@ -8,14 +8,16 @@
 // modern locations like `Downloads`. The CSIDL helper stays for
 // backwards compatibility with older callers.
 //
-// `FOLDERID_*` constants are exported as `windows.GUID` values:
-// Profile, Desktop, Documents, Downloads, LocalAppData,
-// RoamingAppData, Programs, Startup, System, Windows,
-// ProgramFiles, ProgramFilesX86, PublicDesktop, CommonStartup.
-// Pass any of them (or your own GUID) to [GetKnown] with an
-// optional [KnownFolderFlag] (e.g. `KFF_CREATE` to force
-// directory creation, `KFF_DONT_VERIFY` to skip the existence
-// check).
+// Pass any `windows.FOLDERID_*` GUID (Profile / Desktop /
+// Documents / Downloads / LocalAppData / RoamingAppData /
+// Programs / Startup / System / Windows / ProgramFiles /
+// ProgramFilesX86 / PublicDesktop / CommonStartup, …) directly
+// to [GetKnown] with an optional `windows.KF_FLAG_*` bitmask
+// (e.g. `windows.KF_FLAG_CREATE` to force directory creation,
+// `windows.KF_FLAG_DONT_VERIFY` to skip the existence check).
+// The constants live upstream in `golang.org/x/sys/windows` —
+// this package no longer re-exports them, just wraps the
+// `KnownFolderPath` call site with a sentinel-error.
 //
 // The OS handles per-user vs per-machine path differences and
 // folder redirection in domain environments transparently for

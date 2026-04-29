@@ -67,7 +67,6 @@ e.g. `TypeRemovable` only.
 | `(*Watcher).Watch(interval) (<-chan Event, error)` | **Polling mode.** Re-enumerates drives every `interval`. Headless-process compatible — no message pump required. |
 | `(*Watcher).WatchEvents(buffer) (<-chan Event, error)` | **Event mode (NEW).** Hidden message-only window subscribed to `WM_DEVICECHANGE`. Zero CPU at idle, ms-latency wake on `DBT_DEVICEARRIVAL` / `DBT_DEVICEREMOVECOMPLETE`. Requires an interactive session for the broadcast to land. |
 | `(*Watcher).Snapshot() ([]*Info, error)` | Current snapshot |
-| [`var ErrEventPumpFailed`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#ErrEventPumpFailed) | Sentinel returned by `WatchEvents` when `RegisterClassExW` / `CreateWindowExW` fails on startup. |
 
 ### `(*Watcher).WatchEvents(buffer int) (<-chan Event, error)`
 
@@ -92,8 +91,9 @@ Event-driven watcher. Internally:
 
 **Returns:**
 - `<-chan Event` — closed on `ctx` cancel.
-- `error` — wraps `ErrEventPumpFailed` when the class registration or
-  window creation fails before the pump starts.
+- `error` — non-nil when `RegisterClassExW` / `CreateWindowExW`
+  fails before the pump starts. Per-iteration errors arrive on
+  the channel as `Event{Err: ...}` instead of being returned.
 
 **Side effects:** registers a window class on the calling
 process for the lifetime of the watcher.
@@ -173,7 +173,7 @@ w := drive.NewWatcher(ctx, func(d *drive.Info) bool {
 })
 ch, err := w.WatchEvents(4) // buffer 4 — USB hub re-enum bursts
 if err != nil {
-    return err // ErrEventPumpFailed (wrapped) on RegisterClassExW / CreateWindowExW failure
+    return err // RegisterClassExW / CreateWindowExW failure
 }
 for ev := range ch {
     if ev.Kind == drive.EventAdded {

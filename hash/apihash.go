@@ -1,6 +1,9 @@
 package hash
 
-import "hash/crc32"
+import (
+	"hash/crc32"
+	"unsafe"
+)
 
 // API-hashing alternatives to ROR13 (`ror13.go`). Each function is a
 // pure-Go single-pass byte hash suitable for converting a Windows
@@ -83,12 +86,21 @@ func DJB2(name string) uint32 {
 }
 
 // CRC32 returns the IEEE polynomial CRC-32 of `name`. Backed by
-// `hash/crc32`'s table-driven implementation (constant-time
-// allocation; the table itself is computed once at process start).
+// `hash/crc32`'s table-driven implementation (the table itself is
+// computed once at process start).
+//
+// Zero-allocation: views `name`'s underlying bytes via
+// `unsafe.Slice` rather than `[]byte(name)`, which would copy.
+// Safe because `crc32.Update` reads the slice without retaining
+// it past return.
 //
 // Useful when the operator wants a hash family that's also
 // cryptographic-adjacent (CRC tables are everywhere; ROR13 is
 // distinctively malware-shaped).
 func CRC32(name string) uint32 {
-	return crc32.ChecksumIEEE([]byte(name))
+	if len(name) == 0 {
+		return 0
+	}
+	b := unsafe.Slice(unsafe.StringData(name), len(name))
+	return crc32.Update(0, crc32.IEEETable, b)
 }

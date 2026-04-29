@@ -31,6 +31,25 @@ type Result struct {
 	Err      error  // non-nil only if the check itself failed
 }
 
+// Check* constants are the canonical Result.Name values produced
+// by CheckAll across both platform variants. Using them as the
+// keys in detectionWeights (and as Result.Name in CheckAll
+// producers) means a typo stops compiling instead of silently
+// dropping a signal.
+const (
+	CheckDebugger     = "debugger"
+	CheckVM           = "vm"
+	CheckCPU          = "cpu"
+	CheckRAM          = "ram"
+	CheckDisk         = "disk"
+	CheckUsername     = "username"
+	CheckHostname     = "hostname"
+	CheckDomain       = "domain"
+	CheckProcess      = "process"
+	CheckProcessCount = "process_count"
+	CheckConnectivity = "connectivity"
+)
+
 // detectionWeights assigns each check a 0..100-scale contribution
 // to the aggregate sandbox score. Strong signals (active debugger,
 // VM-detection probe, fake DNS reachable) carry the highest
@@ -39,22 +58,18 @@ type Result struct {
 //
 // Sum of all weights = 116; the aggregate is capped at 100 so a
 // "everything matched" outcome lands at the ceiling.
-//
-// Mirrors the Result.Name values produced by the platform-specific
-// CheckAll implementations (debugger, vm, cpu, ram, disk, username,
-// hostname, domain, process, process-count, connectivity).
 var detectionWeights = map[string]int{
-	"debugger":      20,
-	"vm":            18,
-	"domain":        15, // fake-domain-reachable = strong signal
-	"process":       13, // analysis tool present in process list
-	"username":      12,
-	"hostname":      12,
-	"process-count": 7,  // unusually low process count
-	"connectivity":  6,  // no real internet egress
-	"ram":           5,
-	"disk":          5,
-	"cpu":           3,
+	CheckDebugger:     20,
+	CheckVM:           18,
+	CheckDomain:       15, // fake-domain-reachable = strong signal
+	CheckProcess:      13, // analysis tool present in process list
+	CheckUsername:     12,
+	CheckHostname:     12,
+	CheckProcessCount: 7, // unusually low process count
+	CheckConnectivity: 6, // no real internet egress
+	CheckRAM:          5,
+	CheckDisk:         5,
+	CheckCPU:          3,
 }
 
 // Score aggregates a []Result (typically returned by

@@ -3,7 +3,6 @@
 package drive
 
 import (
-	"errors"
 	"fmt"
 	"runtime"
 	"syscall"
@@ -62,12 +61,6 @@ type msgStruct struct {
 	_        uint32 // padding (some headers omit this; harmless overshoot)
 }
 
-// ErrEventPumpFailed is returned through the Watcher channel when
-// window class registration or message-only window creation fails.
-// Distinct from per-iteration errors so callers can distinguish a
-// transient enumeration error from a fatal pump-startup issue.
-var ErrEventPumpFailed = errors.New("recon/drive: event pump failed")
-
 // WatchEvents starts an event-driven watcher backed by a
 // message-only window subscribed to `WM_DEVICECHANGE`. A hidden
 // HWND is registered on a goroutine pinned to its OS thread —
@@ -119,7 +112,7 @@ func (w *Watcher) eventPump(ch chan<- Event, startup chan<- error) {
 
 	classNamePtr, err := windows.UTF16PtrFromString("MaldevDriveWatcher")
 	if err != nil {
-		startup <- fmt.Errorf("%w: utf16 class name: %v", ErrEventPumpFailed, err)
+		startup <- fmt.Errorf("recon/drive: event pump utf16 class name: %w", err)
 		return
 	}
 
@@ -146,7 +139,7 @@ func (w *Watcher) eventPump(ch chan<- Event, startup chan<- error) {
 	}
 	atom, _, regErr := api.ProcRegisterClassExW.Call(uintptr(unsafe.Pointer(&cls)))
 	if atom == 0 {
-		startup <- fmt.Errorf("%w: RegisterClassExW: %v", ErrEventPumpFailed, regErr)
+		startup <- fmt.Errorf("recon/drive: event pump RegisterClassExW: %w", regErr)
 		return
 	}
 	defer api.ProcUnregisterClassW.Call(uintptr(unsafe.Pointer(classNamePtr)), 0)
@@ -163,18 +156,24 @@ func (w *Watcher) eventPump(ch chan<- Event, startup chan<- error) {
 		0,           // lpParam
 	)
 	if hwnd == 0 {
-		startup <- fmt.Errorf("%w: CreateWindowExW: %v", ErrEventPumpFailed, createErr)
+		startup <- fmt.Errorf("recon/drive: event pump CreateWindowExW: %w", createErr)
 		return
 	}
 	defer api.ProcDestroyWindow.Call(hwnd)
 
-	// Cancellation watcher — posts WM_CLOSE so the pump exits
-	// through the WM_DESTROY → WM_QUIT path. Do this AFTER startup
-	// reports success so we never race a failed-startup return.
+	// Cancellation watcher — posts WM_CLOSE on ctx.Done() so the
+	// pump exits through WM_DESTROY → WM_QUIT. The `pumpDone`
+	// channel signals normal pump exit so the watcher unblocks
+	// and the goroutine doesn't leak on a runaway parent ctx.
 	startup <- nil
+	pumpDone := make(chan struct{})
+	defer close(pumpDone)
 	go func() {
-		<-w.ctx.Done()
-		api.ProcPostMessageW.Call(hwnd, wmClose, 0, 0)
+		select {
+		case <-w.ctx.Done():
+			api.ProcPostMessageW.Call(hwnd, wmClose, 0, 0)
+		case <-pumpDone:
+		}
 	}()
 
 	var msg msgStruct
@@ -184,7 +183,7 @@ func (w *Watcher) eventPump(ch chan<- Event, startup chan<- error) {
 		case 0: // WM_QUIT
 			return
 		case -1: // GetMessage error
-			ch <- Event{Err: fmt.Errorf("%w: GetMessageW returned -1", ErrEventPumpFailed)}
+			ch <- Event{Err: fmt.Errorf("recon/drive: event pump GetMessageW returned -1")}
 			return
 		}
 		api.ProcDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))

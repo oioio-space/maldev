@@ -138,17 +138,6 @@ func TestWatcher_Watch(t *testing.T) {
 	}
 }
 
-// TestErrEventPumpFailed_Exported pins the new sentinel error symbol
-// (regression guard against accidental rename).
-func TestErrEventPumpFailed_Exported(t *testing.T) {
-	if ErrEventPumpFailed == nil {
-		t.Fatal("ErrEventPumpFailed must not be nil")
-	}
-	if ErrEventPumpFailed.Error() == "" {
-		t.Fatal("ErrEventPumpFailed must have a non-empty message")
-	}
-}
-
 // TestWatcher_WatchEvents_StartsAndCancels verifies the event-pump
 // path:
 //   - WatchEvents returns nil error → window class registered + HWND

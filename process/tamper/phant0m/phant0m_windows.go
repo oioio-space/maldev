@@ -211,7 +211,7 @@ func Heartbeat(ctx context.Context, interval time.Duration, caller *wsyscall.Cal
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-t.C:
-			_ = Kill(caller) // best-effort re-kill
+			_ = Kill(caller)
 		}
 	}
 }

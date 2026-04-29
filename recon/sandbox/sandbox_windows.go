@@ -221,27 +221,27 @@ func (c *Checker) CheckAll(ctx context.Context) []Result {
 	var results []Result
 
 	results = append(results, Result{
-		Name:     "debugger",
+		Name:     CheckDebugger,
 		Detected: c.IsDebuggerPresent(),
 		Detail:   "debugger attached to process",
 	})
 
 	results = append(results, Result{
-		Name:     "vm",
+		Name:     CheckVM,
 		Detected: c.IsRunningInVM(),
 		Detail:   "hypervisor indicators found",
 	})
 
 	cpuOK := c.HasEnoughCPU()
 	results = append(results, Result{
-		Name:     "cpu",
+		Name:     CheckCPU,
 		Detected: !cpuOK,
 		Detail:   fmt.Sprintf("CPU cores: %d, minimum: %d", runtime.NumCPU(), c.cfg.MinCPUCores),
 	})
 
 	ramOK, ramErr := c.HasEnoughRAM()
 	results = append(results, Result{
-		Name:     "ram",
+		Name:     CheckRAM,
 		Detected: ramErr == nil && !ramOK,
 		Detail:   fmt.Sprintf("minimum RAM: %dGB", int(c.cfg.MinRAMGB)),
 		Err:      ramErr,
@@ -249,7 +249,7 @@ func (c *Checker) CheckAll(ctx context.Context) []Result {
 
 	diskOK, diskErr := c.HasEnoughDisk()
 	results = append(results, Result{
-		Name:     "disk",
+		Name:     CheckDisk,
 		Detected: diskErr == nil && !diskOK,
 		Detail:   fmt.Sprintf("minimum disk: %dGB on %s", int(c.cfg.MinDiskGB), c.cfg.DiskPath),
 		Err:      diskErr,
@@ -257,7 +257,7 @@ func (c *Checker) CheckAll(ctx context.Context) []Result {
 
 	badUser, userName, userErr := c.BadUsername()
 	results = append(results, Result{
-		Name:     "username",
+		Name:     CheckUsername,
 		Detected: userErr == nil && badUser,
 		Detail:   "suspicious username: " + userName,
 		Err:      userErr,
@@ -265,7 +265,7 @@ func (c *Checker) CheckAll(ctx context.Context) []Result {
 
 	badHost, hostName, hostErr := c.BadHostname()
 	results = append(results, Result{
-		Name:     "hostname",
+		Name:     CheckHostname,
 		Detected: hostErr == nil && badHost,
 		Detail:   "suspicious hostname: " + hostName,
 		Err:      hostErr,
@@ -277,7 +277,7 @@ func (c *Checker) CheckAll(ctx context.Context) []Result {
 		detail = fmt.Sprintf("fake domain reachable, status %d", statusCode)
 	}
 	results = append(results, Result{
-		Name:     "domain",
+		Name:     CheckDomain,
 		Detected: domainErr == nil && domainReachable,
 		Detail:   detail,
 		Err:      domainErr,
@@ -285,7 +285,7 @@ func (c *Checker) CheckAll(ctx context.Context) []Result {
 
 	procFound, procName, procErr := c.CheckProcesses(ctx)
 	results = append(results, Result{
-		Name:     "process",
+		Name:     CheckProcess,
 		Detected: procErr == nil && procFound,
 		Detail:   "analysis tool detected: " + procName,
 		Err:      procErr,
@@ -293,7 +293,7 @@ func (c *Checker) CheckAll(ctx context.Context) []Result {
 
 	lowProcs, lowProcsDetail, lowProcsErr := c.CheckProcessCount(ctx)
 	results = append(results, Result{
-		Name:     "process_count",
+		Name:     CheckProcessCount,
 		Detected: lowProcsErr == nil && lowProcs,
 		Detail:   lowProcsDetail,
 		Err:      lowProcsErr,
@@ -301,7 +301,7 @@ func (c *Checker) CheckAll(ctx context.Context) []Result {
 
 	noInternet, noInternetDetail, noInternetErr := c.CheckConnectivity(ctx)
 	results = append(results, Result{
-		Name:     "connectivity",
+		Name:     CheckConnectivity,
 		Detected: noInternetErr == nil && noInternet,
 		Detail:   noInternetDetail,
 		Err:      noInternetErr,

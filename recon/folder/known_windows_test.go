@@ -10,39 +10,33 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// TestGetKnown_KnownIDsResolve calls GetKnown against every shipped
-// FOLDERID_* GUID with KFF_DONT_VERIFY so the path is returned
-// without an existence check. This decouples the test from
-// host-specific fs state (CommonStartup may or may not be present
-// depending on the build).
+// TestGetKnown_KnownIDsResolve calls GetKnown against a sample of
+// `windows.FOLDERID_*` GUIDs with KF_FLAG_DONT_VERIFY so the path
+// is returned without an existence check (decouples the test
+// from host-specific fs state — `FOLDERID_CommonStartup` may or
+// may not be present depending on the build).
 func TestGetKnown_KnownIDsResolve(t *testing.T) {
 	cases := []struct {
 		name string
-		id   windows.GUID
+		id   *windows.KNOWNFOLDERID
 	}{
-		{"Profile", FOLDERID_Profile},
-		{"Desktop", FOLDERID_Desktop},
-		{"Documents", FOLDERID_Documents},
-		{"Downloads", FOLDERID_Downloads},
-		{"LocalAppData", FOLDERID_LocalAppData},
-		{"RoamingAppData", FOLDERID_RoamingAppData},
-		{"Programs", FOLDERID_Programs},
-		{"Startup", FOLDERID_Startup},
-		{"System", FOLDERID_System},
-		{"Windows", FOLDERID_Windows},
-		{"ProgramFiles", FOLDERID_ProgramFiles},
-		{"ProgramFilesX86", FOLDERID_ProgramFilesX86},
-		{"PublicDesktop", FOLDERID_PublicDesktop},
-		// FOLDERID_CommonStartup intentionally excluded from the
-		// auto-resolve smoke test: its GUID is exported (callers
-		// who want it can call GetKnown directly) but on some
-		// host configurations / session types Shell32 returns
-		// 0x80070002 (path not configured for the calling
-		// principal).
+		{"Profile", windows.FOLDERID_Profile},
+		{"Desktop", windows.FOLDERID_Desktop},
+		{"Documents", windows.FOLDERID_Documents},
+		{"Downloads", windows.FOLDERID_Downloads},
+		{"LocalAppData", windows.FOLDERID_LocalAppData},
+		{"RoamingAppData", windows.FOLDERID_RoamingAppData},
+		{"Programs", windows.FOLDERID_Programs},
+		{"Startup", windows.FOLDERID_Startup},
+		{"System", windows.FOLDERID_System},
+		{"Windows", windows.FOLDERID_Windows},
+		{"ProgramFiles", windows.FOLDERID_ProgramFiles},
+		{"ProgramFilesX86", windows.FOLDERID_ProgramFilesX86},
+		{"PublicDesktop", windows.FOLDERID_PublicDesktop},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			path, err := GetKnown(tc.id, KFF_DONT_VERIFY)
+			path, err := GetKnown(tc.id, windows.KF_FLAG_DONT_VERIFY)
 			if err != nil {
 				t.Fatalf("GetKnown(%s) err = %v, want nil", tc.name, err)
 			}
@@ -56,13 +50,13 @@ func TestGetKnown_KnownIDsResolve(t *testing.T) {
 	}
 }
 
-// TestGetKnown_KFFCreate confirms KFF_CREATE returns a path even when
-// the underlying directory might not pre-exist. We use Documents as
-// the smoke target — it's always present on a healthy host either way.
-func TestGetKnown_KFFCreate(t *testing.T) {
-	path, err := GetKnown(FOLDERID_Documents, KFF_CREATE)
+// TestGetKnown_KFCreate confirms KF_FLAG_CREATE returns a path
+// even when the underlying directory might not pre-exist. We use
+// Documents as the smoke target — present on any healthy host.
+func TestGetKnown_KFCreate(t *testing.T) {
+	path, err := GetKnown(windows.FOLDERID_Documents, windows.KF_FLAG_CREATE)
 	if err != nil {
-		t.Fatalf("GetKnown(Documents, KFF_CREATE) err = %v", err)
+		t.Fatalf("GetKnown(Documents, KF_FLAG_CREATE) err = %v", err)
 	}
 	if !strings.Contains(strings.ToLower(path), "documents") {
 		t.Errorf("expected path containing 'documents', got %q", path)
@@ -70,15 +64,16 @@ func TestGetKnown_KFFCreate(t *testing.T) {
 }
 
 // TestGetKnown_UnknownGUID_ReturnsErrKnownFolderNotFound passes a
-// random GUID that no Shell extension has registered. SHGetKnownFolderPath
-// returns E_INVALIDARG (HRESULT 0x80070057) which the wrapper translates
-// to ErrKnownFolderNotFound.
+// random GUID no Shell extension has registered. SHGetKnownFolderPath
+// returns E_INVALIDARG (HRESULT 0x80070057); GetKnown wraps it as
+// ErrKnownFolderNotFound.
 func TestGetKnown_UnknownGUID_ReturnsErrKnownFolderNotFound(t *testing.T) {
 	bogus, err := windows.GUIDFromString("{DEADBEEF-DEAD-BEEF-DEAD-BEEFDEADBEEF}")
 	if err != nil {
 		t.Fatalf("guid parse: %v", err)
 	}
-	path, err := GetKnown(bogus, 0)
+	bogusKF := windows.KNOWNFOLDERID(bogus)
+	path, err := GetKnown(&bogusKF, 0)
 	if !errors.Is(err, ErrKnownFolderNotFound) {
 		t.Fatalf("GetKnown(bogus) err = %v, want ErrKnownFolderNotFound", err)
 	}

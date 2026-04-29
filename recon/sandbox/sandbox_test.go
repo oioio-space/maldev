@@ -181,7 +181,7 @@ func TestScore_Capped100(t *testing.T) {
 		{Name: "process", Detected: true},
 		{Name: "username", Detected: true},
 		{Name: "hostname", Detected: true},
-		{Name: "process-count", Detected: true},
+		{Name: "process_count", Detected: true},
 		{Name: "connectivity", Detected: true},
 		{Name: "ram", Detected: true},
 		{Name: "disk", Detected: true},
