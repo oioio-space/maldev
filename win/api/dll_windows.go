@@ -21,7 +21,13 @@ var (
 	Gdi32    = windows.NewLazySystemDLL("gdi32.dll")
 	Mscoree  = windows.NewLazySystemDLL("mscoree.dll")
 	Oleaut32 = windows.NewLazySystemDLL("oleaut32.dll")
+	Ole32    = windows.NewLazySystemDLL("ole32.dll")
 	Wtsapi32 = windows.NewLazySystemDLL("wtsapi32.dll")
+)
+
+// ole32.dll procs
+var (
+	ProcCoTaskMemFree = Ole32.NewProc("CoTaskMemFree")
 )
 
 // Thread access rights.
@@ -148,6 +154,7 @@ var (
 // shell32.dll procs
 var (
 	ProcSHGetSpecialFolderPathW = Shell32.NewProc("SHGetSpecialFolderPathW")
+	ProcSHGetKnownFolderPath    = Shell32.NewProc("SHGetKnownFolderPath")
 	ProcShellExecuteW           = Shell32.NewProc("ShellExecuteW")
 )
 

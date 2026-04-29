@@ -1,12 +1,25 @@
-// Package folder resolves Windows special folder paths via
-// `SHGetSpecialFolderPathW` (Shell32) — Desktop, AppData,
-// Startup, Program Files, Common AppData, etc.
+// Package folder resolves Windows special folder paths via two
+// Shell32 entry points: [Get] (legacy `SHGetSpecialFolderPathW`,
+// CSIDL-keyed) and [GetKnown] (modern `SHGetKnownFolderPath`,
+// KNOWNFOLDERID-keyed). Microsoft recommends the KNOWNFOLDERID
+// path for new code — it returns API-allocated `PWSTR` (not
+// `MAX_PATH`-capped), supports 3rd-party Shell extensions that
+// register their own folders, and is the only API that exposes
+// modern locations like `Downloads`. The CSIDL helper stays for
+// backwards compatibility with older callers.
 //
-// Single entry point: [Get] takes a [CSIDL] constant and an
-// optional create-if-missing flag, returns the resolved
-// filesystem path. The OS handles per-user vs per-machine
-// path differences and folder redirection in domain
-// environments transparently.
+// `FOLDERID_*` constants are exported as `windows.GUID` values:
+// Profile, Desktop, Documents, Downloads, LocalAppData,
+// RoamingAppData, Programs, Startup, System, Windows,
+// ProgramFiles, ProgramFilesX86, PublicDesktop, CommonStartup.
+// Pass any of them (or your own GUID) to [GetKnown] with an
+// optional [KnownFolderFlag] (e.g. `KFF_CREATE` to force
+// directory creation, `KFF_DONT_VERIFY` to skip the existence
+// check).
+//
+// The OS handles per-user vs per-machine path differences and
+// folder redirection in domain environments transparently for
+// both APIs.
 //
 // Used by `persistence/startup` to resolve `%APPDATA%\…\Startup`
 // and `%PROGRAMDATA%\…\StartUp`, by `credentials/lsassdump` to

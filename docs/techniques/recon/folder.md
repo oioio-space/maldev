@@ -32,24 +32,98 @@ initialization overhead.
 
 ## API Reference
 
-| Symbol | Description |
-|---|---|
-| [`Get(csidl, createIfNotExist) string`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/folder#Get) | Resolve CSIDL to filesystem path |
-| [`type CSIDL`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/folder#CSIDL) | Per-folder constant |
+Two paths: the **modern** [GetKnown] (KNOWNFOLDERID, recommended
+by Microsoft for new code) and the **legacy** [Get] (CSIDL, kept
+for backwards compatibility).
 
-Common CSIDLs: `CSIDL_DESKTOP`, `CSIDL_APPDATA`,
-`CSIDL_LOCAL_APPDATA`, `CSIDL_COMMON_APPDATA`,
-`CSIDL_STARTUP`, `CSIDL_COMMON_STARTUP`, `CSIDL_PROGRAM_FILES`,
-`CSIDL_PROGRAM_FILESX86`, `CSIDL_SYSTEM`, `CSIDL_WINDOWS`,
-`CSIDL_TEMPLATES`.
+### `GetKnown(rfid windows.GUID, flags KnownFolderFlag) (string, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/folder#GetKnown)
+
+Resolves a `KNOWNFOLDERID` GUID to its filesystem path via
+`SHGetKnownFolderPath`. Handles the `PWSTR` ownership contract
+(API-allocated buffer freed via `CoTaskMemFree`) internally.
+
+**Parameters:**
+- `rfid` — any of the exported `FOLDERID_*` GUIDs or a custom
+  `windows.GUID` (3rd-party Shell extensions register their own).
+- `flags` — bit-set of `KnownFolderFlag`. `0` for default,
+  `KFF_CREATE` to force directory creation, `KFF_DONT_VERIFY`
+  to skip the existence check.
+
+**Returns:**
+- `string` — resolved path. Not `MAX_PATH`-capped.
+- `error` — `ErrKnownFolderNotFound` (wrapped) when Shell32
+  returns a non-success HRESULT.
+
+**Side effects:** none beyond the Shell32 call. The internal
+`CoTaskMemFree` releases the API-allocated `PWSTR`.
+
+**OPSEC:** very-quiet. `SHGetKnownFolderPath` is in every
+modern installer / Office app / browser path.
+
+**Required privileges:** `unprivileged`.
+
+**Platform:** `windows` ≥ Vista (KNOWNFOLDERID introduced in Vista).
+
+### `Get(csidl CSIDL, createIfNotExist bool) string`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/folder#Get)
+
+Legacy path. Resolves a `CSIDL` constant via
+`SHGetSpecialFolderPathW`. Microsoft recommends `GetKnown` for
+new code; keep this for callers that already key on CSIDL.
+
+**Parameters:**
+- `csidl` — one of the `CSIDL_*` constants.
+- `createIfNotExist` — pass `true` to create the folder when
+  missing.
+
+**Returns:**
+- `string` — resolved path or empty on failure.
+
+**Side effects:** caps at `MAX_PATH` (260 chars).
+
+**OPSEC:** very-quiet. Universal Win32 API.
+
+**Required privileges:** `unprivileged`.
+
+**Platform:** `windows` (all versions).
+
+### Common KNOWNFOLDERID constants
+
+`FOLDERID_Profile`, `FOLDERID_Desktop`, `FOLDERID_Documents`,
+`FOLDERID_Downloads`, `FOLDERID_LocalAppData`,
+`FOLDERID_RoamingAppData`, `FOLDERID_Programs`,
+`FOLDERID_Startup`, `FOLDERID_System`, `FOLDERID_Windows`,
+`FOLDERID_ProgramFiles`, `FOLDERID_ProgramFilesX86`,
+`FOLDERID_PublicDesktop`, `FOLDERID_CommonStartup`.
+
+### Common CSIDL constants (legacy)
+
+`CSIDL_DESKTOP`, `CSIDL_APPDATA`, `CSIDL_LOCAL_APPDATA`,
+`CSIDL_COMMON_APPDATA`, `CSIDL_STARTUP`, `CSIDL_COMMON_STARTUP`,
+`CSIDL_PROGRAM_FILES`, `CSIDL_PROGRAM_FILESX86`, `CSIDL_SYSTEM`,
+`CSIDL_WINDOWS`, `CSIDL_TEMPLATES`.
 
 ## Examples
 
-### Simple — common folders
+### Simple — modern KNOWNFOLDERID
 
 ```go
 import "github.com/oioio-space/maldev/recon/folder"
 
+appdata, _   := folder.GetKnown(folder.FOLDERID_RoamingAppData, 0)
+downloads, _ := folder.GetKnown(folder.FOLDERID_Downloads, 0)
+system, _    := folder.GetKnown(folder.FOLDERID_System, 0)
+
+// Force creation (KFF_CREATE) when staging a per-user drop directory:
+stage, _ := folder.GetKnown(folder.FOLDERID_LocalAppData, folder.KFF_CREATE)
+```
+
+### Simple — legacy CSIDL
+
+```go
 appdata := folder.Get(folder.CSIDL_APPDATA, false)
 startup := folder.Get(folder.CSIDL_STARTUP, false)
 system  := folder.Get(folder.CSIDL_SYSTEM, false)
