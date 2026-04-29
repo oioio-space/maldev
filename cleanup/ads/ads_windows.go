@@ -115,14 +115,7 @@ func Write(path, streamName string, data []byte) error {
 // Creator to layer transactional NTFS, encryption, or a stealth write
 // primitive over the ADS landing.
 func WriteVia(creator stealthopen.Creator, path, streamName string, data []byte) error {
-	adsPath := path + ":" + streamName
-	wc, err := stealthopen.UseCreator(creator).Create(adsPath)
-	if err != nil {
-		return err
-	}
-	defer wc.Close()
-	_, err = wc.Write(data)
-	return err
+	return stealthopen.WriteAll(creator, path+":"+streamName, data)
 }
 
 // Delete removes a named alternate data stream.

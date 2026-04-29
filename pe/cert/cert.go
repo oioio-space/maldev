@@ -129,7 +129,7 @@ func StripVia(creator stealthopen.Creator, pePath, dst string) error {
 	if target == "" {
 		target = pePath
 	}
-	return writeBytesVia(creator, target, data)
+	return stealthopen.WriteAll(creator, target, data)
 }
 
 // Copy copies the Authenticode certificate from src PE to dst PE.
@@ -142,17 +142,6 @@ func Copy(srcPE, dstPE string) error {
 	return Write(dstPE, c)
 }
 
-// writeBytesVia is the shared write-side helper. nil creator falls
-// back to a [stealthopen.StandardCreator] (plain os.Create).
-func writeBytesVia(creator stealthopen.Creator, path string, data []byte) error {
-	wc, err := stealthopen.UseCreator(creator).Create(path)
-	if err != nil {
-		return err
-	}
-	defer wc.Close()
-	_, err = wc.Write(data)
-	return err
-}
 
 // Write writes raw certificate data to a PE file, replacing any existing
 // certificate. The certificate blob is appended at the end of the file and
@@ -201,7 +190,7 @@ func WriteVia(creator stealthopen.Creator, pePath string, c *Certificate) error 
 
 	data = append(data, c.Raw...)
 
-	return writeBytesVia(creator, pePath, data)
+	return stealthopen.WriteAll(creator, pePath, data)
 }
 
 // Export saves the raw certificate data to a file. Equivalent to
@@ -217,7 +206,7 @@ func (c *Certificate) ExportVia(creator stealthopen.Creator, path string) error 
 	if c == nil || len(c.Raw) == 0 {
 		return ErrNoCertificate
 	}
-	return writeBytesVia(creator, path, c.Raw)
+	return stealthopen.WriteAll(creator, path, c.Raw)
 }
 
 // Import loads raw certificate data from a file.

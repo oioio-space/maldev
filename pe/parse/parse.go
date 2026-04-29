@@ -269,13 +269,7 @@ func (f *File) Write(path string) error {
 // [stealthopen.Creator]. nil falls back to a [stealthopen.StandardCreator]
 // (plain os.Create).
 func (f *File) WriteVia(creator stealthopen.Creator, path string) error {
-	wc, err := stealthopen.UseCreator(creator).Create(path)
-	if err != nil {
-		return err
-	}
-	defer wc.Close()
-	_, err = wc.Write(f.Raw)
-	return err
+	return stealthopen.WriteAll(creator, path, f.Raw)
 }
 
 // WriteBytes returns the raw PE bytes.

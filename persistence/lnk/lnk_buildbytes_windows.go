@@ -320,13 +320,8 @@ func (s *Shortcut) WriteVia(creator stealthopen.Creator, path string) error {
 	if err != nil {
 		return err
 	}
-	wc, err := stealthopen.UseCreator(creator).Create(path)
-	if err != nil {
-		return fmt.Errorf("lnk: WriteVia create %q: %w", path, err)
-	}
-	defer wc.Close()
-	if _, err := wc.Write(b); err != nil {
-		return fmt.Errorf("lnk: WriteVia write %q: %w", path, err)
+	if err := stealthopen.WriteAll(creator, path, b); err != nil {
+		return fmt.Errorf("lnk: WriteVia %q: %w", path, err)
 	}
 	return nil
 }

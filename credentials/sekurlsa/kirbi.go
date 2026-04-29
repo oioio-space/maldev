@@ -142,14 +142,8 @@ func (t *KerberosTicket) ToKirbiFileVia(creator stealthopen.Creator, dir string)
 	if err != nil {
 		return "", err
 	}
-	name := kirbiFilename(t)
-	path := filepath.Join(dir, name)
-	wc, err := stealthopen.UseCreator(creator).Create(path)
-	if err != nil {
-		return "", fmt.Errorf("create %s: %w", path, err)
-	}
-	defer wc.Close()
-	if _, err := wc.Write(data); err != nil {
+	path := filepath.Join(dir, kirbiFilename(t))
+	if err := stealthopen.WriteAll(creator, path, data); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
 	return path, nil
