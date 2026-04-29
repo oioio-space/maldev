@@ -139,11 +139,20 @@ var (
 
 // user32.dll procs
 var (
-	ProcMessageBoxW  = User32.NewProc("MessageBoxW")
-	ProcMessageBeep  = User32.NewProc("MessageBeep")
-	ProcEnumWindows  = User32.NewProc("EnumWindows")
-	ProcSendMessageW = User32.NewProc("SendMessageW")
-	ProcFindWindowW  = User32.NewProc("FindWindowW")
+	ProcMessageBoxW       = User32.NewProc("MessageBoxW")
+	ProcMessageBeep       = User32.NewProc("MessageBeep")
+	ProcEnumWindows       = User32.NewProc("EnumWindows")
+	ProcSendMessageW      = User32.NewProc("SendMessageW")
+	ProcFindWindowW       = User32.NewProc("FindWindowW")
+	ProcRegisterClassExW  = User32.NewProc("RegisterClassExW")
+	ProcUnregisterClassW  = User32.NewProc("UnregisterClassW")
+	ProcCreateWindowExW   = User32.NewProc("CreateWindowExW")
+	ProcDestroyWindow     = User32.NewProc("DestroyWindow")
+	ProcDefWindowProcW    = User32.NewProc("DefWindowProcW")
+	ProcGetMessageW       = User32.NewProc("GetMessageW")
+	ProcDispatchMessageW  = User32.NewProc("DispatchMessageW")
+	ProcPostMessageW      = User32.NewProc("PostMessageW")
+	ProcPostQuitMessage   = User32.NewProc("PostQuitMessage")
 )
 
 // crypt32.dll procs

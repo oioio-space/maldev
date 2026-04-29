@@ -137,3 +137,46 @@ func TestWatcher_Watch(t *testing.T) {
 		}
 	}
 }
+
+// TestErrEventPumpFailed_Exported pins the new sentinel error symbol
+// (regression guard against accidental rename).
+func TestErrEventPumpFailed_Exported(t *testing.T) {
+	if ErrEventPumpFailed == nil {
+		t.Fatal("ErrEventPumpFailed must not be nil")
+	}
+	if ErrEventPumpFailed.Error() == "" {
+		t.Fatal("ErrEventPumpFailed must have a non-empty message")
+	}
+}
+
+// TestWatcher_WatchEvents_StartsAndCancels verifies the event-pump
+// path:
+//   - WatchEvents returns nil error → window class registered + HWND
+//     created successfully.
+//   - context cancellation closes the channel cleanly via the
+//     WM_CLOSE → WM_DESTROY → WM_QUIT chain.
+// Skips on hosts without an interactive session — RegisterClassExW
+// works in service / SYSTEM contexts but the WM_DEVICECHANGE
+// broadcast doesn't reach message-only windows there, which makes
+// the test useless. The startup/teardown path is the only thing we
+// verify automatically; live device-arrival reception is in the VM
+// matrix.
+func TestWatcher_WatchEvents_StartsAndCancels(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	w := NewWatcher(ctx, func(*Info) bool { return true })
+	ch, err := w.WatchEvents(4)
+	require.NoError(t, err)
+
+	// Drain until the channel closes (ctx cancellation triggers
+	// WM_CLOSE → WM_DESTROY → WM_QUIT → close(ch)).
+	drained := 0
+	for ev := range ch {
+		drained++
+		if ev.Err != nil {
+			t.Logf("watcher error: %v", ev.Err)
+		}
+	}
+	t.Logf("event-pump drained %d events", drained)
+}

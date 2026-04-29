@@ -63,9 +63,59 @@ e.g. `TypeRemovable` only.
 | [`LogicalDriveLetters() ([]string, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#LogicalDriveLetters) | Every present drive letter |
 | [`TypeOf(root) Type`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#TypeOf) | Per-root classification |
 | [`VolumeOf(root) (*VolumeInfo, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#VolumeOf) | Volume label + serial + FS |
-| [`NewWatcher(ctx, filter) *Watcher`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#NewWatcher) | Polling watcher |
-| `(*Watcher).Watch(interval) (<-chan Event, error)` | Start polling, return event channel |
+| [`NewWatcher(ctx, filter) *Watcher`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#NewWatcher) | Watcher (consumed by both watcher modes below) |
+| `(*Watcher).Watch(interval) (<-chan Event, error)` | **Polling mode.** Re-enumerates drives every `interval`. Headless-process compatible — no message pump required. |
+| `(*Watcher).WatchEvents(buffer) (<-chan Event, error)` | **Event mode (NEW).** Hidden message-only window subscribed to `WM_DEVICECHANGE`. Zero CPU at idle, ms-latency wake on `DBT_DEVICEARRIVAL` / `DBT_DEVICEREMOVECOMPLETE`. Requires an interactive session for the broadcast to land. |
 | `(*Watcher).Snapshot() ([]*Info, error)` | Current snapshot |
+| [`var ErrEventPumpFailed`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#ErrEventPumpFailed) | Sentinel returned by `WatchEvents` when `RegisterClassExW` / `CreateWindowExW` fails on startup. |
+
+### `(*Watcher).WatchEvents(buffer int) (<-chan Event, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#Watcher.WatchEvents)
+
+Event-driven watcher. Internally:
+
+1. Locks the goroutine to its OS thread (mandatory — Win32 message
+   pumps can't migrate).
+2. Registers a `WNDCLASSEXW` and creates a message-only window
+   (`HWND_MESSAGE`).
+3. Receives `WM_DEVICECHANGE` and triggers `Snapshot+diff` on
+   `DBT_DEVICEARRIVAL` / `DBT_DEVICEREMOVECOMPLETE`.
+4. On `ctx.Done()`, posts `WM_CLOSE` so the pump exits via
+   `WM_DESTROY → WM_QUIT`, destroys the window, unregisters the
+   class, closes the channel.
+
+**Parameters:**
+- `buffer` — channel capacity. `0` is synchronous; `≥ 4` recommended
+  for burst-friendly consumers (USB hub re-enumeration emits multiple
+  `WM_DEVICECHANGE`s in quick succession).
+
+**Returns:**
+- `<-chan Event` — closed on `ctx` cancel.
+- `error` — wraps `ErrEventPumpFailed` when the class registration or
+  window creation fails before the pump starts.
+
+**Side effects:** registers a window class on the calling
+process for the lifetime of the watcher.
+
+**OPSEC:** very-quiet — message-only windows aren't enumerated by
+`EnumWindows` and don't appear in Spy++ default views. Visible only
+to a debugger walking `User Atom Tables` for the registered class
+name (`MaldevDriveWatcher`).
+
+**Required privileges:** `unprivileged`.
+
+**Platform:** `windows` (interactive session — service / SYSTEM
+contexts receive no `WM_DEVICECHANGE` broadcasts).
+
+When to pick which:
+
+| Situation | Use |
+|---|---|
+| Headless / SYSTEM service / no interactive session | `Watch(interval)` (polling) |
+| Foreground / interactive process | `WatchEvents(buffer)` (event-driven) |
+| You don't care about CPU at idle and want simple semantics | `Watch(interval)` |
+| You want sub-second latency and zero idle CPU | `WatchEvents(buffer)` |
 
 ## Examples
 
