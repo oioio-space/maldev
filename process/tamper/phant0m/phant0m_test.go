@@ -3,8 +3,10 @@
 package phant0m
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -46,4 +48,36 @@ func TestKillEventLogThreads(t *testing.T) {
 	}
 	require.NoError(t, err)
 	t.Log("Event Log service threads terminated; event logging is now silenced")
+}
+
+// TestHeartbeat_RejectsNonPositiveInterval is a unit-only check
+// (no privilege, no real Kill). The function must reject zero or
+// negative intervals before attempting any side effect.
+func TestHeartbeat_RejectsNonPositiveInterval(t *testing.T) {
+	for _, interval := range []time.Duration{0, -1, -time.Second} {
+		err := Heartbeat(context.Background(), interval, nil)
+		if err == nil {
+			t.Fatalf("Heartbeat(%s) err = nil, want non-nil", interval)
+		}
+	}
+}
+
+// TestHeartbeat_RespectsContextCancellation requires SeDebugPrivilege
+// and a running Event Log service — same gate as TestKillEventLogThreads.
+// Confirms that:
+//   - the first Kill ran (no error from Heartbeat)
+//   - cancelling the context returns ctx.Err()
+func TestHeartbeat_RespectsContextCancellation(t *testing.T) {
+	testutil.RequireManual(t)
+	testutil.RequireIntrusive(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	err := Heartbeat(ctx, 100*time.Millisecond, nil)
+	if errors.Is(err, ErrNoTargetThreads) {
+		t.Skip("no EventLog threads with service tags on this VM — tag resolution may not be available")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Heartbeat err = %v, want DeadlineExceeded", err)
+	}
 }

