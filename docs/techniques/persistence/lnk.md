@@ -48,13 +48,13 @@ sequenceDiagram
     Caller->>Shell: CoCreateInstance WScript.Shell
     Caller->>Shell: CreateShortcut path
     Shell-->>Link: IWshShortcut dispatch
-    Caller->>Link: PutProperty TargetPath / Arguments / Icon / Style / Desc / WorkDir
+    Caller->>Link: PutProperty TargetPath, Arguments, Icon, Style, Desc, WorkDir
     Caller->>Link: Save
-    Link-->>Caller: .lnk on disk
-    Caller->>COM: Release + CoUninitialize
+    Link-->>Caller: lnk on disk
+    Caller->>COM: Release then CoUninitialize
 ```
 
-The zero-disk path (`BuildBytes` / `WriteTo`) swaps the Shell
+The zero-disk path (`BuildBytes` and `WriteTo`) swaps the Shell
 automation actors for a direct IShellLinkW + IPersistStream chain:
 
 ```mermaid
@@ -67,13 +67,13 @@ sequenceDiagram
 
     Caller->>COM: CoInitializeEx STA
     Caller->>Link: CoCreateInstance CLSID_ShellLink
-    Caller->>Link: SetPath / SetArguments / SetIconLocation / SetShowCmd / SetHotkey
+    Caller->>Link: SetPath, SetArguments, SetIconLocation, SetShowCmd, SetHotkey
     Caller->>Link: QueryInterface IID_IPersistStream
     Link-->>PS: IPersistStream pointer
     Caller->>Stream: CreateStreamOnHGlobal NULL TRUE
     Caller->>PS: Save Stream TRUE
     PS-->>Stream: bytes written into HGLOBAL
-    Caller->>Stream: GetHGlobalFromStream + GlobalLock
+    Caller->>Stream: GetHGlobalFromStream and GlobalLock
     Stream-->>Caller: byte slice
     Caller->>Stream: Release
     Caller->>PS: Release
