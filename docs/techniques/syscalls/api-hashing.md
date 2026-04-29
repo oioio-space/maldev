@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: a705c32
+last_reviewed: 2026-04-29
+reflects_commit: b614f6c
 ---
 
 # API Hashing (PEB Walk + ROR13)
@@ -135,6 +135,27 @@ Both ends MUST agree: `NewHashGateWith(fn)` for the resolver,
 `WithHashFunc(fn)` for any `CallByHash` call. Pre-compute the
 hash constants once at build time (or via a `go generate` step)
 to keep the binary string-free.
+
+#### `cmd/hashgen` — generate the constants
+
+Use the in-tree CLI to emit `const Hash<Algo><Symbol> = 0x…`
+declarations for any of the 7 supported algorithms (`ror13`,
+`ror13module`, `fnv1a32`, `fnv1a64`, `jenkins`, `djb2`, `crc32`):
+
+```bash
+go run ./cmd/hashgen -algo jenkins -package winhashes \
+    LoadLibraryA GetProcAddress NtAllocateVirtualMemory > winhashes/winhashes_gen.go
+```
+
+Or, for `go generate`-style integration, drop a stanza like the
+following into a stub file and check the generated output into git:
+
+```go
+//go:generate go run ../../cmd/hashgen -algo jenkins -package winhashes -o winhashes_gen.go LoadLibraryA GetProcAddress
+```
+
+This keeps the runtime cost zero (no hashing on each process
+start) and the binary string-free.
 
 ### PE Export Resolution
 
