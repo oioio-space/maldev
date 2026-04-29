@@ -153,3 +153,14 @@ func TestDeleteUndeletable(t *testing.T) {
 	_, err = ReadUndeletable(path)
 	require.Error(t, err)
 }
+
+func TestReadVia_NilOpenerMatchesRead(t *testing.T) {
+	path := tempFile(t)
+	payload := []byte("via-nil-payload")
+
+	require.NoError(t, Write(path, "viatest", payload))
+
+	got, err := ReadVia(nil, path, "viatest")
+	require.NoError(t, err)
+	assert.Equal(t, payload, got, "ReadVia(nil) must match Read")
+}

@@ -83,6 +83,24 @@ landing. Internally calls `stealthopen.WriteAll` with the
 
 Read the entire named stream into memory.
 
+### `ReadVia(opener stealthopen.Opener, path, stream string) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/ads#ReadVia)
+
+Same semantics as `Read`, but routes through the operator-supplied
+[`stealthopen.Opener`](../evasion/stealthopen.md). nil falls back to
+plain `os.Open` on the composite `<path>:<stream>` (identical to
+`Read`); non-nil layers an operator-controlled read primitive on top.
+
+> [!CAUTION]
+> [`*stealthopen.Stealth`](../evasion/stealthopen.md) opens by NTFS
+> Object ID and addresses the **MFT entry** (the main stream). Named
+> ADS streams share the entry but are addressed by stream name; the
+> Object-ID path cannot reach them. An Opener that needs to defeat
+> path-based EDR hooks AND read a specific named stream must route
+> through `NtCreateFile` with the composite path (FILE_OBJECT
+> resolution) rather than Object-ID resolution.
+
 ### `List(path string) ([]string, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/ads#List)
@@ -166,6 +184,14 @@ configured.
   avoiding (don't use `Zone.Identifier` as your stream name).
 - **Backup tools** (Robocopy with `/B`, Windows Backup) preserve streams;
   unaware tools (`copy`, `xcopy` without `/B`) silently drop them.
+- **Stealth read of named ADS streams is non-trivial.** [`ReadVia`](#readviaopener-stealthopenopener-path-stream-string-byte-error)
+  + nil-fallback uses path-based `os.Open` on `<path>:<stream>` —
+  visible to path-hooking EDRs. The repo's bundled
+  [`*stealthopen.Stealth`](../evasion/stealthopen.md) routes through
+  NTFS Object IDs which addresses the MFT entry only (main stream),
+  *not* a specific named stream. A stealth-on-ADS read primitive
+  needs a custom Opener built on `NtCreateFile` with the composite
+  path; not provided by this package.
 
 ## See also
 

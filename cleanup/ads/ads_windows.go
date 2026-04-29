@@ -97,10 +97,25 @@ func parseStreamName(raw string) string {
 	return raw[:idx]
 }
 
-// Read reads the content of a named alternate data stream.
+// Read reads the content of a named alternate data stream. Equivalent
+// to [ReadVia] with a nil Opener.
 func Read(path, streamName string) ([]byte, error) {
-	adsPath := path + ":" + streamName
-	return os.ReadFile(adsPath)
+	return ReadVia(nil, path, streamName)
+}
+
+// ReadVia routes the ADS read through the operator-supplied
+// [stealthopen.Opener]. nil falls back to a plain os.Open on the
+// composite "<path>:<streamName>" — same byte content as [Read].
+//
+// CAVEAT: [stealthopen.Stealth] opens files by their NTFS Object ID,
+// which addresses the MFT entry (the main stream). Named ADS streams
+// share the entry but are addressed by stream name; the OpenByID path
+// cannot reach them. For an Opener that must defeat path-based EDR
+// hooks AND read a specific named stream, the implementation must
+// route through NtCreateFile with the composite path on the
+// FILE_OBJECT side rather than Object-ID resolution.
+func ReadVia(opener stealthopen.Opener, path, streamName string) ([]byte, error) {
+	return stealthopen.OpenRead(opener, path+":"+streamName)
 }
 
 // Write creates or overwrites a named alternate data stream. Equivalent
