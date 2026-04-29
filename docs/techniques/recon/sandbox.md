@@ -73,8 +73,31 @@ or relaxing.
 | [`DefaultConfig() Config`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#DefaultConfig) | Defender-baseline calibration |
 | [`type Checker`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker) | Orchestrator instance |
 | [`New(cfg) *Checker`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#New) | Build a checker |
-| `Checker.IsSandboxed(ctx) (bool, string, error)` | Run all enabled checks; first match wins |
-| `Checker.RunAll(ctx) ([]Result, error)` | Run every check; return all results |
+| `Checker.IsSandboxed(ctx) (bool, string, error)` | Run all enabled checks; first match wins (binary verdict) |
+| `Checker.CheckAll(ctx) []Result` | Run every check; return all results (per-check breakdown) |
+| [`Score(results []Result) int`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Score) | Aggregate `[]Result` into a 0..100 confidence score, capped at 100 |
+| [`Weights() map[string]int`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Weights) | Returns a copy of the per-check score weights for audit/tuning |
+
+### Scoring weights
+
+| Check | Weight | Rationale |
+|---|---|---|
+| `debugger` | 20 | active analyst attached |
+| `vm` | 18 | virt detection probe matched |
+| `domain` | 15 | sandbox DNS resolves a known-fake domain |
+| `process` | 13 | analysis tool (procmon / wireshark / …) running |
+| `username` | 12 | analyst-flavour user name |
+| `hostname` | 12 | analyst-flavour hostname |
+| `process-count` | 7 | unusually low PID population |
+| `connectivity` | 6 | no real internet egress |
+| `ram` | 5 | below `MinRAMGB` |
+| `disk` | 5 | below `MinDiskGB` |
+| `cpu` | 3 | below `MinCPUCores` |
+
+Sum of all weights = 116. The aggregate is capped at 100 so a
+"matched everything" outcome lands at the ceiling. Operators
+pick a bail threshold (typically 50–70) per their tolerance for
+false positives.
 
 ## Examples
 
@@ -113,11 +136,36 @@ c := sandbox.New(cfg)
 ### Advanced — full audit + report
 
 ```go
-results, _ := c.RunAll(ctx)
+results := c.CheckAll(ctx)
 for _, r := range results {
-    if r.Hit {
-        fmt.Printf("%-15s %s\n", r.Check, r.Reason)
+    if r.Detected {
+        fmt.Printf("%-15s %s\n", r.Name, r.Detail)
     }
+}
+```
+
+### Advanced — score-based bail (recommended for tunable noise)
+
+Replace the binary `IsSandboxed` verdict with a 0..100 score so
+operators can tune the bail threshold per engagement.
+
+```go
+import "github.com/oioio-space/maldev/recon/sandbox"
+
+c := sandbox.New(sandbox.DefaultConfig())
+results := c.CheckAll(ctx)
+score := sandbox.Score(results)
+if score >= 60 {
+    log.Printf("bail: sandbox score=%d", score)
+    return
+}
+```
+
+Audit / tune the weights:
+
+```go
+for name, w := range sandbox.Weights() {
+    log.Printf("weight[%s] = %d", name, w)
 }
 ```
 
@@ -156,7 +204,17 @@ for _, r := range results {
   defeats every check.
 - **False positives on low-spec real users.** Tightening
   hardware thresholds catches sandboxes but may catch real
-  embedded / minimal-VM targets.
+  embedded / minimal-VM targets. The `Score` helper +
+  operator-chosen threshold gives finer control than the
+  binary `IsSandboxed`: a single hardware check failing on a
+  real low-spec target only contributes 3-5 points; the
+  operator's bail threshold (typically 50-70) absorbs that
+  noise.
+- **Score weights are static.** The current `detectionWeights`
+  are tuned for "default-defender baseline" target shapes.
+  Targets with unusual hardware (cheap VPS, dense Docker
+  hosts) may need re-weighting via `Weights()` audit + a
+  custom aggregator.
 - **DNS check requires outbound resolution.** Air-gapped
   sandboxes that NXDOMAIN everything still defeat the
   fake-domain probe.

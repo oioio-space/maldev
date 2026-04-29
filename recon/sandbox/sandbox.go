@@ -31,6 +31,66 @@ type Result struct {
 	Err      error  // non-nil only if the check itself failed
 }
 
+// detectionWeights assigns each check a 0..100-scale contribution
+// to the aggregate sandbox score. Strong signals (active debugger,
+// VM-detection probe, fake DNS reachable) carry the highest
+// individual weight; cumulative weak signals can still push the
+// score above the operator-chosen bail threshold.
+//
+// Sum of all weights = 116; the aggregate is capped at 100 so a
+// "everything matched" outcome lands at the ceiling.
+//
+// Mirrors the Result.Name values produced by the platform-specific
+// CheckAll implementations (debugger, vm, cpu, ram, disk, username,
+// hostname, domain, process, process-count, connectivity).
+var detectionWeights = map[string]int{
+	"debugger":      20,
+	"vm":            18,
+	"domain":        15, // fake-domain-reachable = strong signal
+	"process":       13, // analysis tool present in process list
+	"username":      12,
+	"hostname":      12,
+	"process-count": 7,  // unusually low process count
+	"connectivity":  6,  // no real internet egress
+	"ram":           5,
+	"disk":          5,
+	"cpu":           3,
+}
+
+// Score aggregates a []Result (typically returned by
+// (*Checker).CheckAll) into a single 0..100 confidence value.
+// Each detected check contributes its mapped weight; the total is
+// capped at 100. Undetected checks contribute zero.
+//
+// Unknown Result.Name values contribute zero — preserves forward-
+// compatibility when CheckAll grows new check kinds before the
+// weight table is updated. Callers that want strict accounting
+// should snapshot the keys of Weights and iterate explicitly.
+func Score(results []Result) int {
+	total := 0
+	for _, r := range results {
+		if r.Detected {
+			total += detectionWeights[r.Name]
+		}
+	}
+	if total > 100 {
+		return 100
+	}
+	return total
+}
+
+// Weights returns a copy of the per-check score weights so callers
+// can audit / tune the algorithm without reaching into private
+// state. Mutating the returned map is safe; the package's internal
+// table is unchanged.
+func Weights() map[string]int {
+	out := make(map[string]int, len(detectionWeights))
+	for k, v := range detectionWeights {
+		out[k] = v
+	}
+	return out
+}
+
 // DefaultConfig returns sensible defaults for sandbox detection.
 func DefaultConfig() Config {
 	diskPath := "/"

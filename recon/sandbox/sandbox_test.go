@@ -118,3 +118,102 @@ func TestBadHostname(t *testing.T) {
 	require.NoError(t, err, "BadHostname must not fail")
 	t.Logf("BadHostname: detected=%v name=%q", bad, name)
 }
+
+// TestScore_ZeroOnEmpty pins the no-detection floor: an empty slice
+// or all-undetected results must score 0.
+func TestScore_ZeroOnEmpty(t *testing.T) {
+	if got := Score(nil); got != 0 {
+		t.Errorf("Score(nil) = %d, want 0", got)
+	}
+	clean := []Result{
+		{Name: "debugger", Detected: false},
+		{Name: "vm", Detected: false},
+	}
+	if got := Score(clean); got != 0 {
+		t.Errorf("Score(clean) = %d, want 0", got)
+	}
+}
+
+// TestScore_StrongSignals confirms the canonical strong-signal
+// weights: debugger=20 alone, vm=18 alone, both = 38.
+func TestScore_StrongSignals(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []Result
+		want int
+	}{
+		{
+			"debugger only",
+			[]Result{{Name: "debugger", Detected: true}},
+			20,
+		},
+		{
+			"vm only",
+			[]Result{{Name: "vm", Detected: true}},
+			18,
+		},
+		{
+			"debugger + vm",
+			[]Result{
+				{Name: "debugger", Detected: true},
+				{Name: "vm", Detected: true},
+			},
+			38,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Score(tc.in); got != tc.want {
+				t.Errorf("Score = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestScore_Capped100 verifies the cap fires when accumulated
+// weight exceeds 100. Sum of every weight in the table = 116, so
+// "everything matched" must land at 100.
+func TestScore_Capped100(t *testing.T) {
+	all := []Result{
+		{Name: "debugger", Detected: true},
+		{Name: "vm", Detected: true},
+		{Name: "domain", Detected: true},
+		{Name: "process", Detected: true},
+		{Name: "username", Detected: true},
+		{Name: "hostname", Detected: true},
+		{Name: "process-count", Detected: true},
+		{Name: "connectivity", Detected: true},
+		{Name: "ram", Detected: true},
+		{Name: "disk", Detected: true},
+		{Name: "cpu", Detected: true},
+	}
+	if got := Score(all); got != 100 {
+		t.Errorf("Score(all) = %d, want 100", got)
+	}
+}
+
+// TestScore_UnknownNamesContributeZero confirms forward-compat:
+// new check kinds that haven't earned a weight yet score 0
+// instead of breaking the call.
+func TestScore_UnknownNamesContributeZero(t *testing.T) {
+	in := []Result{
+		{Name: "future-bizarre-check", Detected: true},
+		{Name: "vm", Detected: true},
+	}
+	if got := Score(in); got != 18 {
+		t.Errorf("Score = %d, want 18 (vm only)", got)
+	}
+}
+
+// TestWeights_ReturnsCopy guarantees the caller can mutate the
+// returned map without affecting subsequent Score calls.
+func TestWeights_ReturnsCopy(t *testing.T) {
+	w := Weights()
+	if w["debugger"] != 20 {
+		t.Fatalf("Weights[debugger] = %d, want 20", w["debugger"])
+	}
+	w["debugger"] = 999
+	if got := Score([]Result{{Name: "debugger", Detected: true}}); got != 20 {
+		t.Errorf("Score after mutating returned map = %d, want 20 — Weights() must return a copy", got)
+	}
+}
