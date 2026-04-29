@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+
+	"github.com/oioio-space/maldev/pe/cert"
 )
 
 // Machine identifies the COFF machine type baked into the emitted PE.
@@ -86,6 +88,23 @@ type Options struct {
 	// DllMain, no imports. That mode is invisible at runtime once
 	// loaded; the real target executes as if loaded directly.
 	PayloadDLL string
+
+	// DOSStub embeds the canonical 64-byte MSVC DOS stub program (the
+	// "This program cannot be run in DOS mode." text) between the DOS
+	// header and the PE signature, with e_lfanew bumped to 0x80. Zero
+	// value emits a minimal MZ-only header (e_lfanew = 0x40).
+	//
+	// Defenders fingerprinting on the DOS stub presence/absence cannot
+	// distinguish the proxy from a real MSVC-linked DLL when this flag
+	// is set.
+	DOSStub bool
+
+	// PatchCheckSum recomputes the PE optional-header CheckSum after
+	// assembly via [github.com/oioio-space/maldev/pe/cert.PatchPECheckSum].
+	// Zero value leaves CheckSum at 0 (which the Windows user-mode
+	// loader tolerates for non-driver images, but ImageHlp-based tools
+	// flag as "not signed by ImageHlp").
+	PatchCheckSum bool
 }
 
 // Sentinel errors callers may inspect with errors.Is.
@@ -191,10 +210,21 @@ func GenerateExt(targetName string, exports []Export, opts Options) ([]byte, err
 		return nil, err
 	}
 
+	var out []byte
 	if opts.PayloadDLL == "" {
-		return assembleForwarderOnly(targetName, normalised, opts)
+		out, err = assembleForwarderOnly(targetName, normalised, opts)
+	} else {
+		out, err = assembleWithPayload(targetName, normalised, opts)
 	}
-	return assembleWithPayload(targetName, normalised, opts)
+	if err != nil {
+		return nil, err
+	}
+	if opts.PatchCheckSum {
+		if err := cert.PatchPECheckSum(out); err != nil {
+			return nil, fmt.Errorf("dllproxy: patch checksum: %w", err)
+		}
+	}
+	return out, nil
 }
 
 // normaliseExports validates input, assigns missing ordinals, and
@@ -253,7 +283,7 @@ func assembleForwarderOnly(targetName string, sortedExports []Export, opts Optio
 	secs := []section{
 		{name: ".rdata", rva: rdataVA, contents: rdata, characteristics: imageRDataCharacteristics},
 	}
-	return assemblePE(secs, 0, dataDirs, opts.Machine), nil
+	return assemblePE(secs, 0, dataDirs, opts.Machine, opts.DOSStub), nil
 }
 
 func assembleWithPayload(targetName string, sortedExports []Export, opts Options) ([]byte, error) {
@@ -293,7 +323,7 @@ func assembleWithPayload(targetName string, sortedExports []Export, opts Options
 		{name: ".text", rva: textVA, contents: textBytes, characteristics: imageTextCharacteristics},
 		{name: ".rdata", rva: rdataVA, contents: rdata, characteristics: imageRDataCharacteristics},
 	}
-	return assemblePE(secs, textVA, dataDirs, opts.Machine), nil
+	return assemblePE(secs, textVA, dataDirs, opts.Machine, opts.DOSStub), nil
 }
 
 // PE / COFF / Optional-Header constants used by the emitter. Anything
@@ -468,8 +498,14 @@ func forwarderPrefix(scheme PathScheme, targetName string) string {
 //
 // Headers are written through stdlib [debug/pe] structs so on-disk
 // layout matches the spec without any hand-counted offsets.
-func assemblePE(secs []section, addressOfEntryPoint uint32, dataDirs [16]pe.DataDirectory, machine Machine) []byte {
-	const peHeaderOffset = dosHeaderSize // e_lfanew = 0x40
+func assemblePE(secs []section, addressOfEntryPoint uint32, dataDirs [16]pe.DataDirectory, machine Machine, dosStub bool) []byte {
+	peHeaderOffset := uint32(dosHeaderSize) // e_lfanew = 0x40
+	if dosStub {
+		// MSVC-canonical layout: 64-byte DOS header + 64-byte DOS
+		// program ("This program cannot be run in DOS mode."), so the
+		// PE signature lands at 0x80.
+		peHeaderOffset = 0x80
+	}
 
 	is32 := machine == MachineI386
 	optHdrSize := uint32(optionalHeader64Sz)
@@ -596,12 +632,40 @@ func assemblePE(secs []section, addressOfEntryPoint uint32, dataDirs [16]pe.Data
 
 	out := make([]byte, fileOff)
 	copy(out, hdr.Bytes())
-	binary.LittleEndian.PutUint16(out[0:], dosMagic)
-	binary.LittleEndian.PutUint32(out[0x3c:], peHeaderOffset)
+	if dosStub {
+		copy(out, dosStubBlock[:])
+	} else {
+		binary.LittleEndian.PutUint16(out[0:], dosMagic)
+		binary.LittleEndian.PutUint32(out[0x3c:], peHeaderOffset)
+	}
 	for i, s := range secs {
 		copy(out[files[i].fileOff:], s.contents)
 	}
 	return out
+}
+
+// dosStubBlock is the canonical 128-byte MSVC DOS header + DOS
+// program. Bytes 0x40..0x80 contain 16-bit code that prints
+// "This program cannot be run in DOS mode." and exits via INT 21h.
+// e_lfanew at offset 0x3C is 0x80, matching the layout assemblePE
+// produces when DOSStub is true.
+var dosStubBlock = [128]byte{
+	0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00,
+	0x04, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00,
+	0xB8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00,
+	0x0E, 0x1F, 0xBA, 0x0E, 0x00, 0xB4, 0x09, 0xCD,
+	0x21, 0xB8, 0x01, 0x4C, 0xCD, 0x21, 0x54, 0x68,
+	0x69, 0x73, 0x20, 0x70, 0x72, 0x6F, 0x67, 0x72,
+	0x61, 0x6D, 0x20, 0x63, 0x61, 0x6E, 0x6E, 0x6F,
+	0x74, 0x20, 0x62, 0x65, 0x20, 0x72, 0x75, 0x6E,
+	0x20, 0x69, 0x6E, 0x20, 0x44, 0x4F, 0x53, 0x20,
+	0x6D, 0x6F, 0x64, 0x65, 0x2E, 0x0D, 0x0D, 0x0A,
+	0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 }
 
 // secNameBytes packs an ASCII section name (max 8 chars) into the
