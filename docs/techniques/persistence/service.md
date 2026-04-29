@@ -86,6 +86,19 @@ the SCM interaction contract well-tested and conventional.
 | `Description` | Long description (shown in services.msc properties) |
 | `StartType` | One of the `StartType` constants |
 | `Args` | Command-line arguments appended to `BinPath` at launch |
+| `Account` | **Optional** service-account override. Empty → `LocalSystem` (default). Forms accepted: `.\\<user>` / `<host>\\<user>` (local), `<DOMAIN>\\<user>` (domain), `NT AUTHORITY\\NetworkService` / `NT AUTHORITY\\LocalService` (built-in low-priv). |
+| `Password` | Plaintext password for the account. Ignored for built-in `NT AUTHORITY\\*` principals. |
+
+> [!IMPORTANT]
+> When `Account` is set to a normal local or domain user, the
+> account MUST already hold `SeServiceLogonRight`. The package
+> intentionally does not auto-grant the right (the LSA policy edit
+> via `LsaAddAccountRights` is its own backlog item under P2.15).
+> Operators run `secedit /import …` or
+> `ntrights -u <user> +r SeServiceLogonRight` during deployment.
+>
+> Built-in `NT AUTHORITY\NetworkService` / `LocalService` already
+> hold the right and need no password.
 
 ### Functions
 

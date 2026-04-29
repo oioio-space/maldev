@@ -38,6 +38,22 @@ type Config struct {
 	BinPath     string    // Full path to the service executable
 	Args        string    // Command-line arguments (appended to BinPath)
 	StartType   StartType // When the service starts
+
+	// Account / Password — optional service-account override. Empty
+	// Account (the default) installs the service as
+	// `LocalSystem`. Use formats accepted by the SCM:
+	//   - ".\\<user>" or "<host>\\<user>" — local account
+	//   - "<DOMAIN>\\<user>"               — domain account
+	//   - "NT AUTHORITY\\NetworkService" / "NT AUTHORITY\\LocalService"
+	//     — built-in low-privilege service accounts (no password)
+	//
+	// The account MUST already hold `SeServiceLogonRight`. Granting
+	// it requires LSA policy edit (`LsaAddAccountRights`); that is
+	// out of scope for this package — operators run
+	// `secedit /import …` or `ntrights -u <user> +r SeServiceLogonRight`
+	// during deployment, or hand-roll the grant via win32 Lsa* APIs.
+	Account  string
+	Password string
 }
 
 // Install creates a Windows service with the given configuration.
@@ -64,9 +80,11 @@ func Install(cfg *Config) error {
 	}
 
 	s, err := m.CreateService(cfg.Name, cfg.BinPath, mgr.Config{
-		DisplayName: cfg.DisplayName,
-		Description: cfg.Description,
-		StartType:   mapStartType(cfg.StartType),
+		DisplayName:      cfg.DisplayName,
+		Description:      cfg.Description,
+		StartType:        mapStartType(cfg.StartType),
+		ServiceStartName: cfg.Account,  // empty → LocalSystem (default)
+		Password:         cfg.Password, // ignored for built-in NT AUTHORITY\* accounts
 	}, args...)
 	if err != nil {
 		return mapError(err)
