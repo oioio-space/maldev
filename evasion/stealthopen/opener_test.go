@@ -96,3 +96,52 @@ func (f *fakeOpener) Open(path string) (*os.File, error) {
 	f.calls = append(f.calls, path)
 	return f.file, f.err
 }
+
+func TestUseCreator_NilReturnsStandard(t *testing.T) {
+	c := UseCreator(nil)
+	if _, ok := c.(*StandardCreator); !ok {
+		t.Fatalf("UseCreator(nil) = %T, want *StandardCreator", c)
+	}
+}
+
+func TestUseCreator_PassthroughOnNonNil(t *testing.T) {
+	fc := &fakeCreator{}
+	if got := UseCreator(fc); got != fc {
+		t.Fatalf("UseCreator(non-nil) = %v, want passthrough %v", got, fc)
+	}
+}
+
+func TestStandardCreator_CreateWritesToDisk(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "smoke.bin")
+	wc, err := (&StandardCreator{}).Create(path)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := wc.Write([]byte("ok")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := wc.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(b) != "ok" {
+		t.Errorf("contents = %q, want %q", b, "ok")
+	}
+}
+
+// fakeCreator records Create calls so consumer tests can assert WriteVia
+// routed through the operator's primitive.
+type fakeCreator struct {
+	paths []string
+	wc    io.WriteCloser
+	err   error
+}
+
+func (f *fakeCreator) Create(path string) (io.WriteCloser, error) {
+	f.paths = append(f.paths, path)
+	return f.wc, f.err
+}

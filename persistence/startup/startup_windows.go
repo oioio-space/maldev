@@ -8,28 +8,30 @@ import (
 	"path/filepath"
 
 	"github.com/oioio-space/maldev/persistence/lnk"
+	"github.com/oioio-space/maldev/recon/folder"
+	"golang.org/x/sys/windows"
 )
 
-const (
-	// Relative path from AppData/Roaming to the user's Startup folder.
-	userStartupRel = `Microsoft\Windows\Start Menu\Programs\Startup`
-
-	// Absolute path for the machine-wide Startup folder.
-	machineStartupDir = `C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp`
-)
-
-// UserDir returns the current user's Startup folder path.
+// UserDir returns the current user's Startup folder path via
+// SHGetKnownFolderPath(FOLDERID_Startup) — typically
+// `%APPDATA%\Microsoft\Windows\Start Menu\Programs\StartUp`.
 func UserDir() (string, error) {
-	appData, err := os.UserConfigDir()
+	dir, err := folder.GetKnown(windows.FOLDERID_Startup, 0)
 	if err != nil {
-		return "", fmt.Errorf("resolve user config dir: %w", err)
+		return "", fmt.Errorf("resolve user startup dir: %w", err)
 	}
-	return filepath.Join(appData, userStartupRel), nil
+	return dir, nil
 }
 
-// MachineDir returns the machine-wide Startup folder path.
+// MachineDir returns the machine-wide Startup folder path via
+// SHGetKnownFolderPath(FOLDERID_CommonStartup) — typically
+// `%ProgramData%\Microsoft\Windows\Start Menu\Programs\StartUp`.
 func MachineDir() (string, error) {
-	return machineStartupDir, nil
+	dir, err := folder.GetKnown(windows.FOLDERID_CommonStartup, 0)
+	if err != nil {
+		return "", fmt.Errorf("resolve machine startup dir: %w", err)
+	}
+	return dir, nil
 }
 
 // Install creates a .lnk shortcut in the user's Startup folder.

@@ -11,6 +11,7 @@ import (
 	"unsafe"
 
 	ole "github.com/go-ole/go-ole"
+	"github.com/oioio-space/maldev/evasion/stealthopen"
 	"github.com/oioio-space/maldev/win/api"
 	"github.com/oioio-space/maldev/win/com"
 	"golang.org/x/sys/windows"
@@ -301,4 +302,31 @@ func (s *Shortcut) WriteTo(w io.Writer) (int64, error) {
 	}
 	n, err := w.Write(b)
 	return int64(n), err
+}
+
+// WriteVia lands the LNK bytes on disk through the operator-supplied
+// [stealthopen.Creator]. nil falls back to a [stealthopen.StandardCreator]
+// (plain os.Create), which makes WriteVia a drop-in replacement for
+// [Shortcut.Save] that produces an identical file.
+//
+// Use a non-nil Creator to route the write through transactional NTFS,
+// an encrypted-stream wrapper, an alternate data stream, or any other
+// operator-controlled write primitive — same composition story as
+// [stealthopen.Opener] for read paths. Bytes are produced by
+// [Shortcut.BuildBytes] (zero intermediate disk artefact); only the
+// final landing is on the operator's terms.
+func (s *Shortcut) WriteVia(creator stealthopen.Creator, path string) error {
+	b, err := s.BuildBytes()
+	if err != nil {
+		return err
+	}
+	wc, err := stealthopen.UseCreator(creator).Create(path)
+	if err != nil {
+		return fmt.Errorf("lnk: WriteVia create %q: %w", path, err)
+	}
+	defer wc.Close()
+	if _, err := wc.Write(b); err != nil {
+		return fmt.Errorf("lnk: WriteVia write %q: %w", path, err)
+	}
+	return nil
 }

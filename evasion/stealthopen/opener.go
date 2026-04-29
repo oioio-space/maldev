@@ -57,3 +57,29 @@ func OpenRead(opener Opener, path string) ([]byte, error) {
 	defer f.Close()
 	return io.ReadAll(f)
 }
+
+// Creator is the write-side parallel of [Opener]: a narrow contract
+// for "create or truncate a file at path for writing". Implementations
+// can layer transactional NTFS, alternate data streams, encrypted
+// streams, or any operator-controlled write primitive on top of the
+// raw os.Create — same composition story as [Opener] for read paths.
+type Creator interface {
+	Create(path string) (io.WriteCloser, error)
+}
+
+// StandardCreator is the default Creator. It delegates to os.Create —
+// the resulting *os.File satisfies io.WriteCloser. Use it explicitly
+// when a nil fallback is inconvenient at the call site.
+type StandardCreator struct{}
+
+// Create implements Creator.
+func (*StandardCreator) Create(path string) (io.WriteCloser, error) { return os.Create(path) }
+
+// UseCreator returns creator if non-nil, otherwise a zero-value
+// *StandardCreator. Mirrors [Use] for the write side.
+func UseCreator(creator Creator) Creator {
+	if creator != nil {
+		return creator
+	}
+	return &StandardCreator{}
+}
