@@ -26,9 +26,9 @@ Token theft gives you a copy of someone else's badge. Thread impersonation goes 
 
 ```mermaid
 sequenceDiagram
-    participant Thread as Locked OS Thread
-    participant Win as Windows API
-    participant Callback as callbackFunc()
+    participant Thread as "Locked OS Thread"
+    participant Win as "Windows API"
+    participant Callback as "callbackFunc()"
 
     Thread->>Thread: runtime.LockOSThread()
     Note over Thread: Thread pinned to OS thread

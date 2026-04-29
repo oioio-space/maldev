@@ -37,10 +37,10 @@ times per second; the only anomaly is the callback target itself.
 
 ```mermaid
 sequenceDiagram
-    participant Impl as Implant
-    participant Nt as ntdll
-    participant Pool as Default thread pool
-    participant W as Worker thread
+    participant Impl as "Implant"
+    participant Nt as "ntdll"
+    participant Pool as "Default thread pool"
+    participant W as "Worker thread"
 
     Impl->>Impl: VirtualAlloc(RW) + memcpy
     Impl->>Impl: VirtualProtect(RX)

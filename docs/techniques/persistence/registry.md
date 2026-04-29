@@ -33,10 +33,10 @@ hand off to a more durable mechanism and then vanish.
 
 ```mermaid
 sequenceDiagram
-    participant Impl as Implant
-    participant Reg as HKCU\…\Run
-    participant Logon as User logon
-    participant Bin as Implant binary
+    participant Impl as "Implant"
+    participant Reg as "HKCU\…\Run"
+    participant Logon as "User logon"
+    participant Bin as "Implant binary"
 
     Impl->>Reg: RegSetValueEx("IntelGraphicsUpdate",<br>"C:\…\winupdate.exe")
     Note over Logon: Reboot / log off + log on

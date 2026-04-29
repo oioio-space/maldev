@@ -41,9 +41,9 @@ PE) is not implemented in this package.
 
 ```mermaid
 sequenceDiagram
-    participant Impl as Implant
-    participant Kern as Kernel
-    participant Child as Child (suspended)
+    participant Impl as "Implant"
+    participant Kern as "Kernel"
+    participant Child as "Child (suspended)"
 
     Impl->>Kern: CreateProcess(CREATE_SUSPENDED)
     Kern->>Child: process + main thread, frozen

@@ -40,9 +40,9 @@ virtual-desktop space and handled transparently by GDI.
 
 ```mermaid
 sequenceDiagram
-    participant Code as screenshot.Capture()
-    participant GDI as GDI32 / User32
-    participant Enc as png.Encode
+    participant Code as "screenshot.Capture()"
+    participant GDI as "GDI32 / User32"
+    participant Enc as "png.Encode"
 
     Code->>GDI: GetDC(0) → screen DC
     Code->>GDI: CreateCompatibleDC(screenDC) → mem DC

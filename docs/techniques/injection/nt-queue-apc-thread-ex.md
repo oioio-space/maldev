@@ -42,9 +42,9 @@ set.
 
 ```mermaid
 sequenceDiagram
-    participant Impl as Implant
-    participant Kern as Kernel
-    participant Tgt as Target
+    participant Impl as "Implant"
+    participant Kern as "Kernel"
+    participant Tgt as "Target"
 
     Impl->>Kern: OpenProcess(VM_OPERATION | VM_WRITE | VM_READ)
     Kern-->>Impl: hProcess

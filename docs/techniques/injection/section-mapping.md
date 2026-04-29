@@ -37,9 +37,9 @@ final trigger (`NtCreateThreadEx`, or anything else the caller wants).
 
 ```mermaid
 sequenceDiagram
-    participant Impl as Implant
-    participant Kern as Kernel
-    participant Tgt as Target
+    participant Impl as "Implant"
+    participant Kern as "Kernel"
+    participant Tgt as "Target"
 
     Impl->>Kern: NtCreateSection(SEC_COMMIT, RWX)
     Kern-->>Impl: hSection

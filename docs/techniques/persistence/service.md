@@ -40,9 +40,9 @@ operationally available.
 ```mermaid
 sequenceDiagram
     participant Caller
-    participant SCM as Service Control Manager
-    participant DB as services.exe DB
-    participant Audit as Event log
+    participant SCM as "Service Control Manager"
+    participant DB as "services.exe DB"
+    participant Audit as "Event log"
 
     Caller->>SCM: OpenSCManager(SC_MANAGER_CREATE_SERVICE)
     Caller->>SCM: CreateService(name, binPath, type, startType)

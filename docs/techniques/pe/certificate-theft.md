@@ -36,9 +36,9 @@ host to prepare implants without round-tripping through
 
 ```mermaid
 sequenceDiagram
-    participant Signed as Signed PE notepad.exe
-    participant Tool as pe/cert
-    participant Unsigned as Unsigned implant
+    participant Signed as "Signed PE notepad.exe"
+    participant Tool as "pe/cert"
+    participant Unsigned as "Unsigned implant"
 
     Tool->>Signed: Read locate security directory
     Note over Tool: PE Data Directory 4 - VirtualAddress is file offset, unique among directories

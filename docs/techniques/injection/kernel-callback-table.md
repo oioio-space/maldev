@@ -44,9 +44,9 @@ PEB write and the `WM_COPYDATA` send are the only loud syscalls.
 
 ```mermaid
 sequenceDiagram
-    participant Impl as Implant
-    participant Kern as Kernel
-    participant Tgt as Target
+    participant Impl as "Implant"
+    participant Kern as "Kernel"
+    participant Tgt as "Target"
 
     Impl->>Kern: NtQueryInformationProcess(target, ProcessBasicInformation)
     Kern-->>Impl: PEB address

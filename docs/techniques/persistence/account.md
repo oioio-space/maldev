@@ -35,10 +35,10 @@ manipulation; the loudness is inherent to the technique.
 
 ```mermaid
 sequenceDiagram
-    participant Op as Operator
-    participant API as NetAPI32
-    participant SAM as Local SAM database
-    participant Audit as Security audit log
+    participant Op as "Operator"
+    participant API as "NetAPI32"
+    participant SAM as "Local SAM database"
+    participant Audit as "Security audit log"
 
     Op->>API: NetUserAdd("svc-update", "P@ss…")
     API->>SAM: USER_INFO_1 record

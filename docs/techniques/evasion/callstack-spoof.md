@@ -44,11 +44,11 @@ hits a stack walker.
 
 ```mermaid
 sequenceDiagram
-    participant G as Caller (Go)
-    participant S as Spoof pivot (asm)
-    participant T as Target fn
-    participant W as RtlVirtualUnwind
-    participant N as ntdll RET gadget
+    participant G as "Caller (Go)"
+    participant S as "Spoof pivot (asm)"
+    participant T as "Target fn"
+    participant W as "RtlVirtualUnwind"
+    participant N as "ntdll RET gadget"
 
     Note over G: Build chain via StandardChain + FindReturnGadget
     G->>S: SpoofCall(target, chain, args)

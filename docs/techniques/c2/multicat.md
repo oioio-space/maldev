@@ -39,9 +39,9 @@ That keeps the detection surface zero.
 
 ```mermaid
 sequenceDiagram
-    participant Agent as Implant (c2/shell)
-    participant Mgr as multicat.Manager
-    participant Op as Operator UI
+    participant Agent as "Implant (c2/shell)"
+    participant Mgr as "multicat.Manager"
+    participant Op as "Operator UI"
 
     Agent->>Mgr: Connect (transport)
     Mgr->>Mgr: assign session ID

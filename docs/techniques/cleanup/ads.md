@@ -34,8 +34,8 @@ and any non-Windows filesystem do not. Crossing a non-NTFS boundary
 sequenceDiagram
     participant Caller
     participant ads
-    participant Kernel as NTFS driver
-    participant File as some.txt
+    participant Kernel as "NTFS driver"
+    participant File as "some.txt"
     Caller->>ads: Write("some.txt", "hidden", payload)
     ads->>Kernel: CreateFileW("some.txt:hidden", GENERIC_WRITE)
     Kernel->>File: allocate/locate stream "hidden"

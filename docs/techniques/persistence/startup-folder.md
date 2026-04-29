@@ -36,11 +36,11 @@ the right paths and a `Mechanism` adapter.
 
 ```mermaid
 sequenceDiagram
-    participant Impl as Implant
-    participant Lnk as persistence/lnk
-    participant FS as %APPDATA%\…\Startup
-    participant Logon as User logon
-    participant Shell as Windows Shell
+    participant Impl as "Implant"
+    participant Lnk as "persistence/lnk"
+    participant FS as "%APPDATA%\…\Startup"
+    participant Logon as "User logon"
+    participant Shell as "Windows Shell"
 
     Impl->>Lnk: New().SetTargetPath(payload).Save(<dir>\Update.lnk)
     Lnk->>FS: write .lnk

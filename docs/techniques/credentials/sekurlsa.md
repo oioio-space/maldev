@@ -46,10 +46,10 @@ extraction layer.
 ```mermaid
 sequenceDiagram
     participant Caller
-    participant Parse as sekurlsa.Parse
-    participant Reader as MINIDUMP reader
-    participant Crypto as LSA crypto
-    participant Walker as MSV1_0 walker
+    participant Parse as "sekurlsa.Parse"
+    participant Reader as "MINIDUMP reader"
+    participant Crypto as "LSA crypto"
+    participant Walker as "MSV1_0 walker"
 
     Caller->>Parse: Parse(reader, size)
     Parse->>Reader: openReader → header + directory + 4 streams

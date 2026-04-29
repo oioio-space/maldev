@@ -53,12 +53,12 @@ verified-working 26100 builds can drop the test skip locally.
 
 ```mermaid
 sequenceDiagram
-    participant Op as Operator
-    participant Sec as NtCreateSection<br>(SEC_IMAGE)
-    participant Cache as Kernel image cache
-    participant Disk as Backing file
-    participant Proc as NtCreateProcessEx
-    participant Thr as NtCreateThreadEx
+    participant Op as "Operator"
+    participant Sec as "NtCreateSection<br>(SEC_IMAGE)"
+    participant Cache as "Kernel image cache"
+    participant Disk as "Backing file"
+    participant Proc as "NtCreateProcessEx"
+    participant Thr as "NtCreateThreadEx"
     participant EDR
 
     Op->>Sec: payload.exe → section

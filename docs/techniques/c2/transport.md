@@ -70,9 +70,9 @@ The `Listener` interface is the operator-side counterpart, used by
 
 ```mermaid
 sequenceDiagram
-    participant Imp as Implant
-    participant MITM as TLS-inspection proxy
-    participant Op as Operator handler
+    participant Imp as "Implant"
+    participant MITM as "TLS-inspection proxy"
+    participant Op as "Operator handler"
 
     Imp->>MITM: ClientHello
     MITM->>Op: ClientHello (re-originated)

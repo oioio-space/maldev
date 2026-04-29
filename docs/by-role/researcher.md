@@ -55,10 +55,10 @@ the chosen method:
 
 ```mermaid
 sequenceDiagram
-    participant Pkg as package (e.g. amsi)
-    participant Caller as *wsyscall.Caller
-    participant Resolver as SSN Gate Chain
-    participant NT as ntdll syscall stub
+    participant Pkg as "package (e.g. amsi)"
+    participant Caller as "*wsyscall.Caller"
+    participant Resolver as "SSN Gate Chain"
+    participant NT as "ntdll syscall stub"
     Pkg->>Caller: NtProtectVirtualMemory(...)
     Caller->>Resolver: resolve("NtProtectVirtualMemory")
     Resolver-->>Caller: SSN 0x50

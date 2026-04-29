@@ -44,10 +44,10 @@ the sacrificial child blend in.
 
 ```mermaid
 sequenceDiagram
-    participant Impl as Implant
-    participant Kern as Kernel
-    participant EDR as EDR / Sysmon
-    participant Child as Child (suspended)
+    participant Impl as "Implant"
+    participant Kern as "Kernel"
+    participant EDR as "EDR / Sysmon"
+    participant Child as "Child (suspended)"
 
     Impl->>Kern: CreateProcess("cmd.exe /c dir", SUSPENDED)
     Kern->>EDR: Event 1: "cmd.exe /c dir"

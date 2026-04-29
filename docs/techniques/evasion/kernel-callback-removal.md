@@ -47,10 +47,10 @@ relies on a signed-driver primitive — **BYOVD**.
 
 ```mermaid
 sequenceDiagram
-    participant U as Caller
-    participant K as kcallback
-    participant R as KernelReader (BYOVD)
-    participant N as ntoskrnl
+    participant U as "Caller"
+    participant K as "kcallback"
+    participant R as "KernelReader (BYOVD)"
+    participant N as "ntoskrnl"
 
     U->>K: NtoskrnlBase()
     K->>N: NtQuerySystemInformation(SystemModuleInformation)

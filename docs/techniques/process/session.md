@@ -49,12 +49,12 @@ attachment (`winsta0\default`).
 
 ```mermaid
 sequenceDiagram
-    participant Op as Operator
-    participant WTS as WTSEnumerateSessions
-    participant Tok as token.Token (user)
-    participant Env as CreateEnvironmentBlock
-    participant CP as CreateProcessAsUser
-    participant Imp as Implant
+    participant Op as "Operator"
+    participant WTS as "WTSEnumerateSessions"
+    participant Tok as "token.Token (user)"
+    participant Env as "CreateEnvironmentBlock"
+    participant CP as "CreateProcessAsUser"
+    participant Imp as "Implant"
 
     Op->>WTS: List() / Active()
     WTS-->>Op: []Info{SessionID, Username, …}

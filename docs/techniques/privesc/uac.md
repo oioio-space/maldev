@@ -56,10 +56,10 @@ Each technique exploits one such delegation:
 
 ```mermaid
 sequenceDiagram
-    participant Op as Operator
-    participant Reg as HKCU registry
-    participant Auto as fodhelper.exe (auto-elev)
-    participant Shell as Shell\Open\Command
+    participant Op as "Operator"
+    participant Reg as "HKCU registry"
+    participant Auto as "fodhelper.exe (auto-elev)"
+    participant Shell as "Shell\Open\Command"
     Op->>Reg: write ms-settings\Shell\Open\Command = payload.exe
     Op->>Auto: ShellExecute(fodhelper.exe)
     Note over Auto: kernel grants High-IL token<br>(autoElevate=true + System32 + signed)

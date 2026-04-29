@@ -46,12 +46,12 @@ The trade-offs are loud:
 
 ```mermaid
 sequenceDiagram
-    participant Imp as Implant
-    participant MH as ICLRMetaHost
-    participant RT as ICLRRuntimeInfo
-    participant Host as ICorRuntimeHost
-    participant AD as AppDomain (default)
-    participant Asm as managed assembly
+    participant Imp as "Implant"
+    participant MH as "ICLRMetaHost"
+    participant RT as "ICLRRuntimeInfo"
+    participant Host as "ICorRuntimeHost"
+    participant AD as "AppDomain (default)"
+    participant Asm as "managed assembly"
 
     Imp->>Imp: mscoree.CLRCreateInstance
     Imp->>MH: GetRuntime("v4.0.30319")

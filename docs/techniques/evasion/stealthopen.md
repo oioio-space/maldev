@@ -32,10 +32,10 @@ matching on `*.docx`, `ntds.dit`, `lsass.dmp`, etc. simply does not fire.
 
 ```mermaid
 sequenceDiagram
-    participant Code as stealthopen
-    participant Vol as Volume handle
-    participant NTFS as NTFS driver
-    participant MFT as $OBJECT_ID attr
+    participant Code as "stealthopen"
+    participant Vol as "Volume handle"
+    participant NTFS as "NTFS driver"
+    participant MFT as "$OBJECT_ID attr"
 
     Note over Code: Phase 1 — stamp the target
     Code->>Vol: CreateFile("C:\\sensitive.bin")

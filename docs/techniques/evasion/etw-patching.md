@@ -40,9 +40,9 @@ companion `PatchNtTraceEvent` for the kernel-call layer.
 
 ```mermaid
 sequenceDiagram
-    participant Provider as user-mode provider
-    participant ntdll as ntdll!EtwEventWrite
-    participant TI as ETW Subscriber
+    participant Provider as "user-mode provider"
+    participant ntdll as "ntdll!EtwEventWrite"
+    participant TI as "ETW Subscriber"
 
     rect rgb(255,238,238)
         Note over Provider,TI: Without patch

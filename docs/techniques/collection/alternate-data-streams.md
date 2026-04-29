@@ -26,9 +26,9 @@ This makes ADS useful for stashing payloads on legitimate-looking files, persist
 
 ```mermaid
 sequenceDiagram
-    participant Attacker as Attacker Process
-    participant NTFS as NTFS Driver
-    participant File as document.txt (on disk)
+    participant Attacker as "Attacker Process"
+    participant NTFS as "NTFS Driver"
+    participant File as "document.txt (on disk)"
 
     Attacker->>NTFS: os.WriteFile("document.txt:payload", data)
     NTFS->>File: Create named stream ":payload:$DATA"

@@ -26,9 +26,9 @@ Every process on Windows runs under a security token that defines who it is and 
 
 ```mermaid
 sequenceDiagram
-    participant Attacker as Attacker Process
-    participant Target as Target Process (SYSTEM)
-    participant Kernel as Windows Kernel
+    participant Attacker as "Attacker Process"
+    participant Target as "Target Process (SYSTEM)"
+    participant Kernel as "Windows Kernel"
 
     Attacker->>Kernel: OpenProcess(PROCESS_QUERY_INFORMATION, targetPID)
     Kernel-->>Attacker: Process handle

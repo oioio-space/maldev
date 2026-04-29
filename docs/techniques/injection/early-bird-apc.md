@@ -39,9 +39,9 @@ ETW-Ti consumers because no `Create*Thread*` API is invoked at all.
 
 ```mermaid
 sequenceDiagram
-    participant Impl as Implant
-    participant Kern as Kernel
-    participant Child as Child (e.g. notepad.exe, suspended)
+    participant Impl as "Implant"
+    participant Kern as "Kernel"
+    participant Child as "Child (e.g. notepad.exe, suspended)"
 
     Impl->>Kern: CreateProcess(CREATE_SUSPENDED)
     Kern->>Child: process + main thread, frozen

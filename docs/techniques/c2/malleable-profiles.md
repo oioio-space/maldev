@@ -46,9 +46,9 @@ holds:
 
 ```mermaid
 sequenceDiagram
-    participant Sh as c2/shell or stager
-    participant Mal as Malleable transport
-    participant CDN as Operator handler (looks like CDN)
+    participant Sh as "c2/shell or stager"
+    participant Mal as "Malleable transport"
+    participant CDN as "Operator handler (looks like CDN)"
 
     Sh->>Mal: Write([]byte("ls /etc"))
     Mal->>Mal: DataEncoder(bytes)

@@ -46,8 +46,8 @@ configurable timeout.
 
 ```mermaid
 sequenceDiagram
-    participant Imp as Implant (Stager)
-    participant H as MSF multi/handler
+    participant Imp as "Implant (Stager)"
+    participant H as "MSF multi/handler"
 
     Imp->>H: connect (TCP / HTTP GET / HTTPS GET)
     H-->>Imp: stage length (4 bytes)

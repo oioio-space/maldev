@@ -37,9 +37,9 @@ ETW, MsSense) is unaffected.
 
 ```mermaid
 sequenceDiagram
-    participant Impl as Implant
-    participant Target as Taskmgr.exe (target)
-    participant NtQSI as ntdll!NtQuerySystemInformation
+    participant Impl as "Implant"
+    participant Target as "Taskmgr.exe (target)"
+    participant NtQSI as "ntdll!NtQuerySystemInformation"
 
     Impl->>Impl: GetModuleHandle("ntdll.dll") + GetProcAddress("NtQSI")
     Note over Impl: ntdll loads at the same VA in every<br>process per boot — local VA = remote VA

@@ -50,10 +50,10 @@ its own.
 
 ```mermaid
 sequenceDiagram
-    participant C as Caller
-    participant D as lsassdump.Dump
-    participant K as NTDLL / kernel32
-    participant L as lsass.exe
+    participant C as "Caller"
+    participant D as "lsassdump.Dump"
+    participant K as "NTDLL / kernel32"
+    participant L as "lsass.exe"
 
     C->>D: OpenLSASS(caller)
     loop NtGetNextProcess walk

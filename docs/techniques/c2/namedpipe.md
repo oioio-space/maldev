@@ -43,9 +43,9 @@ Either side plugs into the rest of the C2 stack:
 
 ```mermaid
 sequenceDiagram
-    participant Server as namedpipe.Listener
-    participant NP as \\.\pipe\c2agent
-    participant Client as namedpipe.Transport (implant)
+    participant Server as "namedpipe.Listener"
+    participant NP as "\\.\pipe\c2agent"
+    participant Client as "namedpipe.Transport (implant)"
 
     Server->>NP: CreateNamedPipe (instance 1)
     Server->>NP: ConnectNamedPipe (block)

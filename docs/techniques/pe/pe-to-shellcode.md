@@ -37,9 +37,9 @@ input format, sized roughly +5–10 % over the original.
 ```mermaid
 sequenceDiagram
     participant Caller
-    participant Donut as srdi (go-donut)
-    participant Stub as Loader stub<br>(in-memory)
-    participant Payload as PE / .NET / Script
+    participant Donut as "srdi (go-donut)"
+    participant Stub as "Loader stub<br>(in-memory)"
+    participant Payload as "PE / .NET / Script"
 
     Caller->>Donut: ConvertFile(path, cfg)
     Donut->>Donut: Parse + classify input

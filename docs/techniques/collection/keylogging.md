@@ -46,10 +46,10 @@ tears down cleanly.
 ```mermaid
 sequenceDiagram
     participant User
-    participant OS as Win32 message pump
-    participant Hook as hookProc (LL hook)
-    participant Xlat as ToUnicodeEx
-    participant Ch as Event channel
+    participant OS as "Win32 message pump"
+    participant Hook as "hookProc (LL hook)"
+    participant Xlat as "ToUnicodeEx"
+    participant Ch as "Event channel"
     participant Consumer
 
     User->>OS: WM_KEYDOWN (VkCode)

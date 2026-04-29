@@ -38,9 +38,9 @@ exists.
 
 ```mermaid
 sequenceDiagram
-    participant Impl as Implant
-    participant Kern as Kernel
-    participant Tgt as Target PID
+    participant Impl as "Implant"
+    participant Kern as "Kernel"
+    participant Tgt as "Target PID"
 
     Impl->>Kern: OpenProcess(VM_*, CREATE_THREAD)
     Kern-->>Impl: hProcess

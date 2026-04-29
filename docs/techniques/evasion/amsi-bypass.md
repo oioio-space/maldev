@@ -45,9 +45,9 @@ Patching either short-circuits the chain.
 
 ```mermaid
 sequenceDiagram
-    participant Loader as runtime/clr or PowerShell host
-    participant amsi as amsi.dll
-    participant Provider as Defender (MpOav.dll)
+    participant Loader as "runtime/clr or PowerShell host"
+    participant amsi as "amsi.dll"
+    participant Provider as "Defender (MpOav.dll)"
 
     rect rgb(255,238,238)
         Note over Loader,Provider: Without patch

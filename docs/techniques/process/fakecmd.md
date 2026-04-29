@@ -41,11 +41,11 @@ matches.
 
 ```mermaid
 sequenceDiagram
-    participant Reader as Process Explorer / Sysmon-usermode / EDR
-    participant PEB as Target PEB
-    participant PP as RTL_USER_PROCESS_PARAMETERS
-    participant CmdLine as UNICODE_STRING CommandLine
-    participant Kernel as EPROCESS<br>(SeAuditProcessCreationInfo)
+    participant Reader as "Process Explorer / Sysmon-usermode / EDR"
+    participant PEB as "Target PEB"
+    participant PP as "RTL_USER_PROCESS_PARAMETERS"
+    participant CmdLine as "UNICODE_STRING CommandLine"
+    participant Kernel as "EPROCESS<br>(SeAuditProcessCreationInfo)"
 
     Note over PEB,PP: Setup at process creation
     PP->>CmdLine: Length / MaximumLength / Buffer = "evil.exe --c2 …"

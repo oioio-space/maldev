@@ -21,10 +21,10 @@ This package's `Mask` type composes a **`Cipher`** (XOR / RC4 / AES-CTR) with a 
 
 ```mermaid
 sequenceDiagram
-    participant Impl as Implant
-    participant Mask as Mask.Sleep
-    participant Page as Protected region
-    participant Scan as EDR scanner
+    participant Impl as "Implant"
+    participant Mask as "Mask.Sleep"
+    participant Page as "Protected region"
+    participant Scan as "EDR scanner"
 
     Impl->>Mask: Sleep(30s)
     Mask->>Mask: 32-byte random key (crypto/rand)

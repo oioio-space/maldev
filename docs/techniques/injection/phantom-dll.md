@@ -42,10 +42,10 @@ copy see the divergence.
 
 ```mermaid
 sequenceDiagram
-    participant Impl as Implant
-    participant Open as stealthopen.Opener (optional)
-    participant Kern as Kernel
-    participant Tgt as Target
+    participant Impl as "Implant"
+    participant Open as "stealthopen.Opener (optional)"
+    participant Kern as "Kernel"
+    participant Tgt as "Target"
 
     Impl->>Open: open amsi.dll
     Open-->>Impl: hFile

@@ -41,8 +41,8 @@ after a `runas` escalation that may have left a password on the clipboard.
 sequenceDiagram
     participant User
     participant App
-    participant OS as Windows Clipboard
-    participant Watch as clipboard.Watch()
+    participant OS as "Windows Clipboard"
+    participant Watch as "clipboard.Watch()"
 
     User->>App: Ctrl+C (copy credential)
     App->>OS: SetClipboardData(CF_UNICODETEXT)

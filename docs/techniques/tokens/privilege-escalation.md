@@ -55,10 +55,10 @@ flowchart TD
 
 ```mermaid
 sequenceDiagram
-    participant Implant as Implant (Medium IL)
-    participant Reg as Registry (HKCU)
-    participant Fod as fodhelper.exe (Auto-elevate)
-    participant Payload as Payload (High IL)
+    participant Implant as "Implant (Medium IL)"
+    participant Reg as "Registry (HKCU)"
+    participant Fod as "fodhelper.exe (Auto-elevate)"
+    participant Payload as "Payload (High IL)"
 
     Implant->>Reg: Create key:<br>HKCU\Software\Classes\{random}\shell\open\command
     Implant->>Reg: Set default value = "C:\payload.exe"

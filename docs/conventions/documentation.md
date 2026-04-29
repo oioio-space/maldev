@@ -221,6 +221,27 @@ sequenceDiagram
     amsi-->>Implant: original 3 bytes
 ```
 
+### Mermaid 11.2.0 strict-mode rules
+
+`mdbook-mermaid` pins Mermaid 11.2.0 (see `book.toml`). Its parser
+is stricter than older versions; the following patterns break the
+gh-pages build silently (diagram renders as raw code):
+
+- **Quote multi-word `participant`/`actor` aliases.** Bare
+  `participant X as STA COM apartment` parses the alias as `STA`
+  only and errors on the rest. Use `participant X as "STA COM
+  apartment"`. Same rule for `subgraph` titles in flow diagrams.
+- **Use `%%` for diagram comments**, not `#` or `//`.
+- **Avoid the Unicode em-dash `—` inside message text.** ASCII
+  `--` or `-` works across themes. Same for "smart quotes": use
+  ASCII `"` and `'`.
+- **Self-loops** (`Actor->>Actor: msg`) are fine; nested
+  `loop` / `alt` / `opt` blocks must close with `end`.
+- **`note over X,Y: text`** requires a comma between actors with
+  no leading space.
+
+When in doubt, quote — it's never wrong to quote.
+
 ## GFM features to use
 
 Reference: [GitHub advanced formatting](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting), [GFM spec](https://github.github.com/gfm/).

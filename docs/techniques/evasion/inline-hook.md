@@ -53,10 +53,10 @@ trampoline. Pure Go — no CGo, no x64dbg required.
 ```mermaid
 sequenceDiagram
     participant Caller
-    participant Target as Target Function
-    participant Relay as Relay Page within 2GB
-    participant Callback as Go Callback
-    participant Trampoline as Trampoline
+    participant Target as "Target Function"
+    participant Relay as "Relay Page within 2GB"
+    participant Callback as "Go Callback"
+    participant Trampoline as "Trampoline"
 
     Note over Target: Prologue patched with JMP rel32
     Caller->>Target: Call function

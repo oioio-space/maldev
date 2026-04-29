@@ -45,8 +45,8 @@ The ADS-rename path:
 
 ```mermaid
 sequenceDiagram
-    participant Proc as running .exe
-    participant FS as NTFS driver
+    participant Proc as "running .exe"
+    participant FS as "NTFS driver"
     Note over Proc: GetModuleFileNameW("C:\impl.exe")
     Proc->>FS: CreateFileW(":x", FILE_RENAME_INFO)
     FS->>FS: rename default :$DATA → :x

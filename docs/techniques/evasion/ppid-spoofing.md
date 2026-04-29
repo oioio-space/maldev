@@ -19,10 +19,10 @@ This is a legitimate Windows API feature -- Go 1.24+ even added native support v
 
 ```mermaid
 sequenceDiagram
-    participant Attacker as Attacker (malware.exe)
-    participant Explorer as explorer.exe (PID 1234)
-    participant Kernel as Windows Kernel
-    participant Child as cmd.exe (child)
+    participant Attacker as "Attacker (malware.exe)"
+    participant Explorer as "explorer.exe (PID 1234)"
+    participant Kernel as "Windows Kernel"
+    participant Child as "cmd.exe (child)"
 
     Attacker->>Kernel: OpenProcess(PROCESS_CREATE_PROCESS, explorer PID)
     Kernel-->>Attacker: hParent

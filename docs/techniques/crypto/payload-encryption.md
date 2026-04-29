@@ -107,9 +107,9 @@ returns, inject, wipe the plaintext.
 
 ```mermaid
 sequenceDiagram
-    participant App as Implant
-    participant Pkg as crypto
-    participant Std as crypto/aes + cipher
+    participant App as "Implant"
+    participant Pkg as "crypto"
+    participant Std as "crypto/aes + cipher"
 
     App->>Pkg: EncryptAESGCM(key, plaintext)
     Pkg->>Std: aes.NewCipher(key) -- 32 bytes

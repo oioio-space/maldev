@@ -39,8 +39,8 @@ Two implementations, both cross-platform:
 
 ```mermaid
 sequenceDiagram
-    participant Imp as Implant
-    participant Hook as Sandbox<br>(Sleep hook)
+    participant Imp as "Implant"
+    participant Hook as "Sandbox<br>(Sleep hook)"
     participant CPU
 
     Note over Imp: Naive Sleep — sandbox fast-forwards

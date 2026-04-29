@@ -61,9 +61,9 @@ mutex-guarded.
 
 ```mermaid
 sequenceDiagram
-    participant Op as Operator listener
-    participant Imp as Implant
-    participant Sh as Local interpreter
+    participant Op as "Operator listener"
+    participant Imp as "Implant"
+    participant Sh as "Local interpreter"
 
     loop until Stop or max retries
         Imp->>Op: transport.Connect()
