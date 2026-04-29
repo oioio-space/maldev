@@ -40,6 +40,7 @@ Follow the rules in:
 
 In-progress doc refactor reference:
 - `docs/refactor-2026-doc/progress.md` — **the live state of the refactor.** Read FIRST when resuming work after any break or on a different machine. Update this file at every commit that advances a phase.
+- `docs/refactor-2026-doc/backlog-2026-04-29.md` — **active polish backlog (P1/P2/P3 checklist).** Source of truth for what to work on next: mdBook polish, per-package code improvements, new-package ideas. Tick boxes + bump front-matter on each commit that closes a row.
 - `docs/refactor-2026-doc/audit-2026-04-27.md` — exhaustive audit of pre-refactor state, used as the master TODO list.
 
 Key rules:

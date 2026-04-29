@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: a705c32
+last_reviewed: 2026-04-29
+reflects_commit: 33a98ea
 ---
 
 # Documentation refactor — progress tracker
@@ -8,6 +8,14 @@ reflects_commit: a705c32
 > **Read this file first** when picking the refactor up on another
 > machine or after a session break. It is the canonical view of what's
 > done, what's in flight, and what comes next.
+
+## Phase 7+ — Polish backlog (post-refactor)
+
+> The refactor proper is structurally complete. Active work now lives
+> in [`backlog-2026-04-29.md`](backlog-2026-04-29.md) — a
+> checkbox-tracked, P1/P2/P3-prioritised list covering mdBook polish,
+> per-package code improvements, and new-package ideas. **Pick up
+> from there.**
 
 ## Source of truth
 
