@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/pe/cert
-last_reviewed: 2026-04-27
-reflects_commit: 23c9331
+last_reviewed: 2026-04-29
+reflects_commit: b0327b4
 ---
 
 # PE Certificate Theft
@@ -105,6 +105,27 @@ removed cert bytes are written there for later restoration.
 
 Persist / re-load raw cert blobs to and from disk so they can
 travel between operations.
+
+### `WriteVia` / `StripVia` / `ExportVia` — operator-controlled write primitive
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#WriteVia)
+
+Each disk-touching API has a `Via` variant that takes a
+[`stealthopen.Creator`](../evasion/stealthopen.md). Pass nil for the
+standard `os.Create` path; pass a custom Creator to land bytes through
+transactional NTFS, encrypted streams, ADS, or any other primitive
+the operator controls. The byte content is identical to the non-Via
+flavor.
+
+### `PatchPECheckSum(data []byte) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#PatchPECheckSum)
+
+Recomputes IMAGE_OPTIONAL_HEADER.CheckSum using the MS
+`ImageHlp!CheckSumMappedFile` algorithm (16-bit rolling-carry sum +
+file size, CheckSum field masked to zero). `Strip` and `Write` call
+it automatically post-splice; expose it for ad-hoc PE surgery
+performed outside the cert package.
 
 ## Examples
 
@@ -211,9 +232,13 @@ See [`ExampleRead`](../../../pe/cert/cert_example_test.go) and
 - **Signature won't verify.** Cryptographic chain validation
   (`signtool verify`, SmartScreen, AppLocker publisher rules)
   catches the substitution.
-- **No checksum recomputation.** PE optional header `CheckSum`
-  field stays as the source-PE value; downstream verifiers that
-  check it (rare but real) will flag.
+- **Checksum recomputation handled internally.** `Strip` and `Write`
+  both call [`PatchPECheckSum`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#PatchPECheckSum)
+  after the splice — the optional-header `CheckSum` is rebuilt with
+  the MS `ImageHlp!CheckSumMappedFile` algorithm so downstream
+  verifiers that check it (rare in user-mode, mandatory for kernel
+  drivers) see a self-consistent value. Independent callers can
+  invoke `PatchPECheckSum(data)` directly after their own splices.
 - **No certificate-chain emulation.** This is blob copy, not
   cert forging — for that, look at separate signing pipelines.
 - **Validity-window mismatch.** Donor certs have NotBefore /
