@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: a705c32
+last_reviewed: 2026-04-29
+reflects_commit: 9d02c6d
 ---
 
 # Testing Guide — maldev
@@ -151,29 +151,45 @@ msfconsole exits when stdin closes (not a crash — EOF). `nohup`/`screen` don't
 
 ClassicUnhook safelist: NtClose, NtCreateFile, NtReadFile, NtWriteFile, NtQueryVolumeInformationFile, NtQueryInformationFile, NtSetInformationFile, NtFsControlFile — all rejected to prevent Go runtime deadlock.
 
-### stealthopen.Opener composition
+### stealthopen Opener / Creator composition
 
-The unhook, phantomdll, and herpaderping functions accept an optional
-`stealthopen.Opener` that mirrors the `*wsyscall.Caller` pattern: nil
-keeps the historic path-based `os.Open` / `windows.CreateFile`, non-nil
-(typically `*stealthopen.Stealth`) routes reads through `OpenFileById`
-and makes path-based EDR file hooks blind to the operation.
+`stealthopen` exposes a symmetric pair of optional interfaces that
+mirror the `*wsyscall.Caller` pattern — nil falls back to the standard
+`os` operation, non-nil routes through whatever stealth strategy the
+caller wires up.
+
+**Read side — `Opener`**: the unhook, phantomdll, and herpaderping
+functions accept it. nil keeps the historic path-based `os.Open` /
+`windows.CreateFile`, non-nil (typically `*stealthopen.Stealth`) routes
+reads through `OpenFileById` and makes path-based EDR file hooks blind
+to the operation.
+
+**Write side — `Creator`**: the LNK, ADS, .kirbi, lsass-minidump, PE
+rewrite, and .syso emit paths accept it. nil falls back to
+`*StandardCreator` (plain `os.Create`); non-nil lands the file through
+the operator's primitive (transactional NTFS, encrypted-stream wrapper,
+ADS, raw NtCreateFile, etc.). Byte-ready callers go through
+`stealthopen.WriteAll(creator, path, data)`; streaming producers
+(`lsassdump.DumpToFileVia`, `masquerade.GenerateSysoVia`) drive the
+returned `io.WriteCloser` directly.
 
 | Package | Test file | Coverage |
 |---------|-----------|----------|
-| `evasion/stealthopen` | `opener_test.go` (host) | Standard.Open, Use(nil)==Standard, fake opener pass-through |
+| `evasion/stealthopen` | `opener_test.go` (host) | Standard.Open, Use(nil)==Standard, fake opener pass-through; StandardCreator.Create, UseCreator(nil)==StandardCreator, fakeCreator pass-through; WriteAll nil/non-nil/Create-error propagation |
 | `evasion/stealthopen` | `opener_windows_test.go` (VM) | VolumeFromPath (drive/UNC/Win32/relative/empty), NewStealth round-trip via OpenFileById, Stealth.Open state validation, Stealth ignores caller's path argument |
 | `evasion/unhook` | `opener_windows_test.go` (VM, intrusive) | spyOpener counts: ClassicUnhook/FullUnhook each call `Open` exactly once on `ntdll.dll`; real Stealth round-trip proves full unhook still succeeds |
 | `inject` | `phantomdll_opener_test.go` (Windows build, host-safe) | spyOpener asserts PhantomDLLInject makes 2 opens on the same System32 DLL path (PE parse + NtCreateSection HANDLE) |
 | `process/tamper/herpaderping` | `opener_windows_test.go` (Windows build, host-safe) | spyOpener asserts payload+decoy reads both go through the Opener; empty DecoyPath → single call |
+| `persistence/lnk` | `lnk_test.go` (VM) | recordingCreator confirms WriteVia routes through the Creator's Create call with the expected path; nil fallback writes a non-empty .lnk via StandardCreator |
 
-Run just the Opener paths:
+Run just the Opener / Creator paths:
 
 ```bash
 ./scripts/vm-run-tests.sh windows "./evasion/stealthopen/..." "-v -count=1"
 ./scripts/vm-run-tests.sh windows "./evasion/unhook/..." "-v -count=1 -run Opener"
 ./scripts/vm-run-tests.sh windows "./inject/..." "-v -count=1 -run PhantomDLLInject_UsesProvidedOpener"
 ./scripts/vm-run-tests.sh windows "./process/tamper/herpaderping/..." "-v -count=1 -run Opener"
+./scripts/vm-run-tests.sh windows "./persistence/lnk/..." "-v -count=1 -run WriteVia"
 ```
 
 ### Other Evasion
@@ -248,6 +264,12 @@ Cross-validated: x64dbg reads SSN bytes from ntdll prologue (offset +4, +5) and 
 |-----------|------|-------------|
 | Registry Run key | TestSetAndGet + TestDelete | Full CRUD lifecycle (Set → Get → Exists → Delete) |
 | Scheduler task | TestCreateAndDelete | Create → Exists=true → Delete → Exists=false |
+| LNK Save (disk via WScript.Shell) | TestSave | .lnk produced is non-empty under t.TempDir |
+| LNK BuildBytes (zero-disk via IShellLinkW + IPersistStream) | TestBuildBytes + TestBuildBytesNoArtefact | Header byte = 0x4C; no `maldev-lnk-*` directory left in TEMP |
+| LNK WriteTo (zero-disk → io.Writer) | TestWriteTo | Bytes equal to BuildBytes round-trip into bytes.Buffer |
+| LNK WriteVia (zero-disk → stealthopen.Creator) | TestWriteVia_NilUsesStandardCreator + TestWriteVia_DelegatesToCreator | nil falls back to os.Create; recordingCreator captures the right path |
+| LNK SetIconLocationIndexed | TestSetIconLocationIndexed | Builder packs (path, index) into the WSH "path,N" form |
+| LNK Hotkey parser | TestParseHotkey | 8 cases — Ctrl/Alt/Shift/Control aliases, F1/F-out-of-range, single-letter, single-digit, unsupported keys |
 
 ## Cleanup
 
