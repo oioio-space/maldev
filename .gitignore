@@ -36,6 +36,7 @@ ignore/
 material_theme_project_new.xml
 modules.xml
 testutil/results/
+logs/
 scripts/x64dbg-harness/
 scripts/vm-install-x64dbg-mcp.ps1
 scripts/vm-test-x64dbg-mcp.go
