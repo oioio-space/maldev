@@ -8,6 +8,7 @@ import (
 	_ "image/png"
 	"os"
 
+	"github.com/oioio-space/maldev/evasion/stealthopen"
 	"github.com/oioio-space/maldev/pe/cert"
 	"github.com/tc-hib/winres"
 	"github.com/tc-hib/winres/version"
@@ -187,8 +188,16 @@ func extractVersionStrings(vi *version.Info) *VersionInfo {
 
 // GenerateSyso builds a .syso COFF object from the extracted resources.
 // When no fields have been overridden, reuses the original resource set
-// directly — only patching the manifest execution level.
+// directly — only patching the manifest execution level. Equivalent to
+// [Resources.GenerateSysoVia] with a nil Creator.
 func (res *Resources) GenerateSyso(output string, arch Arch, level ExecLevel) error {
+	return res.GenerateSysoVia(nil, output, arch, level)
+}
+
+// GenerateSysoVia routes the .syso write through the operator-supplied
+// [stealthopen.Creator]. nil falls back to a [stealthopen.StandardCreator]
+// (plain os.Create).
+func (res *Resources) GenerateSysoVia(creator stealthopen.Creator, output string, arch Arch, level ExecLevel) error {
 	var rs *winres.ResourceSet
 
 	if res.modified || res.rs == nil {
@@ -204,13 +213,13 @@ func (res *Resources) GenerateSyso(output string, arch Arch, level ExecLevel) er
 	m.UIAccess = false
 	rs.SetManifest(m)
 
-	f, err := os.Create(output)
+	wc, err := stealthopen.UseCreator(creator).Create(output)
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}
-	defer f.Close()
+	defer wc.Close()
 
-	if err := rs.WriteObject(f, arch.toWinres()); err != nil {
+	if err := rs.WriteObject(wc, arch.toWinres()); err != nil {
 		return fmt.Errorf("write object: %w", err)
 	}
 	return nil

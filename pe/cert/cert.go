@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/oioio-space/maldev/evasion/stealthopen"
 )
 
 // Sentinel errors for certificate operations.
@@ -89,7 +91,15 @@ func Has(pePath string) (bool, error) {
 
 // Strip removes the Authenticode certificate from a PE file and writes
 // the result to dst. If dst is empty, the file is modified in place.
+// Equivalent to [StripVia] with a nil Creator.
 func Strip(pePath, dst string) error {
+	return StripVia(nil, pePath, dst)
+}
+
+// StripVia mirrors [Strip] but routes the final write through the
+// operator-supplied [stealthopen.Creator]. nil falls back to a
+// [stealthopen.StandardCreator] (plain os.Create).
+func StripVia(creator stealthopen.Creator, pePath, dst string) error {
 	data, err := os.ReadFile(pePath)
 	if err != nil {
 		return fmt.Errorf("read PE: %w", err)
@@ -119,7 +129,7 @@ func Strip(pePath, dst string) error {
 	if target == "" {
 		target = pePath
 	}
-	return os.WriteFile(target, data, 0o644)
+	return writeBytesVia(creator, target, data)
 }
 
 // Copy copies the Authenticode certificate from src PE to dst PE.
@@ -132,10 +142,30 @@ func Copy(srcPE, dstPE string) error {
 	return Write(dstPE, c)
 }
 
+// writeBytesVia is the shared write-side helper. nil creator falls
+// back to a [stealthopen.StandardCreator] (plain os.Create).
+func writeBytesVia(creator stealthopen.Creator, path string, data []byte) error {
+	wc, err := stealthopen.UseCreator(creator).Create(path)
+	if err != nil {
+		return err
+	}
+	defer wc.Close()
+	_, err = wc.Write(data)
+	return err
+}
+
 // Write writes raw certificate data to a PE file, replacing any existing
 // certificate. The certificate blob is appended at the end of the file and
-// the security directory entry is patched to point to it.
+// the security directory entry is patched to point to it. Equivalent to
+// [WriteVia] with a nil Creator.
 func Write(pePath string, c *Certificate) error {
+	return WriteVia(nil, pePath, c)
+}
+
+// WriteVia mirrors [Write] but routes the final write through the
+// operator-supplied [stealthopen.Creator]. nil falls back to a
+// [stealthopen.StandardCreator] (plain os.Create).
+func WriteVia(creator stealthopen.Creator, pePath string, c *Certificate) error {
 	if c == nil || len(c.Raw) == 0 {
 		return ErrNoCertificate
 	}
@@ -171,15 +201,23 @@ func Write(pePath string, c *Certificate) error {
 
 	data = append(data, c.Raw...)
 
-	return os.WriteFile(pePath, data, 0o644)
+	return writeBytesVia(creator, pePath, data)
 }
 
-// Export saves the raw certificate data to a file.
+// Export saves the raw certificate data to a file. Equivalent to
+// [Certificate.ExportVia] with a nil Creator.
 func (c *Certificate) Export(path string) error {
+	return c.ExportVia(nil, path)
+}
+
+// ExportVia routes the certificate write through the operator-supplied
+// [stealthopen.Creator]. nil falls back to a [stealthopen.StandardCreator]
+// (plain os.Create).
+func (c *Certificate) ExportVia(creator stealthopen.Creator, path string) error {
 	if c == nil || len(c.Raw) == 0 {
 		return ErrNoCertificate
 	}
-	return os.WriteFile(path, c.Raw, 0o644)
+	return writeBytesVia(creator, path, c.Raw)
 }
 
 // Import loads raw certificate data from a file.

@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+
+	"github.com/oioio-space/maldev/evasion/stealthopen"
 )
 
 // File represents a parsed PE file with read/write capabilities.
@@ -257,9 +259,23 @@ func (f *File) Imports() ([]string, error) {
 	return libs, nil
 }
 
-// Write saves the (potentially modified) PE to disk.
+// Write saves the (potentially modified) PE to disk. Equivalent to
+// [File.WriteVia] with a nil Creator.
 func (f *File) Write(path string) error {
-	return os.WriteFile(path, f.Raw, 0644)
+	return f.WriteVia(nil, path)
+}
+
+// WriteVia routes the PE write through the operator-supplied
+// [stealthopen.Creator]. nil falls back to a [stealthopen.StandardCreator]
+// (plain os.Create).
+func (f *File) WriteVia(creator stealthopen.Creator, path string) error {
+	wc, err := stealthopen.UseCreator(creator).Create(path)
+	if err != nil {
+		return err
+	}
+	defer wc.Close()
+	_, err = wc.Write(f.Raw)
+	return err
 }
 
 // WriteBytes returns the raw PE bytes.

@@ -9,10 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 
 	"github.com/oioio-space/maldev/persistence/scheduler"
+	"github.com/oioio-space/maldev/recon/folder"
 )
 
 // ValidationResult reports the outcome of a canary-validation attempt.
@@ -51,7 +53,11 @@ func (o *ValidateOpts) defaults() {
 		o.MarkerGlob = "maldev-canary-*.marker"
 	}
 	if o.MarkerDir == "" {
-		if pd := os.Getenv("ProgramData"); pd != "" {
+		// SHGetKnownFolderPath instead of os.Getenv("ProgramData") avoids
+		// the PEB env-var sniff EDRs commonly log on credential-style
+		// techniques. Falls back to the canonical path on resolution
+		// failure.
+		if pd, err := folder.GetKnown(windows.FOLDERID_ProgramData, 0); err == nil {
 			o.MarkerDir = pd
 		} else {
 			o.MarkerDir = `C:\ProgramData`

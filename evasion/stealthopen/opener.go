@@ -63,6 +63,8 @@ func OpenRead(opener Opener, path string) ([]byte, error) {
 // can layer transactional NTFS, alternate data streams, encrypted
 // streams, or any operator-controlled write primitive on top of the
 // raw os.Create — same composition story as [Opener] for read paths.
+// The developer's choice: nil → [StandardCreator] (normal os.Create);
+// non-nil → operator's stealth primitive.
 type Creator interface {
 	Create(path string) (io.WriteCloser, error)
 }

