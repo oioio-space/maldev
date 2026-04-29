@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/credentials/lsassdump
-last_reviewed: 2026-04-27
-reflects_commit: cfd7730
+last_reviewed: 2026-04-29
+reflects_commit: 4d55e88
 ---
 
 # LSASS minidump (live)
@@ -163,6 +163,21 @@ stream — the dump is stream-friendly (writes flow directly out).
 
 Convenience: `OpenLSASS` + `Dump(h, file, caller)` + `Sync` +
 `Close`.
+
+### `DumpToFileVia(creator stealthopen.Creator, path string, caller *wsyscall.Caller) (Stats, error)` (Windows)
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/lsassdump#DumpToFileVia)
+
+Same as `DumpToFile` but routes the on-disk landing through the
+operator-supplied [`stealthopen.Creator`](../evasion/stealthopen.md).
+nil falls back to a `*StandardCreator` (plain `os.Create` — identical
+to `DumpToFile`); non-nil layers transactional NTFS, encrypted
+streams, ADS, or any operator-controlled write primitive on top of
+the minidump landing. The minidump byte stream itself is unchanged
+— `Dump(h, w, caller)` writes into the WriteCloser the Creator
+returns. *os.File-only* `Sync` is best-effort: when the Creator
+returns something other than *os.File, durability semantics are
+delegated to the Creator's Close.
 
 ### `Unprotect(rw driver.ReadWriter, eprocess uintptr, tab PPLOffsetTable) (PPLToken, error)`
 

@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/pe/masquerade
-last_reviewed: 2026-04-27
-reflects_commit: 23c9331
+last_reviewed: 2026-04-29
+reflects_commit: 4d55e88
 ---
 
 # PE Resource Masquerade
@@ -88,7 +88,8 @@ one and blank-import:
 | [`Extract(pePath) (*Resources, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Extract) | Open a PE; extract manifest + icons + VERSIONINFO + optional Authenticode cert. |
 | [`Clone(srcPE, outSyso, arch, level) error`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Clone) | One-shot `Extract` + `GenerateSyso`. |
 | [`Build(out, arch, opts ...Option) error`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Build) | Option-chain entry point — start from a source PE, override fields, emit. |
-| [`(*Resources).GenerateSyso(out, arch, level)`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Resources.GenerateSyso) | Write `.syso` from the current `Resources` state. |
+| [`(*Resources).GenerateSyso(out, arch, level)`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Resources.GenerateSyso) | Write `.syso` from the current `Resources` state via plain `os.Create`. |
+| [`(*Resources).GenerateSysoVia(creator, out, arch, level)`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Resources.GenerateSysoVia) | Same as `GenerateSyso`, but routes through a [`stealthopen.Creator`](../evasion/stealthopen.md). nil → `os.Create`; non-nil → operator-controlled write primitive. The COFF byte stream is identical. |
 | [`(*Resources).IconCount() int`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Resources.IconCount) | How many icon groups were extracted. |
 
 ### `Build` options

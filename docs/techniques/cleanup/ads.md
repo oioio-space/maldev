@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/cleanup/ads
-last_reviewed: 2026-04-27
-reflects_commit: 07ced18
+last_reviewed: 2026-04-29
+reflects_commit: 4d55e88
 ---
 
 # NTFS Alternate Data Streams
@@ -65,6 +65,17 @@ non-empty string, no colons). `data` — bytes to write.
 NTFS" when the volume doesn't support ADS.
 
 **Side effects:** stream is created if absent, replaced if present.
+
+### `WriteVia(creator stealthopen.Creator, path, stream string, data []byte) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/ads#WriteVia)
+
+Same semantics as `Write`, but routes through the operator-supplied
+[`stealthopen.Creator`](../evasion/stealthopen.md). nil falls back to
+`os.Create` (identical to plain `Write`); non-nil layers transactional
+NTFS, encryption, or any other write primitive on top of the ADS
+landing. Internally calls `stealthopen.WriteAll` with the
+`<path>:<stream>` composite path.
 
 ### `Read(path, stream string) ([]byte, error)`
 

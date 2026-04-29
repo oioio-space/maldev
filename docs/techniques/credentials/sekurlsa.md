@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: a705c32
+last_reviewed: 2026-04-29
+reflects_commit: 4d55e88
 ---
 
 # LSASS Parsing — In-Process Credential Extraction
@@ -283,6 +283,13 @@ defer lsassdump.Reprotect(tok, &d)
   attach to lsass is a separate chantier (`credentials/lsalive`)
   that needs PPL bypass + much louder OPSEC. The dump-then-parse
   pipeline gives most of the value with a fraction of the noise.
+- **`.kirbi` export composes via `stealthopen.Creator`.**
+  `(*KerberosTicket).ToKirbiFile(dir)` lands the file via plain
+  `os.Create`; pair with
+  [`ToKirbiFileVia(creator, dir)`](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/sekurlsa#KerberosTicket.ToKirbiFileVia)
+  to route the write through the operator's primitive
+  (transactional NTFS, encrypted-stream wrapper, ADS, raw
+  `NtCreateFile`). Same `[]byte` content; same filename.
 
 ---
 

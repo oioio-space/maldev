@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-28
-reflects_commit: master
+last_reviewed: 2026-04-29
+reflects_commit: 4d55e88
 ---
 
 # DLL Proxy Generator
@@ -106,9 +106,11 @@ const (
 func (p PathScheme) String() string
 
 type Options struct {
-    Machine    Machine    // zero → MachineAMD64
-    PathScheme PathScheme // zero → PathSchemeGlobalRoot
-    PayloadDLL string     // when set, embed a DllMain that LoadLibraryA's it
+    Machine       Machine    // zero → MachineAMD64
+    PathScheme    PathScheme // zero → PathSchemeGlobalRoot
+    PayloadDLL    string     // when set, embed a DllMain that LoadLibraryA's it
+    DOSStub       bool       // emit canonical 128-byte MSVC DOS header + program
+    PatchCheckSum bool       // recompute IMAGE_OPTIONAL_HEADER.CheckSum post-assembly
 }
 
 type Export struct {
@@ -262,6 +264,22 @@ proxy, err := dllproxy.Generate(
 )
 ```
 
+### Advanced — MSVC-shaped output (DOS stub + CheckSum)
+
+For deployments where defenders fingerprint on the absence of a
+real DOS stub or a zero-valued optional-header `CheckSum`, both
+flags can be flipped:
+
+```go
+proxy, _ := dllproxy.Generate("version.dll", exports, dllproxy.Options{
+    DOSStub:       true, // canonical "This program cannot be run in DOS mode."
+    PatchCheckSum: true, // ImageHlp!CheckSumMappedFile-equivalent
+})
+```
+
+`DOSStub` bumps `e_lfanew` from 0x40 to 0x80 and embeds the canonical 128-byte MSVC DOS block.
+`PatchCheckSum` reuses `pe/cert.PatchPECheckSum` after assembly so the field is non-zero and self-consistent.
+
 ---
 
 ## OPSEC & Detection
@@ -287,7 +305,7 @@ proxy, err := dllproxy.Generate(
 ## Limitations
 
 - **COM-private semantics**. The MSVC `,PRIVATE` linker directive only excludes a symbol from the import library so downstream `.lib`-based linkers ignore it; at runtime the export is binary-identical to a regular named export. `pe/dllproxy` does not need a separate code path — pass `DllRegisterServer` & friends as ordinary `Export{Name: …}` entries.
-- **No CheckSum / no DOS stub**. Windows tolerates both; signed DLLs would need a recomputed checksum, which is out of scope (use `pe/cert` if signing is in play).
+- **CheckSum + DOS stub are now opt-in.** `Options.PatchCheckSum` recomputes IMAGE_OPTIONAL_HEADER.CheckSum (via `pe/cert.PatchPECheckSum`); `Options.DOSStub` emits the canonical 128-byte MSVC DOS block. Both default to false (preserves the historic minimal-MZ + zero-CheckSum output for callers that don't care).
 - **Forwarder paths are plaintext** in `.rdata` — easy YARA target. String obfuscation is a Phase 2 candidate.
 
 ---
