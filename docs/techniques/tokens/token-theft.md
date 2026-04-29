@@ -289,3 +289,9 @@ const (
     Linked        Type  // Linked (elevated) token
 )
 ```
+
+## See also
+
+- [Tokens area README](README.md)
+- [`tokens/impersonation.md`](impersonation.md) — consume the stolen handle to run code as the target
+- [`tokens/privilege-escalation.md`](privilege-escalation.md) — adjust privileges before / after impersonation

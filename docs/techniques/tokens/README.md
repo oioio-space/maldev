@@ -65,6 +65,20 @@ graph TD
 | [Thread Impersonation](impersonation.md) | LogonUserW + ImpersonateLoggedOnUser |
 | [Privilege Escalation](privilege-escalation.md) | ExecAs, CreateProcessWithLogon, UAC bypass |
 
+## Quick decision tree
+
+| You want to… | Use |
+|---|---|
+| …steal a primary token from another PID | [token-theft.md](token-theft.md) — `Steal(pid)` |
+| …steal a token by process name | [token-theft.md](token-theft.md) — `StealByName(name)` |
+| …run code as `domain\user` with credentials | [impersonation.md](impersonation.md) — `ImpersonateThread` |
+| …run code as `NT AUTHORITY\SYSTEM` | [impersonation.md](impersonation.md) — `GetSystem` (winlogon clone) |
+| …run code as `TrustedInstaller` | [impersonation.md](impersonation.md) — `GetTrustedInstaller` |
+| …enable `SeDebugPrivilege` (or any SeXxx) on the current token | [privilege-escalation.md](privilege-escalation.md) — `EnablePrivilege` |
+| …spawn a child process under alternate credentials | [privilege-escalation.md](privilege-escalation.md) — `ExecAs(...)` |
+| …check if I'm admin / elevated right now | [privilege-escalation.md](privilege-escalation.md) — `IsAdmin()` |
+| …trigger a UAC consent prompt and elevate | [privilege-escalation.md](privilege-escalation.md) — `ShellExecuteRunAs` |
+
 ## MITRE ATT&CK
 
 | Technique | ID | Description |
@@ -79,3 +93,10 @@ graph TD
 |----------------|-----|-------------|
 | Token Authentication and Authorization Normalization | [D3-TAAN](https://d3fend.mitre.org/technique/d3f:TokenAuthenticationandAuthorizationNormalization/) | Monitor token manipulation |
 | User Account Profiling | [D3-UAP](https://d3fend.mitre.org/technique/d3f:UserAccountProfiling/) | Detect privilege escalation |
+
+## See also
+
+- [`tokens/token-theft.md`](token-theft.md) — open + duplicate primary tokens
+- [`tokens/impersonation.md`](impersonation.md) — run code under a stolen context
+- [`tokens/privilege-escalation.md`](privilege-escalation.md) — adjust SeXxx privileges
+- [`syscalls` techniques (index)](../syscalls/README.md) — sibling Layer-1 area

@@ -316,3 +316,9 @@ func HashROR13(name string) uint32 // package default, satisfies HashFunc
 ```
 
 Pass the same `HashFunc` to both `NewHashGateWith` (so the resolver hashes export-table names with it during the PEB walk) and `Caller.WithHashFunc` (so `CallByHash` uses it for its own ntdll export lookup). Build with a per-implant `fn` and the well-known ROR13 constants of NT function names stop appearing in the binary's `.rdata`.
+
+## See also
+
+- [Syscalls area README](README.md)
+- [`syscalls/api-hashing.md`](api-hashing.md) — string-free import resolution for the Direct/Indirect path
+- [`syscalls/ssn-resolvers.md`](ssn-resolvers.md) — SSN extraction strategies plugged into the Caller

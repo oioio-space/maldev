@@ -444,3 +444,9 @@ func (m *RemoteMask) WithCipher(c Cipher) *RemoteMask
 func (m *RemoteMask) WithStrategy(s RemoteStrategy) *RemoteMask
 func (m *RemoteMask) Sleep(ctx context.Context, d time.Duration) error
 ```
+
+## See also
+
+- [Evasion area README](README.md)
+- [`evasion/callstack`](callstack-spoof.md) — pair with callstack-spoof so the hibernating thread's stack is also obfuscated
+- [`evasion/preset`](preset.md) — Stealth preset includes the Foliage strategy

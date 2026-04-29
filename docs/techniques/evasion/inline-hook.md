@@ -778,3 +778,10 @@ go l.Serve()
 **High** — Any integrity check comparing in-memory function prologues to
 their on-disk counterparts will detect the JMP patch. EDR products
 specifically monitor for this on sensitive functions.
+
+## See also
+
+- [Evasion area README](README.md)
+- [`evasion/hook/bridge`](inline-hook.md) — companion IPC controller for runtime hook swap
+- [`evasion/hook/shellcode`](inline-hook.md) — pre-fab x64 handler payloads
+- [`evasion/unhook`](ntdll-unhooking.md) — symmetric primitive: remove EDR-installed hooks before installing your own

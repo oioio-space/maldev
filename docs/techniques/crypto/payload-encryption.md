@@ -16,6 +16,54 @@ in-process unpackers; signature-breaking permutations (S-Box, Matrix
 Hill, ArithShift, XOR) to defeat YARA byte patterns. Pure Go, no CGo,
 cross-platform.
 
+## Pick the primitive
+
+Side-by-side. Pick the row whose tradeoffs match the deployment
+context, then click through to the API Reference for that
+function.
+
+| Primitive | Layer | Speed | Entropy profile | Key | Nonce / IV | Authenticated | Reversible | Static signature | Best for |
+|---|---|---|---|---|---|---|---|---|---|
+| **AES-GCM** | AEAD outer | fast (AES-NI) | uniform high (256 bits) | 32 B | 12 B random | ✅ tag | yes | low (random) | Default outer envelope; tampering detection mandatory. |
+| **XChaCha20-Poly1305** | AEAD outer | fast | uniform high | 32 B | 24 B random | ✅ tag | yes | low | AES-NI absent; misuse-resistant nonce (24 B random ≈ unique). |
+| **RC4** | Stream | very fast | uniform | 5–256 B | none | ❌ | yes | YARA: keystream bias | Cheap unpacker between layers; never as outer envelope. |
+| **TEA** | Block (64-bit) | very fast | uniform | 16 B | none (ECB) | ❌ | yes | low | Tiny block primitive when binary footprint matters. |
+| **XTEA** | Block (64-bit) | very fast | uniform | 16 B | none (ECB) | ❌ | yes | low | Same as TEA but with corrected key schedule. |
+| **XOR** | Stream | trivial | matches key length | any | implicit | ❌ | yes | YARA: visible key | Dev / scratch only; never alone in production. |
+| **S-Box (substitute)** | Permutation | very fast | uniform when keyed | 256-byte table | none | ❌ | yes (`Reverse*`) | breaks byte-frequency YARA | Layer between AES-GCM and embed to flatten histograms. |
+| **Matrix Hill** | Permutation | medium (per-row) | uniform | 4×4 / 8×8 matrix | none | ❌ | yes | breaks contiguous-byte YARA | Defeat contiguous-byte signatures; pair with S-Box. |
+| **ArithShift** | Permutation | very fast | non-uniform | 1–4 B | none | ❌ | yes | low | Cheap layer that produces *non*-uniform entropy — masks an AES blob's "looks-random" tell. |
+
+How to read the matrix:
+
+- **Authenticated** = does the cipher detect tampering on
+  decrypt? Only the AEAD ciphers do; everything else returns
+  "decrypted" garbage on bit-flips. Always run an AEAD as the
+  outermost layer if integrity matters.
+- **Static signature** = how visible the cipher choice is to a
+  YARA scanner. Permutations break histogram / contiguous-byte
+  rules; AEAD ciphers leave no static fingerprint at all
+  (output is random).
+- **Speed** is qualitative. For multi-MB payloads, prefer
+  AES-GCM (AES-NI) or XChaCha20-Poly1305 — the rest allocate
+  per call.
+
+Composition pattern (build → embed → runtime):
+
+```text
+plaintext
+  ↓ EncryptAESGCM(key)              [outer AEAD, uniform output]
+  ↓ SubstituteBytes(table)          [S-Box: flatten histogram]
+  ↓ MatrixTransform(M)              [break contiguous bytes]
+  ↓ ArithShift(k)                   [non-uniform entropy mask]
+ciphertext bytes embedded into the implant
+```
+
+Reverse on the runtime side: `ReverseArithShift` →
+`ReverseMatrixTransform` → `ReverseSubstituteBytes` →
+`DecryptAESGCM`. **Always** wipe the key buffer with
+`memory.SecureZero` immediately after `DecryptAESGCM` returns.
+
 ## Primer
 
 Static signatures are the cheapest defender win. A raw shellcode buffer

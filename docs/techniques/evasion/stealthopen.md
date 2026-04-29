@@ -238,3 +238,9 @@ through OpenFileById).
 ## API Reference
 
 See [evasion.md](../../evasion.md) (table row: `evasion/stealthopen`)
+
+## See also
+
+- [Evasion area README](README.md)
+- [`cleanup/ads`](../cleanup/ads.md) — companion NTFS-Object-ID-aware ADS primitive
+- [`persistence/lnk`](../persistence/lnk.md) — backlog P2.16 wires LNK creation through stealthopen for fileless drop

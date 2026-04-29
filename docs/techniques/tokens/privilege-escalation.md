@@ -260,3 +260,9 @@ func SilentCleanup(path string) error
 func EventVwr(path string) error
 func EventVwrLogon(domain, user, password, path string) error
 ```
+
+## See also
+
+- [Tokens area README](README.md)
+- [`tokens/token-theft.md`](token-theft.md) — capture an admin token first, then enable privileges on the duplicated handle
+- [`privesc` techniques (index)](../privesc/README.md) — full UAC bypass + kernel exploit alternatives

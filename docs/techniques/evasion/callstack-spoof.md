@@ -261,3 +261,10 @@ See [package doc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/calls
 Every export is error-surfacing; `ErrUnsupportedPlatform`,
 `ErrFunctionEntryNotFound`, and `ErrGadgetNotFound` exist for
 `errors.Is` discrimination.
+
+## See also
+
+- [Evasion area README](README.md)
+- [`evasion/sleepmask`](sleep-mask.md) — pair with sleep-mask so spoofed frames are also wiped between callbacks
+- [`win/syscall`](../syscalls/direct-indirect.md) — `MethodIndirect` returns into ntdll, complementary stack-stealth path
+- [`recon/hwbp`](../recon/hw-breakpoints.md) — companion HW-BP variant tracked under backlog P2.6

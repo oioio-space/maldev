@@ -244,3 +244,9 @@ inside RTCore64.sys.
 - [CVE-2019-16098](https://nvd.nist.gov/vuln/detail/CVE-2019-16098)
 - [Bishop Fox — RTCore64 BYOVD analysis](https://bishopfox.com/blog/lockfile-and-signed-drivers)
 - [Microsoft vulnerable-driver block list](https://learn.microsoft.com/en-us/windows/security/threat-protection/windows-defender-application-control/microsoft-recommended-driver-block-rules)
+
+## See also
+
+- [Kernel BYOVD area README](README.md)
+- [`evasion/kcallback`](../evasion/kernel-callback-removal.md) — major consumer of the kernel R/W primitive
+- [`credentials/lsassdump`](../credentials/lsassdump.md) — uses the kernel R/W to flip lsass.exe out of PPL

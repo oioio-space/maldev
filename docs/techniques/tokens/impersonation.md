@@ -333,3 +333,9 @@ const (
     LOGON32_LOGON_NEW_CREDENTIALS LogonType = 9
 )
 ```
+
+## See also
+
+- [Tokens area README](README.md)
+- [`tokens/token-theft.md`](token-theft.md) — supplies the stolen handle this primitive impersonates with
+- [`tokens/privilege-escalation.md`](privilege-escalation.md) — once impersonated, adjust privileges on the new context

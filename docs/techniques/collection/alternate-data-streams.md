@@ -206,3 +206,9 @@ func ReadUndeletable(path string) ([]byte, error)
 // Uses the \\?\ prefix to bypass Win32 name normalization.
 func DeleteUndeletable(path string) error
 ```
+
+## See also
+
+- [Collection area README](README.md)
+- [`cleanup/ads`](../cleanup/ads.md) — sister NTFS Alternate Data Stream primitives (CRUD-only, used during scrub)
+- [`evasion/stealthopen`](../evasion/stealthopen.md) — read ADS payloads via NTFS Object ID, bypassing path-based EDR file hooks

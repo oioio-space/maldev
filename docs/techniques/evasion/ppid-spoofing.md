@@ -167,3 +167,9 @@ ppid, err := shell.ParentPID(childPID)
 // Check if current process is admin
 admin := shell.IsAdmin()
 ```
+
+## See also
+
+- [Evasion area README](README.md)
+- [`process` techniques (index)](../process/README.md) — sibling process-tampering primitives
+- [`process/tamper/fakecmd`](../process/fakecmd.md) — companion lineage-spoof: pretty up the spawned child's CommandLine

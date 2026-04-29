@@ -100,6 +100,23 @@ flowchart TD
     style KC fill:#2d5016,color:#fff
 ```
 
+## Quick decision tree
+
+| You want to… | Use |
+|---|---|
+| …self-inject without spawning a thread | [callback-execution.md](callback-execution.md) |
+| …self-inject through a thread-pool worker | [thread-pool.md](thread-pool.md) |
+| …self-inject image-backed (memory looks like a normal module) | [module-stomping.md](module-stomping.md) |
+| …spawn a clean new process and queue shellcode pre-init | [early-bird-apc.md](early-bird-apc.md) |
+| …inject into an existing PID with WPM allowed | [create-remote-thread.md](create-remote-thread.md) |
+| …inject into an existing PID without WriteProcessMemory | [section-mapping.md](section-mapping.md) |
+| …blend with a mapped DLL on disk (path-spoof) | [phantom-dll.md](phantom-dll.md) |
+| …land in the GUI message-loop callback table | [kernel-callback-table.md](kernel-callback-table.md) |
+| …pivot via a hijacked existing thread | [thread-hijack.md](thread-hijack.md) |
+| …queue a Win10-1903+ APC (special) | [nt-queue-apc-thread-ex.md](nt-queue-apc-thread-ex.md) |
+| …disguise the spawned child's argv | [process-arg-spoofing.md](process-arg-spoofing.md) |
+| …land via the EtwpCreateEtwThread trampoline | [etwp-create-etw-thread.md](etwp-create-etw-thread.md) |
+
 ## Architecture
 
 All methods implement `Injector`:

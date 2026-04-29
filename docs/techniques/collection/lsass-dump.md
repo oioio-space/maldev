@@ -237,3 +237,9 @@ type Stats struct {
 // a test fixture). See minidump.go for field docs.
 func Build(w io.Writer, cfg Config) (Stats, error)
 ```
+
+## See also
+
+- [Collection area README](README.md)
+- [`credentials/lsassdump`](../credentials/lsassdump.md) — canonical owner of the LSASS dump producer (PPL bypass + MINIDUMP build)
+- [`credentials/sekurlsa`](../credentials/sekurlsa.md) — pure-Go MINIDUMP parser; consumes the bytes produced here

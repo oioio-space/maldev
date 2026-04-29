@@ -292,3 +292,9 @@ See [`docs/credentials.md`](../../credentials.md) for the inline API
 reference. Sentinel errors (`ErrNotMinidump`, `ErrUnsupportedBuild`,
 `ErrLSASRVNotFound`, `ErrMSV1_0NotFound`, `ErrKeyExtractFailed`) are
 all `errors.Is`-dispatchable.
+
+## See also
+
+- [Credentials area README](README.md)
+- [`credentials/lsassdump`](lsassdump.md) — producer counterpart (dump LSASS so this parser has bytes to chew)
+- [`credentials/goldenticket`](goldenticket.md) — feed the extracted krbtgt hash directly into Forge

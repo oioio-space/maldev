@@ -285,3 +285,9 @@ func ROR13(name string) uint32
 // ROR13Module computes the ROR13 hash of a UTF-16LE module name (with null terminator).
 func ROR13Module(name string) uint32
 ```
+
+## See also
+
+- [Syscalls area README](README.md)
+- [`syscalls/ssn-resolvers.md`](ssn-resolvers.md) — the resolver chain that uses these hashes
+- [`syscalls/direct-indirect.md`](direct-indirect.md) — the calling-method side of the same Caller seam

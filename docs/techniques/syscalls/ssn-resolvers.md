@@ -349,3 +349,9 @@ func NewHashGate() *HashGateResolver
 // Chain tries multiple resolvers in sequence, returning first success.
 func Chain(resolvers ...SSNResolver) *ChainResolver
 ```
+
+## See also
+
+- [Syscalls area README](README.md)
+- [`syscalls/api-hashing.md`](api-hashing.md) — HashGate uses these primitives to find Nt* exports
+- [`syscalls/direct-indirect.md`](direct-indirect.md) — once the SSN is known, this is how the syscall fires

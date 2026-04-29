@@ -149,3 +149,9 @@ func Enable(caller *wsyscall.Caller) error
 // Technique constructor:
 func MicrosoftOnly() evasion.Technique
 ```
+
+## See also
+
+- [Evasion area README](README.md)
+- [`evasion/cet`](cet.md) — sibling process-mitigation hardening (CET shadow stack)
+- [`evasion/preset`](preset.md) — bundles ACG + BlockDLLs into composable Technique stacks

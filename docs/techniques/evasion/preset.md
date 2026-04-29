@@ -305,3 +305,9 @@ remediation without overlapping.
 ## API Reference
 
 See [evasion.md](../../evasion.md#preset----composable-technique-presets)
+
+## See also
+
+- [Evasion area README](README.md)
+- [`evasion` umbrella](README.md) — the `Technique` interface every preset bundles
+- [`win/syscall`](../syscalls/README.md) — supplies the `*Caller` every preset Technique consumes

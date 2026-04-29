@@ -331,3 +331,9 @@ var (
   slot isn't universally "enabled" — in some Windows builds it's part
   of the reference count. Trust the Address field as the primary
   signal; treat Enabled as a hint.
+
+## See also
+
+- [Evasion area README](README.md)
+- [`kernel/driver`](../kernel/README.md) — supplies the BYOVD R/W primitive consumed here
+- [`kernel/driver/rtcore64`](../kernel/byovd-rtcore64.md) — concrete signed-driver implementation

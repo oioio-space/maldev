@@ -194,3 +194,10 @@ func Perun() evasion.Technique
 // Hook detection:
 func IsHooked(funcName string) (bool, error)
 ```
+
+## See also
+
+- [Evasion area README](README.md)
+- [`evasion/hook`](inline-hook.md) — symmetric primitive: install your own hooks once EDR's are removed
+- [`evasion/preset`](preset.md) — Stealth preset includes `unhook.FullUnhook` as the first step
+- [`win/syscall`](../syscalls/direct-indirect.md) — direct/indirect syscalls bypass hooks without restoring them
