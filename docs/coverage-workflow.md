@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: a705c32
+last_reviewed: 2026-04-29
+reflects_commit: d64d554
 ---
 
 # Coverage Workflow — test harness state (as of 2026-04-22)
@@ -9,6 +9,17 @@ This document is the **entry point for any agent or contributor picking up
 the coverage + VM-testing work**. It describes the infrastructure currently
 in place, how to reproduce it, what passes / skips / fails, and what's left
 to do.
+
+> [!NOTE]
+> The pass/skip counts in this document reflect the 2026-04-22 baseline
+> run. Newer infrastructure shipped after that date — `win/com.Error`
+> shared HRESULT helper (consumed by `runtime/clr` + `persistence/lnk`),
+> `stealthopen.Creator` write-side interface (LNK / ADS / .kirbi / PE /
+> .syso emit), and the LNK three-sink API (`Save` / `BuildBytes` /
+> `WriteTo` / `WriteVia`) — has unit-test coverage running on host but
+> has **not** been re-baselined under `bash scripts/full-coverage.sh`.
+> See [`testing.md`](testing.md) for the per-package row-level coverage
+> table updated to the current API surface.
 
 > For bootstrap from scratch (creating VMs, SSH keys, INIT snapshots) see
 > [`docs/vm-test-setup.md`](vm-test-setup.md).
