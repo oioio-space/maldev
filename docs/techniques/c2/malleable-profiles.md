@@ -52,7 +52,7 @@ sequenceDiagram
 
     Sh->>Mal: Write([]byte("ls /etc"))
     Mal->>Mal: DataEncoder(bytes)
-    Mal->>CDN: GET /jquery-3.7.1.min.js<br/>Referer: https://docs.example/<br/>User-Agent: Chrome/124
+    Mal->>CDN: GET /jquery-3.7.1.min.js<br>Referer: https://docs.example/<br>User-Agent: Chrome/124
     CDN-->>Mal: 200 OK + payload-as-jquery
     Mal->>Mal: DataDecoder(body)
     Mal-->>Sh: Read → []byte("/etc/passwd contents")

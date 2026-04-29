@@ -40,17 +40,17 @@ clears them.
 
 ```mermaid
 flowchart TD
-    START[Walk threads in process] --> SUSP[SuspendThread]
-    SUSP --> CTX[GetThreadContext<br/>CONTEXT_DEBUG_REGISTERS]
-    CTX --> DR{DR0-DR3 set?}
-    DR -- yes --> RESOLVE[resolve address → module]
-    RESOLVE --> NTDLL{in ntdll?}
-    NTDLL -- yes --> COLLECT[Breakpoint{TID, Register, Address}]
-    NTDLL -- no --> SKIP[skip]
-    DR -- no --> NEXT[next thread]
+    START["Walk threads in process"] --> SUSP["SuspendThread"]
+    SUSP --> CTX["GetThreadContext<br>CONTEXT_DEBUG_REGISTERS"]
+    CTX --> DR{"DR0-DR3 set?"}
+    DR -- yes --> RESOLVE["resolve address to module"]
+    RESOLVE --> NTDLL{"in ntdll?"}
+    NTDLL -- yes --> COLLECT["Breakpoint TID Register Address"]
+    NTDLL -- no --> SKIP["skip"]
+    DR -- no --> NEXT["next thread"]
     COLLECT --> NEXT
-    NEXT --> RESUME[ResumeThread]
-    RESUME --> NEXT2[continue walk]
+    NEXT --> RESUME["ResumeThread"]
+    RESUME --> NEXT2["continue walk"]
 ```
 
 `ClearAll` walks the same threads, zeros DR0-DR3 + DR7 via

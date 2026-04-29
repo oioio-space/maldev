@@ -11,13 +11,13 @@ Inject shellcode into a remote process using multiple OPSEC layers.
 
 ```mermaid
 flowchart TD
-    A[Start] --> B[Clear HW breakpoints<br/>Defeat CrowdStrike DR monitoring]
-    B --> C[Apply evasion<br/>AMSI + ETW + Unhook]
-    C --> D[Decrypt payload<br/>ChaCha20-Poly1305]
-    D --> E{Choose injection<br/>based on target}
-    E -->|High stealth| F[Section mapping<br/>No WriteProcessMemory]
-    E -->|File-backed| G[Module stomping<br/>Trusted memory region]
-    E -->|No new thread| H[Callback execution<br/>EnumWindows abuse]
+    A[Start] --> B[Clear HW breakpoints<br>Defeat CrowdStrike DR monitoring]
+    B --> C[Apply evasion<br>AMSI + ETW + Unhook]
+    C --> D[Decrypt payload<br>ChaCha20-Poly1305]
+    D --> E{Choose injection<br>based on target}
+    E -->|High stealth| F[Section mapping<br>No WriteProcessMemory]
+    E -->|File-backed| G[Module stomping<br>Trusted memory region]
+    E -->|No new thread| H[Callback execution<br>EnumWindows abuse]
     F --> I[Cleanup memory]
     G --> I
     H --> I

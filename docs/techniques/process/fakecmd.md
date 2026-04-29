@@ -45,14 +45,14 @@ sequenceDiagram
     participant PEB as Target PEB
     participant PP as RTL_USER_PROCESS_PARAMETERS
     participant CmdLine as UNICODE_STRING CommandLine
-    participant Kernel as EPROCESS<br/>(SeAuditProcessCreationInfo)
+    participant Kernel as EPROCESS<br>(SeAuditProcessCreationInfo)
 
     Note over PEB,PP: Setup at process creation
     PP->>CmdLine: Length / MaximumLength / Buffer = "evil.exe --c2 …"
     Kernel-->>Kernel: SeAuditProcessCreationInfo = "evil.exe --c2 …" (frozen)
 
     Note over PEB,CmdLine: fakecmd.Spoof rewrites here
-    CmdLine->>CmdLine: Buffer ← "svchost.exe -k netsvcs"<br/>Length / MaximumLength updated
+    CmdLine->>CmdLine: Buffer ← "svchost.exe -k netsvcs"<br>Length / MaximumLength updated
 
     Reader->>PEB: NtQueryInformationProcess(ProcessBasicInformation)
     Reader->>PP: Follow PEB.ProcessParameters

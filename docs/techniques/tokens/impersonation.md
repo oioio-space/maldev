@@ -38,10 +38,10 @@ sequenceDiagram
 
     Thread->>Win: EnableAllPrivileges(token)
     Thread->>Win: ImpersonateLoggedOnUser(token)
-    Note over Thread: Thread now runs as<br/>the impersonated user
+    Note over Thread: Thread now runs as<br>the impersonated user
 
     Thread->>Callback: callbackFunc()
-    Note over Callback: All operations use<br/>impersonated identity
+    Note over Callback: All operations use<br>impersonated identity
 
     Callback-->>Thread: return
 

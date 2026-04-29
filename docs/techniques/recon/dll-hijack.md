@@ -50,18 +50,18 @@ search order entirely.
 ```mermaid
 flowchart LR
     subgraph scan [Scanners]
-        SVC[ScanServices<br/>SCM enum + IAT walk]
-        PROC[ScanProcesses<br/>Toolhelp32 + loaded modules]
-        TASK[ScanScheduledTasks<br/>COM ITaskService]
-        AE[ScanAutoElevate<br/>System32 manifest filter]
+        SVC["ScanServices<br>SCM enum + IAT walk"]
+        PROC["ScanProcesses<br>Toolhelp32 + loaded modules"]
+        TASK["ScanScheduledTasks<br>COM ITaskService"]
+        AE["ScanAutoElevate<br>System32 manifest filter"]
     end
-    SVC --> ALL[ScanAll → []Opportunity]
+    SVC --> ALL["ScanAll returns Opportunity slice"]
     PROC --> ALL
     TASK --> ALL
     AE --> ALL
-    ALL --> RANK[Rank<br/>integrity-gain score]
-    RANK --> VAL[Validate<br/>drop canary + trigger]
-    VAL --> CONF[ValidationResult<br/>confirmed hijack]
+    ALL --> RANK["Rank<br>integrity-gain score"]
+    RANK --> VAL["Validate<br>drop canary + trigger"]
+    VAL --> CONF["ValidationResult<br>confirmed hijack"]
 ```
 
 ## API Reference

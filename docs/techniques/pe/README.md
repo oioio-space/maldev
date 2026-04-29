@@ -20,18 +20,18 @@ loaders moved to [`runtime/bof`](../runtime/) and
 ```mermaid
 flowchart LR
     subgraph offline [Offline / build-host]
-        SRC[Source PE<br/>signed donor]
-        PARSE[parse + imports<br/>read-only walkers]
-        STRIP[strip<br/>Go-toolchain scrub]
-        MORPH[morph<br/>UPX header rename]
-        CERT[cert<br/>Authenticode graft]
-        MASQ[masquerade<br/>manifest + icon<br/>+ VERSIONINFO clone]
-        SRDI[srdi<br/>Donut PE → shellcode]
+        SRC[Source PE<br>signed donor]
+        PARSE[parse + imports<br>read-only walkers]
+        STRIP[strip<br>Go-toolchain scrub]
+        MORPH[morph<br>UPX header rename]
+        CERT[cert<br>Authenticode graft]
+        MASQ[masquerade<br>manifest + icon<br>+ VERSIONINFO clone]
+        SRDI[srdi<br>Donut PE → shellcode]
     end
     subgraph runtime [Runtime / target host]
-        INJECT[inject/*<br/>execute shellcode]
-        BOF[runtime/bof<br/>COFF loader]
-        CLR[runtime/clr<br/>.NET hosting]
+        INJECT[inject/*<br>execute shellcode]
+        BOF[runtime/bof<br>COFF loader]
+        CLR[runtime/clr<br>.NET hosting]
     end
     SRC --> PARSE
     SRC --> STRIP

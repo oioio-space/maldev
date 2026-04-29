@@ -43,7 +43,7 @@ flowchart LR
     A[VirtualAlloc RW] --> B[memcpy shellcode]
     B --> C[VirtualProtect → RX]
     C --> D[resolve ntdll!EtwpCreateEtwThread]
-    D --> E[invoke EtwpCreateEtwThread<br/>start = shellcode]
+    D --> E[invoke EtwpCreateEtwThread<br>start = shellcode]
     E --> F[new OS thread runs shellcode]
 ```
 

@@ -11,10 +11,10 @@ A minimal implant that decrypts shellcode, applies evasion, and executes.
 
 ```mermaid
 flowchart TD
-    A[Start] --> B[Apply evasion<br/>AMSI + ETW + Unhook]
-    B --> C[Decrypt payload<br/>AES-256-GCM]
-    C --> D[Self-inject<br/>CreateThread]
-    D --> E[Sleep mask<br/>Encrypted idle]
+    A[Start] --> B[Apply evasion<br>AMSI + ETW + Unhook]
+    B --> C[Decrypt payload<br>AES-256-GCM]
+    C --> D[Self-inject<br>CreateThread]
+    D --> E[Sleep mask<br>Encrypted idle]
     E --> D
 ```
 

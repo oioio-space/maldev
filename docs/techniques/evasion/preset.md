@@ -29,7 +29,7 @@ A preset is just a function returning `[]evasion.Technique`. `evasion.ApplyAll` 
 
 ```mermaid
 flowchart LR
-    A[preset.Stealth] --> B["[]evasion.Technique<br/>amsi + etw + 10x unhook"]
+    A[preset.Stealth] --> B["[]evasion.Technique<br>amsi + etw + 10x unhook"]
     B --> C["evasion.ApplyAll(slice, caller)"]
     C --> D{"each .Apply()"}
     D --> E[AMSI patched]

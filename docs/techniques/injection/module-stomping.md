@@ -38,10 +38,10 @@ fiber, or a manually-fired callback) to dispatch.
 
 ```mermaid
 flowchart LR
-    A[LoadLibraryEx<br/>DONT_RESOLVE_DLL_REFERENCES] --> B[parse PE headers<br/>find .text]
-    B --> C[VirtualProtect<br/>.text → RW]
-    C --> D[memcpy shellcode<br/>over .text]
-    D --> E[VirtualProtect<br/>.text → RX]
+    A[LoadLibraryEx<br>DONT_RESOLVE_DLL_REFERENCES] --> B[parse PE headers<br>find .text]
+    B --> C[VirtualProtect<br>.text → RW]
+    C --> D[memcpy shellcode<br>over .text]
+    D --> E[VirtualProtect<br>.text → RX]
     E --> F[return RX address]
 ```
 

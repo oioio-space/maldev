@@ -42,7 +42,7 @@ flowchart TD
     subgraph cfg [Config dimensions]
         DEBUG[Debugger]
         VM[VM/Hypervisor]
-        HW[Hardware<br/>cores / RAM / disk]
+        HW[Hardware<br>cores / RAM / disk]
         IDENT[User / hostname]
         PROC[Process names]
         DNS[Fake-domain DNS]

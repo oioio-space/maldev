@@ -25,11 +25,11 @@ first.
 
 ```mermaid
 flowchart TD
-    L0["Layer 0 (pure Go)<br/>crypto · encode · hash · random · useragent"]
-    L1["Layer 1 (OS primitives)<br/>win/api · win/syscall · win/ntapi · win/token · win/privilege<br/>process/enum · process/session · kernel/driver"]
-    L2T["Layer 2 (techniques)<br/>evasion/* · recon/* · inject · pe/* · runtime/*<br/>cleanup/* · process/tamper/* · privesc/*"]
-    L2P["Layer 2 (post-ex)<br/>persistence/* · collection/* · credentials/*"]
-    L3["Layer 3 (orchestration)<br/>c2/transport · c2/shell · c2/meterpreter · c2/cert"]
+    L0["Layer 0 (pure Go)<br>crypto · encode · hash · random · useragent"]
+    L1["Layer 1 (OS primitives)<br>win/api · win/syscall · win/ntapi · win/token · win/privilege<br>process/enum · process/session · kernel/driver"]
+    L2T["Layer 2 (techniques)<br>evasion/* · recon/* · inject · pe/* · runtime/*<br>cleanup/* · process/tamper/* · privesc/*"]
+    L2P["Layer 2 (post-ex)<br>persistence/* · collection/* · credentials/*"]
+    L3["Layer 3 (orchestration)<br>c2/transport · c2/shell · c2/meterpreter · c2/cert"]
 
     L0 --> L1
     L1 --> L2T

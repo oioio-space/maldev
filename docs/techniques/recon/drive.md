@@ -38,13 +38,13 @@ Operationally:
 
 ```mermaid
 flowchart LR
-    GLD[GetLogicalDrives<br/>letter bitmask] --> LET[A: B: C: …]
-    LET --> TYPE[GetDriveTypeW<br/>per-letter classification]
-    LET --> VOL[GetVolumeInformationW<br/>label + serial + FS]
-    TYPE --> INFO[Info<br/>Letter / Type / Volume]
+    GLD[GetLogicalDrives<br>letter bitmask] --> LET[A: B: C: …]
+    LET --> TYPE[GetDriveTypeW<br>per-letter classification]
+    LET --> VOL[GetVolumeInformationW<br>label + serial + FS]
+    TYPE --> INFO[Info<br>Letter / Type / Volume]
     VOL --> INFO
-    INFO --> WATCH[Watcher<br/>poll snapshot diff]
-    WATCH --> EVT[Event<br/>EventAdded / EventRemoved]
+    INFO --> WATCH[Watcher<br>poll snapshot diff]
+    WATCH --> EVT[Event<br>EventAdded / EventRemoved]
 ```
 
 Watcher polling is configurable (default 200 ms). Snapshots

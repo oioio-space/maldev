@@ -40,7 +40,7 @@ return.
 ```mermaid
 flowchart LR
     subgraph SecureZero
-        BUF["[]byte"] --> CLEAR["clear(buf)<br/>(intrinsic, not elidable)"]
+        BUF["[]byte"] --> CLEAR["clear(buf)<br>(intrinsic, not elidable)"]
         CLEAR --> ZEROED["all bytes 0x00"]
     end
     subgraph WipeAndFree

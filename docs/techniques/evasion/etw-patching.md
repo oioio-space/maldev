@@ -54,8 +54,8 @@ sequenceDiagram
     rect rgb(238,255,238)
         Note over Provider,TI: After PatchAll
         Provider->>ntdll: EtwEventWrite(...)
-        Note over ntdll: prologue is now<br/>48 33 C0 C3 (xor rax,rax; ret)
-        ntdll-->>Provider: STATUS_SUCCESS<br/>(no event emitted)
+        Note over ntdll: prologue is now<br>48 33 C0 C3 (xor rax,rax; ret)
+        ntdll-->>Provider: STATUS_SUCCESS<br>(no event emitted)
     end
 ```
 

@@ -27,13 +27,13 @@ Every resolver answers the same question — "what SSN does `NtXxx` map to on th
 ```mermaid
 flowchart LR
     A["Need SSN for NtXxx"] --> B[Resolver.Resolve]
-    B --> C[ntdll base via<br/>GetProcAddress or PEB walk]
+    B --> C[ntdll base via<br>GetProcAddress or PEB walk]
     C --> D[Read function prologue]
-    D --> E{Intact?<br/>4C 8B D1 B8}
+    D --> E{Intact?<br>4C 8B D1 B8}
     E -->|Yes| F[SSN = bytes 4-5]
-    E -->|No| G[Strategy fallback:<br/>neighbors / JMP follow / hash]
+    E -->|No| G[Strategy fallback:<br>neighbors / JMP follow / hash]
     G --> F
-    F --> H[caller.Call builds<br/>syscall stub]
+    F --> H[caller.Call builds<br>syscall stub]
 ```
 
 - **Hell's Gate** — read `mov eax, imm32` directly from the unhooked prologue. Fastest, fails on any hooked function.

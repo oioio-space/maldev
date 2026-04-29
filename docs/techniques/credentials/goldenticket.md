@@ -54,13 +54,13 @@ choosing.
 
 ```mermaid
 flowchart LR
-    P[Params<br/>Domain + krbtgt hash<br/>+ user/RID/groups] --> PAC[buildPAC<br/>KERB_VALIDATION_INFO<br/>+ PAC_CLIENT_INFO<br/>+ 2× PAC_SIGNATURE_DATA]
-    PAC --> ETP[EncTicketPart<br/>flags + cname + crealm<br/>+ key + AuthTime/EndTime<br/>+ AuthorizationData=PAC]
-    ETP --> ENC[encrypt with krbtgt key<br/>RC4 / AES128 / AES256]
-    ENC --> KC[KRB-CRED<br/>kirbi blob]
+    P[Params<br>Domain + krbtgt hash<br>+ user/RID/groups] --> PAC[buildPAC<br>KERB_VALIDATION_INFO<br>+ PAC_CLIENT_INFO<br>+ 2× PAC_SIGNATURE_DATA]
+    PAC --> ETP[EncTicketPart<br>flags + cname + crealm<br>+ key + AuthTime/EndTime<br>+ AuthorizationData=PAC]
+    ETP --> ENC[encrypt with krbtgt key<br>RC4 / AES128 / AES256]
+    ENC --> KC[KRB-CRED<br>kirbi blob]
     KC --> OUT{output}
-    OUT -->|Forge returns bytes| DISK[ccache / .kirbi file<br/>cross-platform]
-    OUT -->|Submit on Windows| LSA[LsaCallAuthenticationPackage<br/>KerbSubmitTicketMessage]
+    OUT -->|Forge returns bytes| DISK[ccache / .kirbi file<br>cross-platform]
+    OUT -->|Submit on Windows| LSA[LsaCallAuthenticationPackage<br>KerbSubmitTicketMessage]
     LSA --> CACHE[per-LUID TGT cache]
 ```
 

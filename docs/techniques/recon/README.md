@@ -26,7 +26,7 @@ flowchart TB
         AD[antidebug]
         AV[antivm]
         TIME[timing]
-        SB[sandbox<br/>orchestrator]
+        SB[sandbox<br>orchestrator]
         AD --> SB
         AV --> SB
         TIME --> SB
@@ -37,10 +37,10 @@ flowchart TB
         NET[network]
     end
     subgraph hooks [Hook detection]
-        HWBP[hwbp<br/>DR0-DR3]
+        HWBP[hwbp<br>DR0-DR3]
     end
     subgraph hijack [Hijack discovery]
-        DLL[dllhijack<br/>services + procs +<br/>tasks + autoElevate]
+        DLL[dllhijack<br>services + procs +<br>tasks + autoElevate]
     end
     SB --> BAIL[bail-on-detect]
     HWBP --> CLEAR[clear + unhook]

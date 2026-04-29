@@ -19,7 +19,7 @@ post-ex code runs unobserved. Every package in this area accepts a
 flowchart LR
     A[unhook ntdll] --> B[patch AMSI]
     B --> C[patch ETW]
-    C --> D[harden process<br/>ACG / BlockDLLs / CET]
+    C --> D[harden process<br>ACG / BlockDLLs / CET]
     D --> E[sleepmask between callbacks]
 ```
 

@@ -36,9 +36,9 @@ remains after garble emits the binary.
 
 ```mermaid
 flowchart LR
-    INPUT[Go-built PE binary] --> TS[SetTimestamp<br/>random epoch / project date]
-    TS --> PCL[WipePclntab<br/>zero 32 bytes at each<br/>pclntab magic match]
-    PCL --> RN[RenameSections<br/>.gopclntab → .rdata2<br/>.go.buildinfo → .rsrc2<br/>.noptrdata → .data2]
+    INPUT[Go-built PE binary] --> TS[SetTimestamp<br>random epoch / project date]
+    TS --> PCL[WipePclntab<br>zero 32 bytes at each<br>pclntab magic match]
+    PCL --> RN[RenameSections<br>.gopclntab → .rdata2<br>.go.buildinfo → .rsrc2<br>.noptrdata → .data2]
     RN --> OUT[Sanitised PE]
 ```
 

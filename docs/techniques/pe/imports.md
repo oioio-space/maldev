@@ -35,11 +35,11 @@ Wine or signtool.
 
 ```mermaid
 flowchart LR
-    A[PE bytes] --> B[debug/pe.NewFile]
-    B --> C[ImportedSymbols<br/>walks IMAGE_IMPORT_DESCRIPTOR]
-    C --> D{parse "Func:DLL"}
-    D --> E[List Import<br/>DLL + Function]
-    E --> F[evasion/unhook<br/>or wsyscall SSN extract]
+    A["PE bytes"] --> B["debug/pe.NewFile"]
+    B --> C["ImportedSymbols<br>walks IMAGE_IMPORT_DESCRIPTOR"]
+    C --> D{"parse Func then DLL"}
+    D --> E["List Import<br>DLL + Function"]
+    E --> F["evasion/unhook<br>or wsyscall SSN extract"]
 ```
 
 - Read the PE optional header and locate

@@ -39,12 +39,12 @@ Use cases:
 
 ```mermaid
 flowchart LR
-    INPUT[BOF .o bytes] --> PARSE[parse COFF<br/>header + sections]
-    PARSE --> ALLOC[VirtualAlloc RWX<br/>copy .text + .data]
-    ALLOC --> RELOC[apply relocations<br/>ADDR64 / ADDR32NB / REL32]
-    RELOC --> SYM[resolve entry symbol<br/>from COFF symtab]
-    SYM --> EXEC[jump to entry<br/>via function ptr]
-    EXEC --> OUT[capture output<br/>via stdout redirect]
+    INPUT[BOF .o bytes] --> PARSE[parse COFF<br>header + sections]
+    PARSE --> ALLOC[VirtualAlloc RWX<br>copy .text + .data]
+    ALLOC --> RELOC[apply relocations<br>ADDR64 / ADDR32NB / REL32]
+    RELOC --> SYM[resolve entry symbol<br>from COFF symtab]
+    SYM --> EXEC[jump to entry<br>via function ptr]
+    EXEC --> OUT[capture output<br>via stdout redirect]
 ```
 
 ## API Reference

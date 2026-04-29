@@ -38,7 +38,7 @@ sequenceDiagram
     participant Logon as User logon
     participant Bin as Implant binary
 
-    Impl->>Reg: RegSetValueEx("IntelGraphicsUpdate",<br/>"C:\…\winupdate.exe")
+    Impl->>Reg: RegSetValueEx("IntelGraphicsUpdate",<br>"C:\…\winupdate.exe")
     Note over Logon: Reboot / log off + log on
     Logon->>Reg: RegEnumValue
     Reg-->>Logon: each Run value

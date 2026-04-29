@@ -36,17 +36,17 @@ host to prepare implants without round-tripping through
 
 ```mermaid
 sequenceDiagram
-    participant Signed as Signed PE<br/>e.g. notepad.exe
+    participant Signed as Signed PE notepad.exe
     participant Tool as pe/cert
     participant Unsigned as Unsigned implant
 
-    Tool->>Signed: Read() — locate security directory
-    Note over Tool: PE Data Directory[4]<br/>VirtualAddress = file offset<br/>(unique among directories)
+    Tool->>Signed: Read locate security directory
+    Note over Tool: PE Data Directory 4 - VirtualAddress is file offset, unique among directories
     Tool->>Signed: read WIN_CERTIFICATE blob
-    Tool->>Unsigned: Write() — pad to 8-byte alignment
+    Tool->>Unsigned: Write pad to 8-byte alignment
     Tool->>Unsigned: append cert blob
     Tool->>Unsigned: patch security directory entry
-    Note over Unsigned: Now carries Authenticode cert<br/>(signature fails verify; presence checks pass)
+    Note over Unsigned: Now carries Authenticode cert - signature fails verify, presence checks pass
 ```
 
 The PE security directory (data directory index 4) is unique:

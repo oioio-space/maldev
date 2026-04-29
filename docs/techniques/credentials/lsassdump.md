@@ -55,20 +55,20 @@ field offsets without hand-curated tables.
 ```mermaid
 flowchart TD
     subgraph PPL [PPL bypass — optional, only if RunAsPPL]
-        D1[DiscoverProtectionOffset<br/>parse PsIsProtectedProcess]
-        D2[DiscoverUniqueProcessIdOffset<br/>parse PsGetProcessId]
-        D3[DiscoverInitialSystemProcessRVA<br/>find PsInitialSystemProcess]
-        D1 --> FE[FindLsassEProcess<br/>walk PsActiveProcessLinks]
+        D1[DiscoverProtectionOffset<br>parse PsIsProtectedProcess]
+        D2[DiscoverUniqueProcessIdOffset<br>parse PsGetProcessId]
+        D3[DiscoverInitialSystemProcessRVA<br>find PsInitialSystemProcess]
+        D1 --> FE[FindLsassEProcess<br>walk PsActiveProcessLinks]
         D2 --> FE
         D3 --> FE
-        FE --> UN[Unprotect<br/>zero Protection byte<br/>via RTCore64]
+        FE --> UN[Unprotect<br>zero Protection byte<br>via RTCore64]
     end
     UN -. removes PPL bit .-> OPEN
-    OPEN[OpenLSASS<br/>NtGetNextProcess + access mask] --> ENUM[collectRegions / collectModules<br/>NtQueryVirtualMemory<br/>+ ProcessLdrInformation]
-    ENUM --> RD[Dump<br/>stream regions to writer<br/>via NtReadVirtualMemory]
+    OPEN[OpenLSASS<br>NtGetNextProcess + access mask] --> ENUM[collectRegions / collectModules<br>NtQueryVirtualMemory<br>+ ProcessLdrInformation]
+    ENUM --> RD[Dump<br>stream regions to writer<br>via NtReadVirtualMemory]
     RD --> DMP[MINIDUMP blob]
-    DMP --> SK[credentials/sekurlsa<br/>parses extracts]
-    UN -. after dump .-> RP[Reprotect<br/>restore Protection byte]
+    DMP --> SK[credentials/sekurlsa<br>parses extracts]
+    UN -. after dump .-> RP[Reprotect<br>restore Protection byte]
 ```
 
 Implementation details:

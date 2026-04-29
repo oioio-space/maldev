@@ -36,10 +36,10 @@ sequenceDiagram
     Attacker->>Kernel: OpenProcessToken(handle, TOKEN_DUPLICATE|TOKEN_QUERY)
     Kernel-->>Attacker: Token handle
 
-    Attacker->>Kernel: DuplicateTokenEx(token, TOKEN_ALL_ACCESS,<br/>SecurityImpersonation, TokenPrimary)
+    Attacker->>Kernel: DuplicateTokenEx(token, TOKEN_ALL_ACCESS,<br>SecurityImpersonation, TokenPrimary)
     Kernel-->>Attacker: Duplicated token (new handle)
 
-    Note over Attacker: Now holds a SYSTEM-level<br/>primary token
+    Note over Attacker: Now holds a SYSTEM-level<br>primary token
 
     Attacker->>Kernel: CreateProcessAsUser(dupToken, "cmd.exe")
     Note over Attacker: New cmd.exe runs as SYSTEM

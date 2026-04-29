@@ -45,7 +45,7 @@ sequenceDiagram
     Caller->>Shell: CoCreateInstance(WScript.Shell)
     Caller->>Shell: CreateShortcut(path)
     Shell-->>Link: IWshShortcut dispatch
-    Caller->>Link: PutProperty(TargetPath / Arguments / IconLocation / WindowStyle / Description / WorkingDirectory)
+    Caller->>Link: PutProperty TargetPath, Arguments, IconLocation, WindowStyle, Description, WorkingDirectory
     Caller->>Link: Save()
     Link-->>Caller: written .lnk
     Caller->>COM: Release + CoUninitialize

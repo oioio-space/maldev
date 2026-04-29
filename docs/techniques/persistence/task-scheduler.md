@@ -37,7 +37,7 @@ process-creation telemetry vanishes.
 ```mermaid
 sequenceDiagram
     participant Caller
-    participant COM as Schedule.Service<br/>(COM)
+    participant COM as Schedule.Service<br>(COM)
     participant TS as Task Scheduler service
     participant Audit as Security log
     participant Trig as Trigger fires

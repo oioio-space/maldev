@@ -14,17 +14,17 @@ complete reverse-shell / staging / multi-session stack:
 ```mermaid
 flowchart LR
     subgraph implant [Implant side]
-        S[c2/shell<br/>reverse shell]
-        M[c2/meterpreter<br/>MSF stager]
+        S[c2/shell<br>reverse shell]
+        M[c2/meterpreter<br>MSF stager]
     end
     subgraph wire [Wire]
-        T[c2/transport<br/>TCP / TLS / uTLS]
-        NP[c2/transport/namedpipe<br/>SMB pipes]
-        Cert[c2/cert<br/>mTLS certs + pinning]
+        T[c2/transport<br>TCP / TLS / uTLS]
+        NP[c2/transport/namedpipe<br>SMB pipes]
+        Cert[c2/cert<br>mTLS certs + pinning]
         T -.uses.-> Cert
     end
     subgraph operator [Operator side]
-        MC[c2/multicat<br/>multi-session listener]
+        MC[c2/multicat<br>multi-session listener]
     end
     S --> T
     S --> NP

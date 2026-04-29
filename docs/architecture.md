@@ -22,37 +22,37 @@ graph TD
     end
 
     subgraph "Layer 1 — OS Primitives"
-        api["win/api<br/>DLL handles, PEB walk, API hashing"]
-        syscall["win/syscall<br/>Direct/Indirect syscalls, HashGate"]
-        ntapi["win/ntapi<br/>Typed NT wrappers, handle enum"]
-        token["win/token<br/>Token manipulation"]
-        privilege["win/privilege<br/>Elevation helpers"]
-        impersonate["win/impersonate<br/>Thread impersonation"]
-        version["win/version<br/>Version detection"]
-        domain["win/domain<br/>Domain membership"]
-        kerneldriver["kernel/driver<br/>BYOVD primitives (Reader/Writer/Lifecycle)"]
+        api["win/api<br>DLL handles, PEB walk, API hashing"]
+        syscall["win/syscall<br>Direct/Indirect syscalls, HashGate"]
+        ntapi["win/ntapi<br>Typed NT wrappers, handle enum"]
+        token["win/token<br>Token manipulation"]
+        privilege["win/privilege<br>Elevation helpers"]
+        impersonate["win/impersonate<br>Thread impersonation"]
+        version["win/version<br>Version detection"]
+        domain["win/domain<br>Domain membership"]
+        kerneldriver["kernel/driver<br>BYOVD primitives (Reader/Writer/Lifecycle)"]
     end
 
     subgraph "Layer 2 — Techniques"
-        inject["inject/<br/>15 injection methods"]
-        evasion["evasion/<br/>active evasion (amsi, etw, unhook, sleepmask, callstack, kcallback, …)"]
-        recon["recon/<br/>read-only discovery (antidebug, antivm, sandbox, timing, hwbp, dllhijack, drive, folder, network)"]
-        cleanup["cleanup/<br/>memory, files, timestamps, ads, bsod"]
-        pe["pe/<br/>parse, strip, morph, srdi, cert, masquerade, imports"]
-        runtime["runtime/<br/>in-process loaders (clr, bof)"]
-        process_tamper["process/tamper/<br/>hideprocess, herpaderping, fakecmd, phant0m"]
-        process["process/<br/>enum, session"]
-        ui["ui/<br/>MessageBox + sounds"]
-        credentials["credentials/<br/>lsassdump (LSASS dump + PPL unprotect)"]
-        privesc["privesc/<br/>uac (4 bypass) + cve202430088 (kernel LPE)"]
-        persistence["persistence/<br/>registry, startup, scheduler, service, lnk, account"]
+        inject["inject/<br>15 injection methods"]
+        evasion["evasion/<br>active evasion (amsi, etw, unhook, sleepmask, callstack, kcallback, …)"]
+        recon["recon/<br>read-only discovery (antidebug, antivm, sandbox, timing, hwbp, dllhijack, drive, folder, network)"]
+        cleanup["cleanup/<br>memory, files, timestamps, ads, bsod"]
+        pe["pe/<br>parse, strip, morph, srdi, cert, masquerade, imports"]
+        runtime["runtime/<br>in-process loaders (clr, bof)"]
+        process_tamper["process/tamper/<br>hideprocess, herpaderping, fakecmd, phant0m"]
+        process["process/<br>enum, session"]
+        ui["ui/<br>MessageBox + sounds"]
+        credentials["credentials/<br>lsassdump (LSASS dump + PPL unprotect)"]
+        privesc["privesc/<br>uac (4 bypass) + cve202430088 (kernel LPE)"]
+        persistence["persistence/<br>registry, startup, scheduler, service, lnk, account"]
     end
 
     subgraph "Layer 3 — Orchestration"
-        shell["c2/shell<br/>Reverse shell + state machine"]
-        meterpreter["c2/meterpreter<br/>Metasploit staging"]
-        transport["c2/transport<br/>TCP, TLS, uTLS, Malleable HTTP"]
-        cert["c2/cert<br/>Certificate generation"]
+        shell["c2/shell<br>Reverse shell + state machine"]
+        meterpreter["c2/meterpreter<br>Metasploit staging"]
+        transport["c2/transport<br>TCP, TLS, uTLS, Malleable HTTP"]
+        cert["c2/cert<br>Certificate generation"]
     end
 
     %% Dependencies
@@ -84,11 +84,11 @@ The `*wsyscall.Caller` is the central OPSEC mechanism. Any function that calls N
 ```mermaid
 flowchart LR
     A[Your Code] --> B{Caller?}
-    B -->|nil| C[Standard WinAPI<br/>kernel32 → ntdll]
+    B -->|nil| C[Standard WinAPI<br>kernel32 → ntdll]
     B -->|WinAPI| C
     B -->|NativeAPI| D[ntdll directly]
-    B -->|Direct| E[Syscall stub<br/>in RW→RX page]
-    B -->|Indirect| F[Jump to ntdll<br/>syscall;ret gadget]
+    B -->|Direct| E[Syscall stub<br>in RW→RX page]
+    B -->|Indirect| F[Jump to ntdll<br>syscall;ret gadget]
 
     E --> G[SSN Resolver]
     F --> G

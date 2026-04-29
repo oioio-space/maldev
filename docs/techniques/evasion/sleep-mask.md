@@ -29,17 +29,17 @@ sequenceDiagram
     Impl->>Mask: Sleep(30s)
     Mask->>Mask: 32-byte random key (crypto/rand)
 
-    Note over Mask,Page: Order matters: RW first, then XOR.<br/>Post-inject pages are PAGE_EXECUTE_READ,<br/>writing before downgrade = STATUS_ACCESS_VIOLATION
+    Note over Mask,Page: Order matters: RW first, then XOR.<br>Post-inject pages are PAGE_EXECUTE_READ,<br>writing before downgrade = STATUS_ACCESS_VIOLATION
 
     loop For each region
         Mask->>Page: VirtualProtect(RW), capture origProtect
         Mask->>Page: XOR in-place with key
     end
 
-    Note over Page: Pages: RW + scrambled bytes<br/>(not on the scanner's target list)
+    Note over Page: Pages: RW + scrambled bytes<br>(not on the scanner's target list)
 
     Scan->>Page: scan executable pages
-    Page-->>Scan: no executable pages matching<br/>signature in this region
+    Page-->>Scan: no executable pages matching<br>signature in this region
 
     Mask->>Mask: time.Sleep(30s) OR BusyWaitTrig(30s)
 

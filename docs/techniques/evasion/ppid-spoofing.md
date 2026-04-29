@@ -27,13 +27,13 @@ sequenceDiagram
     Attacker->>Kernel: OpenProcess(PROCESS_CREATE_PROCESS, explorer PID)
     Kernel-->>Attacker: hParent
 
-    Note over Attacker: Build PROC_THREAD_ATTRIBUTE_LIST<br/>with PARENT_PROCESS = hParent
+    Note over Attacker: Build PROC_THREAD_ATTRIBUTE_LIST<br>with PARENT_PROCESS = hParent
 
     Attacker->>Kernel: CreateProcess(cmd.exe, EXTENDED_STARTUPINFO)
     Kernel->>Child: Create process
     Kernel-->>Child: ParentProcessId = 1234 (explorer)
 
-    Note over Child: Process tree shows:<br/>explorer.exe → cmd.exe<br/>(not malware.exe → cmd.exe)
+    Note over Child: Process tree shows:<br>explorer.exe → cmd.exe<br>(not malware.exe → cmd.exe)
 ```
 
 **Step-by-step:**

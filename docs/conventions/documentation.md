@@ -229,7 +229,7 @@ Reference: [GitHub advanced formatting](https://docs.github.com/en/get-started/w
 | Strikethrough | `~~deprecated~~` | Marking removed APIs in CHANGELOG. |
 | Emoji shortcodes | `:rocket:` | Sparingly; never in API references. |
 | HTML comments | `<!-- … -->` | TOC markers, `<!-- BEGIN AUTOGEN -->` / `<!-- END AUTOGEN -->` boundaries. |
-| Line break inside paragraph | trailing `  ` (2 spaces), `\`, or `<br/>` | Sparingly; usually a paragraph break is correct. |
+| Line break inside paragraph | trailing `  ` (2 spaces), `\`, or `<br>` | Sparingly; usually a paragraph break is correct. |
 | File attachments (drag-drop) | (UI) | Issue/PR comments only — uploads to user-attachments CDN. Not for repo docs (use `assets/` directory). |
 
 ### GitHub-platform features (commit messages & PRs only)

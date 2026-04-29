@@ -13,15 +13,15 @@ non-elevated user token and produce SYSTEM-context execution.
 ```mermaid
 flowchart TB
     subgraph startState [Start state]
-        Medium["Medium-IL token<br/>(typical user)"]
+        Medium["Medium-IL token<br>(typical user)"]
     end
     subgraph paths [Escalation paths]
-        UAC["uac/*<br/>fodhelper / slui /<br/>silentcleanup / eventvwr"]
-        CVE["cve202430088/*<br/>kernel TOCTOU race"]
+        UAC["uac/*<br>fodhelper / slui /<br>silentcleanup / eventvwr"]
+        CVE["cve202430088/*<br>kernel TOCTOU race"]
     end
     subgraph end [End state]
         High["High-IL token (UAC)"]
-        SYSTEM["NT AUTHORITY\\SYSTEM<br/>(token swap)"]
+        SYSTEM["NT AUTHORITY\\SYSTEM<br>(token swap)"]
     end
     Medium -->|admin user, UAC default| UAC
     UAC --> High

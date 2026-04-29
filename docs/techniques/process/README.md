@@ -19,14 +19,14 @@ The `process/*` package tree groups two concerns:
 ```mermaid
 flowchart TB
     subgraph discovery [Discovery / management]
-        ENUM[enum<br/>Win32 Toolhelp + Linux /proc<br/>List / FindByName / FindProcess]
-        SESS[session<br/>WTSEnumerate + cross-session<br/>CreateProcess / Impersonate]
+        ENUM[enum<br>Win32 Toolhelp + Linux /proc<br>List / FindByName / FindProcess]
+        SESS[session<br>WTSEnumerate + cross-session<br>CreateProcess / Impersonate]
     end
     subgraph tamper [process/tamper/*]
-        FK[fakecmd<br/>PEB CommandLine spoof<br/>self + remote PID]
-        HD[herpaderping<br/>kernel image-section cache<br/>Herpaderping + Ghosting]
-        HP[hideprocess<br/>NtQSI patch in target<br/>blind Task Manager / ProcExp]
-        PH[phant0m<br/>EventLog thread termination<br/>SCM still RUNNING]
+        FK[fakecmd<br>PEB CommandLine spoof<br>self + remote PID]
+        HD[herpaderping<br>kernel image-section cache<br>Herpaderping + Ghosting]
+        HP[hideprocess<br>NtQSI patch in target<br>blind Task Manager / ProcExp]
+        PH[phant0m<br>EventLog thread termination<br>SCM still RUNNING]
     end
     subgraph consumers [Downstream consumers]
         LSA[credentials/lsassdump]

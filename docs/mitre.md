@@ -87,11 +87,11 @@ graph TD
     end
 
     subgraph "D3FEND Countermeasures (Blue)"
-        D1[D3-PSA<br/>Process Spawn Analysis]
-        D2[D3-AIPA<br/>App Integrity Analysis]
-        D3[D3-SCA<br/>System Call Analysis]
-        D4[D3-NTA<br/>Network Traffic Analysis]
-        D5[D3-SMRA<br/>Memory Range Analysis]
+        D1[D3-PSA<br>Process Spawn Analysis]
+        D2[D3-AIPA<br>App Integrity Analysis]
+        D3[D3-SCA<br>System Call Analysis]
+        D4[D3-NTA<br>Network Traffic Analysis]
+        D5[D3-SMRA<br>Memory Range Analysis]
     end
 
     I --> D1
@@ -101,10 +101,10 @@ graph TD
     C --> D4
 
     subgraph "maldev OPSEC Counters"
-        O1[Indirect syscalls<br/>defeat D3-SCA]
-        O2[Sleep mask<br/>defeats D3-SMRA]
-        O3[uTLS JA3 spoofing<br/>defeats D3-NTA]
-        O4[Unhooking<br/>defeats D3-AIPA hooks]
+        O1[Indirect syscalls<br>defeat D3-SCA]
+        O2[Sleep mask<br>defeats D3-SMRA]
+        O3[uTLS JA3 spoofing<br>defeats D3-NTA]
+        O4[Unhooking<br>defeats D3-AIPA hooks]
     end
 
     D3 -.->|bypassed by| O1

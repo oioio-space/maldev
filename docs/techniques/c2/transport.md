@@ -43,12 +43,12 @@ ClientHello".
 ```mermaid
 flowchart TD
     Pick{Config.UseTLS / UseUTLS} -->|raw| TCP[TCP transport]
-    Pick -->|TLS| TLS[TLS transport<br/>+ optional cert pin]
-    Pick -->|uTLS| UT[uTLS transport<br/>JA3 profile pinned]
+    Pick -->|TLS| TLS[TLS transport<br>+ optional cert pin]
+    Pick -->|uTLS| UT[uTLS transport<br>JA3 profile pinned]
     TCP --> Wire((wire))
     TLS --> Wire
     UT --> Wire
-    Wire -->|defenders see| NetMon[network monitor<br/>DPI + JA3 + cert]
+    Wire -->|defenders see| NetMon[network monitor<br>DPI + JA3 + cert]
 ```
 
 All transports implement the same five-method `Transport` interface:

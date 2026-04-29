@@ -51,7 +51,7 @@ flowchart TD
     Pick -->|ReadDirectoryChanges| RD[kernel32!ReadDirectoryChangesW]
     Pick -->|RtlRegisterWait| RW[ntdll!RtlRegisterWait]
     Pick -->|NtNotifyChangeDirectory| NC[ntdll!NtNotifyChangeDirectoryFile]
-    EW --> CALL[Windows calls shellcode<br/>as a normal API callback]
+    EW --> CALL[Windows calls shellcode<br>as a normal API callback]
     TQ --> CALL
     CE --> CALL
     RD --> CALL

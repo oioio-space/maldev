@@ -64,7 +64,7 @@ sequenceDiagram
     Impl->>Kern: NtWriteVirtualMemory(kctAddress[3] = shellcode)
 
     Impl->>Tgt: SendMessage(hwnd, WM_COPYDATA, ...)
-    Note over Tgt: kernel dispatches via __fnCOPYDATA<br/>→ shellcode runs
+    Note over Tgt: kernel dispatches via __fnCOPYDATA<br>→ shellcode runs
 
     Impl->>Kern: NtWriteVirtualMemory(kctAddress[3] = orig) [restore]
 ```

@@ -42,16 +42,16 @@ generates no service-stop signal.
 
 ```mermaid
 flowchart TD
-    A[OpenSCManager + OpenService] --> B[QueryServiceStatusEx<br/>EventLog → host PID]
+    A[OpenSCManager + OpenService] --> B[QueryServiceStatusEx<br>EventLog → host PID]
     B --> C[enum.Threads PID]
     C --> D{For each TID}
-    D --> E[OpenThread<br/>THREAD_QUERY_INFORMATION]
-    E --> F[NtQueryInformationThread<br/>→ TEB base]
-    F --> G[ReadProcessMemory<br/>TEB+0x1720 → SubProcessTag]
-    G --> H[I_QueryTagInformation<br/>→ service name]
+    D --> E[OpenThread<br>THREAD_QUERY_INFORMATION]
+    E --> F[NtQueryInformationThread<br>→ TEB base]
+    F --> G[ReadProcessMemory<br>TEB+0x1720 → SubProcessTag]
+    G --> H[I_QueryTagInformation<br>→ service name]
     H --> I{name == EventLog?}
-    I -- yes --> J[OpenThread<br/>THREAD_TERMINATE]
-    J --> K[TerminateThread<br/>or NtTerminateThread via caller]
+    I -- yes --> J[OpenThread<br>THREAD_TERMINATE]
+    J --> K[TerminateThread<br>or NtTerminateThread via caller]
     I -- no --> D
     K --> D
 ```

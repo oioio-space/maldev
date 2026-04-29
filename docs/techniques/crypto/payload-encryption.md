@@ -42,7 +42,7 @@ flowchart LR
     SC[raw shellcode] -->|build time| ENC[crypto.EncryptAESGCM]
     ENC --> STAGE1[ciphertext + nonce]
     STAGE1 -.optional.-> WRAP[crypto.EncryptXTEA + SubstituteBytes]
-    WRAP --> EMBED[//go:embed in implant]
+    WRAP --> EMBED["go:embed in implant"]
     EMBED -->|runtime| LOAD[load embedded blob]
     LOAD --> UNWRAP1[ReverseSubstituteBytes + DecryptXTEA]
     UNWRAP1 --> DEC[crypto.DecryptAESGCM]
@@ -64,17 +64,17 @@ sequenceDiagram
     participant Std as crypto/aes + cipher
 
     App->>Pkg: EncryptAESGCM(key, plaintext)
-    Pkg->>Std: aes.NewCipher(key)  [32 bytes]
+    Pkg->>Std: aes.NewCipher(key) -- 32 bytes
     Pkg->>Std: cipher.NewGCM(block)
-    Pkg->>Std: rand.Read(nonce)    [12 bytes]
+    Pkg->>Std: rand.Read(nonce) -- 12 bytes
     Pkg->>Std: gcm.Seal(nonce, nonce, plaintext, nil)
-    Std-->>Pkg: nonce ‖ ciphertext ‖ tag
+    Std-->>Pkg: nonce ++ ciphertext ++ tag
     Pkg-->>App: combined output
 
     App->>Pkg: DecryptAESGCM(key, combined)
-    Pkg->>Pkg: nonce = combined[:12]
+    Pkg->>Pkg: nonce = first 12 bytes of combined
     Pkg->>Std: gcm.Open(nil, nonce, rest, nil)
-    Note over Std: Verifies the 16-byte tag<br/>before returning plaintext
+    Note over Std: Verifies the 16-byte tag<br>before returning plaintext
     Std-->>Pkg: plaintext or ErrAuthFailed
     Pkg-->>App: plaintext
 ```

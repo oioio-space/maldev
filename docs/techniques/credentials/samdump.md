@@ -46,14 +46,14 @@ from a backup. The package itself opens nothing.
 
 ```mermaid
 flowchart TD
-    SYS[SYSTEM hive bytes] --> EBK[extractBootKey<br/>permute Lsa class strings]
+    SYS[SYSTEM hive bytes] --> EBK[extractBootKey<br>permute Lsa class strings]
     EBK -->|16-byte boot key| HBK
-    SAM[SAM hive bytes] --> RDF[readDomainAccountF<br/>AES-encrypted blob]
-    RDF --> HBK[deriveDomainKey<br/>AES-128-CBC]
+    SAM[SAM hive bytes] --> RDF[readDomainAccountF<br>AES-encrypted blob]
+    RDF --> HBK[deriveDomainKey<br>AES-128-CBC]
     HBK -->|hashed bootkey| LU
-    SAM --> LU[listUserRIDs<br/>walk Users key]
-    LU --> PV[parseUserV<br/>extract username + LM/NT enc]
-    PV --> DEC[decryptUserNT / decryptUserLM<br/>per-RID DES-permute<br/>+ AES-128-CBC or RC4]
+    SAM --> LU[listUserRIDs<br>walk Users key]
+    LU --> PV[parseUserV<br>extract username + LM/NT enc]
+    PV --> DEC[decryptUserNT / decryptUserLM<br>per-RID DES-permute<br>+ AES-128-CBC or RC4]
     DEC --> ACC[Account&#123;Username, RID, NT, LM&#125;]
 ```
 

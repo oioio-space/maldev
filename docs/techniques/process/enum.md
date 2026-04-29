@@ -35,14 +35,14 @@ theft, process hollowing).
 ```mermaid
 flowchart LR
     subgraph win [Windows]
-        TH[CreateToolhelp32Snapshot<br/>TH32CS_SNAPPROCESS]
+        TH[CreateToolhelp32Snapshot<br>TH32CS_SNAPPROCESS]
         TH --> P32[Process32First/Next walk]
-        P32 --> WIN[Process<br/>PID/PPID/Name]
+        P32 --> WIN[Process<br>PID/PPID/Name]
     end
     subgraph linux [Linux]
         PROC[walk /proc/&lt;pid&gt;/]
         PROC --> COMM[read comm + status]
-        COMM --> LIN[Process<br/>PID/PPID/Name]
+        COMM --> LIN[Process<br>PID/PPID/Name]
     end
     WIN --> OUT[List or FindByName or FindProcess]
     LIN --> OUT

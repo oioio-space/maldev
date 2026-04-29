@@ -60,14 +60,14 @@ sequenceDiagram
     participant Fod as fodhelper.exe (Auto-elevate)
     participant Payload as Payload (High IL)
 
-    Implant->>Reg: Create key:<br/>HKCU\Software\Classes\{random}\shell\open\command
+    Implant->>Reg: Create key:<br>HKCU\Software\Classes\{random}\shell\open\command
     Implant->>Reg: Set default value = "C:\payload.exe"
-    Implant->>Reg: Create key:<br/>HKCU\Software\Classes\ms-settings\CurVer
+    Implant->>Reg: Create key:<br>HKCU\Software\Classes\ms-settings\CurVer
     Implant->>Reg: Set default value = "{random}"
 
     Implant->>Fod: cmd.exe /C fodhelper.exe
-    Note over Fod: fodhelper.exe auto-elevates<br/>(no UAC prompt)
-    Fod->>Reg: Read ms-settings handler<br/>CurVer -> {random}
+    Note over Fod: fodhelper.exe auto-elevates<br>(no UAC prompt)
+    Fod->>Reg: Read ms-settings handler<br>CurVer -> {random}
     Reg-->>Fod: shell\open\command = "C:\payload.exe"
     Fod->>Payload: Launch payload as High IL
 

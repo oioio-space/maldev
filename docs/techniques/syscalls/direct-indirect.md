@@ -64,13 +64,13 @@ flowchart LR
 
 ```mermaid
 graph TD
-    Q{Need to bypass<br/>EDR hooks?}
-    Q -->|No| WINAPI["MethodWinAPI<br/>Standard, maximum compatibility"]
-    Q -->|Yes| Q2{EDR hooks<br/>kernel32 only?}
-    Q2 -->|Yes| NATIVE["MethodNativeAPI<br/>Bypass kernel32, call ntdll directly"]
-    Q2 -->|No| Q3{EDR performs<br/>call-stack analysis?}
-    Q3 -->|No| DIRECT["MethodDirect<br/>Private syscall stub"]
-    Q3 -->|Yes| INDIRECT["MethodIndirect<br/>JMP to ntdll gadget, cleanest stack"]
+    Q{Need to bypass<br>EDR hooks?}
+    Q -->|No| WINAPI["MethodWinAPI<br>Standard, maximum compatibility"]
+    Q -->|Yes| Q2{EDR hooks<br>kernel32 only?}
+    Q2 -->|Yes| NATIVE["MethodNativeAPI<br>Bypass kernel32, call ntdll directly"]
+    Q2 -->|No| Q3{EDR performs<br>call-stack analysis?}
+    Q3 -->|No| DIRECT["MethodDirect<br>Private syscall stub"]
+    Q3 -->|Yes| INDIRECT["MethodIndirect<br>JMP to ntdll gadget, cleanest stack"]
 
     style WINAPI fill:#4a9,color:#fff
     style NATIVE fill:#49a,color:#fff

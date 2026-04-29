@@ -36,20 +36,20 @@ the multi-factor orchestrator.
 ```mermaid
 flowchart LR
     subgraph debug [antidebug]
-        WIN[Windows: IsDebuggerPresent<br/>PEB BeingDebugged]
-        LIN[Linux: /proc/self/status<br/>TracerPid != 0]
+        WIN[Windows: IsDebuggerPresent<br>PEB BeingDebugged]
+        LIN[Linux: /proc/self/status<br>TracerPid != 0]
     end
     subgraph vm [antivm]
-        REG[Registry keys<br/>HKLM\HARDWARE\…]
-        FILES[VM driver files<br/>vmtoolsd, vbox*]
-        NIC[MAC prefixes<br/>00:0C:29 VMware]
-        PROC[Process names<br/>vmtoolsd, vboxservice]
-        DMI[DMI info<br/>BIOS / chassis]
-        CPU[CPUID flags<br/>hypervisor bit]
+        REG[Registry keys<br>HKLM\HARDWARE\…]
+        FILES[VM driver files<br>vmtoolsd, vbox*]
+        NIC[MAC prefixes<br>00:0C:29 VMware]
+        PROC[Process names<br>vmtoolsd, vboxservice]
+        DMI[DMI info<br>BIOS / chassis]
+        CPU[CPUID flags<br>hypervisor bit]
     end
     debug --> OUT[bool / vendor name]
     vm --> OUT
-    OUT --> SANDBOX[recon/sandbox<br/>orchestrator]
+    OUT --> SANDBOX[recon/sandbox<br>orchestrator]
 ```
 
 ## API Reference

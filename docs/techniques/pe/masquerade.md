@@ -40,13 +40,13 @@ cover.
 
 ```mermaid
 flowchart LR
-    SRC[Source PE<br/>e.g. svchost.exe] --> EXT[Extract<br/>manifest + icons + VERSIONINFO]
+    SRC[Source PE<br>e.g. svchost.exe] --> EXT[Extract<br>manifest + icons + VERSIONINFO]
     EXT --> RES[Resources struct]
-    RES --> MUT[optional: mutate fields<br/>OriginalFilename / FileVersion / icon]
-    MUT --> SYSO[GenerateSyso<br/>winres COFF emitter]
+    RES --> MUT[optional: mutate fields<br>OriginalFilename / FileVersion / icon]
+    MUT --> SYSO[GenerateSyso<br>winres COFF emitter]
     SYSO --> FILE[resource_windows_amd64.syso]
-    FILE --> LINK[go build<br/>auto-links .syso]
-    LINK --> OUT[implant .exe<br/>with cloned identity]
+    FILE --> LINK[go build<br>auto-links .syso]
+    LINK --> OUT[implant .exe<br>with cloned identity]
 ```
 
 At build time, `go build` finds every `*_windows_amd64.syso` in

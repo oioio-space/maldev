@@ -47,7 +47,7 @@ sequenceDiagram
     Op->>API: NetLocalGroupAddMembers("Administrators", "svc-update")
     API->>SAM: alias-member entry
     SAM-->>Audit: Event 4732 (user added to group)
-    Note over Audit: SIEM correlation: account creation + admin add<br/>from non-IT lineage = high-fidelity alert
+    Note over Audit: SIEM correlation: account creation + admin add<br>from non-IT lineage = high-fidelity alert
 ```
 
 The package's `Add` posts a `USER_INFO_1` (level 1: name +

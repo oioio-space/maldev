@@ -44,11 +44,11 @@ Three complementary tools:
 
 ```mermaid
 flowchart TD
-    Start[shellcode injected] --> Q{cet.Enforced()?}
-    Q -- No --> Run[execute as-is]
-    Q -- Yes --> TryDisable[cet.Disable]
+    Start["shellcode injected"] --> Q{"cet.Enforced ?"}
+    Q -- No --> Run["execute as-is"]
+    Q -- Yes --> TryDisable["cet.Disable"]
     TryDisable -- success --> Run
-    TryDisable -- fails ERROR_NOT_SUPPORTED --> Wrap[sc = cet.Wrap sc]
+    TryDisable -- "fails ERROR_NOT_SUPPORTED" --> Wrap["sc = cet.Wrap(sc)"]
     Wrap --> Run
 ```
 

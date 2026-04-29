@@ -58,7 +58,7 @@ sequenceDiagram
         Impl->>Kern: NtQueueApcThreadEx(hThread, FLAG=1, remoteAddr)
     end
 
-    Note over Tgt: next KiUserApcDispatcher return<br/>fires the special APC
+    Note over Tgt: next KiUserApcDispatcher return<br>fires the special APC
     Tgt->>Tgt: shellcode runs
 ```
 

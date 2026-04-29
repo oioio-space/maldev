@@ -18,17 +18,17 @@ local-account branch when LSASS access is unavailable.
 ```mermaid
 flowchart LR
     subgraph host [Live Windows host]
-        L[lsass.exe<br/>memory]
-        S[SYSTEM + SAM<br/>hives]
-        K[krbtgt key<br/>on a DC]
+        L[lsass.exe<br>memory]
+        S[SYSTEM + SAM<br>hives]
+        K[krbtgt key<br>on a DC]
     end
     subgraph extract [credentials/*]
-        LD[lsassdump<br/>NtReadVirtualMemory<br/>+ in-process MINIDUMP<br/>+ optional PPL bypass]
-        SE[sekurlsa<br/>parse MINIDUMP<br/>walk MSV / Wdigest /<br/>Kerberos / DPAPI / TSPkg /<br/>CloudAP / LiveSSP / CredMan]
-        SD[samdump<br/>REGF parser<br/>+ syskey / hashed bootkey<br/>+ AES/RC4/DES decrypt]
+        LD[lsassdump<br>NtReadVirtualMemory<br>+ in-process MINIDUMP<br>+ optional PPL bypass]
+        SE[sekurlsa<br>parse MINIDUMP<br>walk MSV / Wdigest /<br>Kerberos / DPAPI / TSPkg /<br>CloudAP / LiveSSP / CredMan]
+        SD[samdump<br>REGF parser<br>+ syskey / hashed bootkey<br>+ AES/RC4/DES decrypt]
     end
     subgraph forge [credentials/*]
-        GT[goldenticket<br/>Forge + Submit]
+        GT[goldenticket<br>Forge + Submit]
     end
     L --> LD
     LD --> SE
@@ -36,8 +36,8 @@ flowchart LR
     K --> SE
     SE -.krbtgt hash.-> GT
     SD --> OUT[NTLM hashes / pwdump]
-    SE --> OUT2[NTLM / Kerberos / DPAPI<br/>/ CloudAP PRT / etc.]
-    GT --> KIRBI[kirbi blob<br/>+ LSA cache inject]
+    SE --> OUT2[NTLM / Kerberos / DPAPI<br>/ CloudAP PRT / etc.]
+    GT --> KIRBI[kirbi blob<br>+ LSA cache inject]
 ```
 
 ## Packages

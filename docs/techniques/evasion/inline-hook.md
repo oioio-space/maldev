@@ -54,7 +54,7 @@ trampoline. Pure Go — no CGo, no x64dbg required.
 sequenceDiagram
     participant Caller
     participant Target as Target Function
-    participant Relay as Relay Page (±2GB)
+    participant Relay as Relay Page within 2GB
     participant Callback as Go Callback
     participant Trampoline as Trampoline
 

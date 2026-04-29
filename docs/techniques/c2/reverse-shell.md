@@ -75,7 +75,7 @@ sequenceDiagram
             and operator→implant
                 Op->>Imp: copy(socket → stdout)
             end
-            Note over Imp: socket dropped<br/>or Stop()
+            Note over Imp: socket dropped<br>or Stop()
             Imp->>Sh: kill child
         else fail
             Imp->>Imp: backoff(delay)

@@ -14,24 +14,24 @@ single "win technique" — the area is a foundation for the others.
 ```mermaid
 flowchart TB
     subgraph imports [Imports & syscalls]
-        API[win/api<br/>PEB walk + ROR13 hash]
-        NTAPI[win/ntapi<br/>typed Nt* wrappers]
-        SYSCALL[win/syscall<br/>Direct/Indirect SSN]
+        API[win/api<br>PEB walk + ROR13 hash]
+        NTAPI[win/ntapi<br>typed Nt* wrappers]
+        SYSCALL[win/syscall<br>Direct/Indirect SSN]
     end
     subgraph identity [Token & identity]
-        TOK[win/token<br/>steal · privileges · UBR]
-        IMP[win/impersonate<br/>thread context swap]
-        PRIV[win/privilege<br/>IsAdmin · ExecAs]
+        TOK[win/token<br>steal · privileges · UBR]
+        IMP[win/impersonate<br>thread context swap]
+        PRIV[win/privilege<br>IsAdmin · ExecAs]
     end
     subgraph fingerprint [Host fingerprint]
-        VER[win/version<br/>RtlGetVersion + UBR]
-        DOM[win/domain<br/>NetGetJoinInformation]
+        VER[win/version<br>RtlGetVersion + UBR]
+        DOM[win/domain<br>NetGetJoinInformation]
     end
     API --> NTAPI
     API --> SYSCALL
     TOK --> IMP
     IMP --> PRIV
-    VER --> GATE{technique<br/>compatibility}
+    VER --> GATE{technique<br>compatibility}
     DOM --> GATE
 ```
 

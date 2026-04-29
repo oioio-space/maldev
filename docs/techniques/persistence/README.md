@@ -26,12 +26,12 @@ flowchart TB
         CLICK[user execution]
     end
     subgraph mechs [persistence/*]
-        REG[registry<br/>HKCU + HKLM<br/>Run / RunOnce]
-        ST[startup<br/>StartUp-folder LNK]
-        SCHEDP[scheduler<br/>COM ITaskService]
-        SVC[service<br/>SCM SYSTEM]
-        ACC[account<br/>local user + admin]
-        LNK[lnk<br/>shortcut primitive]
+        REG[registry<br>HKCU + HKLM<br>Run / RunOnce]
+        ST[startup<br>StartUp-folder LNK]
+        SCHEDP[scheduler<br>COM ITaskService]
+        SVC[service<br>SCM SYSTEM]
+        ACC[account<br>local user + admin]
+        LNK[lnk<br>shortcut primitive]
     end
     subgraph compose [Composition]
         IFACE[Mechanism interface]

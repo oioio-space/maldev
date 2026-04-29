@@ -15,7 +15,7 @@ vulnerable-driver block-list update.
 
 ```mermaid
 flowchart LR
-    Caller -->|Driver.Install| Lifecycle["NtLoadDriver +<br/>SCM CreateService/Start"]
+    Caller -->|Driver.Install| Lifecycle["NtLoadDriver +<br>SCM CreateService/Start"]
     Lifecycle --> SignedSys["RTCore64.sys (signed)"]
     SignedSys --> IOCTL["IOCTL 0x80002048 / 0x8000204C"]
     IOCTL --> Kernel["arbitrary kernel R/W"]

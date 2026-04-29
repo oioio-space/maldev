@@ -20,9 +20,9 @@ flowchart LR
         FB[Framebuffer]
     end
     subgraph collection [collection/*]
-        K[keylog<br/>WH_KEYBOARD_LL hook]
-        C[clipboard<br/>OpenClipboard + seq poll]
-        S[screenshot<br/>GDI BitBlt]
+        K[keylog<br>WH_KEYBOARD_LL hook]
+        C[clipboard<br>OpenClipboard + seq poll]
+        S[screenshot<br>GDI BitBlt]
     end
     subgraph sink [Operator sink]
         OUT[stdout / file / C2 channel]

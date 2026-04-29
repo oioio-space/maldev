@@ -62,7 +62,7 @@ sequenceDiagram
     participant Shell as Shell\Open\Command
     Op->>Reg: write ms-settings\Shell\Open\Command = payload.exe
     Op->>Auto: ShellExecute(fodhelper.exe)
-    Note over Auto: kernel grants High-IL token<br/>(autoElevate=true + System32 + signed)
+    Note over Auto: kernel grants High-IL token<br>(autoElevate=true + System32 + signed)
     Auto->>Reg: read ms-settings\Shell\Open\Command
     Reg-->>Auto: payload.exe
     Auto->>Shell: CreateProcess(payload.exe)

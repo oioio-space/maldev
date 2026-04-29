@@ -61,7 +61,7 @@ sequenceDiagram
     rect rgb(238,255,238)
         Note over Loader,Provider: After PatchScanBuffer
         Loader->>amsi: AmsiScanBuffer(payload)
-        Note over amsi: prologue is now<br/>31 C0 C3 (xor eax,eax; ret)
+        Note over amsi: prologue is now<br>31 C0 C3 (xor eax,eax; ret)
         amsi-->>Loader: returns S_OK, *result untouched
         Loader->>Loader: continue (treats as clean)
     end

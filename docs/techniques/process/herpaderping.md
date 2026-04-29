@@ -54,7 +54,7 @@ verified-working 26100 builds can drop the test skip locally.
 ```mermaid
 sequenceDiagram
     participant Op as Operator
-    participant Sec as NtCreateSection<br/>(SEC_IMAGE)
+    participant Sec as NtCreateSection<br>(SEC_IMAGE)
     participant Cache as Kernel image cache
     participant Disk as Backing file
     participant Proc as NtCreateProcessEx
@@ -65,12 +65,12 @@ sequenceDiagram
     Sec->>Cache: cache image (immutable)
     Op->>Proc: NtCreateProcessEx(section)
     Note over Op,Disk: Mode-specific step
-    Op->>Disk: Herpaderping: overwrite with decoy<br/>OR Ghosting: delete (file unlinked)
+    Op->>Disk: Herpaderping: overwrite with decoy<br>OR Ghosting: delete (file unlinked)
     Op->>Thr: NtCreateThreadEx
     Thr->>EDR: PsSetCreateThreadNotifyRoutine fires
     EDR->>Disk: read backing file
     Disk-->>EDR: decoy / file-not-found
-    Note over Cache,Thr: Process executes from cached image<br/>= original payload
+    Note over Cache,Thr: Process executes from cached image<br>= original payload
 ```
 
 The on-disk decoy can be a signed system binary so authenticode

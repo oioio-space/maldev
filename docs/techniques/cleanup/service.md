@@ -41,7 +41,7 @@ sequenceDiagram
     SCM-->>Caller: HANDLE
     Caller->>Service: SetNamedSecurityInfo(SE_SERVICE, DACL_SECURITY_INFORMATION, restricted-DACL)
     Service-->>Caller: ERROR_SUCCESS
-    Note over SCM,Service: subsequent EnumServicesStatus calls<br/>filter out the service for non-SYSTEM callers
+    Note over SCM,Service: subsequent EnumServicesStatus calls<br>filter out the service for non-SYSTEM callers
 ```
 
 The restricted DACL the package applies:

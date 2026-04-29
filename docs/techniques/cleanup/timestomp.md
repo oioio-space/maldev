@@ -37,8 +37,8 @@ you'd need a kernel driver — out of scope here.
 
 ```mermaid
 flowchart LR
-    SRC["reference file<br/>e.g. notepad.exe"] -->|"GetFileTime"| TIMES["3 FILETIMEs"]
-    TIMES -->|"SetFileTime"| DST["target file<br/>e.g. impl.exe"]
+    SRC["reference file<br>e.g. notepad.exe"] -->|"GetFileTime"| TIMES["3 FILETIMEs"]
+    TIMES -->|"SetFileTime"| DST["target file<br>e.g. impl.exe"]
 
     classDef ref fill:#e8f4ff
     classDef tgt fill:#ffeae8

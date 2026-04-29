@@ -42,11 +42,11 @@ sequenceDiagram
     participant NtQSI as ntdll!NtQuerySystemInformation
 
     Impl->>Impl: GetModuleHandle("ntdll.dll") + GetProcAddress("NtQSI")
-    Note over Impl: ntdll loads at the same VA in every<br/>process per boot — local VA = remote VA
+    Note over Impl: ntdll loads at the same VA in every<br>process per boot — local VA = remote VA
 
     Impl->>Target: OpenProcess(VM_WRITE | VM_OPERATION)
     Impl->>NtQSI: WriteProcessMemory(prologue, stub)
-    Note over NtQSI: 7-byte stub:<br/>B8 02 00 00 C0   mov eax, 0xC0000002<br/>C2 10 00         ret 0x10
+    Note over NtQSI: 7-byte stub:<br>B8 02 00 00 C0   mov eax, 0xC0000002<br>C2 10 00         ret 0x10
 
     Target->>NtQSI: NtQuerySystemInformation(SystemProcessInformation, …)
     NtQSI-->>Target: STATUS_NOT_IMPLEMENTED

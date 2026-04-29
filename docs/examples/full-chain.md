@@ -31,12 +31,12 @@ flowchart TD
 
     subgraph "3. Injection"
         C1[Decrypt shellcode]
-        C2[Module stomp or<br/>section map inject]
+        C2[Module stomp or<br>section map inject]
     end
 
     subgraph "4. C2"
-        D1[uTLS connection<br/>Chrome JA3 fingerprint]
-        D2[Malleable HTTP<br/>jQuery CDN profile]
+        D1[uTLS connection<br>Chrome JA3 fingerprint]
+        D2[Malleable HTTP<br>jQuery CDN profile]
     end
 
     subgraph "5. Post-Exploitation"

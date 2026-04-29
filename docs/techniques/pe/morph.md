@@ -35,10 +35,10 @@ shallow, defeating only signature-based static unpacker matching.
 
 ```mermaid
 flowchart LR
-    INPUT["UPX-packed binary<br/>UPX0 / UPX1 / UPX2"] --> SCAN[Scan section table<br/>for 'UPX' substring]
-    SCAN --> RAND[Generate 8 random<br/>printable bytes per section]
-    RAND --> PATCH[Overwrite Name field<br/>40-byte section header offset]
-    PATCH --> OUT[Morphed binary<br/>random section names]
+    INPUT["UPX-packed binary<br>UPX0 / UPX1 / UPX2"] --> SCAN[Scan section table<br>for 'UPX' substring]
+    SCAN --> RAND[Generate 8 random<br>printable bytes per section]
+    RAND --> PATCH[Overwrite Name field<br>40-byte section header offset]
+    PATCH --> OUT[Morphed binary<br>random section names]
 ```
 
 The section name field lives at offset 0 of every 40-byte section
