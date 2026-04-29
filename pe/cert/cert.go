@@ -125,6 +125,12 @@ func StripVia(creator stealthopen.Creator, pePath, dst string) error {
 	binary.LittleEndian.PutUint32(data[dirEntryOffset:], 0)   // VirtualAddress
 	binary.LittleEndian.PutUint32(data[dirEntryOffset+4:], 0) // Size
 
+	// PE optional-header CheckSum is now stale — recompute so the
+	// stripped image still verifies under ImageHlp!CheckSumMappedFile.
+	if err := PatchPECheckSum(data); err != nil {
+		return fmt.Errorf("patch checksum: %w", err)
+	}
+
 	target := dst
 	if target == "" {
 		target = pePath
@@ -189,6 +195,12 @@ func WriteVia(creator stealthopen.Creator, pePath string, c *Certificate) error 
 	binary.LittleEndian.PutUint32(data[dirEntryOffset+4:], newSize)
 
 	data = append(data, c.Raw...)
+
+	// PE optional-header CheckSum is now stale — recompute so the
+	// re-signed image still verifies under ImageHlp!CheckSumMappedFile.
+	if err := PatchPECheckSum(data); err != nil {
+		return fmt.Errorf("patch checksum: %w", err)
+	}
 
 	return stealthopen.WriteAll(creator, pePath, data)
 }
