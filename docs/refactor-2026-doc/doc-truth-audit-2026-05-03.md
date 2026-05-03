@@ -33,7 +33,7 @@ Each panorama lives at `cmd/examples/<id>/main.go` + a walkthrough at `docs/exam
 | 7 | `tokens-impersonation` | tokens/{impersonation,token-theft,privilege-escalation} | ⏳ pending | Token games. |
 | 8 | `privesc-uac` | privesc/{uac,cve202430088} + recon/dllhijack autoElevate | ⏳ pending | UAC bypass. |
 | 9 | `credentials` | credentials/{lsassdump,samdump,sekurlsa,goldenticket} | ⏳ pending | Cred extraction. |
-| 10 | `cleanup-suite` | cleanup/{ads,timestomp,self-delete,memory-wipe,wipe} | ⏳ pending | Anti-forensics. |
+| 10 | `cleanup-suite` | cleanup/{ads,timestomp,memory-wipe} (skips selfdelete to avoid terminating the runner) | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. Doc-drift: `ads.List` returns structs with name+size, doc shows `[]string`. |
 | 11 | `pe-suite` | pe/{cert,dll-proxy,masquerade,morph,imports,pe-to-shellcode,strip-sanitize} | ⏳ pending | PE manipulation. |
 | 12 | `process-tamper` | process/{fakecmd,herpaderping,hideprocess,phant0m} | ⏳ pending | Process evasion. |
 | 13 | `collection-suite` | collection/{clipboard,screenshot,keylogging,lsass-dump,alternate-data-streams} | ⏳ pending | Data collection. |
@@ -62,6 +62,7 @@ Add a row whenever a panorama or audit reveals a mismatch. Decision column: **fi
 | `docs/techniques/persistence/startup-folder.md` | `startup.Install("name", path, args)` | works for users with an existing interactive profile; on accounts that have never logged in interactively, `SHGetKnownFolderPath` for the Startup CSIDL returns "file not found" because the per-user Shell folders aren't registered yet | clarify-doc | TODO — add a "Requires the user account to have logged in at least once interactively (the Startup folder is materialized at first logon, not at user creation)" note. |
 | `docs/techniques/persistence/task-scheduler.md` | `scheduler.Create(\`\\\<name>\`, …)` "Simple" | lowuser cannot register a task at the root path; gets `RegisterTaskDefinition: Une exception s'est produite. (<nil>)` even with `WithTriggerLogon` | clarify-doc | TODO — add a "User-scope tasks live under `\Users\<sid>\` or similar; the root path requires admin/SYSTEM" note. Or document the correct path syntax for unprivileged installs (or note that there isn't one — task registration in the root namespace is admin-only on modern Windows). |
 | `docs/techniques/persistence/account.md` | `import "github.com/oioio-space/maldev/persistence/account"` then uses `user.Add(...)` | works because the package declaration is `package user` — implicit alias from the import path's basename to the actual package identifier. The doc lists the import path but never explains the rename, easy to miss when the example doesn't compile in a casual reader's editor. | clarify-doc | TODO — show the import line with an explicit rename (`user "github.com/oioio-space/maldev/persistence/account"`), or rename the package to `account` to remove the surprise entirely. |
+| `docs/techniques/cleanup/ads.md:Simple` | `streams, _ := ads.List(...)` shown as `[]string{"config"}` | actual return is a slice of structs with at least Name + Size (`[{config 10}]`) | fix-doc | TODO — show the real type in the comment and `for _, s := range streams { fmt.Println(s.Name, s.Size) }`. |
 
 ## E2E observations from completed panoramas
 
@@ -133,6 +134,19 @@ This is the key admin/user differential the audit is designed to surface: the do
 | Process exit code | ✅ rc=0 | ✅ rc=0 (errors are reported, not fatal) | ✅ rc=0 | ✅ rc=0 | OK |
 
 The cleanest 3-for-3 / 0-for-3 differential in the audit. Combined with panorama 5 it gives the full "what persists without admin?" answer: only the HKCU Run key.
+
+### Panorama 10 — `cleanup-suite` (matrix run, 2026-05-03)
+
+| Step | win10 admin | win10 lowuser | win11 admin | win11 lowuser | Doc note |
+|---|---|---|---|---|---|
+| `ads.Write` + `Read` (round-trip) | ✅ 10 bytes round-trip | ✅ same | ✅ | ✅ | OK |
+| `ads.List` | ✅ `[{config 10}]` | ✅ same | ✅ | ✅ | Doc-drift: doc shows `[]string` |
+| `ads.Delete` | ✅ | ✅ | ✅ | ✅ | OK |
+| `timestomp.Set` (mtime+atime → 5y in past) | ✅ verified via os.Stat: 43800h ago | ✅ same | ✅ | ✅ | OK |
+| `memory.SecureZero` | ✅ zeroed=true | ✅ | ✅ | ✅ | OK |
+| Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | full panorama green |
+
+Anti-forensic primitives are filesystem-level (ADS via FILE_FLAG_BACKUP_SEMANTICS, timestomp via NtSetInformationFile FileBasicInformation, memory wipe is a process-local memset) — all work for any user with write access to the target file. The matrix uses `C:\Users\Public\maldev` which is granted to lowuser by the provisioning script.
 
 ## Workflow per panorama
 
