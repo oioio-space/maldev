@@ -36,7 +36,7 @@ Each panorama lives at `cmd/examples/<id>/main.go` + a walkthrough at `docs/exam
 | 10 | `cleanup-suite` | cleanup/{ads,timestomp,memory-wipe} (skips selfdelete to avoid terminating the runner) | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. Doc-drift: `ads.List` returns structs with name+size, doc shows `[]string`. |
 | 11 | `pe-suite` | pe/{imports.List, cert.Has+Read, strip.Sanitize, srdi.ConvertFile} | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0 with full parity admin/lowuser. **Doc-clarif**: notepad.exe is catalog-signed, not Authenticode-embedded; `cert.Copy(notepad.exe, …)` in the doc would fail — pick a different sample. |
 | 12 | `process-tamper` | process/enum.List + process/session.Active + process/tamper/fakecmd.Spoof+Restore | ✅ matrix run | Done 2026-05-03. enum/fakecmd parity admin/lowuser. session.Active inconsistent for lowuser (likely returns empty / errors when invoked from session 0 task). **Doc-drift**: session.Info real fields are `ID/Name/State/User/Domain`, doc says `SessionID/Username`. |
-| 13 | `collection-suite` | collection/{clipboard,screenshot,keylogging,lsass-dump,alternate-data-streams} | ⏳ pending | Data collection. |
+| 13 | `collection-suite` | collection/{clipboard.ReadText, screenshot.Capture, keylog.Start} | ✅ matrix run | Done 2026-05-03. lsass-dump + ADS already covered by panoramas 9 + 10. **Session-0 limitation surfaced**: every collection primitive is interactive-session-bound; SSH admin + scheduled-task lowuser both run in session 0 → empty clipboard, screen-capture-failed, keylogger receives no events. The doc could call this out: "collection requires running inside a user logon session (interactive desktop), not via service / scheduled task / SSH". |
 | 14 | `runtime-loaders` | runtime/{bof-loader,clr} + injection/{phantom-dll,module-stomping,section-mapping} | ⏳ pending | Loader variants. |
 | 15 | `c2-suite` | c2/{transport,reverse-shell,namedpipe,multicat,malleable-profiles} | ⏳ pending | C2 plumbing. |
 | 16 | `kernel-byovd` | kernel/byovd-rtcore64 + (admin only) | ⏳ pending | BYOVD admin-only. |
@@ -68,6 +68,7 @@ Add a row whenever a panorama or audit reveals a mismatch. Decision column: **fi
 | `docs/techniques/credentials/samdump.md` `LiveDump` | matrix evidence: fails on all four cells with `samdump: live dump failed` (admin too) | unclear — LiveDump uses VSS shadow copies which may need explicit feature setup on workstation SKUs, or the function has an environment requirement the doc doesn't mention | clarify-doc + investigate-code | TODO — reproduce manually on the VM, capture the real underlying error, then either fix-code or add a "VSS required" note. |
 | `docs/techniques/pe/certificate-theft.md:Simple` | `cert.Copy(\`C:\Windows\System32\notepad.exe\`, …)` | notepad.exe (and most modern system PEs) are *catalog-signed* — the Authenticode signature lives in `\System32\CatRoot\…\*.cat`, not embedded in the PE overlay. `cert.Has(notepad.exe)` returns false on Win10 + Win11; the example would fail at the source-cert read. | clarify-doc | TODO — change the example to a third-party signed PE (e.g. `\Program Files\Internet Explorer\iediagcmd.exe` historically had embedded sig, or a small embedded-signed Windows tool), or add a note explaining catalog vs embedded signing and how to inspect both. |
 | `docs/techniques/process/session.md:Simple` | `i.SessionID`, `i.Username` | real fields on `session.Info` are `ID`, `Name`, `State`, `User`, `Domain` (no `SessionID`, no `Username`) | fix-doc | TODO — rewrite the example: `fmt.Printf("session %d (%s): %s\\%s (%v)\n", i.ID, i.Name, i.Domain, i.User, i.State)`. |
+| `docs/techniques/collection/{clipboard,screenshot,keylogging}.md` | "Simple" examples imply they "just work" | every primitive needs an interactive logon session — running from a service / scheduled task / SSH session yields empty clipboard, "screen capture failed", and a keylogger that receives no events. Matrix evidence on Win10 + Win11 in both admin and lowuser. | clarify-doc | TODO — add a "Session requirement" callout to the area README: collection requires session ≠ 0 with an attached desktop. Useful for operators who would otherwise wonder why their service-mode implant collects nothing. |
 
 ## E2E observations from completed panoramas
 
@@ -228,6 +229,17 @@ PE work is parse + transform on raw bytes — no privileged syscalls, full parit
 | Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | OK |
 
 Notable: **fakecmd.Spoof works at lowuser parity with admin** — PEB rewriting is in-process memory tampering with no external token check, exactly the kind of evasion non-admin malware can rely on. Conversely, session enumeration's lowuser quirk (no rows visible) likely reflects the matrix runner's use of a session-0 scheduled task; an actual interactive user-session implant would see at least its own session.
+
+### Panorama 13 — `collection-suite` (matrix run, 2026-05-03)
+
+| Step | win10 admin | win10 lowuser | win11 admin | win11 lowuser | Doc note |
+|---|---|---|---|---|---|
+| `clipboard.ReadText` | ✅ OK 0 chars | ✅ same | ✅ same | ✅ same | OK — no error, but no clipboard data either; session-0 has no user clipboard |
+| `screenshot.Capture` | ❌ `screen capture failed` | ❌ same | ❌ same | ❌ same | Doc-clarif — needs interactive desktop |
+| `keylog.Start` (100 ms window) | ✅ Start OK / 0 events drained | ✅ same | ✅ | ✅ | OK API surface, 0 events because session 0 has no input message pump |
+| Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | OK |
+
+Single consolidated finding for the area: **collection requires an interactive logon session** (with an attached desktop and a window-station). Running from a service, scheduled task, or SSH session — which is how every "post-exploitation tool" actually lands on a target — yields empty/failed results. The doc should call this out at the top of the area README; right now the "Simple" examples make it look like one-line magic.
 
 ## Workflow per panorama
 
