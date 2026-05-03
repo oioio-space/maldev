@@ -41,6 +41,11 @@ func main() {
 		configPath = flag.String("config", defaultConfigPath, "path to config YAML")
 		localPath  = flag.String("local", defaultLocalPath, "path to local-override YAML (optional)")
 		reportDir  = flag.String("report-dir", "", "host directory to collect test.log + cover.out per VM (empty = no artifacts)")
+		binPath    = flag.String("bin", "", "run a Go example binary on the VM instead of `go test` (path to a Go pkg dir or a pre-built .exe)")
+		asUser     = flag.String("as-user", "", "guest user for -bin mode: empty/admin = ssh as vm.User; any other name = provisioned via scheduled task")
+		matrix     = flag.Bool("matrix", false, "in -bin mode, run admin + lowuser back-to-back and report each")
+		noRestore  = flag.Bool("no-restore", false, "in -bin mode, skip start/revert (assume VM is already up)")
+		noStop     = flag.Bool("no-stop", false, "in -bin mode, skip stop+restore at end (leave VM running for repeated runs)")
 	)
 	flag.Usage = usage
 	flag.Parse()
@@ -101,18 +106,28 @@ func main() {
 		die("unknown target %q (want windows|windows11|linux|all)", target)
 	}
 
-	projectRoot, err := filepath.Abs(".")
-	if err != nil {
-		die("project root: %v", err)
-	}
-
 	rc := 0
 	for _, name := range targets {
 		vm, ok := cfg.VMs[name]
 		if !ok {
 			die("vm %q not in config", name)
 		}
-		code := RunVM(ctx, drv, &vm, projectRoot, packages, testFlags, RunOpts{ReportDir: *reportDir})
+		var code int
+		if *binPath != "" {
+			code = RunBinaryOnVM(ctx, drv, &vm, RunBinaryOpts{
+				BinPath:   *binPath,
+				AsUser:    *asUser,
+				Matrix:    *matrix,
+				NoRestore: *noRestore,
+				NoStop:    *noStop,
+			})
+		} else {
+			projectRoot, err := filepath.Abs(".")
+			if err != nil {
+				die("project root: %v", err)
+			}
+			code = RunVM(ctx, drv, &vm, projectRoot, packages, testFlags, RunOpts{ReportDir: *reportDir})
+		}
 		if code != 0 {
 			rc = code
 		}
