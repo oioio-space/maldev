@@ -46,6 +46,7 @@ import (
 	"github.com/oioio-space/maldev/evasion/etw"
 	"github.com/oioio-space/maldev/evasion/unhook"
 	"github.com/oioio-space/maldev/inject"
+	"github.com/oioio-space/maldev/process/tamper/fakecmd"
 	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
 
@@ -74,8 +75,20 @@ func main() {
 		wsyscall.MethodIndirectAsm,
 	}
 	selfPID := os.Getpid()
+	// Deliberately omitted from the matrix:
+	//   - evasion/acg.Enable      — sets ProhibitDynamicCode process-wide;
+	//                               once on, every subsequent Direct/Indirect
+	//                               cell fails to flip its stub page to RX.
+	//                               Also: caller arg is accepted but unused
+	//                               (kernel32 path), so 5×4 cells would yield
+	//                               identical results — no composability
+	//                               signal.
+	//   - evasion/blockdlls.Enable — caller arg accepted but unused for the
+	//                               same reason. Test value zero across the
+	//                               method/resolver axes.
+	//
 	// Unhook techniques mutate the in-process ntdll globally and are listed
-	// last so the first 8 techniques exercise each (method, resolver) cell
+	// last so the first 9 techniques exercise each (method, resolver) cell
 	// against the original (potentially hooked) ntdll. Otherwise an early
 	// unhook cell would mask resolver drifts that only manifest on a
 	// hooked ntdll.
@@ -93,6 +106,9 @@ func main() {
 		{"lsassdump.LsassPID", func(c *wsyscall.Caller) error {
 			_, err := lsassdump.LsassPID(c)
 			return err
+		}},
+		{"fakecmd.Spoof(notepad.exe)", func(c *wsyscall.Caller) error {
+			return fakecmd.Spoof("notepad.exe", c)
 		}},
 		{"unhook.PerunUnhook", unhook.PerunUnhook},
 		{"unhook.ClassicUnhook(NtAllocateVirtualMemory)", func(c *wsyscall.Caller) error {
