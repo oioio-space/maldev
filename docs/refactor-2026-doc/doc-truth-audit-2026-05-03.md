@@ -27,7 +27,7 @@ Each panorama lives at `cmd/examples/<id>/main.go` + a walkthrough at `docs/exam
 | 1 | `stealth-recon-ppid` | win/syscall (Tartarus + IndirectAsm) + evasion/stealthopen + evasion/preset + recon/dllhijack + c2/shell PPID | ✅ matrix run | Done 2026-05-03. See observations below. Open fixes : doc-drift Opportunity fields, clarify-doc admin caveats. |
 | 2 | `injection-evasion` | wsyscall (Tartarus + Indirect) + evasion/preset.Stealth + inject.ThreadPoolExec + evasion/sleepmask + cleanup/memory.SecureZero | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. Doc clarification queued (SecureZero target). |
 | 3 | `unhook-suite` | evasion/unhook (Classic + Full) + evasion/ntdll-unhooking + win/syscall callers | ⏳ pending | Per-method unhook coverage. |
-| 4 | `recon-suite` | recon/{anti-analysis,sandbox,timing,network,drive,folder,hw-breakpoints} | ⏳ pending | All sandbox/AV checks. |
+| 4 | `recon-suite` | recon/{anti-analysis,sandbox,timing,network,drive,folder,hw-breakpoints} | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. Findings: drive.New needs trailing `\`; hwbp.Breakpoint missing Module+TID fields. |
 | 5 | `persistence-user` | persistence/{registry,startup,scheduler} (HKCU paths) | ⏳ pending | Survives without admin? |
 | 6 | `persistence-admin` | persistence/{service,account,task-scheduler-SYSTEM,lnk} | ⏳ pending | Admin-only persistence. |
 | 7 | `tokens-impersonation` | tokens/{impersonation,token-theft,privilege-escalation} | ⏳ pending | Token games. |
@@ -57,6 +57,8 @@ Add a row whenever a panorama or audit reveals a mismatch. Decision column: **fi
 | `docs/techniques/evasion/stealthopen.md` | `NewStealth(path)` returns `(*Stealth, error)` | works **but** silently requires admin to obtain Object ID on system files (matrix evidence: `obtain ObjectID: Accès refusé` for lowuser on `C:\Windows\System32\ntdll.dll`) | clarify-doc | TODO — add an "Admin needed for Object ID stamping on system files" note to the Limitations block |
 | `docs/techniques/evasion/ppid-spoofing.md` | "legitimate Windows API feature, Go 1.24+ native support" | admin SSH session can `OpenProcess(explorer)` and build SysProcAttr, **but** `cmd.Output()` → `CreateProcess` fails with `Accès refusé` even as admin on both Win10 and Win11 (likely integrity-level mismatch: SSH-launched admin = High IL, explorer = Medium IL) | clarify-doc | TODO — add an "integrity-level constraint" note. Spawning a child of an interactive-session process from a non-interactive admin session is denied. Test must run from an interactive shell (or pick a non-interactive parent like svchost). |
 | `docs/techniques/evasion/sleep-mask.md` + `docs/techniques/cleanup/memory-wipe.md` | "Real beacon loop" example sets the region to RX then leaves it; thread-pool.md "Complex" example wipes via `memory.SecureZero(shellcode)` | the `shellcode []byte` heap slice is what gets zeroed; the RX page is read-only and SecureZero on it crashes with access violation. Easy mistake when conflating the two examples. | clarify-doc | TODO — add a "wipe target = the heap-side plaintext, not the RX page" note to memory-wipe.md, or mention it in sleep-mask.md "Common Pitfalls". |
+| `docs/techniques/recon/drive.md:Simple` | `drive.New("C:")` | rejects `"C:"`, requires `"C:\"` (Win10 + Win11 both fail with `syntax incorrect`) | fix-doc | TODO — change the example to use a raw string `\`C:\\\``. |
+| `docs/techniques/recon/hw-breakpoints.md:Simple` | `bp.Module`, `bp.TID` | neither field exists on `hwbp.Breakpoint` | fix-doc | TODO — list the real fields (run a quick godoc check first). |
 
 ## E2E observations from completed panoramas
 
@@ -90,6 +92,22 @@ Decisions captured in the doc-drift table above.
 | Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | full panorama green |
 
 Validates the canonical "init beacon" sequence end-to-end. Notable that **none of these steps require admin**: a non-admin local user can silence AMSI/ETW in their own process, dispatch shellcode on the existing thread pool, and mask the region — exactly the threat model EDRs need to defend against.
+
+### Panorama 3 — `recon-suite` (matrix run, 2026-05-03)
+
+| Step | win10 admin | win10 lowuser | win11 admin | win11 lowuser | Doc note |
+|---|---|---|---|---|---|
+| `antidebug.IsDebuggerPresent` | ✅ false | ✅ false | ✅ false | ✅ false | OK |
+| `antivm.Detect` | ✅ "QEMU" | ✅ "QEMU" | ✅ "QEMU" | ✅ "QEMU" | OK — both VMs surface the QEMU vendor as expected |
+| `sandbox.IsSandboxed` | ✅ "virtual machine detected" | ✅ same | ✅ same | ✅ same | OK |
+| busy-wait timing | ✅ 200-206ms | ✅ same | ✅ | ✅ | OK |
+| `drive.New("C:")` | ❌ "syntax incorrect" | ❌ same | ❌ same | ❌ same | **Doc bug** — needs trailing `\`. Example fixed locally to `\`C:\\\``. |
+| `folder.GetKnown(FOLDERID_RoamingAppData…)` | ✅ `C:\Users\test\AppData\Roaming` | ✅ `C:\Users\lowuser…\AppData\Roaming` | ✅ | ✅ | OK — non-admin can resolve their own profile paths |
+| `network.InterfaceIPs` | ✅ 4 IPs (link-local v6 + v4 + loopback ×2) | ✅ same | ✅ | ✅ | OK |
+| `hwbp.Detect` | ✅ "no DR0-DR3 set" | ✅ same | ✅ | ✅ | OK; doc-drift on the Breakpoint field names (no `Module`/`TID`) |
+| Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | full panorama green |
+
+Recon is observation-only — every check works at lowuser parity with admin, which matches expectations. The two doc bugs (drive.New signature, hwbp.Breakpoint fields) are pure typo-class fixes.
 
 ## Workflow per panorama
 
