@@ -30,7 +30,7 @@ Each panorama lives at `cmd/examples/<id>/main.go` + a walkthrough at `docs/exam
 | 4 | `recon-suite` | recon/{anti-analysis,sandbox,timing,network,drive,folder,hw-breakpoints} | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. Findings: drive.New needs trailing `\`; hwbp.Breakpoint missing Module+TID fields. |
 | 5 | `persistence-user` | persistence/{registry,startup,scheduler} (HKCU paths) | ✅ matrix run | Done 2026-05-03. **Major findings**: HKCU Run OK for both. Startup folder fails for lowuser (no interactive profile = no Shell folders). Scheduler at root path `\<name>` requires admin even with WithTriggerLogon. |
 | 6 | `persistence-admin` | persistence/{account,service,lnk} | ✅ matrix run | Done 2026-05-03. Clean 3-for-3 admin success / 3-for-3 lowuser denial — the doc-truth-audit's clearest differential row. Doc-drift: persistence/account is `package user`, doc relies on implicit alias. |
-| 7 | `tokens-impersonation` | tokens/{impersonation,token-theft,privilege-escalation} | ⏳ pending | Token games. |
+| 7 | `tokens-impersonation` | impersonate.ThreadEffectiveTokenOwner + privilege.IsAdmin / IsAdminGroupMember + token.StealByName(winlogon, explorer) + IntegrityLevel | ✅ matrix run | Done 2026-05-03. Clean differential: admin steals winlogon SYSTEM token + explorer Medium token, lowuser gets `open process: Accès refusé` for both. Identity probes work everywhere. |
 | 8 | `privesc-uac` | privesc/{uac,cve202430088} + recon/dllhijack autoElevate | ⏳ pending | UAC bypass. |
 | 9 | `credentials` | credentials/{lsassdump,samdump,sekurlsa,goldenticket} | ⏳ pending | Cred extraction. |
 | 10 | `cleanup-suite` | cleanup/{ads,timestomp,memory-wipe} (skips selfdelete to avoid terminating the runner) | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. Doc-drift: `ads.List` returns structs with name+size, doc shows `[]string`. |
@@ -163,6 +163,19 @@ Anti-forensic primitives are filesystem-level (ADS via FILE_FLAG_BACKUP_SEMANTIC
 | Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | full panorama green |
 
 Notable: every unhook variant works at lowuser parity with admin, including `PerunUnhookTarget("svchost.exe")` which spawns a new child process to source the clean ntdll bytes — non-admin can spawn `svchost.exe` and read its memory because it's a *child* of the current process, not the system svchost. Doc and code aligned, no drift to flag.
+
+### Panorama 7 — `tokens-impersonation` (matrix run, 2026-05-03)
+
+| Step | win10 admin | win10 lowuser | win11 admin | win11 lowuser | Doc note |
+|---|---|---|---|---|---|
+| `impersonate.ThreadEffectiveTokenOwner` | ✅ `…\test` | ✅ `…\lowuser` | ✅ same | ✅ same | OK |
+| `privilege.IsAdmin` | ✅ `admin-group=true elevated=true` | ✅ `admin-group=false elevated=false` | ✅ | ✅ | OK |
+| `privilege.IsAdminGroupMember` | ✅ `true` | ✅ `false` | ✅ | ✅ | OK |
+| `token.StealByName("winlogon.exe")` | ✅ + IntegrityLevel = `System` | ❌ `open process: Accès refusé` | ✅ same | ❌ same | OK — SeDebugPrivilege required for SYSTEM, lowuser denied as expected |
+| `token.StealByName("explorer.exe")` | ✅ + IntegrityLevel = `Medium` | ❌ `open process: Accès refusé` | ✅ same | ❌ same | OK — explorer owned by interactive `test`, different SID from lowuser |
+| Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | OK |
+
+Cleanest "what can the current process see vs do" differential of the audit: every probe returns valid data for both modes, but the action (token steal) is admin-gated. Doc and code aligned across all checks.
 
 ## Workflow per panorama
 
