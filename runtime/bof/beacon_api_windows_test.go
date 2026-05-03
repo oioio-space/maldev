@@ -181,6 +181,83 @@ func TestBeaconDataParse_NilParser(t *testing.T) {
 // constant by a single digit would silently mis-route every BOF
 // relocation; this test catches that the constants match the
 // canonical IMAGE_REL_AMD64_* numeric values.
+// TestBeaconFormat_RoundTrip exercises the full Alloc → Append → Int →
+// ToString → Free cycle. Asserts the bytes the BOF reads back match
+// what we wrote, and that Free clears the formatp fields.
+func TestBeaconFormat_RoundTrip(t *testing.T) {
+	withCurrentBOF(t, func(_ *BOF) {
+		var fmt formatp
+		beaconFormatAllocImpl(uintptr(unsafe.Pointer(&fmt)), 64)
+		require.NotZero(t, fmt.original)
+		require.Equal(t, int32(64), fmt.size)
+		require.Equal(t, int32(0), fmt.length)
+
+		// Append "hi" then a big-endian int 0xCAFEBABE.
+		hi := []byte("hi")
+		beaconFormatAppendImpl(
+			uintptr(unsafe.Pointer(&fmt)),
+			uintptr(unsafe.Pointer(&hi[0])),
+			uintptr(len(hi)),
+		)
+		assert.Equal(t, int32(2), fmt.length)
+
+		beaconFormatIntImpl(uintptr(unsafe.Pointer(&fmt)), 0xCAFEBABE)
+		assert.Equal(t, int32(6), fmt.length)
+
+		// ToString returns the original pointer and writes length.
+		var outLen int32
+		ptr := beaconFormatToStringImpl(
+			uintptr(unsafe.Pointer(&fmt)),
+			uintptr(unsafe.Pointer(&outLen)),
+		)
+		require.Equal(t, fmt.original, ptr)
+		assert.Equal(t, int32(6), outLen)
+
+		got := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), int(outLen))
+		assert.Equal(t, []byte{'h', 'i', 0xCA, 0xFE, 0xBA, 0xBE}, got)
+
+		// Reset rewinds the cursor without releasing the slice.
+		beaconFormatResetImpl(uintptr(unsafe.Pointer(&fmt)))
+		assert.Equal(t, int32(0), fmt.length)
+		assert.Equal(t, fmt.original, fmt.buffer)
+
+		// Free clears the formatp fields.
+		beaconFormatFreeImpl(uintptr(unsafe.Pointer(&fmt)))
+		assert.Equal(t, uintptr(0), fmt.original)
+		assert.Equal(t, int32(0), fmt.size)
+	})
+}
+
+func TestBeaconFormatAppend_Truncates(t *testing.T) {
+	withCurrentBOF(t, func(_ *BOF) {
+		var fmt formatp
+		beaconFormatAllocImpl(uintptr(unsafe.Pointer(&fmt)), 4)
+		// Write 8 bytes into a 4-byte buffer — append truncates silently.
+		src := []byte("ABCDEFGH")
+		beaconFormatAppendImpl(
+			uintptr(unsafe.Pointer(&fmt)),
+			uintptr(unsafe.Pointer(&src[0])),
+			uintptr(len(src)),
+		)
+		assert.Equal(t, int32(4), fmt.length)
+		got := unsafe.Slice((*byte)(unsafe.Pointer(fmt.original)), 4)
+		assert.Equal(t, []byte("ABCD"), got)
+		beaconFormatFreeImpl(uintptr(unsafe.Pointer(&fmt)))
+	})
+}
+
+func TestBeaconFormatAlloc_NilGuards(t *testing.T) {
+	// Hostile inputs must not panic.
+	assert.Equal(t, uintptr(0), beaconFormatAllocImpl(0, 16))
+	var fmt formatp
+	assert.Equal(t, uintptr(0), beaconFormatAllocImpl(uintptr(unsafe.Pointer(&fmt)), 0))
+}
+
+// TestRelocationConstants is a regression guard locking the COFF AMD64
+// relocation type values against the PE spec. A typo flipping one
+// constant by a single digit would silently mis-route every BOF
+// relocation; this test catches that the constants match the
+// canonical IMAGE_REL_AMD64_* numeric values.
 func TestRelocationConstants(t *testing.T) {
 	cases := []struct {
 		name string

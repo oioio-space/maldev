@@ -124,9 +124,11 @@ for _, path := range []string{"whoami.o", "netstat.o", "tasklist.o"} {
   `BeaconPrintf` (format-string-only — varargs not expanded;
   see "Beacon-API limitations" below), `BeaconOutput`,
   `BeaconDataParse`, `BeaconDataInt`, `BeaconDataShort`,
-  `BeaconDataLength`, `BeaconDataExtract`. **Not yet
-  implemented:** `BeaconFormatAlloc` / `Reset` / `Free` /
-  `Append` / `Printf` / `ToString` / `Int`, `BeaconErrorD` /
+  `BeaconDataLength`, `BeaconDataExtract`,
+  `BeaconFormatAlloc` / `Reset` / `Free` / `Append` / `Int` /
+  `ToString`. **Not yet implemented:** `BeaconFormatPrintf`
+  (varargs unfeasible from a `syscall.NewCallback` thunk —
+  same constraint as `BeaconPrintf`), `BeaconErrorD` /
   `ErrorDD` / `ErrorNA`, `BeaconGetSpawnTo`. BOFs that import
   any of the unimplemented symbols fail at relocation time
   with `unresolved external symbol __imp_BeaconXxx`.
