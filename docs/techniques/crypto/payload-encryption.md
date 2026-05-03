@@ -366,6 +366,29 @@ each byte. Defeats simple frequency analysis that XOR doesn't.
 
 Inverse of `ArithShift`.
 
+### `Wipe(buf []byte)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#Wipe)
+
+Compiler-resistant memclear over `buf`. Convenience re-export of
+`cleanup/memory.SecureZero` so the most common
+"decrypt → consume → forget" sequence can stay in the `crypto` package
+without an extra import.
+
+### `UseDecrypted(decrypt func() ([]byte, error), fn func([]byte) error) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#UseDecrypted)
+
+Runs `decrypt`, hands the resulting plaintext to `fn`, and zeroes the
+plaintext via `defer Wipe(...)` before returning. The wipe runs even
+when `fn` returns an error or panics, so the only way to leave
+plaintext in heap-resident bytes is for `fn` to copy them out — which
+the doc comment forbids.
+
+`decrypt` is a closure rather than a typed function so any decrypt
+shape (fixed-size keys for TEA/XTEA, AAD-aware AEAD wrappers) fits
+without per-cipher overloads.
+
 ## Examples
 
 ### Simple
@@ -516,7 +539,11 @@ sit in RWX longer than a few microseconds; pair with sleep-masking
 - **Ephemeral plaintext still touchable.** Between decrypt and `Inject`,
   the plaintext lives on the Go heap. EDR memory scans (Defender,
   CrowdStrike) sweep RW pages — wipe the buffer *before* the next
-  syscall, not after.
+  syscall, not after. Use `crypto.UseDecrypted(decrypt, fn)` — the
+  helper runs decrypt, calls fn with the plaintext, and zeroes the
+  buffer via defer (so the wipe still runs when fn errors or
+  panics). Or call `crypto.Wipe(plaintext)` manually for cases that
+  don't fit the closure shape.
 - **No streaming API.** Every function takes the whole buffer. For
   multi-MB payloads, allocate carefully — `EncryptAESGCM` allocates
   exactly once, but `MatrixTransform` allocates intermediate row
