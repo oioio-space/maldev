@@ -25,7 +25,7 @@ Each panorama lives at `cmd/examples/<id>/main.go` + a walkthrough at `docs/exam
 | # | Panorama | Combines | Status | Notes |
 |---|---|---|---|---|
 | 1 | `stealth-recon-ppid` | win/syscall (Tartarus + IndirectAsm) + evasion/stealthopen + evasion/preset + recon/dllhijack + c2/shell PPID | ✅ matrix run | Done 2026-05-03. See observations below. Open fixes : doc-drift Opportunity fields, clarify-doc admin caveats. |
-| 2 | `injection-evasion` | evasion/preset + evasion/{amsi,etw} + inject (CreateRemoteThread or ThreadPool) + evasion/sleep-mask | ⏳ pending | Std implant init. |
+| 2 | `injection-evasion` | wsyscall (Tartarus + Indirect) + evasion/preset.Stealth + inject.ThreadPoolExec + evasion/sleepmask + cleanup/memory.SecureZero | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. Doc clarification queued (SecureZero target). |
 | 3 | `unhook-suite` | evasion/unhook (Classic + Full) + evasion/ntdll-unhooking + win/syscall callers | ⏳ pending | Per-method unhook coverage. |
 | 4 | `recon-suite` | recon/{anti-analysis,sandbox,timing,network,drive,folder,hw-breakpoints} | ⏳ pending | All sandbox/AV checks. |
 | 5 | `persistence-user` | persistence/{registry,startup,scheduler} (HKCU paths) | ⏳ pending | Survives without admin? |
@@ -56,6 +56,7 @@ Add a row whenever a panorama or audit reveals a mismatch. Decision column: **fi
 | `recon/dllhijack/scan_autoelevate_windows.go:32-38` | `ScanAutoElevate` aborts on System32 read failure | same pattern | clarify-doc + fix-code | TODO |
 | `docs/techniques/evasion/stealthopen.md` | `NewStealth(path)` returns `(*Stealth, error)` | works **but** silently requires admin to obtain Object ID on system files (matrix evidence: `obtain ObjectID: Accès refusé` for lowuser on `C:\Windows\System32\ntdll.dll`) | clarify-doc | TODO — add an "Admin needed for Object ID stamping on system files" note to the Limitations block |
 | `docs/techniques/evasion/ppid-spoofing.md` | "legitimate Windows API feature, Go 1.24+ native support" | admin SSH session can `OpenProcess(explorer)` and build SysProcAttr, **but** `cmd.Output()` → `CreateProcess` fails with `Accès refusé` even as admin on both Win10 and Win11 (likely integrity-level mismatch: SSH-launched admin = High IL, explorer = Medium IL) | clarify-doc | TODO — add an "integrity-level constraint" note. Spawning a child of an interactive-session process from a non-interactive admin session is denied. Test must run from an interactive shell (or pick a non-interactive parent like svchost). |
+| `docs/techniques/evasion/sleep-mask.md` + `docs/techniques/cleanup/memory-wipe.md` | "Real beacon loop" example sets the region to RX then leaves it; thread-pool.md "Complex" example wipes via `memory.SecureZero(shellcode)` | the `shellcode []byte` heap slice is what gets zeroed; the RX page is read-only and SecureZero on it crashes with access violation. Easy mistake when conflating the two examples. | clarify-doc | TODO — add a "wipe target = the heap-side plaintext, not the RX page" note to memory-wipe.md, or mention it in sleep-mask.md "Common Pitfalls". |
 
 ## E2E observations from completed panoramas
 
@@ -76,6 +77,19 @@ Legend : ✅ success, ⚠️ partial / non-fatal degradation, ❌ failed (with r
 | `cmd.Output()` (PPID-spoofed CreateProcess) | ❌ `fork/exec cmd.exe: Accès refusé` even as admin | n/a | ❌ same | n/a | **NEW finding** — admin SSH session (non-interactive) cannot spawn child of interactive-session explorer ; integrity-level mismatch. The doc claims it "just works" but the example needs a non-interactive parent (svchost) or to run from an interactive console. |
 
 Decisions captured in the doc-drift table above.
+
+### Panorama 2 — `injection-evasion` (matrix run, 2026-05-03)
+
+| Step | win10 admin | win10 lowuser | win11 admin | win11 lowuser | Doc note |
+|---|---|---|---|---|---|
+| `wsyscall.New(MethodIndirect, NewTartarus())` | ✅ | ✅ | ✅ | ✅ | OK |
+| `evasion.ApplyAll(preset.Stealth(), caller)` | ✅ "applied cleanly" | ✅ same | ✅ | ✅ | OK — AMSI + ETW + 10x Classic unhook all succeed for an unprivileged caller |
+| `inject.ThreadPoolExec(shellcode)` | ✅ "dispatched + ret returned" | ✅ same | ✅ | ✅ | OK — TpAllocWork/TpPostWork/TpWaitForWork on the local pool needs no admin |
+| `sleepmask.New(...).Sleep(ctx, 1.5s)` (XOR + InlineStrategy) | ✅ region restored to RX | ✅ same | ✅ | ✅ | OK |
+| `cleanup/memory.SecureZero(plaintext)` | ✅ | ✅ | ✅ | ✅ | OK once we zero the heap slice (initial draft tried to zero the RX page → access violation; doc would benefit from clarifying the wipe target) |
+| Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | full panorama green |
+
+Validates the canonical "init beacon" sequence end-to-end. Notable that **none of these steps require admin**: a non-admin local user can silence AMSI/ETW in their own process, dispatch shellcode on the existing thread pool, and mask the region — exactly the threat model EDRs need to defend against.
 
 ## Workflow per panorama
 
