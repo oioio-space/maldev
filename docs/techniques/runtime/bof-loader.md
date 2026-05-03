@@ -150,8 +150,13 @@ for _, path := range []string{"whoami.o", "netstat.o", "tasklist.o"} {
   execution is fundamentally single-threaded) but is worth
   knowing if a host program runs many BOFs in parallel.
 - **x64 only.** `Machine == 0x8664` required.
-- **Limited relocation types.** ADDR64 / ADDR32NB / REL32 only;
-  exotic relocations (TLS, GOT) not supported.
+- **Relocation coverage.** `IMAGE_REL_AMD64_ABSOLUTE` (no-op),
+  `_ADDR64`, `_ADDR32` (errors out cleanly when target exceeds
+  32-bit range), `_ADDR32NB`, `_REL32`, and the `_REL32_1`
+  through `_REL32_5` bias variants. Exotic relocations (TLS, GOT,
+  `_SECTION`, `_SECREL`) are not supported — the loader fails
+  with `unsupported relocation type: 0xNN` so the failure mode
+  is obvious instead of a silent corruption.
 - **RWX allocation is loud.** Hardened EDRs flag RWX from any
   source; pair with sleep-mask + RW→RX flip.
 

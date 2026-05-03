@@ -14,11 +14,19 @@ import (
 // COFF machine type for x64.
 const machineAMD64 = 0x8664
 
-// COFF relocation types for x64.
+// COFF relocation types for x64. Reference:
+// https://learn.microsoft.com/windows/win32/debug/pe-format#type-indicators
 const (
+	imageRelAMD64Absolute = 0x0000
 	imageRelAMD64Addr64   = 0x0001
+	imageRelAMD64Addr32   = 0x0002
 	imageRelAMD64Addr32NB = 0x0003
-	imageRelAMD64Rel32    = 0x0004
+	imageRelAMD64Rel32     = 0x0004
+	imageRelAMD64Rel32Plus1 = 0x0005
+	imageRelAMD64Rel32Plus2 = 0x0006
+	imageRelAMD64Rel32Plus3 = 0x0007
+	imageRelAMD64Rel32Plus4 = 0x0008
+	imageRelAMD64Rel32Plus5 = 0x0009
 )
 
 // coffHeader is the 20-byte COFF file header.
@@ -260,11 +268,27 @@ func (b *BOF) applyRelocations(textMem []byte, textBase uintptr, textSec coffSec
 
 		patchAddr := reloc.VirtualAddress
 		switch reloc.Type {
+		case imageRelAMD64Absolute:
+			// No-op: emitted as padding, the patch field is left as-is.
+
 		case imageRelAMD64Addr64:
 			if int(patchAddr)+8 > len(textMem) {
 				return fmt.Errorf("ADDR64 patch out of bounds")
 			}
 			binary.LittleEndian.PutUint64(textMem[patchAddr:], uint64(targetAddr))
+
+		case imageRelAMD64Addr32:
+			if int(patchAddr)+4 > len(textMem) {
+				return fmt.Errorf("ADDR32 patch out of bounds")
+			}
+			// 32-bit absolute address. Fails (silently truncates the high
+			// 32 bits) when targetAddr doesn't fit in 32 bits, which is the
+			// common case on x86-64 where system DLLs map above 4G. Emit a
+			// loud error rather than corrupt the BOF code.
+			if targetAddr>>32 != 0 {
+				return fmt.Errorf("ADDR32 target 0x%X exceeds 32-bit range", targetAddr)
+			}
+			binary.LittleEndian.PutUint32(textMem[patchAddr:], uint32(targetAddr))
 
 		case imageRelAMD64Addr32NB:
 			if int(patchAddr)+4 > len(textMem) {
@@ -274,13 +298,23 @@ func (b *BOF) applyRelocations(textMem []byte, textBase uintptr, textSec coffSec
 			rva := uint32(targetAddr - textBase)
 			binary.LittleEndian.PutUint32(textMem[patchAddr:], rva)
 
-		case imageRelAMD64Rel32:
+		case imageRelAMD64Rel32,
+			imageRelAMD64Rel32Plus1,
+			imageRelAMD64Rel32Plus2,
+			imageRelAMD64Rel32Plus3,
+			imageRelAMD64Rel32Plus4,
+			imageRelAMD64Rel32Plus5:
 			if int(patchAddr)+4 > len(textMem) {
 				return fmt.Errorf("REL32 patch out of bounds")
 			}
-			// RIP-relative: target - (patchLocation + 4)
+			// RIP-relative: target - (patchLocation + 4 + bias). The
+			// REL32_N variants encode an implicit +N byte offset for
+			// instructions where the displacement field is followed by
+			// N more bytes before the next instruction (immediate
+			// operands, prefixes). Bias = type - 0x0004.
+			bias := int64(reloc.Type - imageRelAMD64Rel32)
 			patchLocation := textBase + uintptr(patchAddr)
-			rel := int64(targetAddr) - int64(patchLocation+4)
+			rel := int64(targetAddr) - int64(patchLocation+4) - bias
 			binary.LittleEndian.PutUint32(textMem[patchAddr:], uint32(int32(rel)))
 
 		default:

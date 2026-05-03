@@ -176,6 +176,33 @@ func TestBeaconDataParse_NilParser(t *testing.T) {
 	})
 }
 
+// TestRelocationConstants is a regression guard locking the COFF AMD64
+// relocation type values against the PE spec. A typo flipping one
+// constant by a single digit would silently mis-route every BOF
+// relocation; this test catches that the constants match the
+// canonical IMAGE_REL_AMD64_* numeric values.
+func TestRelocationConstants(t *testing.T) {
+	cases := []struct {
+		name string
+		got  uint16
+		want uint16
+	}{
+		{"ABSOLUTE", imageRelAMD64Absolute, 0x0000},
+		{"ADDR64", imageRelAMD64Addr64, 0x0001},
+		{"ADDR32", imageRelAMD64Addr32, 0x0002},
+		{"ADDR32NB", imageRelAMD64Addr32NB, 0x0003},
+		{"REL32", imageRelAMD64Rel32, 0x0004},
+		{"REL32_1", imageRelAMD64Rel32Plus1, 0x0005},
+		{"REL32_2", imageRelAMD64Rel32Plus2, 0x0006},
+		{"REL32_3", imageRelAMD64Rel32Plus3, 0x0007},
+		{"REL32_4", imageRelAMD64Rel32Plus4, 0x0008},
+		{"REL32_5", imageRelAMD64Rel32Plus5, 0x0009},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.want, c.got, "IMAGE_REL_AMD64_%s", c.name)
+	}
+}
+
 func TestCStringFromPtr(t *testing.T) {
 	src := []byte("text\x00ignored")
 	got := cStringFromPtr(uintptr(unsafe.Pointer(&src[0])), 16)

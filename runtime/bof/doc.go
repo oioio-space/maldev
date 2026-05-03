@@ -4,10 +4,14 @@
 // A BOF is a relocatable COFF object that runs in the calling
 // process's address space. The loader parses the COFF header,
 // locates the `.text` section, applies relocations
-// (`IMAGE_REL_AMD64_ADDR64`, `IMAGE_REL_AMD64_ADDR32NB`,
-// `IMAGE_REL_AMD64_REL32`), resolves the entry-point symbol from
-// the symbol table, and jumps into RWX memory. The same format
-// used by Cobalt Strike's inline-execute and Sliver's BOF runner.
+// (`IMAGE_REL_AMD64_ABSOLUTE` / `_ADDR64` / `_ADDR32` /
+// `_ADDR32NB` / `_REL32` / `_REL32_1` … `_REL32_5`),
+// resolves the entry-point symbol from the symbol table, and
+// jumps into RWX memory. External symbols are resolved via the
+// Beacon API stub table (`__imp_BeaconXxx`) or by dynamic-link
+// import name (`__imp_<DLL>$<Func>` → PEB walk + ROR13 export
+// match). The same format used by Cobalt Strike's
+// inline-execute and Sliver's BOF runner.
 //
 // # MITRE ATT&CK
 //
