@@ -76,9 +76,8 @@ flowchart LR
 | [`HijackPath(exeDir, dllName) (hijackDir, resolvedDir string)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#HijackPath) | First writable dir < first legitimate dir |
 | [`IsAutoElevate(peBytes) bool`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#IsAutoElevate) | Manifest probe |
 
-`Opportunity` carries: `Kind`, `ID`, `DisplayName`, `Binary`,
-`MissingDLL`, `HijackedPath`, `ResolvedDLL`, `IntegrityGain`,
-`AutoElevate`.
+`Opportunity` carries: `Kind`, `ID`, `DisplayName`,
+`HijackedPath`, `ResolvedDLL`, `IntegrityGain`, `AutoElevate`.
 
 ## Examples
 
@@ -98,7 +97,7 @@ for _, o := range dllhijack.Rank(opps)[:5] {
 ```go
 ae, _ := dllhijack.ScanAutoElevate()
 for _, o := range ae {
-    fmt.Printf("UAC bypass: drop %s in %s\n", o.MissingDLL, o.HijackedPath)
+    fmt.Printf("UAC bypass: drop %s in %s\n", o.ResolvedDLL, o.HijackedPath)
 }
 ```
 
