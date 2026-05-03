@@ -26,7 +26,7 @@ Each panorama lives at `cmd/examples/<id>/main.go` + a walkthrough at `docs/exam
 |---|---|---|---|---|
 | 1 | `stealth-recon-ppid` | win/syscall (Tartarus + IndirectAsm) + evasion/stealthopen + evasion/preset + recon/dllhijack + c2/shell PPID | ✅ matrix run | Done 2026-05-03. See observations below. Open fixes : doc-drift Opportunity fields, clarify-doc admin caveats. |
 | 2 | `injection-evasion` | wsyscall (Tartarus + Indirect) + evasion/preset.Stealth + inject.ThreadPoolExec + evasion/sleepmask + cleanup/memory.SecureZero | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. Doc clarification queued (SecureZero target). |
-| 3 | `unhook-suite` | evasion/unhook (Classic + Full) + evasion/ntdll-unhooking + win/syscall callers | ⏳ pending | Per-method unhook coverage. |
+| 3 | `unhook-suite` | evasion/unhook ClassicUnhook + FullUnhook + PerunUnhook + IsHooked × 3 caller backends (WinAPI nil / Indirect+Tartarus / IndirectAsm+HashGate) | ✅ matrix green | Done 2026-05-03. All variants OK on all 4 cells. Doc API matches code, no drift. |
 | 4 | `recon-suite` | recon/{anti-analysis,sandbox,timing,network,drive,folder,hw-breakpoints} | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. Findings: drive.New needs trailing `\`; hwbp.Breakpoint missing Module+TID fields. |
 | 5 | `persistence-user` | persistence/{registry,startup,scheduler} (HKCU paths) | ✅ matrix run | Done 2026-05-03. **Major findings**: HKCU Run OK for both. Startup folder fails for lowuser (no interactive profile = no Shell folders). Scheduler at root path `\<name>` requires admin even with WithTriggerLogon. |
 | 6 | `persistence-admin` | persistence/{account,service,lnk} | ✅ matrix run | Done 2026-05-03. Clean 3-for-3 admin success / 3-for-3 lowuser denial — the doc-truth-audit's clearest differential row. Doc-drift: persistence/account is `package user`, doc relies on implicit alias. |
@@ -147,6 +147,22 @@ The cleanest 3-for-3 / 0-for-3 differential in the audit. Combined with panorama
 | Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | full panorama green |
 
 Anti-forensic primitives are filesystem-level (ADS via FILE_FLAG_BACKUP_SEMANTICS, timestomp via NtSetInformationFile FileBasicInformation, memory wipe is a process-local memset) — all work for any user with write access to the target file. The matrix uses `C:\Users\Public\maldev` which is granted to lowuser by the provisioning script.
+
+### Panorama 4 — `unhook-suite` (matrix run, 2026-05-03)
+
+| Step | win10 admin | win10 lowuser | win11 admin | win11 lowuser | Doc note |
+|---|---|---|---|---|---|
+| `IsHooked` baseline (NtAlloc/NtCreateThreadEx/NtProtect) | ✅ all `hooked=false` | ✅ same | ✅ same | ✅ same | OK — clean VM, no EDR |
+| `ClassicUnhook` × nil-caller (WinAPI fallback) | ✅ OK | ✅ same | ✅ | ✅ | OK |
+| `ClassicUnhook` × `MethodIndirect`+`Tartarus` | ✅ OK | ✅ same | ✅ | ✅ | OK |
+| `ClassicUnhook` × `MethodIndirectAsm`+`HashGate` | ✅ OK | ✅ same | ✅ | ✅ | OK |
+| `FullUnhook(nil, nil)` | ✅ OK | ✅ same | ✅ | ✅ | OK — doc-warned "noisy" but does not fail |
+| `PerunUnhook(nil)` (default child host) | ✅ OK | ✅ same | ✅ | ✅ | OK |
+| `PerunUnhookTarget("svchost.exe", nil)` | ✅ OK | ✅ same | ✅ | ✅ | OK |
+| `IsHooked` post-unhook | ✅ `hooked=false` | ✅ same | ✅ same | ✅ same | OK |
+| Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | full panorama green |
+
+Notable: every unhook variant works at lowuser parity with admin, including `PerunUnhookTarget("svchost.exe")` which spawns a new child process to source the clean ntdll bytes — non-admin can spawn `svchost.exe` and read its memory because it's a *child* of the current process, not the system svchost. Doc and code aligned, no drift to flag.
 
 ## Workflow per panorama
 
