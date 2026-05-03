@@ -40,6 +40,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"time"
 
 	"github.com/oioio-space/maldev/credentials/lsassdump"
 	"github.com/oioio-space/maldev/evasion/amsi"
@@ -75,6 +77,15 @@ func main() {
 		wsyscall.MethodIndirectAsm,
 	}
 	selfPID := os.Getpid()
+
+	// Sacrificial notepad for inject.SectionMapInject — spawned once, kept
+	// alive across all cells, killed at the end. Each cell injects a 1-byte
+	// `ret` shellcode (0xC3) so the remote thread exits immediately. The
+	// section view stays mapped (cleanup is on the error path only); 5x4
+	// cells leak ~80 KiB of mapped views which is far below notepad's 8 TiB
+	// of address space.
+	notepadPID := spawnNotepad()
+	defer killPID(notepadPID)
 	// Deliberately omitted from the matrix:
 	//   - evasion/acg.Enable      — sets ProhibitDynamicCode process-wide;
 	//                               once on, every subsequent Direct/Indirect
@@ -109,6 +120,12 @@ func main() {
 		}},
 		{"fakecmd.Spoof(notepad.exe)", func(c *wsyscall.Caller) error {
 			return fakecmd.Spoof("notepad.exe", c)
+		}},
+		{"inject.SectionMapInject(notepad)", func(c *wsyscall.Caller) error {
+			if notepadPID == 0 {
+				return fmt.Errorf("no sacrificial notepad")
+			}
+			return inject.SectionMapInject(notepadPID, []byte{0xC3}, c)
 		}},
 		{"unhook.PerunUnhook", unhook.PerunUnhook},
 		{"unhook.ClassicUnhook(NtAllocateVirtualMemory)", func(c *wsyscall.Caller) error {
@@ -156,6 +173,29 @@ func main() {
 				runCell(m, nr, t)
 			}
 		}
+	}
+}
+
+func spawnNotepad() int {
+	cmd := exec.Command("notepad.exe")
+	if err := cmd.Start(); err != nil {
+		fmt.Printf("[setup] spawnNotepad: %v\n", err)
+		return 0
+	}
+	// Notepad needs a beat to reach its message loop before remote-thread
+	// creation lands cleanly.
+	time.Sleep(500 * time.Millisecond)
+	pid := cmd.Process.Pid
+	fmt.Printf("[setup] sacrificial notepad PID=%d\n", pid)
+	return pid
+}
+
+func killPID(pid int) {
+	if pid == 0 {
+		return
+	}
+	if p, err := os.FindProcess(pid); err == nil {
+		_ = p.Kill()
 	}
 }
 
