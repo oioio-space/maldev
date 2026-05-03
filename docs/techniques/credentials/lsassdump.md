@@ -367,6 +367,17 @@ See [`ExampleDumpToFile`](../../../credentials/lsassdump/lsassdump_example_test.
   there is a microsecond window where lsass is unprotected.
   Defenders with continuous EPROCESS monitoring (rare) can spot
   the transition.
+- **`LsassPID` requires elevation.** The walk uses
+  `NtGetNextProcess` with `PROCESS_QUERY_LIMITED_INFORMATION`,
+  which the kernel silently denies for lsass.exe (a PPL) when
+  the caller has no elevation/`SeDebugPrivilege`. The loop runs
+  to `STATUS_NO_MORE_ENTRIES` without ever seeing lsass and
+  surfaces `ErrLSASSNotFound` — the same error you would see if
+  lsass were genuinely absent. From a non-elevated context use
+  `NtQuerySystemInformation(SystemProcessInformation)` directly
+  (different syscall, returns names without opening handles)
+  if PID-only enumeration is needed; the rest of the dump path
+  can't proceed under lowuser anyway.
 
 ## See also
 

@@ -194,6 +194,14 @@ site reliably.
 - **AMSI providers other than Defender** (e.g., third-party AV) might
   use different code paths that don't go through `AmsiScanBuffer` —
   rare today but worth knowing.
+- **`PatchOpenSession` is idempotent within a process.** It scans the
+  first 1024 bytes of `AmsiOpenSession` for a `0x74` (JZ) and flips the
+  first match to `0x75` (JNZ). A package-level atomic flag short-circuits
+  subsequent calls so re-invoking the patch (e.g. once per syscall caller
+  in a sweep) doesn't consume additional `0x74` sites and surface a
+  spurious "conditional jump (0x74) not found" error. `PatchScanBuffer`
+  is naturally idempotent — it always writes the same 3 bytes at the
+  function entry.
 
 ## See also
 

