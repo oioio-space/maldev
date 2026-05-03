@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/oioio-space/maldev/testutil"
 )
 
 // loadExampleBOF reads a .o file from runtime/bof/testdata. The path
@@ -30,6 +32,7 @@ func loadExampleBOF(t *testing.T, name string) []byte {
 // Beacon API stub resolution (__imp_BeaconPrintf) → relocation patch
 // → entry call → output capture.
 func TestExecute_HelloBeacon_E2E(t *testing.T) {
+	testutil.RequireIntrusive(t)
 	data := loadExampleBOF(t, "hello_beacon.o")
 	b, err := Load(data)
 	require.NoError(t, err)
@@ -44,6 +47,7 @@ func TestExecute_HelloBeacon_E2E(t *testing.T) {
 // helper, executes parse_args.o, and asserts the BOF observed the
 // string back via BeaconDataExtract → BeaconPrintf.
 func TestExecute_ParseArgs_E2E(t *testing.T) {
+	testutil.RequireIntrusive(t)
 	data := loadExampleBOF(t, "parse_args.o")
 	b, err := Load(data)
 	require.NoError(t, err)
@@ -66,6 +70,7 @@ func TestExecute_ParseArgs_E2E(t *testing.T) {
 // against the real kernel32 entry points (no GetProcAddress import
 // in the BOF's COFF symbol table beyond the dollar-import names).
 func TestExecute_LoadLib_E2E(t *testing.T) {
+	testutil.RequireIntrusive(t)
 	data := loadExampleBOF(t, "loadlib.o")
 	b, err := Load(data)
 	require.NoError(t, err)

@@ -142,11 +142,20 @@ func beaconOutputImpl(typ uintptr, dataPtr uintptr, length uintptr) uintptr {
 // The BOF allocates the struct on its stack and hands us a pointer.
 // We parse and update the fields in place — same wire format
 // CS-compatible BOFs already expect.
+// dataParser mirrors the CS datap struct exactly:
+//
+//	typedef struct {
+//	    char *original;
+//	    char *buffer;
+//	    int   length;
+//	    int   size;
+//	} datap;
+//
+// 24 bytes on x64. Two int32 fields pack tightly with no padding.
 type dataParser struct {
 	original uintptr
 	buffer   uintptr
 	length   int32
-	_        [4]byte // padding to align with the C struct on x64
 	size     int32
 }
 
@@ -248,7 +257,6 @@ type formatp struct {
 	original uintptr
 	buffer   uintptr
 	length   int32
-	_        [4]byte
 	size     int32
 }
 

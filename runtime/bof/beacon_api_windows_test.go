@@ -18,7 +18,7 @@ func withCurrentBOF(t *testing.T, fn func(b *BOF)) {
 	t.Helper()
 	bofMu.Lock()
 	defer bofMu.Unlock()
-	b := &BOF{output: newBeaconOutput()}
+	b := &BOF{output: newBeaconOutput(), errors: newBeaconOutput()}
 	currentBOF = b
 	defer func() { currentBOF = nil }()
 	fn(b)
