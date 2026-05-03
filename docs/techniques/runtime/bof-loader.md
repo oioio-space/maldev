@@ -120,15 +120,38 @@ for _, path := range []string{"whoami.o", "netstat.o", "tasklist.o"} {
 
 ## Limitations
 
-- **No Beacon-API resolution.** BOFs that call `BeaconOutput`,
-  `BeaconFormatAlloc`, `BeaconErrorD` etc. crash. Use BOFs
-  built without the Beacon-API contract or implement a stub
-  resolver (out of scope here).
+- **Partial Beacon-API surface.** Implemented today:
+  `BeaconPrintf` (format-string-only — varargs not expanded;
+  see "Beacon-API limitations" below), `BeaconOutput`,
+  `BeaconDataParse`, `BeaconDataInt`, `BeaconDataShort`,
+  `BeaconDataLength`, `BeaconDataExtract`. **Not yet
+  implemented:** `BeaconFormatAlloc` / `Reset` / `Free` /
+  `Append` / `Printf` / `ToString` / `Int`, `BeaconErrorD` /
+  `ErrorDD` / `ErrorNA`, `BeaconGetSpawnTo`. BOFs that import
+  any of the unimplemented symbols fail at relocation time
+  with `unresolved external symbol __imp_BeaconXxx`.
+- **`BeaconPrintf` varargs are not expanded.** `syscall.NewCallback`
+  binds a fixed-arity Go function as a stdcall callback; Go
+  cannot introspect cdecl varargs from inside the callback. We
+  forward the format string verbatim — BOFs that pass a literal
+  format with no `%` directives behave correctly; BOFs relying
+  on `printf`-style expansion see the format string raw.
+- **External Win32 imports unresolved.** CS BOFs encode dynamic-link
+  imports as `__imp_<DLLNAME>$<FuncName>` (e.g.
+  `__imp_KERNEL32$LoadLibraryA`). The current resolver only
+  handles `__imp_Beacon*`; any other external symbol fails
+  with `unresolved external symbol …`. See backlog row P2.23
+  (3rd row) for the planned `win/api.ResolveByHash`-backed
+  resolver.
+- **Concurrency: BOF execution is serialised package-wide.** The
+  Beacon API stubs read a single `currentBOF` pointer guarded
+  by `bofMu`. Concurrent `Execute` calls block on each other.
+  This matches the CS-compatible loader convention (BOF
+  execution is fundamentally single-threaded) but is worth
+  knowing if a host program runs many BOFs in parallel.
 - **x64 only.** `Machine == 0x8664` required.
 - **Limited relocation types.** ADDR64 / ADDR32NB / REL32 only;
   exotic relocations (TLS, GOT) not supported.
-- **No symbol resolution beyond the entry point.** External
-  imports are not resolved — pure in-process code only.
 - **RWX allocation is loud.** Hardened EDRs flag RWX from any
   source; pair with sleep-mask + RW→RX flip.
 

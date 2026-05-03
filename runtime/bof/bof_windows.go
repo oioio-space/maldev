@@ -72,6 +72,15 @@ const coffRelocationSize = 10
 type BOF struct {
 	Data  []byte
 	Entry string // entry point function name (default: "go")
+
+	// output buffers anything BeaconPrintf / BeaconOutput emit during
+	// Execute. nil until Execute initialises it; Execute returns its
+	// snapshot. Tests can also read the buffer directly via OutputBytes.
+	output *beaconOutput
+
+	// argBuf is the raw user args passed to Execute. BeaconDataParse
+	// produces a parser cursor over this slice.
+	argBuf []byte
 }
 
 // Load parses a COFF object file from bytes.
@@ -99,11 +108,27 @@ func Load(data []byte) (*BOF, error) {
 
 // Execute runs the BOF's entry point with the given arguments.
 // The BOF is loaded into executable memory, relocations applied,
-// and the entry function is called.
+// and the entry function is called. Anything the BOF emits via
+// BeaconPrintf / BeaconOutput is captured and returned as the
+// first result.
+//
+// Concurrency: BOF execution is serialised package-wide (the
+// Beacon API stubs read a single currentBOF pointer guarded by
+// bofMu). Concurrent Execute calls block on each other.
 func (b *BOF) Execute(args []byte) ([]byte, error) {
 	if len(b.Data) < coffHeaderSize {
 		return nil, fmt.Errorf("invalid COFF: data too small")
 	}
+
+	b.output = newBeaconOutput()
+	b.argBuf = args
+
+	bofMu.Lock()
+	currentBOF = b
+	defer func() {
+		currentBOF = nil
+		bofMu.Unlock()
+	}()
 
 	hdr := parseCOFFHeader(b.Data)
 
@@ -175,7 +200,7 @@ func (b *BOF) Execute(args []byte) ([]byte, error) {
 	}
 	fn()
 
-	return nil, nil
+	return b.output.Bytes(), nil
 }
 
 // syscallN is a thin wrapper around windows.NewCallback-style calling.
@@ -215,11 +240,22 @@ func (b *BOF) applyRelocations(textMem []byte, textBase uintptr, textSec coffSec
 		sym := parseCOFFSymbol(b.Data[symOff:])
 
 		// Target address: for internal symbols, this is textBase + symbol value.
+		// For external symbols (sym.SectionNumber == 0) — typically the
+		// __imp_BeaconXxx imports a CS-compatible BOF references — look up
+		// the symbol name and resolve to the corresponding Go callback.
 		var targetAddr uintptr
 		if sym.SectionNumber > 0 {
 			// Symbol in a known section — for .text relocations to .text
 			// symbols, resolve relative to the loaded base.
 			targetAddr = textBase + uintptr(sym.Value)
+		} else {
+			stringTableOff := int(hdr.PointerToSymbolTable) + int(hdr.NumberOfSymbols)*coffSymbolSize
+			name := symbolName(sym.Name, b.Data, stringTableOff)
+			addr, ok := resolveBeaconImport(name)
+			if !ok {
+				return fmt.Errorf("unresolved external symbol %q at relocation %d", name, i)
+			}
+			targetAddr = addr
 		}
 
 		patchAddr := reloc.VirtualAddress
