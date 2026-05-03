@@ -253,6 +253,110 @@ func TestBeaconFormatAlloc_NilGuards(t *testing.T) {
 	assert.Equal(t, uintptr(0), beaconFormatAllocImpl(uintptr(unsafe.Pointer(&fmt)), 0))
 }
 
+// TestBeaconFormatPrintf_VerbatimAppend — varargs aren't expandable from
+// a NewCallback thunk; the implementation forwards the format string
+// verbatim. Test asserts the bytes land in the format buffer.
+func TestBeaconFormatPrintf_VerbatimAppend(t *testing.T) {
+	withCurrentBOF(t, func(_ *BOF) {
+		var fmt formatp
+		beaconFormatAllocImpl(uintptr(unsafe.Pointer(&fmt)), 64)
+		fmtStr := []byte("hello %d\x00")
+		beaconFormatPrintfImpl(
+			uintptr(unsafe.Pointer(&fmt)),
+			uintptr(unsafe.Pointer(&fmtStr[0])),
+		)
+		// Verbatim — the %d stays as-is. CS BOFs that pass a literal
+		// format string see this as the shipped behaviour.
+		got := unsafe.Slice((*byte)(unsafe.Pointer(fmt.original)), int(fmt.length))
+		assert.Equal(t, []byte("hello %d"), got)
+		beaconFormatFreeImpl(uintptr(unsafe.Pointer(&fmt)))
+	})
+}
+
+// TestBeaconError_RoutesToErrorsBuffer — BeaconErrorD/DD/NA must write
+// into b.errors, not b.output. Asserts both buffers stay separate.
+func TestBeaconError_RoutesToErrorsBuffer(t *testing.T) {
+	withCurrentBOF(t, func(b *BOF) {
+		beaconErrorDImpl(7, 42)
+		beaconErrorDDImpl(8, 100, 200)
+		beaconErrorNAImpl(9)
+
+		// Errors buffer carries the formatted lines.
+		errs := b.Errors()
+		assert.Contains(t, string(errs), "type=7 data=42")
+		assert.Contains(t, string(errs), "type=8 data1=100 data2=200")
+		assert.Contains(t, string(errs), "type=9\n")
+
+		// Output buffer must stay empty — the two channels are isolated.
+		assert.Empty(t, b.output.Bytes())
+	})
+}
+
+func TestBeaconError_NoCurrentBOF(t *testing.T) {
+	bofMu.Lock()
+	defer bofMu.Unlock()
+	currentBOF = nil
+	// Each variant must no-op safely when no BOF context is active.
+	assert.Equal(t, uintptr(0), beaconErrorDImpl(1, 2))
+	assert.Equal(t, uintptr(0), beaconErrorDDImpl(1, 2, 3))
+	assert.Equal(t, uintptr(0), beaconErrorNAImpl(1))
+}
+
+func TestBeaconGetSpawnTo_ReturnsConfiguredPath(t *testing.T) {
+	withCurrentBOF(t, func(b *BOF) {
+		b.SetSpawnTo(`C:\Windows\System32\rundll32.exe`)
+		ptr := beaconGetSpawnToImpl(0, 0)
+		require.NotZero(t, ptr)
+		got := cStringFromPtr(ptr, 256)
+		assert.Equal(t, `C:\Windows\System32\rundll32.exe`, got)
+	})
+}
+
+func TestBeaconGetSpawnTo_EmptyByDefault(t *testing.T) {
+	withCurrentBOF(t, func(_ *BOF) {
+		// No SetSpawnTo call → returns 0 (BOF sees null pointer).
+		assert.Equal(t, uintptr(0), beaconGetSpawnToImpl(0, 0))
+	})
+}
+
+// TestBOF_Errors_NilBeforeExecute — Errors() must return nil before
+// Execute initialises the buffer.
+func TestBOF_Errors_NilBeforeExecute(t *testing.T) {
+	b := &BOF{}
+	assert.Nil(t, b.Errors())
+}
+
+// TestBOF_SetSpawnTo_RoundTrip — SetSpawnTo configures the path; the
+// pinned C-string includes the trailing NUL.
+func TestBOF_SetSpawnTo_RoundTrip(t *testing.T) {
+	b := &BOF{}
+	b.SetSpawnTo("foo.exe")
+	require.NotNil(t, b.spawnToCStr)
+	assert.Equal(t, []byte{'f', 'o', 'o', '.', 'e', 'x', 'e', 0}, b.spawnToCStr)
+
+	// SetSpawnTo("") clears.
+	b.SetSpawnTo("")
+	assert.Nil(t, b.spawnToCStr)
+}
+
+// TestNewBeaconAPI_SymbolsRegistered — sanity check that every new
+// callback name resolves to a non-zero callback address. Catches a
+// typo in initBeaconCallbacks that would slip past the per-stub
+// tests above.
+func TestNewBeaconAPI_SymbolsRegistered(t *testing.T) {
+	for _, name := range []string{
+		"__imp_BeaconFormatPrintf",
+		"__imp_BeaconErrorD",
+		"__imp_BeaconErrorDD",
+		"__imp_BeaconErrorNA",
+		"__imp_BeaconGetSpawnTo",
+	} {
+		addr, ok := resolveBeaconImport(name)
+		require.True(t, ok, "%s must resolve", name)
+		assert.NotZero(t, addr)
+	}
+}
+
 // TestRelocationConstants is a regression guard locking the COFF AMD64
 // relocation type values against the PE spec. A typo flipping one
 // constant by a single digit would silently mis-route every BOF

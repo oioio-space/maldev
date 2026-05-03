@@ -4,6 +4,7 @@ package bof
 
 import (
 	"encoding/binary"
+	"fmt"
 	"strings"
 	"sync"
 	"syscall"
@@ -91,6 +92,11 @@ func initBeaconCallbacks() {
 		"__imp_BeaconFormatAppend": syscall.NewCallback(beaconFormatAppendImpl),
 		"__imp_BeaconFormatInt":    syscall.NewCallback(beaconFormatIntImpl),
 		"__imp_BeaconFormatToString": syscall.NewCallback(beaconFormatToStringImpl),
+		"__imp_BeaconFormatPrintf":   syscall.NewCallback(beaconFormatPrintfImpl),
+		"__imp_BeaconErrorD":         syscall.NewCallback(beaconErrorDImpl),
+		"__imp_BeaconErrorDD":        syscall.NewCallback(beaconErrorDDImpl),
+		"__imp_BeaconErrorNA":        syscall.NewCallback(beaconErrorNAImpl),
+		"__imp_BeaconGetSpawnTo":     syscall.NewCallback(beaconGetSpawnToImpl),
 	}
 }
 
@@ -364,16 +370,70 @@ func beaconFormatToStringImpl(formatPtr, outSizePtr uintptr) uintptr {
 	return p.original
 }
 
-// cStringFromPtr reads a NUL-terminated C string from ptr, capping at max
-// bytes to avoid runaway reads on a malformed pointer.
+// beaconFormatPrintfImpl handles BeaconFormatPrintf(format*, fmt, ...).
+// Like BeaconPrintf, the variadic argument list cannot be expanded from
+// inside a syscall.NewCallback thunk — Go has no way to walk a cdecl
+// va_list captured by a stdcall callback. We forward the format string
+// verbatim into the format buffer; BOFs that pass a literal string
+// with no `%` directives behave correctly. See tech md "Beacon-API
+// limitations" for the full rationale and the design alternatives
+// (no-resolve / cgo) the project rejected.
+func beaconFormatPrintfImpl(formatPtr, fmtPtr uintptr) uintptr {
+	if formatPtr == 0 || fmtPtr == 0 {
+		return 0
+	}
+	s := []byte(cStringFromPtr(fmtPtr, 65535))
+	if len(s) == 0 {
+		return 0
+	}
+	beaconFormatAppendImpl(formatPtr, uintptr(unsafe.Pointer(&s[0])), uintptr(len(s)))
+	return 0
+}
+
+// writeError appends a formatted error line to currentBOF.errors (or
+// no-ops when currentBOF is nil — defensive guard for unit tests that
+// don't go through Execute).
+func writeError(line string) {
+	if currentBOF == nil || currentBOF.errors == nil {
+		return
+	}
+	currentBOF.errors.write([]byte(line))
+}
+
+func beaconErrorDImpl(typ uintptr, d uintptr) uintptr {
+	writeError(fmtSprintf("error type=%d data=%d\n", uint32(typ), uint32(d)))
+	return 0
+}
+
+func beaconErrorDDImpl(typ uintptr, d1, d2 uintptr) uintptr {
+	writeError(fmtSprintf("error type=%d data1=%d data2=%d\n", uint32(typ), uint32(d1), uint32(d2)))
+	return 0
+}
+
+func beaconErrorNAImpl(typ uintptr) uintptr {
+	writeError(fmtSprintf("error type=%d\n", uint32(typ)))
+	return 0
+}
+
+// beaconGetSpawnToImpl returns a pointer to the configured spawn-to
+// path (NUL-terminated), or 0 when none was set. The path bytes live
+// in the BOF's spawnToCStr field — pinned for the BOF instance's
+// lifetime so the address stays stable across Beacon API callbacks.
+func beaconGetSpawnToImpl(_ uintptr, _ uintptr) uintptr {
+	if currentBOF == nil || len(currentBOF.spawnToCStr) == 0 {
+		return 0
+	}
+	return uintptr(unsafe.Pointer(&currentBOF.spawnToCStr[0]))
+}
+
+// fmtSprintf is a thin alias for fmt.Sprintf so the Beacon error stubs
+// can be unit-tested with a fake formatter if needed.
+var fmtSprintf = fmt.Sprintf
+
+// cStringFromPtr is a thin local alias for api.CStringFromPtr. The
+// helper was promoted to win/api as the canonical home for native-
+// pointer-to-Go-string conversions; this alias keeps the in-file
+// call sites short and the existing tests compatible.
 func cStringFromPtr(ptr uintptr, max int) string {
-	if ptr == 0 {
-		return ""
-	}
-	for n := 0; n < max; n++ {
-		if *(*byte)(unsafe.Pointer(ptr + uintptr(n))) == 0 {
-			return string(unsafe.Slice((*byte)(unsafe.Pointer(ptr)), n))
-		}
-	}
-	return string(unsafe.Slice((*byte)(unsafe.Pointer(ptr)), max))
+	return api.CStringFromPtr(ptr, max)
 }

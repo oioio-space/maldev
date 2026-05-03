@@ -132,12 +132,43 @@ for _, path := range []string{"whoami.o", "netstat.o", "tasklist.o"} {
   `ErrorDD` / `ErrorNA`, `BeaconGetSpawnTo`. BOFs that import
   any of the unimplemented symbols fail at relocation time
   with `unresolved external symbol __imp_BeaconXxx`.
-- **`BeaconPrintf` varargs are not expanded.** `syscall.NewCallback`
-  binds a fixed-arity Go function as a stdcall callback; Go
-  cannot introspect cdecl varargs from inside the callback. We
-  forward the format string verbatim — BOFs that pass a literal
-  format with no `%` directives behave correctly; BOFs relying
-  on `printf`-style expansion see the format string raw.
+- **`BeaconPrintf` / `BeaconFormatPrintf` varargs are not
+  expanded.** `syscall.NewCallback` binds a fixed-arity Go
+  function as a stdcall callback; Go cannot introspect cdecl
+  varargs from inside the callback. We chose option **(a)**
+  in the design discussion: forward the format string verbatim.
+  BOFs that pass a literal format with no `%` directives
+  behave correctly; BOFs relying on `printf`-style expansion
+  see the format string raw.
+
+  Two alternatives were considered and rejected for the default
+  build:
+
+  - **(b) Leave `__imp_BeaconPrintf` / `BeaconFormatPrintf`
+    unresolved** so BOFs that depend on varargs fail at load
+    time with a loud error. Honest but breaks compatibility
+    with the large TrustedSec / Outflank corpus where
+    `BeaconPrintf(CALLBACK_OUTPUT, "...")` is used as a
+    no-args writer in 80% of cases.
+
+  - **(c) Implement varargs via cgo.** A C wrapper around
+    `vsnprintf` would expand the format and call back into Go
+    with the rendered string. Requires:
+      1. A C cross-compile toolchain in the build environment
+         (mingw-w64 on Linux dev hosts, MSVC on Windows CI).
+      2. CGO_ENABLED=1 — flips the entire library out of pure-Go
+         mode, which the README sells as a hard guarantee.
+      3. A different binary surface in `runtime/bof` for cgo vs.
+         pure-Go builds, plus a build-tag matrix.
+
+    The cost is steep relative to the gain (a minority of BOFs).
+    Operators who need full vararg expansion can fork the
+    package, drop a `bof_cgo_windows.go` file behind
+    `//go:build windows && cgo && bof_cgo`, and supply a C-side
+    `vsnprintf` wrapper they register via a hook hung off
+    `resolveBeaconImport`. That extension point is intentionally
+    left open; the default build prioritises pure-Go and
+    accepts the verbatim-format trade-off.
 - **External Win32 imports unresolved.** CS BOFs encode dynamic-link
   imports as `__imp_<DLLNAME>$<FuncName>` (e.g.
   `__imp_KERNEL32$LoadLibraryA`). The current resolver only

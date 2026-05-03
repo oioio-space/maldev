@@ -86,9 +86,48 @@ type BOF struct {
 	// snapshot. Tests can also read the buffer directly via OutputBytes.
 	output *beaconOutput
 
+	// errors buffers anything BeaconErrorD / DD / NA emit during
+	// Execute. Kept separate from output so callers can route the two
+	// to different sinks; read via Errors().
+	errors *beaconOutput
+
 	// argBuf is the raw user args passed to Execute. BeaconDataParse
 	// produces a parser cursor over this slice.
 	argBuf []byte
+
+	// spawnTo is the path BeaconGetSpawnTo returns to the BOF — the
+	// fork-and-run target. Empty string by default; set per-BOF via
+	// SetSpawnTo. The pinned []byte form (with trailing NUL) lives in
+	// spawnToCStr so the address handed to native code stays stable.
+	spawnTo     string
+	spawnToCStr []byte
+}
+
+// SetSpawnTo configures the path BeaconGetSpawnTo returns when the BOF
+// asks the loader for a fork-and-run target. Empty string (the default)
+// means "no spawn target" — BOFs that consult BeaconGetSpawnTo see an
+// empty C string and typically fall back to their own logic. Path is
+// converted to a NUL-terminated byte slice once and pinned for the
+// remaining lifetime of the BOF instance, so the address stays stable
+// across Beacon API callbacks.
+func (b *BOF) SetSpawnTo(path string) {
+	b.spawnTo = path
+	if path == "" {
+		b.spawnToCStr = nil
+		return
+	}
+	b.spawnToCStr = append([]byte(path), 0)
+}
+
+// Errors returns whatever the BOF emitted via BeaconErrorD / DD / NA
+// during the last Execute. Returns nil before the first Execute call.
+// The slice is a fresh copy — safe to retain after subsequent Execute
+// calls clear the underlying buffer.
+func (b *BOF) Errors() []byte {
+	if b.errors == nil {
+		return nil
+	}
+	return b.errors.Bytes()
 }
 
 // Load parses a COFF object file from bytes.
@@ -129,6 +168,7 @@ func (b *BOF) Execute(args []byte) ([]byte, error) {
 	}
 
 	b.output = newBeaconOutput()
+	b.errors = newBeaconOutput()
 	b.argBuf = args
 
 	bofMu.Lock()
