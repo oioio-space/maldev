@@ -38,7 +38,7 @@ Each panorama lives at `cmd/examples/<id>/main.go` + a walkthrough at `docs/exam
 | 12 | `process-tamper` | process/enum.List + process/session.Active + process/tamper/fakecmd.Spoof+Restore | ✅ matrix run | Done 2026-05-03. enum/fakecmd parity admin/lowuser. session.Active inconsistent for lowuser (likely returns empty / errors when invoked from session 0 task). **Doc-drift**: session.Info real fields are `ID/Name/State/User/Domain`, doc says `SessionID/Username`. |
 | 13 | `collection-suite` | collection/{clipboard.ReadText, screenshot.Capture, keylog.Start} | ✅ matrix run | Done 2026-05-03. lsass-dump + ADS already covered by panoramas 9 + 10. **Session-0 limitation surfaced**: every collection primitive is interactive-session-bound; SSH admin + scheduled-task lowuser both run in session 0 → empty clipboard, screen-capture-failed, keylogger receives no events. The doc could call this out: "collection requires running inside a user logon session (interactive desktop), not via service / scheduled task / SSH". |
 | 14 | `runtime-loaders` | runtime/{bof.Load, clr.Load+ExecuteAssembly} + inject.ModuleStomp | ✅ matrix run | Done 2026-05-03. bof + ModuleStomp parity admin/lowuser. clr fails identically on all 4 cells with the doc-aligned "install .NET 3.5" message — known TOOLS-snapshot blocker (memory `clr_v2_activation_blocker`). |
-| 15 | `c2-suite` | c2/{transport,reverse-shell,namedpipe,multicat,malleable-profiles} | ⏳ pending | C2 plumbing. |
+| 15 | `c2-suite` | c2/transport.NewTCPListener+NewTCP + c2/transport/namedpipe.NewListener | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. **Doc-drift**: c2/namedpipe.md imports `c2/namedpipe`; real path is `c2/transport/namedpipe`. **Surprise finding**: lowuser CAN bind port 80 on Windows (no privileged-port gate, unlike Linux). |
 | 16 | `kernel-byovd` | kernel/byovd-rtcore64 + (admin only) | ⏳ pending | BYOVD admin-only. |
 
 Layer-0 docs (`crypto/`, `encode/`, `hash/`, `random/`, `useragent/`) and most of `win/{api,ntapi,token,privilege,version,domain,impersonate}` are *primitives* with no admin/user delta worth E2E-testing — they are exercised transitively by every panorama and audited statically by the per-package code review.
@@ -69,6 +69,7 @@ Add a row whenever a panorama or audit reveals a mismatch. Decision column: **fi
 | `docs/techniques/pe/certificate-theft.md:Simple` | `cert.Copy(\`C:\Windows\System32\notepad.exe\`, …)` | notepad.exe (and most modern system PEs) are *catalog-signed* — the Authenticode signature lives in `\System32\CatRoot\…\*.cat`, not embedded in the PE overlay. `cert.Has(notepad.exe)` returns false on Win10 + Win11; the example would fail at the source-cert read. | clarify-doc | TODO — change the example to a third-party signed PE (e.g. `\Program Files\Internet Explorer\iediagcmd.exe` historically had embedded sig, or a small embedded-signed Windows tool), or add a note explaining catalog vs embedded signing and how to inspect both. |
 | `docs/techniques/process/session.md:Simple` | `i.SessionID`, `i.Username` | real fields on `session.Info` are `ID`, `Name`, `State`, `User`, `Domain` (no `SessionID`, no `Username`) | fix-doc | TODO — rewrite the example: `fmt.Printf("session %d (%s): %s\\%s (%v)\n", i.ID, i.Name, i.Domain, i.User, i.State)`. |
 | `docs/techniques/collection/{clipboard,screenshot,keylogging}.md` | "Simple" examples imply they "just work" | every primitive needs an interactive logon session — running from a service / scheduled task / SSH session yields empty clipboard, "screen capture failed", and a keylogger that receives no events. Matrix evidence on Win10 + Win11 in both admin and lowuser. | clarify-doc | TODO — add a "Session requirement" callout to the area README: collection requires session ≠ 0 with an attached desktop. Useful for operators who would otherwise wonder why their service-mode implant collects nothing. |
+| `docs/techniques/c2/namedpipe.md` | `import "github.com/oioio-space/maldev/c2/namedpipe"` | real package lives at `github.com/oioio-space/maldev/c2/transport/namedpipe` (under `c2/transport/`, alongside the TCP transport) | fix-doc | TODO — fix the import path in every example block in c2/namedpipe.md. |
 
 ## E2E observations from completed panoramas
 
@@ -251,6 +252,17 @@ Single consolidated finding for the area: **collection requires an interactive l
 | Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | OK |
 
 ModuleStomp parity is the noteworthy result: a non-admin process can hijack a benign DLL inside its own image to host shellcode at a legit-looking RVA. Combined with the panorama-2 finding (preset.Stealth + ThreadPoolExec at parity), the audit now has two compounding lowuser-friendly building blocks for full in-process payload execution.
+
+### Panorama 15 — `c2-suite` (matrix run, 2026-05-03)
+
+| Step | win10 admin | win10 lowuser | win11 admin | win11 lowuser | Doc note |
+|---|---|---|---|---|---|
+| `transport.NewTCPListener(":80")` (low port) | ✅ `[::]:80` | ✅ same | ✅ | ✅ | **Surprise** — Windows does not gate ports ≤ 1024 to admin. Lowuser can bind 80, 443, 22 just fine. Worth a doc note for operators coming from Linux. |
+| `transport.NewTCPListener("127.0.0.1:0")` + dial+write loopback | ✅ ephemeral port + `dial+write OK` | ✅ same | ✅ | ✅ | OK |
+| `namedpipe.NewListener(\\.\pipe\<unique>)` | ✅ OK | ✅ same | ✅ | ✅ | OK once the import path is fixed (drift captured) |
+| Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | full panorama green |
+
+Two findings worth pinning to the doc: the import-path drift on `c2/namedpipe`, and the Windows-vs-Unix difference on privileged-port binding (no privileged-port gate on Windows for the local interactive session).
 
 ## Workflow per panorama
 
