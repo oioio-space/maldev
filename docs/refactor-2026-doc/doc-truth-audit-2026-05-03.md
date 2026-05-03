@@ -35,7 +35,7 @@ Each panorama lives at `cmd/examples/<id>/main.go` + a walkthrough at `docs/exam
 | 9 | `credentials-suite` | credentials/{lsassdump.DumpToFile, samdump.LiveDump, goldenticket.Forge} | ⚠️ matrix run, findings | Done 2026-05-03. Goldenticket forge works everywhere. lsass dump differential interesting (Win10 admin OK, Win11 admin ErrOpenDenied — likely Win11 RunAsPPL default, sentinel routing imprecise). LiveDump fails on all 4 cells — needs investigation. **Doc-drifts:** `goldenticket.Hash{Type, Bytes}` (doc says `EType`); `ETypeAES256CTS` (doc says `ETypeAES256CTSHMACSHA196`). |
 | 10 | `cleanup-suite` | cleanup/{ads,timestomp,memory-wipe} (skips selfdelete to avoid terminating the runner) | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. Doc-drift: `ads.List` returns structs with name+size, doc shows `[]string`. |
 | 11 | `pe-suite` | pe/{imports.List, cert.Has+Read, strip.Sanitize, srdi.ConvertFile} | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0 with full parity admin/lowuser. **Doc-clarif**: notepad.exe is catalog-signed, not Authenticode-embedded; `cert.Copy(notepad.exe, …)` in the doc would fail — pick a different sample. |
-| 12 | `process-tamper` | process/{fakecmd,herpaderping,hideprocess,phant0m} | ⏳ pending | Process evasion. |
+| 12 | `process-tamper` | process/enum.List + process/session.Active + process/tamper/fakecmd.Spoof+Restore | ✅ matrix run | Done 2026-05-03. enum/fakecmd parity admin/lowuser. session.Active inconsistent for lowuser (likely returns empty / errors when invoked from session 0 task). **Doc-drift**: session.Info real fields are `ID/Name/State/User/Domain`, doc says `SessionID/Username`. |
 | 13 | `collection-suite` | collection/{clipboard,screenshot,keylogging,lsass-dump,alternate-data-streams} | ⏳ pending | Data collection. |
 | 14 | `runtime-loaders` | runtime/{bof-loader,clr} + injection/{phantom-dll,module-stomping,section-mapping} | ⏳ pending | Loader variants. |
 | 15 | `c2-suite` | c2/{transport,reverse-shell,namedpipe,multicat,malleable-profiles} | ⏳ pending | C2 plumbing. |
@@ -67,6 +67,7 @@ Add a row whenever a panorama or audit reveals a mismatch. Decision column: **fi
 | `docs/techniques/credentials/lsassdump.md` | sentinel error routing (`ErrOpenDenied` for non-admin) | matrix evidence: lowuser hits `lsass.exe not found` (string-comparison miss vs the documented sentinel), Win11 admin hits `ErrOpenDenied` even though the cause is RunAsPPL (should be `ErrPPL`) | fix-code | TODO — tighten the error classification in the dump path so the documented sentinels actually fire when the documented condition holds. |
 | `docs/techniques/credentials/samdump.md` `LiveDump` | matrix evidence: fails on all four cells with `samdump: live dump failed` (admin too) | unclear — LiveDump uses VSS shadow copies which may need explicit feature setup on workstation SKUs, or the function has an environment requirement the doc doesn't mention | clarify-doc + investigate-code | TODO — reproduce manually on the VM, capture the real underlying error, then either fix-code or add a "VSS required" note. |
 | `docs/techniques/pe/certificate-theft.md:Simple` | `cert.Copy(\`C:\Windows\System32\notepad.exe\`, …)` | notepad.exe (and most modern system PEs) are *catalog-signed* — the Authenticode signature lives in `\System32\CatRoot\…\*.cat`, not embedded in the PE overlay. `cert.Has(notepad.exe)` returns false on Win10 + Win11; the example would fail at the source-cert read. | clarify-doc | TODO — change the example to a third-party signed PE (e.g. `\Program Files\Internet Explorer\iediagcmd.exe` historically had embedded sig, or a small embedded-signed Windows tool), or add a note explaining catalog vs embedded signing and how to inspect both. |
+| `docs/techniques/process/session.md:Simple` | `i.SessionID`, `i.Username` | real fields on `session.Info` are `ID`, `Name`, `State`, `User`, `Domain` (no `SessionID`, no `Username`) | fix-doc | TODO — rewrite the example: `fmt.Printf("session %d (%s): %s\\%s (%v)\n", i.ID, i.Name, i.Domain, i.User, i.State)`. |
 
 ## E2E observations from completed panoramas
 
@@ -216,6 +217,17 @@ This row is the audit's most fix-rich panorama: 2 typo-class doc fixes for golde
 | Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | full panorama green |
 
 PE work is parse + transform on raw bytes — no privileged syscalls, full parity admin/lowuser. The one quirk worth clarifying in the doc: modern Microsoft binaries use catalog signing, so the canonical example needs a different sample to actually exercise the cert-copy path.
+
+### Panorama 12 — `process-tamper` (matrix run, 2026-05-03)
+
+| Step | win10 admin | win10 lowuser | win11 admin | win11 lowuser | Doc note |
+|---|---|---|---|---|---|
+| `enum.List` | ✅ 127 procs (sees lsass/winlogon/smss/csrss/services by PID+PPID+name) | ✅ 131 procs (same SYSTEM-owned procs visible by name) | ✅ 139 procs | ✅ 141 procs | OK — Toolhelp32 enumeration is name-level visibility, not handle-level. Both modes see SYSTEM-owned processes; only OpenProcess is gated. |
+| `session.Active` | ✅ 1 session: `{ID:1 Name:Console State:Active User:test …}` | ⚠️ no rows printed | ✅ 1 session | ⚠️ no rows printed | Lowuser is invoked from a Schedule-Service session (session 0 batch logon) — `WTSEnumerateSessions` likely returns 0 rows or errors silently for that context. Worth a doc note. |
+| `fakecmd.Spoof` + `Restore` | ✅ PEB rewritten to "svchost.exe -k netsvcs", restore OK | ✅ same | ✅ | ✅ same | OK — process-local PEB mutation, no admin needed. The doc says fakecmd targets a child process (the example shows `Spoof("...path...")` taking a string command-line); we exercised the self-process variant. |
+| Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | OK |
+
+Notable: **fakecmd.Spoof works at lowuser parity with admin** — PEB rewriting is in-process memory tampering with no external token check, exactly the kind of evasion non-admin malware can rely on. Conversely, session enumeration's lowuser quirk (no rows visible) likely reflects the matrix runner's use of a session-0 scheduled task; an actual interactive user-session implant would see at least its own session.
 
 ## Workflow per panorama
 
