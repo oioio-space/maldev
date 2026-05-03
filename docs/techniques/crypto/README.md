@@ -42,6 +42,13 @@ decrypt → wipe key → inject → wipe plaintext.
 The package mixes three layers; the technique page documents each layer
 separately.
 
+For a side-by-side comparison of every primitive (Layer / Speed / Entropy /
+Key size / IV / Authenticated / Reversible / Static signature / Best-for),
+see the **["Pick the primitive"](payload-encryption.md#pick-the-primitive)**
+9-row matrix in `payload-encryption.md`. The matrix is the canonical place
+to make a "which cipher / transform do I reach for?" choice; the decision
+tree below is a quick-reference shortcut.
+
 ## Quick decision tree
 
 | You want to… | Use |
