@@ -15,7 +15,12 @@
 //     signatures on payloads.
 //
 // Helpers: `NewAESKey`, `NewChaChaKey` for sane-default key
-// generation.
+// generation. `Wipe` zeros a buffer using the same compiler-
+// resistant memclear as `cleanup/memory.SecureZero`.
+// `UseDecrypted(decrypt, fn)` runs `decrypt`, hands the
+// plaintext to `fn`, and zeroes the buffer via defer before
+// returning — closes the "did the operator remember to wipe?"
+// footgun.
 //
 // # Entropy + layering
 //
