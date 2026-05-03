@@ -208,10 +208,28 @@ func (b *BOF) Execute(args []byte) ([]byte, error) {
 
 	textData := b.Data[textSec.PointerToRawData : textSec.PointerToRawData+textSec.SizeOfRawData]
 
-	// 3. Allocate executable memory and copy .text.
+	// 3. Pre-scan relocations to enumerate unique external symbols. Each
+	//    one needs an import-table slot the BOF dereferences via
+	//    mov reg, [rip+disp32]. The slots MUST live within ±2 GB of the
+	//    .text page (REL32 displacement range), so we co-allocate them
+	//    in the same VirtualAlloc as the code.
+	imports, err := b.collectImports(textSec, hdr)
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Allocate executable memory: .text bytes followed by 8-byte
+	//    import-table slots. PAGE_EXECUTE_READWRITE for the whole
+	//    allocation — the slots are read-only data accessed via
+	//    rip-relative loads, but co-housing them with code keeps the
+	//    allocation simple and 2-GB displacement guaranteed.
+	textLen := len(textData)
+	importTableLen := len(imports) * 8
+	totalLen := textLen + importTableLen
+
 	execMem, err := windows.VirtualAlloc(
 		0,
-		uintptr(len(textData)),
+		uintptr(totalLen),
 		windows.MEM_COMMIT|windows.MEM_RESERVE,
 		windows.PAGE_EXECUTE_READWRITE,
 	)
@@ -220,12 +238,28 @@ func (b *BOF) Execute(args []byte) ([]byte, error) {
 	}
 	defer windows.VirtualFree(execMem, 0, windows.MEM_RELEASE)
 
-	dst := unsafe.Slice((*byte)(unsafe.Pointer(execMem)), len(textData))
+	dst := unsafe.Slice((*byte)(unsafe.Pointer(execMem)), totalLen)
 	copy(dst, textData)
 
-	// 4. Apply relocations for .text section.
+	// 5. Resolve each external symbol and write its function address
+	//    into the corresponding import-table slot. importSlots maps
+	//    symbol name to the absolute slot address (within execMem).
+	importSlots := make(map[string]uintptr, len(imports))
+	for i, name := range imports {
+		addr, ok := resolveBeaconImport(name)
+		if !ok {
+			return nil, fmt.Errorf("unresolved external symbol %q", name)
+		}
+		slotAddr := execMem + uintptr(textLen+i*8)
+		*(*uintptr)(unsafe.Pointer(slotAddr)) = addr
+		importSlots[name] = slotAddr
+	}
+
+	// 6. Apply relocations for .text section. Externals consult
+	//    importSlots; in-section relocations resolve to textBase
+	//    (== execMem) + value as before.
 	if textSec.NumberOfRelocations > 0 {
-		if err := b.applyRelocations(dst, execMem, textSec, hdr, sections); err != nil {
+		if err := b.applyRelocations(dst[:textLen], execMem, textSec, hdr, sections, importSlots); err != nil {
 			return nil, fmt.Errorf("relocation failed: %w", err)
 		}
 	}
@@ -266,8 +300,45 @@ func syscallN(addr uintptr, args ...uintptr) {
 	}
 }
 
+// collectImports walks the .text section's relocation entries and returns
+// the deduplicated list of external symbol names, preserving first-seen
+// order so the import-table layout is deterministic. Each unique name
+// gets one 8-byte slot at the tail of the BOF's executable allocation.
+func (b *BOF) collectImports(textSec coffSection, hdr coffHeader) ([]string, error) {
+	stringTableOff := int(hdr.PointerToSymbolTable) + int(hdr.NumberOfSymbols)*coffSymbolSize
+	relocOff := int(textSec.PointerToRelocations)
+	seen := map[string]struct{}{}
+	var names []string
+	for i := 0; i < int(textSec.NumberOfRelocations); i++ {
+		off := relocOff + i*coffRelocationSize
+		if off+coffRelocationSize > len(b.Data) {
+			return nil, fmt.Errorf("relocation entry out of bounds")
+		}
+		reloc := parseCOFFRelocation(b.Data[off:])
+		symOff := int(hdr.PointerToSymbolTable) + int(reloc.SymbolTableIndex)*coffSymbolSize
+		if symOff+coffSymbolSize > len(b.Data) {
+			return nil, fmt.Errorf("symbol table entry out of bounds")
+		}
+		sym := parseCOFFSymbol(b.Data[symOff:])
+		if sym.SectionNumber != 0 {
+			continue
+		}
+		name := symbolName(sym.Name, b.Data, stringTableOff)
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
 // applyRelocations processes COFF relocations for the .text section.
-func (b *BOF) applyRelocations(textMem []byte, textBase uintptr, textSec coffSection, hdr coffHeader, sections []coffSection) error {
+// importSlots maps each external symbol name to the absolute address of
+// its import-table slot — co-allocated by Execute inside the same
+// VirtualAlloc page as the code so REL32 reaches.
+func (b *BOF) applyRelocations(textMem []byte, textBase uintptr, textSec coffSection, hdr coffHeader, sections []coffSection, importSlots map[string]uintptr) error {
+	stringTableOff := int(hdr.PointerToSymbolTable) + int(hdr.NumberOfSymbols)*coffSymbolSize
 	relocOff := int(textSec.PointerToRelocations)
 	for i := 0; i < int(textSec.NumberOfRelocations); i++ {
 		off := relocOff + i*coffRelocationSize
@@ -287,23 +358,23 @@ func (b *BOF) applyRelocations(textMem []byte, textBase uintptr, textSec coffSec
 		}
 		sym := parseCOFFSymbol(b.Data[symOff:])
 
-		// Target address: for internal symbols, this is textBase + symbol value.
-		// For external symbols (sym.SectionNumber == 0) — typically the
-		// __imp_BeaconXxx imports a CS-compatible BOF references — look up
-		// the symbol name and resolve to the corresponding Go callback.
+		// Target address: for internal symbols, this is textBase + symbol
+		// value. For external symbols (sym.SectionNumber == 0) — the
+		// __imp_BeaconXxx / __imp_<DLL>$<Func> imports a CS-format BOF
+		// references — the target is the address of the import-table slot
+		// that holds the resolved function address. The BOF's emitted
+		// `mov reg, [rip+disp32]` then reads the function pointer from
+		// the slot; `call *reg` jumps to it.
 		var targetAddr uintptr
 		if sym.SectionNumber > 0 {
-			// Symbol in a known section — for .text relocations to .text
-			// symbols, resolve relative to the loaded base.
 			targetAddr = textBase + uintptr(sym.Value)
 		} else {
-			stringTableOff := int(hdr.PointerToSymbolTable) + int(hdr.NumberOfSymbols)*coffSymbolSize
 			name := symbolName(sym.Name, b.Data, stringTableOff)
-			addr, ok := resolveBeaconImport(name)
+			slotAddr, ok := importSlots[name]
 			if !ok {
 				return fmt.Errorf("unresolved external symbol %q at relocation %d", name, i)
 			}
-			targetAddr = addr
+			targetAddr = slotAddr
 		}
 
 		patchAddr := reloc.VirtualAddress
