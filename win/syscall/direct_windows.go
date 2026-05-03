@@ -43,7 +43,7 @@ func (c *Caller) Call(ntFuncName string, args ...uintptr) (uintptr, error) {
 //	caller.CallByHash(api.HashNtAllocateVirtualMemory, args...)
 func (c *Caller) CallByHash(funcHash uint32, args ...uintptr) (uintptr, error) {
 	// Resolve function address via PEB walk — no strings involved.
-	ntdllBase, err := pebModuleByHash(hashNtdll)
+	ntdllBase, err := pebModuleByHashFunc(c.ntdllHash, c.hashFunc)
 	if err != nil {
 		return 0, fmt.Errorf("PEB walk ntdll: %w", err)
 	}

@@ -364,7 +364,7 @@ func main() {
 
 - **ROR13 collisions**: Theoretically possible (32-bit hash space), though none exist for common NT function names
 - **PEB walk detectable**: ETW providers and some EDRs monitor PEB traversal patterns
-- **Hash constants are signatures**: Known ROR13 values (e.g., `0xD33BCABD` for NtAllocateVirtualMemory) become YARA targets themselves — switch families (`hash.JenkinsOAAT` / `hash.FNV1a32` / `hash.DJB2` / `hash.CRC32`) to render those signatures useless against your binary
+- **Hash constants are signatures**: Known ROR13 values (e.g., `0xD33BCABD` for NtAllocateVirtualMemory) become YARA targets themselves — switch families (`hash.JenkinsOAAT` / `hash.FNV1a32` / `hash.DJB2` / `hash.CRC32`) to render those signatures useless against your binary. `NewHashGateWith(fn)` and `Caller.WithHashFunc(fn)` recompute the `ntdll.dll` module-name hash via `fn` at construction time, so the ROR13Module fingerprint constant `0x411677B7` no longer appears in binaries built with a non-ROR13 family — the swap is end-to-end, not function-only
 - **No pre-computed Hash\* constants for non-ROR13 families**: `win/api.HashKernel32` / `HashLoadLibraryA` / etc. are ROR13-only. When pairing `wsyscall.NewHashGateWith(hash.JenkinsOAAT)` with `Caller.CallByHash`, callers compute the funcHash at build time themselves. A `cmd/hashgen` `go generate` step that emits per-family constant tables is queued under backlog row P2.24.
 - **Requires loaded modules**: Can only resolve functions from DLLs already in the PEB -- cannot load new DLLs by hash alone
 

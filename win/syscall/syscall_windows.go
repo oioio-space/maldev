@@ -62,6 +62,11 @@ type Caller struct {
 	// Optional custom hash function for CallByHash export-table lookups.
 	// nil means ROR13 (the default everywhere else in maldev).
 	hashFunc HashFunc
+	// ntdllHash matches hashFunc — when hashFunc is nil this is the
+	// precomputed ROR13Module hash of "ntdll.dll"; when hashFunc is set
+	// it is fn("ntdll.dll"), so binaries built with a non-ROR13 family
+	// no longer carry the ROR13Module fingerprint constant.
+	ntdllHash uint32
 
 	// Pre-allocated stub memory (allocated once as RW, cycled to RX per call).
 	directStub   uintptr
@@ -74,7 +79,7 @@ type Caller struct {
 // For those methods, executable stub pages are pre-allocated; call Close
 // to release them when done.
 func New(method Method, r SSNResolver) *Caller {
-	c := &Caller{method: method, resolver: r}
+	c := &Caller{method: method, resolver: r, ntdllHash: hashNtdll}
 	if method == MethodDirect || method == MethodIndirect {
 		// Pre-allocate RW pages for the syscall stubs. 64 bytes each is
 		// more than enough for both the direct (11 bytes) and indirect (21 bytes) stubs.
@@ -95,6 +100,11 @@ func New(method Method, r SSNResolver) *Caller {
 // Pass nil to revert to the package default (ROR13).
 func (c *Caller) WithHashFunc(fn HashFunc) *Caller {
 	c.hashFunc = fn
+	if fn == nil {
+		c.ntdllHash = hashNtdll
+	} else {
+		c.ntdllHash = fn("ntdll.dll")
+	}
 	return c
 }
 

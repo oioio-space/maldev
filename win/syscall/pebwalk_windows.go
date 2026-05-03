@@ -48,6 +48,47 @@ func pebExportByHash(moduleBase uintptr, funcHash uint32) (uintptr, error) {
 	return pebExportByHashFunc(moduleBase, funcHash, nil)
 }
 
+// pebModuleByHashFunc is the swappable-hash variant of pebModuleByHash.
+// When fn is nil the fast inlined ROR13-on-wide-bytes path runs, identical
+// to pebModuleByHash. When fn is supplied, each module's BaseDllName is
+// materialised as a lowercase ASCII Go string (PEB always stores names
+// lowercased) and passed through fn — letting HashGate eliminate the
+// ROR13Module fingerprint constant from binaries that swap to a different
+// algorithm via NewHashGateWith.
+func pebModuleByHashFunc(target uint32, fn HashFunc) (uintptr, error) {
+	if fn == nil {
+		return pebModuleByHash(target)
+	}
+	teb := currentTeb()
+	peb := *(*uintptr)(unsafe.Pointer(teb + 0x60))
+	ldr := *(*uintptr)(unsafe.Pointer(peb + 0x18))
+	head := ldr + 0x10
+	first := *(*uintptr)(unsafe.Pointer(head))
+
+	for entry := first; entry != head; entry = *(*uintptr)(unsafe.Pointer(entry)) {
+		dllBase := *(*uintptr)(unsafe.Pointer(entry + 0x30))
+		nameLen := *(*uint16)(unsafe.Pointer(entry + 0x58))
+		nameBuf := *(*uintptr)(unsafe.Pointer(entry + 0x60))
+
+		if dllBase == 0 || nameLen == 0 || nameBuf == 0 {
+			continue
+		}
+
+		// Wide UTF-16LE → ASCII Go string. Module names in the PEB are
+		// always ASCII (DLL filenames), so the low byte of each uint16
+		// is the character we want.
+		nChars := int(nameLen) / 2
+		ascii := make([]byte, nChars)
+		for i := 0; i < nChars; i++ {
+			ascii[i] = byte(*(*uint16)(unsafe.Pointer(nameBuf + uintptr(i*2))))
+		}
+		if fn(string(ascii)) == target {
+			return dllBase, nil
+		}
+	}
+	return 0, fmt.Errorf("module hash 0x%08X not found in PEB", target)
+}
+
 // pebExportByHashFunc is the swappable-hash variant. When fn is nil, the
 // hot ROR13 path runs in place and avoids the per-export Go string copy.
 // When fn is supplied, each export name is materialised as a Go string and

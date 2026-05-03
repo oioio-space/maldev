@@ -200,26 +200,34 @@ type HashGateResolver struct {
 	ntdllBase uintptr // cached ntdll base address
 	initErr   error
 	hashFunc  HashFunc // nil means ROR13 fast path
+	ntdllHash uint32   // module-name hash matching hashFunc (or hashNtdll when nil)
 }
 
 // NewHashGate creates a HashGateResolver using the default ROR13 hash. The
 // ntdll base address is resolved lazily on first Resolve() call and cached
 // (thread-safe via sync.Once).
-func NewHashGate() *HashGateResolver { return &HashGateResolver{} }
+func NewHashGate() *HashGateResolver {
+	return &HashGateResolver{ntdllHash: hashNtdll}
+}
 
 // NewHashGateWith creates a HashGateResolver that hashes function names with
 // the supplied fn. fn must be the same algorithm used by the caller to
-// pre-compute the function-hash constants stored in the binary.
+// pre-compute the function-hash constants stored in the binary. The ntdll
+// module-name hash is also computed via fn so the binary no longer carries
+// the ROR13Module(ntdll.dll) fingerprint constant.
 //
 // Pass nil to fall back to ROR13 (equivalent to NewHashGate).
 func NewHashGateWith(fn HashFunc) *HashGateResolver {
-	return &HashGateResolver{hashFunc: fn}
+	if fn == nil {
+		return NewHashGate()
+	}
+	return &HashGateResolver{hashFunc: fn, ntdllHash: fn("ntdll.dll")}
 }
 
 func (r *HashGateResolver) Resolve(name string) (uint16, error) {
 	// Thread-safe lazy init of ntdll base address via PEB walk.
 	r.once.Do(func() {
-		r.ntdllBase, r.initErr = pebModuleByHash(hashNtdll)
+		r.ntdllBase, r.initErr = pebModuleByHashFunc(r.ntdllHash, r.hashFunc)
 	})
 	if r.initErr != nil {
 		return 0, fmt.Errorf("HashGate: ntdll not found via PEB walk: %w", r.initErr)

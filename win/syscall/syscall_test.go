@@ -148,6 +148,29 @@ func TestCallerWithHashFunc(t *testing.T) {
 	assert.NotZero(t, r)
 }
 
+// TestNewHashGateWith_ModuleHashIsSwapped guards the end-to-end hash-family
+// swap: NewHashGateWith must use the supplied fn to compute the ntdll.dll
+// module-name hash, not the precomputed ROR13Module constant. We pass a
+// sentinel fn that returns a unique value only for "ntdll.dll" — if the
+// resolver still walks the PEB looking for the ROR13Module constant the
+// PEB walk fails and Resolve errors out.
+func TestNewHashGateWith_ModuleHashIsSwapped(t *testing.T) {
+	const sentinel uint32 = 0xCAFEBABE
+	sentinelFn := func(s string) uint32 {
+		if s == "ntdll.dll" {
+			return sentinel
+		}
+		// Function-name hashes still need to match what pebExportByHashFunc
+		// computes, so fall back to ROR13 there.
+		return ror13str(s)
+	}
+	r := NewHashGateWith(sentinelFn)
+	require.Equal(t, sentinel, r.ntdllHash, "ntdllHash must come from fn(\"ntdll.dll\")")
+	ssn, err := r.Resolve("NtClose")
+	require.NoError(t, err, "PEB walk with the sentinel fn must locate ntdll")
+	assert.Greater(t, ssn, uint16(0))
+}
+
 // TestHashROR13_MatchesPackageDefault verifies the exported HashROR13 var is
 // the same algorithm the package uses by default — feeding it through the
 // custom-hash path must yield identical results to the fast path.
