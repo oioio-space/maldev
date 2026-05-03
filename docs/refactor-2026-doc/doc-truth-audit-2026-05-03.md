@@ -28,7 +28,7 @@ Each panorama lives at `cmd/examples/<id>/main.go` + a walkthrough at `docs/exam
 | 2 | `injection-evasion` | wsyscall (Tartarus + Indirect) + evasion/preset.Stealth + inject.ThreadPoolExec + evasion/sleepmask + cleanup/memory.SecureZero | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. Doc clarification queued (SecureZero target). |
 | 3 | `unhook-suite` | evasion/unhook (Classic + Full) + evasion/ntdll-unhooking + win/syscall callers | ⏳ pending | Per-method unhook coverage. |
 | 4 | `recon-suite` | recon/{anti-analysis,sandbox,timing,network,drive,folder,hw-breakpoints} | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. Findings: drive.New needs trailing `\`; hwbp.Breakpoint missing Module+TID fields. |
-| 5 | `persistence-user` | persistence/{registry,startup,scheduler} (HKCU paths) | ⏳ pending | Survives without admin? |
+| 5 | `persistence-user` | persistence/{registry,startup,scheduler} (HKCU paths) | ✅ matrix run | Done 2026-05-03. **Major findings**: HKCU Run OK for both. Startup folder fails for lowuser (no interactive profile = no Shell folders). Scheduler at root path `\<name>` requires admin even with WithTriggerLogon. |
 | 6 | `persistence-admin` | persistence/{service,account,task-scheduler-SYSTEM,lnk} | ⏳ pending | Admin-only persistence. |
 | 7 | `tokens-impersonation` | tokens/{impersonation,token-theft,privilege-escalation} | ⏳ pending | Token games. |
 | 8 | `privesc-uac` | privesc/{uac,cve202430088} + recon/dllhijack autoElevate | ⏳ pending | UAC bypass. |
@@ -59,6 +59,8 @@ Add a row whenever a panorama or audit reveals a mismatch. Decision column: **fi
 | `docs/techniques/evasion/sleep-mask.md` + `docs/techniques/cleanup/memory-wipe.md` | "Real beacon loop" example sets the region to RX then leaves it; thread-pool.md "Complex" example wipes via `memory.SecureZero(shellcode)` | the `shellcode []byte` heap slice is what gets zeroed; the RX page is read-only and SecureZero on it crashes with access violation. Easy mistake when conflating the two examples. | clarify-doc | TODO — add a "wipe target = the heap-side plaintext, not the RX page" note to memory-wipe.md, or mention it in sleep-mask.md "Common Pitfalls". |
 | `docs/techniques/recon/drive.md:Simple` | `drive.New("C:")` | rejects `"C:"`, requires `"C:\"` (Win10 + Win11 both fail with `syntax incorrect`) | fix-doc | TODO — change the example to use a raw string `\`C:\\\``. |
 | `docs/techniques/recon/hw-breakpoints.md:Simple` | `bp.Module`, `bp.TID` | neither field exists on `hwbp.Breakpoint` | fix-doc | TODO — list the real fields (run a quick godoc check first). |
+| `docs/techniques/persistence/startup-folder.md` | `startup.Install("name", path, args)` | works for users with an existing interactive profile; on accounts that have never logged in interactively, `SHGetKnownFolderPath` for the Startup CSIDL returns "file not found" because the per-user Shell folders aren't registered yet | clarify-doc | TODO — add a "Requires the user account to have logged in at least once interactively (the Startup folder is materialized at first logon, not at user creation)" note. |
+| `docs/techniques/persistence/task-scheduler.md` | `scheduler.Create(\`\\\<name>\`, …)` "Simple" | lowuser cannot register a task at the root path; gets `RegisterTaskDefinition: Une exception s'est produite. (<nil>)` even with `WithTriggerLogon` | clarify-doc | TODO — add a "User-scope tasks live under `\Users\<sid>\` or similar; the root path requires admin/SYSTEM" note. Or document the correct path syntax for unprivileged installs (or note that there isn't one — task registration in the root namespace is admin-only on modern Windows). |
 
 ## E2E observations from completed panoramas
 
@@ -108,6 +110,17 @@ Validates the canonical "init beacon" sequence end-to-end. Notable that **none o
 | Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | full panorama green |
 
 Recon is observation-only — every check works at lowuser parity with admin, which matches expectations. The two doc bugs (drive.New signature, hwbp.Breakpoint fields) are pure typo-class fixes.
+
+### Panorama 5 — `persistence-user` (matrix run, 2026-05-03)
+
+| Step | win10 admin | win10 lowuser | win11 admin | win11 lowuser | Doc note |
+|---|---|---|---|---|---|
+| `registry.Set(HiveCurrentUser, KeyRun, …)` + `Delete` | ✅ Set OK / Delete OK | ✅ same | ✅ | ✅ | OK — HKCU is per-user, no admin |
+| `startup.Install("name", path, args)` + `Remove` | ✅ | ❌ `SHGetKnownFolderPath: file not found` | ✅ | ❌ same | Doc bug — `startup.Install` requires a materialized Shell folder, which the user only gets after a first interactive logon. |
+| `scheduler.Create(\`\\name\`, WithTriggerLogon, WithHidden)` + `Delete` | ✅ | ❌ `RegisterTaskDefinition: exception` | ✅ | ❌ same | Doc bug — the example uses a root-namespace path, which requires admin. The doc should either steer to `\Users\<sid>\<name>` (still privileged on most builds) or call out admin as a prerequisite for the "Simple" form. |
+| Process exit code | ✅ rc=0 | ✅ rc=0 (errors are reported, the example doesn't fatal) | ✅ rc=0 | ✅ rc=0 | OK |
+
+This is the key admin/user differential the audit is designed to surface: the doc folder is named "persistence" but only **one of the three "Simple" examples actually works for an unprivileged user**. HKCU Run is the one truly user-scoped vector. The doc would benefit from a "What persists without admin" callout.
 
 ## Workflow per panorama
 
