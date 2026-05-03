@@ -202,30 +202,52 @@ func (b *BOF) Execute(args []byte) ([]byte, error) {
 	}
 
 	textSec := sections[textIdx]
-	if int(textSec.PointerToRawData)+int(textSec.SizeOfRawData) > len(b.Data) {
-		return nil, fmt.Errorf("invalid COFF: .text section data out of bounds")
+
+	// 3. Lay out every section that has raw data into a single
+	//    contiguous VirtualAlloc page. Section indices in the COFF are
+	//    1-based; sectionBase[idx] holds the absolute address of each
+	//    loaded section. Sections without raw data (.bss et al.) get
+	//    no allocation and won't be referenced by relocations that
+	//    matter for in-process execution.
+	sectionBase := make(map[int]uintptr, len(sections))
+	type loaded struct {
+		idx    int
+		offset int
+		data   []byte
+	}
+	var laid []loaded
+	cursor := 0
+	for i, sec := range sections {
+		if sec.SizeOfRawData == 0 || sec.PointerToRawData == 0 {
+			continue
+		}
+		end := int(sec.PointerToRawData) + int(sec.SizeOfRawData)
+		if end > len(b.Data) {
+			return nil, fmt.Errorf("invalid COFF: section %d data out of bounds", i+1)
+		}
+		laid = append(laid, loaded{
+			idx:    i + 1,
+			offset: cursor,
+			data:   b.Data[sec.PointerToRawData:end],
+		})
+		cursor += int(sec.SizeOfRawData)
 	}
 
-	textData := b.Data[textSec.PointerToRawData : textSec.PointerToRawData+textSec.SizeOfRawData]
-
-	// 3. Pre-scan relocations to enumerate unique external symbols. Each
-	//    one needs an import-table slot the BOF dereferences via
-	//    mov reg, [rip+disp32]. The slots MUST live within ±2 GB of the
-	//    .text page (REL32 displacement range), so we co-allocate them
-	//    in the same VirtualAlloc as the code.
+	// 4. Pre-scan relocations to enumerate unique external symbols.
+	//    Each gets an 8-byte import-table slot at the tail of the
+	//    allocation; slot addresses stay within ±2 GB of every
+	//    section so REL32 displacements always reach.
 	imports, err := b.collectImports(textSec, hdr)
 	if err != nil {
 		return nil, err
 	}
 
-	// 4. Allocate executable memory: .text bytes followed by 8-byte
-	//    import-table slots. PAGE_EXECUTE_READWRITE for the whole
-	//    allocation — the slots are read-only data accessed via
-	//    rip-relative loads, but co-housing them with code keeps the
-	//    allocation simple and 2-GB displacement guaranteed.
-	textLen := len(textData)
+	loadedLen := cursor
 	importTableLen := len(imports) * 8
-	totalLen := textLen + importTableLen
+	totalLen := loadedLen + importTableLen
+	if totalLen == 0 {
+		return nil, fmt.Errorf("BOF has no loadable sections")
+	}
 
 	execMem, err := windows.VirtualAlloc(
 		0,
@@ -239,39 +261,45 @@ func (b *BOF) Execute(args []byte) ([]byte, error) {
 	defer windows.VirtualFree(execMem, 0, windows.MEM_RELEASE)
 
 	dst := unsafe.Slice((*byte)(unsafe.Pointer(execMem)), totalLen)
-	copy(dst, textData)
+	for _, l := range laid {
+		copy(dst[l.offset:l.offset+len(l.data)], l.data)
+		sectionBase[l.idx] = execMem + uintptr(l.offset)
+	}
 
 	// 5. Resolve each external symbol and write its function address
-	//    into the corresponding import-table slot. importSlots maps
-	//    symbol name to the absolute slot address (within execMem).
+	//    into the corresponding import-table slot.
 	importSlots := make(map[string]uintptr, len(imports))
 	for i, name := range imports {
 		addr, ok := resolveBeaconImport(name)
 		if !ok {
 			return nil, fmt.Errorf("unresolved external symbol %q", name)
 		}
-		slotAddr := execMem + uintptr(textLen+i*8)
+		slotAddr := execMem + uintptr(loadedLen+i*8)
 		*(*uintptr)(unsafe.Pointer(slotAddr)) = addr
 		importSlots[name] = slotAddr
 	}
 
-	// 6. Apply relocations for .text section. Externals consult
-	//    importSlots; in-section relocations resolve to textBase
-	//    (== execMem) + value as before.
+	// 6. Apply relocations for .text. In-section symbols resolve via
+	//    sectionBase[sym.SectionNumber]; externals consult importSlots.
+	textBase, ok := sectionBase[textIdx+1]
+	if !ok {
+		return nil, fmt.Errorf(".text section had no raw data")
+	}
+	textInMem := unsafe.Slice((*byte)(unsafe.Pointer(textBase)), int(textSec.SizeOfRawData))
 	if textSec.NumberOfRelocations > 0 {
-		if err := b.applyRelocations(dst[:textLen], execMem, textSec, hdr, sections, importSlots); err != nil {
+		if err := b.applyRelocations(textInMem, textBase, sectionBase, textSec, hdr, importSlots); err != nil {
 			return nil, fmt.Errorf("relocation failed: %w", err)
 		}
 	}
 
-	// 5. Find entry point symbol.
+	// 7. Find entry point symbol within .text.
 	entryOffset, err := b.findSymbolOffset(hdr, textIdx)
 	if err != nil {
 		return nil, err
 	}
 
-	// 6. Call entry function with BOF convention: go(char *data, int len).
-	entryAddr := execMem + uintptr(entryOffset)
+	// 8. Call entry function with BOF convention: go(char *data, int len).
+	entryAddr := textBase + uintptr(entryOffset)
 	var argPtr, argLen uintptr
 	if len(args) > 0 {
 		argPtr = uintptr(unsafe.Pointer(&args[0]))
@@ -334,10 +362,12 @@ func (b *BOF) collectImports(textSec coffSection, hdr coffHeader) ([]string, err
 }
 
 // applyRelocations processes COFF relocations for the .text section.
-// importSlots maps each external symbol name to the absolute address of
-// its import-table slot — co-allocated by Execute inside the same
-// VirtualAlloc page as the code so REL32 reaches.
-func (b *BOF) applyRelocations(textMem []byte, textBase uintptr, textSec coffSection, hdr coffHeader, sections []coffSection, importSlots map[string]uintptr) error {
+// sectionBase maps a COFF (1-based) section index to the loaded base
+// address of that section in execMem. importSlots maps each external
+// symbol name to the absolute address of its import-table slot —
+// co-allocated by Execute inside the same VirtualAlloc page as the
+// code so REL32 reaches every target.
+func (b *BOF) applyRelocations(textMem []byte, textBase uintptr, sectionBase map[int]uintptr, textSec coffSection, hdr coffHeader, importSlots map[string]uintptr) error {
 	stringTableOff := int(hdr.PointerToSymbolTable) + int(hdr.NumberOfSymbols)*coffSymbolSize
 	relocOff := int(textSec.PointerToRelocations)
 	for i := 0; i < int(textSec.NumberOfRelocations); i++ {
@@ -358,16 +388,22 @@ func (b *BOF) applyRelocations(textMem []byte, textBase uintptr, textSec coffSec
 		}
 		sym := parseCOFFSymbol(b.Data[symOff:])
 
-		// Target address: for internal symbols, this is textBase + symbol
-		// value. For external symbols (sym.SectionNumber == 0) — the
-		// __imp_BeaconXxx / __imp_<DLL>$<Func> imports a CS-format BOF
-		// references — the target is the address of the import-table slot
-		// that holds the resolved function address. The BOF's emitted
-		// `mov reg, [rip+disp32]` then reads the function pointer from
-		// the slot; `call *reg` jumps to it.
+		// Target address resolution:
+		//   - sym.SectionNumber > 0:  resolve to the loaded base of that
+		//     section + sym.Value. Cross-section refs (.text → .rdata
+		//     for string literals, .text → .data for globals) work
+		//     because every section with raw data is mapped into the
+		//     same VirtualAlloc.
+		//   - sym.SectionNumber == 0:  external import. Look up the
+		//     symbol name in importSlots; the relocation patches in the
+		//     slot's address (BOF dereferences via mov reg, [rip+disp32]).
 		var targetAddr uintptr
 		if sym.SectionNumber > 0 {
-			targetAddr = textBase + uintptr(sym.Value)
+			base, ok := sectionBase[int(sym.SectionNumber)]
+			if !ok {
+				return fmt.Errorf("relocation %d targets unmapped section %d", i, sym.SectionNumber)
+			}
+			targetAddr = base + uintptr(sym.Value)
 		} else {
 			name := symbolName(sym.Name, b.Data, stringTableOff)
 			slotAddr, ok := importSlots[name]
@@ -418,14 +454,25 @@ func (b *BOF) applyRelocations(textMem []byte, textBase uintptr, textSec coffSec
 			if int(patchAddr)+4 > len(textMem) {
 				return fmt.Errorf("REL32 patch out of bounds")
 			}
-			// RIP-relative: target - (patchLocation + 4 + bias). The
+			// RIP-relative: target - (patchLocation + 4 + bias).
 			// REL32_N variants encode an implicit +N byte offset for
 			// instructions where the displacement field is followed by
 			// N more bytes before the next instruction (immediate
 			// operands, prefixes). Bias = type - 0x0004.
+			//
+			// Critical: the original 4 displacement bytes encode an
+			// addend — the offset INTO the target section/symbol that
+			// the BOF wants. For section-symbol relocations
+			// (e.g. .rdata strings) the addend selects which string
+			// inside the section the lea/mov resolves to. We MUST add
+			// the existing addend to targetAddr before computing the
+			// new displacement, otherwise every .rdata reference
+			// resolves to the section's first byte regardless of the
+			// originally intended offset.
+			addend := int32(binary.LittleEndian.Uint32(textMem[patchAddr:]))
 			bias := int64(reloc.Type - imageRelAMD64Rel32)
 			patchLocation := textBase + uintptr(patchAddr)
-			rel := int64(targetAddr) - int64(patchLocation+4) - bias
+			rel := int64(targetAddr) + int64(addend) - int64(patchLocation+4) - bias
 			binary.LittleEndian.PutUint32(textMem[patchAddr:], uint32(int32(rel)))
 
 		default:

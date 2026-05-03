@@ -122,26 +122,22 @@ func TestBeaconOutputImpl_ZeroLength(t *testing.T) {
 	})
 }
 
-// TestBeaconDataParse_RoundTrip packs an arg buffer in the CS-compatible
-// format (uint32 total-length header + length-prefixed values) and walks
-// it through ParseData / DataInt / DataShort / DataLength / DataExtract.
+// TestBeaconDataParse_RoundTrip packs an arg buffer in the format produced
+// by Args.Pack (length-prefixed values back-to-back, no envelope) and
+// walks it through ParseData / DataInt / DataShort / DataLength /
+// DataExtract.
 func TestBeaconDataParse_RoundTrip(t *testing.T) {
 	withCurrentBOF(t, func(_ *BOF) {
 		// Build payload: int(0x12345678) + short(0x9ABC) + bytes("xyz").
-		var payload []byte
-		payload = binary.LittleEndian.AppendUint32(payload, 0x12345678)
-		payload = binary.LittleEndian.AppendUint16(payload, 0x9ABC)
-		payload = binary.LittleEndian.AppendUint32(payload, 3) // length prefix for the string
-		payload = append(payload, 'x', 'y', 'z')
-
-		// Frame: uint32 total-length header + payload.
-		buf := make([]byte, 4+len(payload))
-		binary.LittleEndian.PutUint32(buf[0:4], uint32(len(payload)))
-		copy(buf[4:], payload)
+		var buf []byte
+		buf = binary.LittleEndian.AppendUint32(buf, 0x12345678)
+		buf = binary.LittleEndian.AppendUint16(buf, 0x9ABC)
+		buf = binary.LittleEndian.AppendUint32(buf, 3) // length prefix for the string
+		buf = append(buf, 'x', 'y', 'z')
 
 		var p dataParser
 		beaconDataParseImpl(uintptr(unsafe.Pointer(&p)), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
-		assert.Equal(t, int32(len(payload)), p.length, "parser length matches header value")
+		assert.Equal(t, int32(len(buf)), p.length, "parser length matches buffer size")
 
 		// Read int — should consume 4 bytes and return 0x12345678.
 		v := beaconDataIntImpl(uintptr(unsafe.Pointer(&p)))
