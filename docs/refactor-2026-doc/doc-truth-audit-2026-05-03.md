@@ -31,7 +31,7 @@ Each panorama lives at `cmd/examples/<id>/main.go` + a walkthrough at `docs/exam
 | 5 | `persistence-user` | persistence/{registry,startup,scheduler} (HKCU paths) | ✅ matrix run | Done 2026-05-03. **Major findings**: HKCU Run OK for both. Startup folder fails for lowuser (no interactive profile = no Shell folders). Scheduler at root path `\<name>` requires admin even with WithTriggerLogon. |
 | 6 | `persistence-admin` | persistence/{account,service,lnk} | ✅ matrix run | Done 2026-05-03. Clean 3-for-3 admin success / 3-for-3 lowuser denial — the doc-truth-audit's clearest differential row. Doc-drift: persistence/account is `package user`, doc relies on implicit alias. |
 | 7 | `tokens-impersonation` | impersonate.ThreadEffectiveTokenOwner + privilege.IsAdmin / IsAdminGroupMember + token.StealByName(winlogon, explorer) + IntegrityLevel | ✅ matrix run | Done 2026-05-03. Clean differential: admin steals winlogon SYSTEM token + explorer Medium token, lowuser gets `open process: Accès refusé` for both. Identity probes work everywhere. |
-| 8 | `privesc-uac` | privesc/{uac,cve202430088} + recon/dllhijack autoElevate | ⏳ pending | UAC bypass. |
+| 8 | `privesc-uac` | privesc/uac (FODHelper/SilentCleanup/EventVwr/SLUI) + win/version pre-flight + privilege.IsAdmin gating | ✅ matrix run | Done 2026-05-03. API surface verified, gating works. **Limitation surfaced**: SSH-launched admin = High-IL Elevated, lowuser = no admin group at all — neither cell hits the "Medium-IL admin" scenario UAC bypasses target. To actually exercise FODHelper would require an interactive RDP/console admin session. Doc's "Composed" pre-flight correctly handles both early-out cases. |
 | 9 | `credentials` | credentials/{lsassdump,samdump,sekurlsa,goldenticket} | ⏳ pending | Cred extraction. |
 | 10 | `cleanup-suite` | cleanup/{ads,timestomp,memory-wipe} (skips selfdelete to avoid terminating the runner) | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. Doc-drift: `ads.List` returns structs with name+size, doc shows `[]string`. |
 | 11 | `pe-suite` | pe/{cert,dll-proxy,masquerade,morph,imports,pe-to-shellcode,strip-sanitize} | ⏳ pending | PE manipulation. |
@@ -176,6 +176,18 @@ Notable: every unhook variant works at lowuser parity with admin, including `Per
 | Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | OK |
 
 Cleanest "what can the current process see vs do" differential of the audit: every probe returns valid data for both modes, but the action (token steal) is admin-gated. Doc and code aligned across all checks.
+
+### Panorama 8 — `privesc-uac` (matrix run, 2026-05-03)
+
+| Step | win10 admin | win10 lowuser | win11 admin | win11 lowuser | Doc note |
+|---|---|---|---|---|---|
+| `privilege.IsAdmin` | ✅ `admin-group=true elevated=true` | ✅ `admin-group=false elevated=false` | ✅ same | ✅ same | OK |
+| `version.Current().BuildNumber` | ✅ 19045 (Win10 22H2) | ✅ same | ✅ 26200 (Win11) | ✅ same | OK |
+| Composed-example branch decision | ✅ `not a UAC scenario` (already elevated) | ✅ `not a UAC scenario` (no admin group) | ✅ same | ✅ same | OK — both cells correctly early-out |
+| `uac.FODHelper / SilentCleanup / EventVwr / SLUI` | API surface compiled, not exercised | not exercised | same | same | OK — test environment cannot produce Medium-IL admin via SSH |
+| Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | OK |
+
+**Test-environment limitation**: a UAC bypass needs a *Medium-IL admin* shell (interactive RDP/console as a UAC-tagged admin who hasn't consented). SSH-launched `test` is automatically High-IL elevated; lowuser is not in the admin group at all. The matrix therefore validates the API surface and the gating logic, not the actual elevation. Doc's "Composed" example correctly anticipates this with `if elevated || !admin { return errors.New("not a UAC scenario") }`. Future work (out of audit scope): wire a Medium-IL launcher into the matrix runner.
 
 ## Workflow per panorama
 
