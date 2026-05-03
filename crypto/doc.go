@@ -17,6 +17,19 @@
 // Helpers: `NewAESKey`, `NewChaChaKey` for sane-default key
 // generation.
 //
+// # Entropy + layering
+//
+// AEAD ciphers produce uniformly high-entropy output. A 200 KB
+// near-Shannon-max region in a Go binary is itself a YARA-friendly
+// signal (`entropy >= 7.5` rules, ML PE classifiers) — strong
+// crypto alone hides plaintext but advertises "encrypted blob
+// here". Pair the AEAD outer envelope with a non-uniform inner
+// transform (`ArithShift` for cheap position-dependent skew, or
+// split across multiple sections) so the per-section entropy
+// histogram looks ordinary. The "Layered envelope" section in
+// docs/techniques/crypto/payload-encryption.md walks through the
+// canonical AES → MatrixTransform → ArithShift → SBox stack.
+//
 // # MITRE ATT&CK
 //
 //   - T1027 (Obfuscated Files or Information)

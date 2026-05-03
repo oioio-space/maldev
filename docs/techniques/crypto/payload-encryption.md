@@ -339,6 +339,14 @@ search exhaustion.
 Hill-cipher block transform mod 256. Each $n$-byte block becomes
 $K\vec{p} \mod 256$. PKCS#7-padded.
 
+> **Allocation cost.** Per-block: one `[]byte` row vector of length
+> `n`. For a 1 MiB payload with `n=4` that's 262 144 transient
+> allocations on the encryption path (and the same on
+> `ReverseMatrixTransform`). The output buffer itself is allocated
+> once. For multi-MiB payloads where allocator pressure matters, use
+> `EncryptAESGCM` / `EncryptChaCha20` as the outer envelope and apply
+> `MatrixTransform` only to a small key/header chunk.
+
 ### `ReverseMatrixTransform(data []byte, inverse [][]byte) ([]byte, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#ReverseMatrixTransform)
