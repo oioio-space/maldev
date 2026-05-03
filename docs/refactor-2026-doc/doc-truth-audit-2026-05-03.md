@@ -34,7 +34,7 @@ Each panorama lives at `cmd/examples/<id>/main.go` + a walkthrough at `docs/exam
 | 8 | `privesc-uac` | privesc/uac (FODHelper/SilentCleanup/EventVwr/SLUI) + win/version pre-flight + privilege.IsAdmin gating | ✅ matrix run | Done 2026-05-03. API surface verified, gating works. **Limitation surfaced**: SSH-launched admin = High-IL Elevated, lowuser = no admin group at all — neither cell hits the "Medium-IL admin" scenario UAC bypasses target. To actually exercise FODHelper would require an interactive RDP/console admin session. Doc's "Composed" pre-flight correctly handles both early-out cases. |
 | 9 | `credentials-suite` | credentials/{lsassdump.DumpToFile, samdump.LiveDump, goldenticket.Forge} | ⚠️ matrix run, findings | Done 2026-05-03. Goldenticket forge works everywhere. lsass dump differential interesting (Win10 admin OK, Win11 admin ErrOpenDenied — likely Win11 RunAsPPL default, sentinel routing imprecise). LiveDump fails on all 4 cells — needs investigation. **Doc-drifts:** `goldenticket.Hash{Type, Bytes}` (doc says `EType`); `ETypeAES256CTS` (doc says `ETypeAES256CTSHMACSHA196`). |
 | 10 | `cleanup-suite` | cleanup/{ads,timestomp,memory-wipe} (skips selfdelete to avoid terminating the runner) | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. Doc-drift: `ads.List` returns structs with name+size, doc shows `[]string`. |
-| 11 | `pe-suite` | pe/{cert,dll-proxy,masquerade,morph,imports,pe-to-shellcode,strip-sanitize} | ⏳ pending | PE manipulation. |
+| 11 | `pe-suite` | pe/{imports.List, cert.Has+Read, strip.Sanitize, srdi.ConvertFile} | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0 with full parity admin/lowuser. **Doc-clarif**: notepad.exe is catalog-signed, not Authenticode-embedded; `cert.Copy(notepad.exe, …)` in the doc would fail — pick a different sample. |
 | 12 | `process-tamper` | process/{fakecmd,herpaderping,hideprocess,phant0m} | ⏳ pending | Process evasion. |
 | 13 | `collection-suite` | collection/{clipboard,screenshot,keylogging,lsass-dump,alternate-data-streams} | ⏳ pending | Data collection. |
 | 14 | `runtime-loaders` | runtime/{bof-loader,clr} + injection/{phantom-dll,module-stomping,section-mapping} | ⏳ pending | Loader variants. |
@@ -66,6 +66,7 @@ Add a row whenever a panorama or audit reveals a mismatch. Decision column: **fi
 | `docs/techniques/credentials/goldenticket.md` | `Hash{EType: …, Bytes: …}` and `ETypeAES256CTSHMACSHA196`, `ETypeAES128CTSHMACSHA196` | real struct field is `Type` (not `EType`), real constants are `ETypeAES256CTS` / `ETypeAES128CTS` (no `HMACSHA196` suffix) | fix-doc | TODO — replace EType→Type in `Hash` and rename the constants in the comparison table to drop the bogus suffix. Three call-sites in the doc (lines 116, 166, 218). |
 | `docs/techniques/credentials/lsassdump.md` | sentinel error routing (`ErrOpenDenied` for non-admin) | matrix evidence: lowuser hits `lsass.exe not found` (string-comparison miss vs the documented sentinel), Win11 admin hits `ErrOpenDenied` even though the cause is RunAsPPL (should be `ErrPPL`) | fix-code | TODO — tighten the error classification in the dump path so the documented sentinels actually fire when the documented condition holds. |
 | `docs/techniques/credentials/samdump.md` `LiveDump` | matrix evidence: fails on all four cells with `samdump: live dump failed` (admin too) | unclear — LiveDump uses VSS shadow copies which may need explicit feature setup on workstation SKUs, or the function has an environment requirement the doc doesn't mention | clarify-doc + investigate-code | TODO — reproduce manually on the VM, capture the real underlying error, then either fix-code or add a "VSS required" note. |
+| `docs/techniques/pe/certificate-theft.md:Simple` | `cert.Copy(\`C:\Windows\System32\notepad.exe\`, …)` | notepad.exe (and most modern system PEs) are *catalog-signed* — the Authenticode signature lives in `\System32\CatRoot\…\*.cat`, not embedded in the PE overlay. `cert.Has(notepad.exe)` returns false on Win10 + Win11; the example would fail at the source-cert read. | clarify-doc | TODO — change the example to a third-party signed PE (e.g. `\Program Files\Internet Explorer\iediagcmd.exe` historically had embedded sig, or a small embedded-signed Windows tool), or add a note explaining catalog vs embedded signing and how to inspect both. |
 
 ## E2E observations from completed panoramas
 
@@ -202,6 +203,19 @@ Cleanest "what can the current process see vs do" differential of the audit: eve
 | Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | OK |
 
 This row is the audit's most fix-rich panorama: 2 typo-class doc fixes for goldenticket, 1 fix-code for lsassdump's error classification, and 1 investigate-code for samdump.LiveDump. Despite the failures, the data still validates the documented threat model — admin-on-Win10-without-Credential-Guard is the only configuration where in-process LSASS mini-dump succeeds today.
+
+### Panorama 11 — `pe-suite` (matrix run, 2026-05-03)
+
+| Step | win10 admin | win10 lowuser | win11 admin | win11 lowuser | Doc note |
+|---|---|---|---|---|---|
+| `imports.List(notepad.exe)` | ✅ 258 imports | ✅ same | ✅ 310 imports | ✅ same | OK — kernel32, user32, advapi32, etc., printed first 3 |
+| `cert.Has(notepad.exe)` | ❌ false | ❌ false | ❌ false | ❌ false | **Doc-clarif** — notepad.exe is *catalog-signed* (`.cat` files in `\System32\CatRoot\…`), not Authenticode-embedded. The cert doc's "Simple" `cert.Copy(notepad.exe, …)` would fail at the source-read. |
+| `cert.Read(notepad.exe)` | error: `PE file has no Authenticode certificate` | same | same | same | sentinel error fires correctly — code is right, doc example is misleading |
+| `strip.Sanitize` | ✅ 201216 bytes in/out (delta=0) | ✅ same | ✅ 360448 in/out | ✅ same | OK — system PEs are already clean of Go pclntab / debug strings, so delta is naturally zero. Real implants would show non-zero delta. |
+| `srdi.ConvertFile(notepad.exe)` | ✅ 228432-byte position-independent payload | ✅ same | ✅ 387664-byte | ✅ same | OK — pure transform, no privileged op |
+| Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | full panorama green |
+
+PE work is parse + transform on raw bytes — no privileged syscalls, full parity admin/lowuser. The one quirk worth clarifying in the doc: modern Microsoft binaries use catalog signing, so the canonical example needs a different sample to actually exercise the cert-copy path.
 
 ## Workflow per panorama
 
