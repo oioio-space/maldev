@@ -138,9 +138,13 @@ func (c *Caller) callWinAPI(name string, args ...uintptr) (uintptr, error) {
 	if err := proc.Find(); err != nil {
 		return 0, err
 	}
-	r, _, err := proc.Call(args...)
+	// Nt* functions don't set Win32 LastError, so proc.Call's err is a
+	// stale leftover from a prior Win32 call (typically ERROR_SUCCESS).
+	// Discarding it keeps the formatting consistent with the
+	// Direct/Indirect/IndirectAsm paths.
+	r, _, _ := proc.Call(args...)
 	if r != 0 {
-		return r, fmt.Errorf("syscall failed: NTSTATUS 0x%08X: %w", uint32(r), err)
+		return r, fmt.Errorf("syscall failed: NTSTATUS 0x%08X", uint32(r))
 	}
 	return 0, nil
 }

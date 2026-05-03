@@ -276,6 +276,51 @@ Each sub-feature ships as its own commit + docs update. Tag `v0.19.0` (after BYO
 
 ---
 
+## Chantier I — `syscall-matrix` panorama (composability sweep)
+
+**Tags:** Test-only — no library code.
+
+### Why
+
+The 16 panorama scenarios committed in the 2026-05-03 wave (`stealth-recon-ppid`
+… `kernel-byovd`) verified admin/user parity but each pinned a single
+`*wsyscall.Caller` (almost always WinAPI). Only `unhook-suite` actually
+sweeps WinAPI / NativeAPI / Direct / Indirect. That leaves the SSN-resolver +
+indirect-syscall path under-exercised end-to-end across the consumers that
+accept a Caller: `inject/*`, `evasion/{acg,amsi,blockdlls,etw,hook,stealthopen}`,
+`c2/{meterpreter,shell}`, `cleanup/bsod`, `win/api/patch`.
+
+Risk this catches: a Direct/Indirect variant that breaks under realistic
+chains (ACG active, post-unhook, EDR hook present) without any unit-test
+signal.
+
+### Scope
+
+New `cmd/examples/syscall-matrix/main.go` that runs 3 representative chains on
+each of the 4 Caller variants and logs a delta:
+
+1. `unhook → inject (sectionmap) → noop payload`
+2. `acg → patch → amsi-bypass`
+3. `etw-bypass → meterpreter-stage (loopback, no connect)`
+
+Driven by `testutil.CallerMethods(t)` analogue (extract a non-test helper or
+inline the 4 constructors).
+
+### Plan
+
+- One file under `cmd/examples/syscall-matrix/`.
+- Run via `vmtest -bin` in admin + lowuser (8 cells total).
+- Panorama commit follows the existing template: `panorama(syscall-matrix): …`
+  with the per-cell findings in the message body.
+- Updates `docs/refactor-2026-doc/backlog-2026-04-29.md` if any Caller variant
+  surfaces a real bug (then spawn a follow-up chantier).
+
+### Estimate
+
+~150 LOC, 1 commit (test-only), 1-2h dev + 1h VM rerun. No tag bump.
+
+---
+
 ## Aggregate
 
 | Chantier | Tag | LOC | Commits | Wave |
@@ -288,6 +333,7 @@ Each sub-feature ships as its own commit + docs update. Tag `v0.19.0` (after BYO
 | F — CLR env | (snapshot) | 0 | 0 | 1 |
 | G — KindProcess Validate | (TBD after brainstorm) | 0-150 | 0-3 | 3 |
 | H — sleepmask roadmap | v0.19.0 | 800-1200 | 8-10 | 3 |
+| I — syscall-matrix panorama | (test-only) | 150 | 1 | 1 |
 
 **Total:** 2,350-3,100 LOC across 23-30 commits + 4 new tags. Six ship-blockers closed (or explicitly downgraded for E/G), three follow-ups landed.
 
