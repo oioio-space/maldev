@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-29
-reflects_commit: 9b9a45f
+last_reviewed: 2026-05-04
+reflects_commit: 9809f0d
 ---
 
 # Documentation refactor — progress tracker
@@ -16,6 +16,12 @@ reflects_commit: 9b9a45f
 > checkbox-tracked, P1/P2/P3-prioritised list covering mdBook polish,
 > per-package code improvements, and new-package ideas. **Pick up
 > from there.**
+>
+> **Cross-machine handoff:** the 2026-05-03/04 Linux session ended at
+> commit `9809f0d`. Resume on a different machine via
+> [`HANDOFF-2026-05-04.md`](HANDOFF-2026-05-04.md) — that file lists
+> what closed, the priority order of remaining backlog rows, and the
+> tools to install on the target box.
 
 ## Source of truth
 
