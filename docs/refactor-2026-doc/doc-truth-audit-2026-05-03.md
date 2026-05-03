@@ -37,7 +37,7 @@ Each panorama lives at `cmd/examples/<id>/main.go` + a walkthrough at `docs/exam
 | 11 | `pe-suite` | pe/{imports.List, cert.Has+Read, strip.Sanitize, srdi.ConvertFile} | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0 with full parity admin/lowuser. **Doc-clarif**: notepad.exe is catalog-signed, not Authenticode-embedded; `cert.Copy(notepad.exe, …)` in the doc would fail — pick a different sample. |
 | 12 | `process-tamper` | process/enum.List + process/session.Active + process/tamper/fakecmd.Spoof+Restore | ✅ matrix run | Done 2026-05-03. enum/fakecmd parity admin/lowuser. session.Active inconsistent for lowuser (likely returns empty / errors when invoked from session 0 task). **Doc-drift**: session.Info real fields are `ID/Name/State/User/Domain`, doc says `SessionID/Username`. |
 | 13 | `collection-suite` | collection/{clipboard.ReadText, screenshot.Capture, keylog.Start} | ✅ matrix run | Done 2026-05-03. lsass-dump + ADS already covered by panoramas 9 + 10. **Session-0 limitation surfaced**: every collection primitive is interactive-session-bound; SSH admin + scheduled-task lowuser both run in session 0 → empty clipboard, screen-capture-failed, keylogger receives no events. The doc could call this out: "collection requires running inside a user logon session (interactive desktop), not via service / scheduled task / SSH". |
-| 14 | `runtime-loaders` | runtime/{bof-loader,clr} + injection/{phantom-dll,module-stomping,section-mapping} | ⏳ pending | Loader variants. |
+| 14 | `runtime-loaders` | runtime/{bof.Load, clr.Load+ExecuteAssembly} + inject.ModuleStomp | ✅ matrix run | Done 2026-05-03. bof + ModuleStomp parity admin/lowuser. clr fails identically on all 4 cells with the doc-aligned "install .NET 3.5" message — known TOOLS-snapshot blocker (memory `clr_v2_activation_blocker`). |
 | 15 | `c2-suite` | c2/{transport,reverse-shell,namedpipe,multicat,malleable-profiles} | ⏳ pending | C2 plumbing. |
 | 16 | `kernel-byovd` | kernel/byovd-rtcore64 + (admin only) | ⏳ pending | BYOVD admin-only. |
 
@@ -240,6 +240,17 @@ Notable: **fakecmd.Spoof works at lowuser parity with admin** — PEB rewriting 
 | Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | OK |
 
 Single consolidated finding for the area: **collection requires an interactive logon session** (with an attached desktop and a window-station). Running from a service, scheduled task, or SSH session — which is how every "post-exploitation tool" actually lands on a target — yields empty/failed results. The doc should call this out at the top of the area README; right now the "Simple" examples make it look like one-line magic.
+
+### Panorama 14 — `runtime-loaders` (matrix run, 2026-05-03)
+
+| Step | win10 admin | win10 lowuser | win11 admin | win11 lowuser | Doc note |
+|---|---|---|---|---|---|
+| `bof.Load(nil)` (smoke-test invalid input) | ✅ structured error: `invalid COFF: data too small` | ✅ same | ✅ | ✅ | OK — error path is well-shaped |
+| `clr.Load(nil)` | ❌ `ICorRuntimeHost unavailable (install .NET 3.5 and call InstallRuntimeActivationPolicy before Load)` | ❌ same | ❌ same | ❌ same | OK — known TOOLS-snapshot blocker (`clr_v2_activation_blocker` memory). Doc could mention the .NET 3.5 dependency more prominently in the Limitations block; the runtime-error message itself already does the right thing. |
+| `inject.ModuleStomp("msftedit.dll", 1 byte)` | ✅ `addr=0x7fff35111000` | ✅ same address | ✅ Win11 distinct ASLR addr | ✅ same | OK — module stomping operates inside the implant's own address space (LoadLibrary + WriteProcessMemory(self) + flip-protection), no admin needed |
+| Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | OK |
+
+ModuleStomp parity is the noteworthy result: a non-admin process can hijack a benign DLL inside its own image to host shellcode at a legit-looking RVA. Combined with the panorama-2 finding (preset.Stealth + ThreadPoolExec at parity), the audit now has two compounding lowuser-friendly building blocks for full in-process payload execution.
 
 ## Workflow per panorama
 
