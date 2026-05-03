@@ -11,3 +11,15 @@ import (
 func PatchProcessMonitor(_ int, _ *wsyscall.Caller) error {
 	return errors.New("hideprocess: not supported on this platform")
 }
+
+func PatchEnumProcesses(_ int, _ *wsyscall.Caller) error {
+	return errors.New("hideprocess: not supported on this platform")
+}
+
+func PatchToolhelp(_ int, _ *wsyscall.Caller) error {
+	return errors.New("hideprocess: not supported on this platform")
+}
+
+func PatchAll(_ int, _ *wsyscall.Caller) error {
+	return errors.New("hideprocess: not supported on this platform")
+}

@@ -70,10 +70,13 @@ Why it works:
 
 | Symbol | Description |
 |---|---|
-| [`PatchProcessMonitor(pid, caller) error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess#PatchProcessMonitor) | Patch the running target. Does not persist a restart. |
+| [`PatchProcessMonitor(pid, caller) error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess#PatchProcessMonitor) | Patches `ntdll!NtQuerySystemInformation` to return `STATUS_NOT_IMPLEMENTED`. Blinds every Win32 enumeration that bottoms out in the Nt-level call (Task Manager, `tasklist`, ProcessHacker default view, …). |
+| [`PatchEnumProcesses(pid, caller) error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess#PatchEnumProcesses) | Patches `kernel32!K32EnumProcesses` to `xor eax, eax; ret` — clients that call `psapi!EnumProcesses` (which forwards to the kernel32 implementation) see the function as failed. |
+| [`PatchToolhelp(pid, caller) error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess#PatchToolhelp) | Patches `kernel32!Process32FirstW` and `kernel32!Process32NextW` to `xor eax, eax; ret` — `CreateToolhelp32Snapshot` walks return FALSE on the first iteration, so the snapshot appears empty. |
+| [`PatchAll(pid, caller) error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess#PatchAll) | Applies all three patches in order (NtQuerySystemInformation → K32EnumProcesses → Process32{First,Next}W). Stops at the first error and returns it wrapped with the failing step's name. |
 
 `caller=nil` uses direct WinAPI; pass a `*wsyscall.Caller` to
-route the cross-process read/write through indirect syscalls.
+route the cross-process write through indirect syscalls.
 Requires `PROCESS_VM_WRITE | PROCESS_VM_OPERATION` —
 typically SeDebugPrivilege or a process the current token
 already owns.
@@ -198,10 +201,19 @@ See [`ExamplePatchProcessMonitor`](../../../process/tamper/hideprocess/hideproce
   ownership of the target.
 - **`.text` integrity check defeats this.** Rare in
   production EDRs but trivially detectable when present.
-- **Specific to `NtQuerySystemInformation`.** Other
-  enumeration paths (WMI `Win32_Process`, NTDLL exports
-  not patched here) bypass the stub. The package targets the
-  most-common path; thorough monitoring needs more patches.
+- **WMI `Win32_Process` not covered.** Clients querying
+  `SELECT * FROM Win32_Process` route through the WMI provider
+  host (`wmiprvse.exe`) which loads `cimwin32.dll`. Patching
+  that path requires injecting into a different process from
+  the one running the patches; out of scope for the in-process
+  tamper API. Block `wmiprvse.exe` enumeration externally
+  (firewall / DACL on the WMI namespace) if WMI is in scope.
+- **`PatchAll` covers the three Win32 enumeration paths most
+  defenders use** (NtQuerySystemInformation, K32EnumProcesses,
+  Toolhelp32). Other ntdll exports that re-implement
+  enumeration (e.g., `NtQuerySystemInformationEx` introduced
+  in Win10 RS5) are not patched; verify against your target
+  monitoring stack.
 
 ## See also
 
