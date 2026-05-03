@@ -66,6 +66,22 @@ Why it works:
 - Only the patched process is affected — kernel telemetry
   doesn't go through user-mode `NtQuerySystemInformation`.
 
+### Coverage matrix
+
+| Enumeration path | Tool examples | Bottoms out in | Covered by |
+|---|---|---|---|
+| `NtQuerySystemInformation(SystemProcessInformation)` | Task Manager (default), `tasklist.exe`, ProcessHacker default view, Sysinternals `pslist`, native PEB walks | `ntdll!NtQuerySystemInformation` → SSDT | `PatchProcessMonitor` |
+| `EnumProcesses` (psapi) | Older `tasklist /v`, anti-malware product enumeration, many .NET `Process.GetProcesses()` paths | `kernel32!K32EnumProcesses` (psapi forwarder) → `NtQuerySystemInformation` | `PatchEnumProcesses` |
+| Toolhelp32 (`CreateToolhelp32Snapshot` + `Process32{First,Next}W`) | Many open-source enumerators, debug tooling, classic VB/Delphi apps | `kernel32!Process32FirstW` / `Process32NextW` → `NtQuerySystemInformation` | `PatchToolhelp` |
+| WMI `SELECT * FROM Win32_Process` | `Get-WmiObject`, `Get-CimInstance`, COM clients | `wmiprvse.exe` (separate process) → `cimwin32!QueryProcesses` → `NtQuerySystemInformation` | **Not covered** — requires a separate injection into `wmiprvse.exe`. See Limitations. |
+| Kernel-source enumeration | EDR drivers, Sysmon Event ID 1, ETW Threat-Intelligence | kernel `PsQuerySystemInformation` directly, or `Pcw*` performance counters | **Not covered** — user-mode patch is invisible to ring-0. |
+
+The bottom two rows aren't accidents — they are fundamental
+boundaries. `PatchAll` covers everything that flows through
+the user-mode ntdll surface in the patched process; anything
+that crosses into another process or into the kernel is out
+of reach by design.
+
 ## API Reference
 
 | Symbol | Description |
