@@ -47,6 +47,41 @@ func TestResolveBeaconImport_Unknown(t *testing.T) {
 	assert.Zero(t, addr)
 }
 
+// TestResolveBeaconImport_DollarImport confirms that CS-format dynamic-link
+// imports (__imp_<DLL>$<Func>) resolve via the PEB walk + ROR13 path. We pick
+// kernel32!LoadLibraryA because it is always loaded and never hooked at the
+// export-table level (only the prologue).
+func TestResolveBeaconImport_DollarImport(t *testing.T) {
+	addr, ok := resolveBeaconImport("__imp_KERNEL32$LoadLibraryA")
+	require.True(t, ok, "KERNEL32$LoadLibraryA must resolve via api.ResolveByHash")
+	assert.NotZero(t, addr)
+}
+
+func TestParseDollarImport(t *testing.T) {
+	cases := []struct {
+		in      string
+		dll, fn string
+		ok      bool
+	}{
+		{"__imp_KERNEL32$LoadLibraryA", "KERNEL32.DLL", "LoadLibraryA", true},
+		{"__imp_kernel32$GetModuleHandleA", "KERNEL32.DLL", "GetModuleHandleA", true},
+		{"__imp_USER32.DLL$MessageBoxW", "USER32.DLL", "MessageBoxW", true},
+		{"__imp_BeaconPrintf", "", "", false},      // no $ separator
+		{"BeaconPrintf", "", "", false},            // no __imp_ prefix
+		{"__imp_$LoadLibraryA", "", "", false},     // empty DLL
+		{"__imp_KERNEL32$", "", "", false},         // empty function
+		{"__imp_KERNEL32$$LoadLibraryA", "KERNEL32.DLL", "$LoadLibraryA", true}, // first $ wins
+	}
+	for _, c := range cases {
+		dll, fn, ok := parseDollarImport(c.in)
+		assert.Equal(t, c.ok, ok, "in=%q ok", c.in)
+		if c.ok {
+			assert.Equal(t, c.dll, dll, "in=%q dll", c.in)
+			assert.Equal(t, c.fn, fn, "in=%q fn", c.in)
+		}
+	}
+}
+
 func TestBeaconPrintfImpl_CapturesOutput(t *testing.T) {
 	withCurrentBOF(t, func(b *BOF) {
 		// NUL-terminated C string in a stable backing array.

