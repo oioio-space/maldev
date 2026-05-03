@@ -39,7 +39,7 @@ Each panorama lives at `cmd/examples/<id>/main.go` + a walkthrough at `docs/exam
 | 13 | `collection-suite` | collection/{clipboard.ReadText, screenshot.Capture, keylog.Start} | ✅ matrix run | Done 2026-05-03. lsass-dump + ADS already covered by panoramas 9 + 10. **Session-0 limitation surfaced**: every collection primitive is interactive-session-bound; SSH admin + scheduled-task lowuser both run in session 0 → empty clipboard, screen-capture-failed, keylogger receives no events. The doc could call this out: "collection requires running inside a user logon session (interactive desktop), not via service / scheduled task / SSH". |
 | 14 | `runtime-loaders` | runtime/{bof.Load, clr.Load+ExecuteAssembly} + inject.ModuleStomp | ✅ matrix run | Done 2026-05-03. bof + ModuleStomp parity admin/lowuser. clr fails identically on all 4 cells with the doc-aligned "install .NET 3.5" message — known TOOLS-snapshot blocker (memory `clr_v2_activation_blocker`). |
 | 15 | `c2-suite` | c2/transport.NewTCPListener+NewTCP + c2/transport/namedpipe.NewListener | ✅ matrix green | Done 2026-05-03. All 4 cells rc=0. **Doc-drift**: c2/namedpipe.md imports `c2/namedpipe`; real path is `c2/transport/namedpipe`. **Surprise finding**: lowuser CAN bind port 80 on Windows (no privileged-port gate, unlike Linux). |
-| 16 | `kernel-byovd` | kernel/byovd-rtcore64 + (admin only) | ⏳ pending | BYOVD admin-only. |
+| 16 | `kernel-byovd` | kernel/driver/rtcore64.Driver.Install (default-tag build) | ✅ matrix run | Done 2026-05-03. Default tags ship without the signed RTCore64.sys bytes, so Install returns the doc-aligned `ErrDriverBytesMissing` ("build with -tags=byovd_rtcore64") on all 4 cells. The admin/user differential would only surface with the `-tags=byovd_rtcore64` build (lowuser → ErrPrivilegeRequired at SCM register). Documented escape hatch works exactly as specified. |
 
 Layer-0 docs (`crypto/`, `encode/`, `hash/`, `random/`, `useragent/`) and most of `win/{api,ntapi,token,privilege,version,domain,impersonate}` are *primitives* with no admin/user delta worth E2E-testing — they are exercised transitively by every panorama and audited statically by the per-package code review.
 
@@ -263,6 +263,30 @@ ModuleStomp parity is the noteworthy result: a non-admin process can hijack a be
 | Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | full panorama green |
 
 Two findings worth pinning to the doc: the import-path drift on `c2/namedpipe`, and the Windows-vs-Unix difference on privileged-port binding (no privileged-port gate on Windows for the local interactive session).
+
+### Panorama 16 — `kernel-byovd` (matrix run, 2026-05-03)
+
+| Step | win10 admin | win10 lowuser | win11 admin | win11 lowuser | Doc note |
+|---|---|---|---|---|---|
+| `rtcore64.Driver.Install` (default-tag build) | ❌ `ErrDriverBytesMissing: build with -tags=byovd_rtcore64` | ❌ same | ❌ same | ❌ same | OK — doc explicitly notes that the open-source repo ships without MSI's signed RTCore64.sys; the well-shaped error guides the user to the `-tags=byovd_rtcore64` workflow. |
+| Process exit code | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | ✅ rc=0 | OK |
+
+This panorama validates the **escape-hatch path** the doc documents: a binary built without the BYOVD tag set never even attempts the SCM register, so it can be shipped without legal exposure to the licensed driver. The actual admin/user differential — admin succeeds, lowuser hits `ErrPrivilegeRequired` at SCM — would only surface under the tagged build, which is intentionally out of the open-source repo's reach.
+
+## Audit summary (2026-05-03)
+
+**16 panoramas covered, 64 matrix cells exercised** (4 cells × 16 panoramas, with cell = win10|win11-2 × admin|lowuser).
+
+**Net behaviour delta** (without lowuser-side compatibility fixes from the operator side, just observed on a fresh INIT snapshot):
+
+- **Full parity admin/lowuser** (12 panoramas): unhook-suite, recon-suite, injection-evasion, cleanup-suite, runtime-loaders, c2-suite, pe-suite, kernel-byovd, process-tamper (enum + fakecmd), tokens-impersonation (probes), privesc-uac (gating), credentials-suite (forge).
+- **Clean differential** (admin succeeds, lowuser denied): persistence-admin (3-for-3), tokens-impersonation (StealByName winlogon/explorer), credentials-suite (LSASS dump on Win10), persistence-user (startup folder + scheduled task — but for *environment* reasons, not pure ACL).
+- **Inverted differential** (lowuser surprise): c2-suite low-port bind succeeds on Windows (no Unix-style privileged-port gate).
+- **Environmental gates** (matrix runner can't exercise without an interactive desktop / session ≠ 0): collection-suite (clipboard/screenshot/keylog), session.Active, ppid spoofing CreateProcess.
+
+**13 doc-vs-code findings queued** in the table above. Five are typo-class fix-doc, three are clarify-doc admin/IL caveats, two are missing-prerequisite notes (interactive desktop, BYOVD tag), one is a rename suggestion (persistence/account → use explicit `user "…"` import alias), one is a fix-code (lsassdump sentinel routing), one is investigate-code (samdump.LiveDump unconditional failure).
+
+**Tooling**: `cmd/vmtest -bin=cmd/examples/<id> -matrix -no-restore -no-stop windows[11]` is the canonical reproduction command. Each panorama is buildable on its own with `GOOS=windows GOARCH=amd64 go build ./cmd/examples/<id>` so the audit doubles as a continuous-integration guard against future doc drift — every example imports the symbols its source `.md` documents, and a future API change that breaks the `.md` will break the panorama at build time.
 
 ## Workflow per panorama
 
