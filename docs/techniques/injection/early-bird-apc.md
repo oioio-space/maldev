@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/inject
-last_reviewed: 2026-04-27
-reflects_commit: 4798780
+last_reviewed: 2026-05-04
+reflects_commit: f7d57a4
 ---
 
 # Early Bird APC injection
@@ -72,30 +72,71 @@ Steps:
 
 ## API Reference
 
-### `Method = MethodEarlyBirdAPC`
+This injection mode plugs into the unified `inject.WindowsConfig` /
+`inject.Builder` framework — the technique itself has no top-level
+helper. Drive it via the standard `Injector` paths.
+
+### `const inject.MethodEarlyBirdAPC Method = "earlybird"`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#MethodEarlyBirdAPC)
 
-The constant `"earlybird"`. Pass to [`Config.Method`](https://pkg.go.dev/github.com/oioio-space/maldev/inject#Config)
-or [`InjectorBuilder.Method`](https://pkg.go.dev/github.com/oioio-space/maldev/inject#InjectorBuilder.Method).
+Selects the Early Bird APC technique. Pass to `Config.Method` or
+`InjectorBuilder.Method`.
 
-### `WindowsConfig.ProcessPath`
+**Required `WindowsConfig` fields:** `ProcessPath` (sacrificial child;
+default `C:\Windows\System32\notepad.exe`). `PID` is **not** used —
+this is a child-process technique that spawns its own target
+suspended.
+
+**Pairs with:** `WithFallback()` chains to `MethodThreadHijack` on
+failure (see `inject/fallback.go:24`).
+
+**OPSEC:** spawning notepad.exe with no parent terminal is a
+high-fidelity Sysmon Event 1 trigger. Choose a process-tree-blending
+parent (`svchost.exe`, `RuntimeBroker.exe`, `WerFault.exe`) and pair
+with PPID spoofing.
+
+**Required privileges:** unprivileged for same-user spawn.
+
+**Platform:** Windows. Stub returns "not implemented".
+
+### `WindowsConfig.ProcessPath string`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#Config)
 
-Path to the sacrificial executable. Required for child-process methods.
-Default fallback: `C:\Windows\System32\notepad.exe`. Choose a binary
-that blends into the target's process tree (`svchost.exe`,
-`RuntimeBroker.exe`, `WerFault.exe`).
+Absolute path to the sacrificial executable spawned suspended. Empty
+defaults to `C:\Windows\System32\notepad.exe`. Choose a binary that
+blends into the target's process tree.
+
+**OPSEC:** the parent process and image-name pair are the most
+visible signals — a lone notepad.exe child of a non-explorer parent
+is anomalous. Pair this field with the `c2/shell` PPID-spoofing path
+when stealth matters.
+
+**Required privileges:** read on `ProcessPath`.
+
+**Platform:** Windows.
 
 ### `inject.NewWindowsInjector(cfg *WindowsConfig) (Injector, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#NewWindowsInjector)
 
-Same shape as the other Windows methods. Returns `Injector` to be
-called with `.Inject(shellcode)`.
+Standard Injector constructor — same shape as every other Windows
+method. Returns an `Injector` whose `.Inject(shellcode)` runs the
+Early Bird APC chain (spawn suspended → allocate RW → write →
+`NtQueueApcThread` → `NtAlertResumeThread`).
 
-### `Builder` pattern
+**Returns:** `Injector` interface; error from `cfg` validation.
+
+**Side effects:** none until `.Inject` runs.
+
+**OPSEC:** as the Method constant.
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows.
+
+### `inject.Builder` pattern
 
 ```go
 inj, err := inject.Build().
@@ -104,6 +145,12 @@ inj, err := inject.Build().
     IndirectSyscalls().
     Create()
 ```
+
+`IndirectSyscalls()` configures the underlying `wsyscall.Caller` to
+`MethodIndirect` so the `NtAllocate` / `NtWrite` / `NtQueueApcThread`
+calls originate from inside ntdll's `.text` (defeats stack-walk
+heuristics). See [`syscalls/direct-indirect.md`](../syscalls/direct-indirect.md)
+for the full Caller surface.
 
 ## Examples
 

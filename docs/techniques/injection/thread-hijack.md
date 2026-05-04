@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/inject
-last_reviewed: 2026-04-27
-reflects_commit: 4798780
+last_reviewed: 2026-05-04
+reflects_commit: f7d57a4
 ---
 
 # Thread execution hijacking
@@ -77,36 +77,79 @@ Steps:
 
 ## API Reference
 
-### `Method = MethodThreadHijack`
+This injection mode plugs into the unified `inject.WindowsConfig` /
+`inject.Builder` framework — the technique itself has no top-level
+helper. Drive it via the standard `Injector` / `Builder` paths.
+
+### `const inject.MethodThreadHijack Method = "threadhijack"`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#MethodThreadHijack)
 
-The constant `"threadhijack"`. Pass to `Config.Method` or
-`InjectorBuilder.Method`.
+Selects Thread Execution Hijacking (T1055.003) — spawns a sacrificial
+child suspended, allocates RWX in it, writes shellcode, modifies the
+main thread's `Rip` (or `Eip` on x86) to point at the shellcode, then
+resumes.
 
-### Legacy alias `MethodProcessHollowing`
+**Required `WindowsConfig` fields:** `ProcessPath` (sacrificial
+child; default `C:\Windows\System32\notepad.exe`).
+
+**OPSEC:** `SetThreadContext` against a freshly-spawned suspended
+process is the highest-fidelity Sysmon Event 8 trigger (CreateRemoteThread
+event family). EDRs hook `NtSetContextThread` specifically. Pair with
+the indirect syscall path so the hook is bypassed at the user/kernel
+boundary.
+
+**Required privileges:** unprivileged for same-user spawn.
+
+**Platform:** Windows. Stub returns "not implemented".
+
+### `const inject.MethodProcessHollowing = MethodThreadHijack` (legacy alias)
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#MethodProcessHollowing)
 
-```go
-const MethodProcessHollowing = MethodThreadHijack
-```
+Historical alias — the name predates the MITRE distinction. New code
+should use `MethodThreadHijack`.
 
 > [!WARNING]
-> The name is historical. This is **Thread Execution Hijacking**
-> (T1055.003), not PE Hollowing (T1055.012). Prefer
-> `MethodThreadHijack` in new code.
+> This is **Thread Execution Hijacking** (T1055.003), not PE
+> Hollowing (T1055.012 — replacing the child's loaded image with a
+> different PE). Prefer `MethodThreadHijack` in new code; the alias
+> stays for backward compatibility but may be deprecated in a future
+> minor version.
 
-### `WindowsConfig.ProcessPath`
+**Platform:** Windows.
 
-Path to the sacrificial child (default `notepad.exe`). Required for
-this method.
+### `WindowsConfig.ProcessPath string`
+
+Absolute path to the sacrificial child spawned suspended. Empty
+defaults to `C:\Windows\System32\notepad.exe`.
+
+**OPSEC:** as `early-bird-apc.md § ProcessPath` — the parent
+process and image-name pair are the most visible signals. Pair with
+PPID spoofing for stealth.
+
+**Required privileges:** read on `ProcessPath`.
+
+**Platform:** Windows.
 
 ### `inject.NewWindowsInjector(cfg *WindowsConfig) (Injector, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#NewWindowsInjector)
 
-### `Builder` pattern
+Standard Injector constructor.
+
+**Returns:** `Injector`; error from `cfg` validation (rejects empty
+`ProcessPath` after default-fallback).
+
+**Side effects:** none until `.Inject` runs.
+
+**OPSEC:** as the Method constant.
+
+**Required privileges:** as the Method constant.
+
+**Platform:** Windows.
+
+### `inject.Builder` pattern
 
 ```go
 inj, err := inject.Build().
@@ -115,6 +158,10 @@ inj, err := inject.Build().
     IndirectSyscalls().
     Create()
 ```
+
+`RuntimeBroker.exe` blends into the explorer process tree better
+than `notepad.exe` — it's spawned routinely by the shell and a
+short-lived instance is unremarkable.
 
 ## Examples
 

@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/inject
-last_reviewed: 2026-04-27
-reflects_commit: 4798780
+last_reviewed: 2026-05-04
+reflects_commit: f7d57a4
 ---
 
 # NtQueueApcThreadEx — special user APC
@@ -86,14 +86,62 @@ Steps:
 
 ## API Reference
 
-### `Method = MethodNtQueueApcThreadEx`
+This injection mode plugs into the unified `inject.WindowsConfig` /
+`inject.Builder` framework — the technique itself has no top-level
+helper. Drive it via the standard `Injector` / `Builder` paths.
+
+### `const inject.MethodNtQueueApcThreadEx Method = "apcex"`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#MethodNtQueueApcThreadEx)
 
-The constant `"apcex"`. Pass to `Config.Method` or
-`InjectorBuilder.Method`.
+Selects the `NtQueueApcThreadEx` "special user APC" technique
+(introduced Win10 1809+) — queues the APC with a flag that bypasses
+the alertable-thread requirement.
 
-### `Builder` pattern
+**Required `WindowsConfig` fields:** `PID` (target process). Cross-
+process technique — opens the target with PROCESS_VM_OPERATION |
+PROCESS_VM_WRITE | PROCESS_VM_READ, then iterates threads via
+`NtGetNextThread` and queues the APC against the first one.
+
+**Pairs with:** `WithFallback()` chains to `MethodEarlyBirdAPC` /
+`MethodThreadHijack` if the special-APC flag is unsupported on the
+target build.
+
+**OPSEC:** `NtQueueApcThreadEx` is rare in benign code — Sysmon
+ETW providers since Win10 21H2 surface it via the `ApcTrace` event.
+Used by Cobalt Strike historically, so EDR signatures are mature.
+
+**Required privileges:** `SeDebugPrivilege` for cross-session targets;
+unprivileged for same-user targets.
+
+**Platform:** Windows ≥ 10 1809 (special-APC flag). Stub returns
+"not implemented".
+
+### `inject.NewWindowsInjector(cfg *WindowsConfig) (Injector, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#NewWindowsInjector)
+
+Standard Injector constructor.
+
+```go
+cfg := &inject.WindowsConfig{
+    Config:        inject.Config{Method: inject.MethodNtQueueApcThreadEx, PID: pid},
+    SyscallMethod: wsyscall.MethodIndirect,
+}
+inj, err := inject.NewWindowsInjector(cfg)
+```
+
+**Returns:** `Injector`; error from `cfg` validation.
+
+**Side effects:** none until `.Inject` runs.
+
+**OPSEC:** as the Method constant.
+
+**Required privileges:** as the Method constant.
+
+**Platform:** Windows ≥ 10 1809.
+
+### `inject.Builder` pattern
 
 ```go
 inj, err := inject.Build().
@@ -104,17 +152,10 @@ inj, err := inject.Build().
     Create()
 ```
 
-### `inject.NewWindowsInjector(cfg *WindowsConfig) (Injector, error)`
-
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#NewWindowsInjector)
-
-```go
-cfg := &inject.WindowsConfig{
-    Config:        inject.Config{Method: inject.MethodNtQueueApcThreadEx, PID: pid},
-    SyscallMethod: wsyscall.MethodIndirect,
-}
-inj, err := inject.NewWindowsInjector(cfg)
-```
+`WithFallback()` is recommended for this Method — older Windows
+builds reject the special-APC flag with `STATUS_INVALID_PARAMETER`,
+and the fallback chain transparently retries with EarlyBird then
+ThreadHijack.
 
 ## Examples
 
