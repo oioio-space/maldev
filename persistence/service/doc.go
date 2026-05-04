@@ -25,6 +25,23 @@
 // SYSTEM-running services pointing at user-writable paths
 // (`%TEMP%`, `%APPDATA%`) trip default rules.
 //
+// # Required privileges
+//
+// admin. SCM `CreateService` / `DeleteService` / `ChangeService`
+// require `SC_MANAGER_CREATE_SERVICE` on the SCM database
+// (Administrators only). SYSTEM works without elevation.
+// Setting `Config.Account` to a non-default principal
+// additionally requires `SeServiceLogonRight` on the target
+// account; the package ships `GrantSeServiceLogonRight` to
+// satisfy this gate (LSA write — also admin).
+//
+// # Platform
+//
+// Windows-only. The SCM is a Windows-only subsystem; no POSIX
+// analogue. Linux equivalent (systemd unit installation) is out
+// of scope here — see `persistence/doc.go` for the wider
+// platform map.
+//
 // # Example
 //
 // See [ExampleService] in service_example_test.go.

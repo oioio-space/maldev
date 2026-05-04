@@ -31,6 +31,23 @@
 // the events requires kernel-level tampering out of this
 // package's scope.
 //
+// # Required privileges
+//
+// admin. `NetUserAdd`, `NetUserSetInfo`,
+// `NetLocalGroupAddMembers` against the local SAM all require
+// membership in the local Administrators group (or the
+// equivalent SAM-Domain `WRITE_DAC` rights, which non-admin
+// users do not hold). SYSTEM works without elevation.
+// `NetUserEnum` is read-only and runs unprivileged for the
+// info levels exposed here.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). NetAPI32 is the
+// Windows-only LM/SMB management surface — no POSIX
+// equivalent. Cross-platform analogues would touch
+// `/etc/passwd` + `/etc/shadow` (Linux) which is not wired up.
+//
 // # Example
 //
 // See [ExampleAdd] in account_example_test.go.

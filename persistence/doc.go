@@ -51,6 +51,21 @@
 // 4720 / 4732. Each sub-package documents its own detection
 // level.
 //
+// # Required privileges
+//
+// Per sub-package. Quick map: `registry` HKCU + `startup`
+// (user folder) + `lnk` + `scheduler` (per-user task) run
+// unprivileged. `registry` HKLM + `startup` (machine folder)
+// + `service` + `account` + `scheduler` with logon/startup
+// triggers require admin. SYSTEM works without elevation.
+//
+// # Platform
+//
+// Windows-only across the sub-packages. Each is gated on
+// SCM / ITaskService / NetAPI32 / IShellLinkW — none have
+// POSIX analogues. Linux persistence (cron, systemd timers,
+// .desktop autostart) is not yet wired up.
+//
 // # Example
 //
 // See [github.com/oioio-space/maldev/persistence/registry],

@@ -36,6 +36,24 @@
 // folders specifically (path-scoped rules) flag the persistence
 // case; standalone LNK creation elsewhere is rarely scrutinised.
 //
+// # Required privileges
+//
+// unprivileged. COM apartment init + IShellLinkW marshalling
+// run in any token. `Save(path)` inherits the DACL of the
+// target directory — user-writable paths (Desktop, %APPDATA%,
+// per-user StartUp) work for any user; machine-wide paths
+// (`C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp`,
+// `C:\Windows\System32\`) require admin to write. `BuildBytes`
+// / `WriteTo` need no filesystem privilege at all — the byte
+// destination is operator-controlled.
+//
+// # Platform
+//
+// Windows-only. Sits on COM (`Schedule.Service`-style
+// IShellLinkW) and `IPersistStream`; no POSIX equivalent.
+// Build tags enforce `windows`; cross-compile yields a build
+// error.
+//
 // # Example
 //
 // See [ExampleNew] in lnk_example_test.go.

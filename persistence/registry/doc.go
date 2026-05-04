@@ -33,6 +33,20 @@
 // HKCU on a target where the implant only needs current-user
 // access.
 //
+// # Required privileges
+//
+// HKCU is unprivileged for the calling user (`HKEY_CURRENT_USER`
+// is per-user-hive, writable by its owner). HKLM
+// (`Software\Microsoft\Windows\CurrentVersion\Run` /
+// `RunOnce`) requires admin (`KEY_SET_VALUE` is gated to
+// Administrators). SYSTEM works without elevation.
+//
+// # Platform
+//
+// Windows-only. The registry as a concept is Windows-only;
+// `golang.org/x/sys/windows/registry` is build-tag gated.
+// Cross-compile yields a build error rather than a silent stub.
+//
 // # Example
 //
 // See [ExampleRunKey] in registry_example_test.go.

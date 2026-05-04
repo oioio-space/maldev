@@ -27,6 +27,25 @@
 // itself looks benign. The user folder draws less default
 // scrutiny than the machine-wide folder.
 //
+// # Required privileges
+//
+// unprivileged for the per-user StartUp folder
+// (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`,
+// resolved via `recon/folder.GetKnown(FOLDERID_Startup)`).
+// admin for the machine-wide folder
+// (`C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp`,
+// `FOLDERID_CommonStartup`) — that path's DACL grants write
+// only to Administrators + SYSTEM. SYSTEM works without
+// elevation but the LNK runs at user logon as the logging-on
+// user, not as SYSTEM.
+//
+// # Platform
+//
+// Windows-only. Resolves Shell-managed paths via
+// `SHGetKnownFolderPath`; LNK creation goes through
+// `persistence/lnk` (COM IShellLinkW). Linux .desktop autostart
+// is not wired up.
+//
 // # Example
 //
 // See [ExampleShortcut] in startup_example_test.go.
