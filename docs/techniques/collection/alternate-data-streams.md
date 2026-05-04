@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: a705c32
+last_reviewed: 2026-05-04
+reflects_commit: f3dc411
 ---
 
 # NTFS Alternate Data Streams
@@ -170,42 +170,74 @@ deletion can remove them.
 
 ## API Reference
 
-```go
-// StreamInfo describes an alternate data stream.
-type StreamInfo struct {
-    Name string
-    Size int64
-}
+Package: `github.com/oioio-space/maldev/cleanup/ads`. This page is
+the **collection-area surface** for the package — the full canonical
+fielded coverage lives at [`cleanup/ads.md`](../cleanup/ads.md). The
+entries below are stubs covering signature + the OPSEC bullet most
+relevant to a collection-time consumer (read/write payloads, hide
+output files); cross-link to the canonical page for the rest of the
+fielded fields.
 
-// List returns all named alternate data streams on path (excludes the default ::$DATA stream).
-// Uses FindFirstStreamW / FindNextStreamW.
-func List(path string) ([]StreamInfo, error)
+### Types
 
-// Read returns the content of the named stream.
-// Equivalent to os.ReadFile(path + ":" + streamName).
-func Read(path, streamName string) ([]byte, error)
+#### `type StreamInfo struct { Name string; Size int64 }`
 
-// Write creates or overwrites the named stream.
-// Equivalent to os.WriteFile(path + ":" + streamName, data, 0644).
-func Write(path, streamName string, data []byte) error
+- godoc: descriptor returned by `List`. `Name` is the stream name without the `:`/`$DATA` suffix; `Size` in bytes.
+- Description: pure data shape — no methods. See [`cleanup/ads.md` § StreamInfo](../cleanup/ads.md) for the fielded entry.
+- Platform: Windows (NTFS).
 
-// Delete removes a named stream without affecting the host file.
-// Returns a wrapped error on failure so callers can use errors.Is.
-func Delete(path, streamName string) error
+### CRUD
 
-// CreateUndeletable creates a file named "..." inside dir using the \\?\ prefix.
-// The resulting path cannot be accessed or deleted by Explorer or cmd.exe.
-// Returns the plain (non-\\?\) path so it can be passed to ReadUndeletable.
-func CreateUndeletable(dir string, data []byte) (string, error)
+#### `List(path string) ([]StreamInfo, error)`
 
-// ReadUndeletable reads a file created by CreateUndeletable.
-// Prepends \\?\ internally to bypass Win32 name normalisation.
-func ReadUndeletable(path string) ([]byte, error)
+- godoc: enumerate all named ADSs on `path` (default `::$DATA` excluded). Uses `FindFirstStreamW`/`FindNextStreamW`. Full coverage: [`cleanup/ads.md` § List](../cleanup/ads.md).
+- OPSEC: `FindFirstStreamW` is rare in benign code paths — Sysmon Event 1/15 detection-engineering rules look for the call against user-writable directories.
+- Required privileges: read on `path`.
+- Platform: Windows + NTFS.
 
-// DeleteUndeletable removes a file created by CreateUndeletable.
-// Uses the \\?\ prefix to bypass Win32 name normalization.
-func DeleteUndeletable(path string) error
-```
+#### `Read(path, streamName string) ([]byte, error)`
+
+- godoc: equivalent to `os.ReadFile(path + ":" + streamName)`. Full coverage: [`cleanup/ads.md` § Read](../cleanup/ads.md).
+- OPSEC: indistinguishable from a normal file read in API telemetry except for the `:streamname` colon in the path argument.
+- Required privileges: read on the host file.
+- Platform: Windows + NTFS.
+
+#### `Write(path, streamName string, data []byte) error`
+
+- godoc: create or overwrite the named ADS with `data`. Equivalent to `os.WriteFile(path + ":" + streamName, data, 0644)`. Full coverage: [`cleanup/ads.md` § Write](../cleanup/ads.md).
+- OPSEC: the same `:streamname` colon tell. ADS writes against `Downloads` / `AppData\Local\Temp` are heavily flagged (classic browser-mark-of-the-web bypass).
+- Required privileges: write on the host file.
+- Platform: Windows + NTFS.
+
+#### `Delete(path, streamName string) error`
+
+- godoc: remove a named ADS without touching the host file. Wrapped error so callers can `errors.Is`. Full coverage: [`cleanup/ads.md` § Delete](../cleanup/ads.md).
+- OPSEC: clean delete leaves no `$Stream` artifact. Defender's "scan ADS" feature catches the write but not the delete.
+- Required privileges: write on the host file.
+- Platform: Windows + NTFS.
+
+### Undeletable file primitives
+
+#### `CreateUndeletable(dir string, data []byte) (string, error)`
+
+- godoc: create a file named `"..."` inside `dir` using the `\\?\` extended-path prefix. Explorer / cmd.exe cannot enumerate or delete it. Returns the plain (non-`\\?\`) path. Full coverage: [`cleanup/ads.md` § CreateUndeletable](../cleanup/ads.md).
+- OPSEC: file appears as `...` in directory listings if the tool uses Win32 path normalisation (Explorer hides it entirely). Operator tools using NT path APIs see it normally.
+- Required privileges: write in `dir`.
+- Platform: Windows + NTFS.
+
+#### `ReadUndeletable(path string) ([]byte, error)`
+
+- godoc: read a file created by `CreateUndeletable`. Prepends `\\?\` internally. Full coverage: [`cleanup/ads.md` § ReadUndeletable](../cleanup/ads.md).
+- OPSEC: silent.
+- Required privileges: read on the host file.
+- Platform: Windows + NTFS.
+
+#### `DeleteUndeletable(path string) error`
+
+- godoc: remove a `CreateUndeletable` file via `\\?\` prefix. Full coverage: [`cleanup/ads.md` § DeleteUndeletable](../cleanup/ads.md).
+- OPSEC: silent.
+- Required privileges: write on the host file.
+- Platform: Windows + NTFS.
 
 ## See also
 
