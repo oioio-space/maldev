@@ -18,6 +18,17 @@
 // Reads from `RtlGenRandom` / `BCryptGenRandom` on Windows; standard
 // CSPRNG everywhere.
 //
+// # Required privileges
+//
+// unprivileged. `crypto/rand` reads from the OS CSPRNG —
+// `BCryptGenRandom` / `RtlGenRandom` on Windows, `getrandom(2)` /
+// `/dev/urandom` on Linux — both available to any token.
+//
+// # Platform
+//
+// Cross-platform. Stdlib `crypto/rand` + `math/big`. No build
+// tags.
+//
 // # Example
 //
 // See [ExampleBytes] and [ExampleDuration] in random_example_test.go.

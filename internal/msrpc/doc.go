@@ -18,6 +18,23 @@
 // path; calling into the vendored claims `ClaimsClient.Bind(ctx)`
 // returns dcerpc.ErrStubbed.
 //
+// # Required privileges
+//
+// unprivileged in the current trim — only PAC NDR marshaling is
+// active, and that is byte-level only. When chantier VI lands
+// the DCERPC transport, downstream calls into DRSUAPI / SAMR
+// will inherit per-RPC server gates (DCSync needs `Replicating
+// Directory Changes` on the DC, SAMR needs the relevant
+// account rights on the target). The fork itself remains
+// agnostic.
+//
+// # Platform
+//
+// Cross-platform for PAC NDR. The vendored DCERPC stub has
+// platform-neutral type signatures; the eventual real
+// transport will use stdlib `net.Dial` (cross-platform) plus an
+// SSPI Negotiate path that becomes Windows-only when wired up.
+//
 // # Caller / Opener / folder.Get integration plan
 //
 // PAC marshaling is purely byte-level — no syscalls, no file reads.

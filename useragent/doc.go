@@ -19,6 +19,15 @@
 //
 // Pure data — picking a string is invisible.
 //
+// # Required privileges
+//
+// unprivileged. Reads an embedded JSON snapshot via `embed.FS`;
+// no syscall, no network.
+//
+// # Platform
+//
+// Cross-platform. Pure Go + `embed`. No build tags.
+//
 // # Example
 //
 // See [ExampleLoad] and [ExampleDB_Random] in useragent_example_test.go.

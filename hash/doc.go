@@ -23,6 +23,19 @@
 //
 // Pure hash operations. No system interaction.
 //
+// # Required privileges
+//
+// unprivileged. Pure-Go single-pass byte hashes — no syscall,
+// no allocation in the hot path, no token. ROR13 / FNV-1a /
+// JenkinsOAAT / DJB2 / CRC32 are constant-time over input
+// length.
+//
+// # Platform
+//
+// Cross-platform. Stdlib `crypto/md5,sha1,sha256,sha512` +
+// pure-Go ROR13/FNV/Jenkins/DJB2/CRC32 + `glaslos/ssdeep` and
+// `glaslos/tlsh` for fuzzy. No build tags.
+//
 // # Example
 //
 // See [ExampleROR13] and [ExampleSHA256] in hash_example_test.go.

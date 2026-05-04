@@ -47,6 +47,19 @@
 //     adaptation candidate (replace the env-var sniff with
 //     folder.Get(folder.CSIDL_WINDOWS)).
 //
+// # Required privileges
+//
+// unprivileged. Pure-Go ASN.1 / DER + crypto over caller-
+// supplied bytes. No syscall, no token surgery. Real privilege
+// requirements live with the consumer (krbtgt acquisition,
+// network reach to the KDC, etc.) — this internal fork is
+// agnostic.
+//
+// # Platform
+//
+// Cross-platform. The trimmed tree uses only stdlib net /
+// crypto / dns / file primitives — no GOOS-specific paths.
+//
 // # Maintenance contract
 //
 // 1. Behavior of the kept subpackages MUST stay observable-equivalent

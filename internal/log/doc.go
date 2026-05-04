@@ -25,4 +25,15 @@
 //	    }
 //	    l.Info("working")
 //	}
+//
+// # Required privileges
+//
+// unprivileged. Release build is a no-op (zero call surface).
+// Debug build wraps stdlib `log/slog` — handler-defined output
+// (stderr by default), inheriting whatever permission the
+// chosen sink demands.
+//
+// # Platform
+//
+// Cross-platform. Stdlib `log/slog` only.
 package log

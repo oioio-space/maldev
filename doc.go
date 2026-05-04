@@ -30,6 +30,28 @@
 // Every technique package documents its MITRE ATT&CK mapping in its doc.go.
 // See docs/mitre.md for the complete coverage table.
 //
+// # Required privileges
+//
+// Per package — the umbrella exports nothing. Rough guide:
+// Layer 0 (`crypto`, `encode`, `hash`, `random`) and the
+// parser-only halves of credential packages are unprivileged.
+// Layer 1 / Layer 2 techniques range from unprivileged
+// self-process surgery (own-process injection, AMSI/ETW
+// patching, sleepmask) up through admin (LSASS dump, service
+// install, kernel-callback removal) and SYSTEM / kernel
+// (callback removal, RTCore64 BYOVD). Each technique package's
+// doc.go carries the per-export rule.
+//
+// # Platform
+//
+// Cross-platform for Layer 0, `c2/transport` (TCP/TLS/uTLS),
+// `c2/cert`, `c2/multicat`, the parser halves of
+// `credentials/lsassdump` + `credentials/sekurlsa` +
+// `credentials/samdump`, and `cleanup/memory.SecureZero`.
+// Windows-only for everything that touches the Windows API
+// (Layer 1 entirely, the bulk of Layer 2). Each package's
+// doc.go documents its specific build matrix.
+//
 // This library is for authorized security research, red team operations,
 // and penetration testing only.
 package maldev

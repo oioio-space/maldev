@@ -24,6 +24,16 @@
 //
 // Pure data transforms. No system interaction.
 //
+// # Required privileges
+//
+// unprivileged. Pure-Go transforms; no syscall, no I/O.
+//
+// # Platform
+//
+// Cross-platform. Stdlib `encoding/base64` +
+// `golang.org/x/text/encoding/unicode` (UTF-16LE). No build
+// tags.
+//
 // # Example
 //
 // See [ExampleBase64Encode] and [ExamplePowerShell] in

@@ -46,6 +46,19 @@
 //
 // Pure cryptographic operations. No system interaction.
 //
+// # Required privileges
+//
+// unprivileged. Pure-Go transforms over caller-supplied byte
+// slices; no syscall, no token, no file I/O. AEAD nonces come
+// from `crypto/rand` (OS CSPRNG), which itself runs at any
+// privilege.
+//
+// # Platform
+//
+// Cross-platform. Pure-Go primitives only — `crypto/aes`,
+// `golang.org/x/crypto/chacha20poly1305`, `crypto/rc4`,
+// `crypto/rand`. No build tags, no GOOS-specific paths.
+//
 // # Example
 //
 // See [ExampleEncryptAESGCM] and [ExampleEncryptChaCha20] in
