@@ -36,6 +36,18 @@
 // the standard `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`
 // key that built-in tools (`winver`, `ver`) rely on.
 //
+// # Required privileges
+//
+// unprivileged. `RtlGetVersion` is a single ntdll call that
+// always returns the real (kernel-side) version regardless of
+// token. The UBR registry read targets
+// `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`, which
+// is world-readable on a default install.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`).
+//
 // # Example
 //
 // See [ExampleCurrent] and [ExampleAtLeast] in version_example_test.go.

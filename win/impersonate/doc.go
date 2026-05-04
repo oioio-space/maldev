@@ -41,6 +41,28 @@
 // pairs. `RunAsTrustedInstaller` spawns a child of `services.exe`
 // — visible in process-tree telemetry.
 //
+// # Required privileges
+//
+// `ImpersonateThread` needs valid credentials for the
+// principal being logged on (no extra privilege beyond what
+// `LogonUserW` requires for the chosen `LOGON32_*` type).
+// `ImpersonateToken` runs at whatever privilege the
+// pre-acquired token grants — usually obtained via
+// `win/token.Steal` which itself needs `SeDebugPrivilege`
+// (admin) for protected targets. `ImpersonateByPID` /
+// `GetSystem` / `GetTrustedInstaller` /
+// `RunAsTrustedInstaller` all require admin —
+// `OpenProcess(QUERY_LIMITED_INFORMATION)` against
+// winlogon.exe / TrustedInstaller.exe is admin-only.
+// SYSTEM works without elevation.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). The token model,
+// `ImpersonateLoggedOnUser`, `RevertToSelf`, and the
+// services-based TrustedInstaller machinery are all
+// Windows-only.
+//
 // # Example
 //
 // See [ExampleImpersonateThread] and [ExampleGetSystem] in

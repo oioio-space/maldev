@@ -25,4 +25,23 @@
 //
 // Import the sub-package for the specific primitive needed. The parent
 // package exports nothing.
+//
+// # Required privileges
+//
+// Per sub-package. `api`, `ntapi`, `syscall`, `version`,
+// `domain`, plus the read-side of `token` are unprivileged
+// — querying the calling process / OS surface. Privileged
+// surfaces: token theft from another PID via `token.Steal`
+// requires `SeDebugPrivilege` (admin) for protected targets;
+// `impersonate.GetSystem` / `RunAsTrustedInstaller` need
+// admin to start with; `privilege.ExecAs` /
+// `CreateProcessWithLogon` need the credentials being
+// substituted (no extra privilege beyond that). SYSTEM works
+// without elevation across the board.
+//
+// # Platform
+//
+// Windows-only across every sub-package
+// (`//go:build windows`). The umbrella itself is
+// Windows-only too.
 package win

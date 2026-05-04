@@ -29,6 +29,17 @@
 // LSA — no network traffic, no privilege required, used by built-in
 // tools (`whoami /upn`, `dsregcmd /status`).
 //
+// # Required privileges
+//
+// unprivileged. `NetGetJoinInformation` against the local
+// netapi32 endpoint runs in any token; built-in tools
+// (`whoami /upn`, `dsregcmd /status`) make the same call.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). NetAPI32 is the
+// Windows-only LM/SMB management surface; no POSIX analogue.
+//
 // # Example
 //
 // See [ExampleName] in domain_example_test.go.

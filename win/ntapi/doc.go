@@ -33,6 +33,25 @@
 // see these calls. The signal drops to very-quiet only when callers
 // move to direct/indirect syscalls in win/syscall.
 //
+// # Required privileges
+//
+// unprivileged for self-process operations (own-process
+// allocate, write, protect). Cross-process targets follow the
+// kernel's per-call gate: `OpenProcess(VM_OPERATION)` /
+// `OpenProcess(VM_WRITE)` against an unprotected same-user
+// process is unprivileged; protected (PPL) or
+// different-user/SYSTEM targets need `SeDebugPrivilege`
+// (admin). Each `Nt*` wrapper accepts a target handle from
+// the caller — the privilege gate sits at handle acquisition,
+// not inside this package.
+//
+// # Platform
+//
+// Windows-only. The package builds without an explicit
+// `//go:build windows` tag because every file underneath is
+// `_windows.go`-suffixed; cross-compile yields an empty
+// build, matching the other `win/*` packages.
+//
 // # Example
 //
 // See [ExampleNtAllocateVirtualMemory] in ntapi_example_test.go.

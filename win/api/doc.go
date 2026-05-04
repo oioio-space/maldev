@@ -39,6 +39,19 @@
 // table read are user-mode-readable memory. No syscall, no telemetry
 // trail.
 //
+// # Required privileges
+//
+// unprivileged. Loading System32 DLLs is a per-process
+// operation; PEB walk reads user-mode-readable memory; export
+// table is read from the on-image file mapping every process
+// already holds. No syscall privilege gate, no token bump.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). The PEB layout, ROR13
+// hash convention, and `windows.LazyDLL` machinery are
+// Windows-specific.
+//
 // # Example
 //
 // See [ExampleResolveByHash] and [ExamplePatchProc] in api_example_test.go.

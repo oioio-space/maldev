@@ -60,6 +60,26 @@
 // `syscall;ret` gadget — the call-stack matches a normal NT call
 // and the only signal is the SSN value itself.
 //
+// # Required privileges
+//
+// unprivileged at the Caller layer. Method selection (WinAPI /
+// NativeAPI / Direct / Indirect / IndirectAsm), gadget pool
+// build, SSN resolution via PEB walk, and stub byte-patch
+// cycle all run in own-process memory at any token.
+// Privilege gates only re-emerge inside the syscalls being
+// dispatched — `NtOpenProcess(VM_READ)` against lsass.exe
+// still needs `SeDebugPrivilege` (admin); the syscall
+// transport itself adds none.
+//
+// # Platform
+//
+// Windows-only. The package builds without an explicit tag
+// because every file underneath is `_windows.go`-suffixed.
+// `MethodIndirectAsm` is amd64-only; the other four methods
+// support 386 + amd64 + arm64 wherever the SSN table is
+// populated. Cross-compile to non-Windows GOOS yields an
+// empty build.
+//
 // # Example
 //
 // See [ExampleNew] and [ExampleCaller_Call] in syscall_example_test.go.

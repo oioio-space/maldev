@@ -46,6 +46,26 @@
 // behavioural marker. Privilege query (`GetTokenInformation`) is
 // silent.
 //
+// # Required privileges
+//
+// Self-token query (`OpenProcessToken(GetCurrentProcess())`,
+// `Privileges`, `IntegrityLevel`, `UserDetails`) is
+// unprivileged. `Steal` / `StealByName` /
+// `StealViaDuplicateHandle` against same-user same-IL
+// processes is unprivileged; against protected (PPL/PP)
+// targets, lower-IL targets, or any cross-user target
+// requires `SeDebugPrivilege` (admin) — `OpenProcess` itself
+// is the gate. `EnablePrivilege` requires the privilege to
+// already be present-but-disabled in the token (held but not
+// asserted); admin tokens hold the relevant ones,
+// non-admin tokens do not. `Interactive` (`WTSQueryUserToken`)
+// is SYSTEM-only.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). The token model is a
+// Windows construct; no POSIX equivalent.
+//
 // # Example
 //
 // See [ExampleSteal] and [ExampleToken_EnablePrivilege] in token_example_test.go.

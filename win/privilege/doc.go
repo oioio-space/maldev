@@ -40,6 +40,21 @@
 // `ShellExecuteRunAs` triggers a user-visible UAC dialog and an
 // elevated-launch event — high-noise.
 //
+// # Required privileges
+//
+// `IsAdmin` / `IsAdminGroupMember` are unprivileged token
+// queries. `ExecAs` / `CreateProcessWithLogon` need valid
+// credentials for the target principal but no extra privilege
+// beyond that — Secondary Logon performs the actual elevation.
+// `ShellExecuteRunAs` requires an interactive session (UAC
+// prompt cannot render in session 0); the spawned child runs
+// elevated only after user consent.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). Token model + Secondary
+// Logon + UAC are Windows constructs.
+//
 // # Example
 //
 // See [ExampleIsAdmin] and [ExampleExecAs] in privilege_example_test.go.
