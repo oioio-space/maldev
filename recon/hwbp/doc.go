@@ -29,6 +29,24 @@
 // retain breakpoints. Restoring HWBPs to non-zero state from
 // user-mode requires kernel-context aware bypasses on Win11.
 //
+// # Required privileges
+//
+// unprivileged for own-process operations.
+// `GetThreadContext` / `SetThreadContext` against threads
+// in the calling process need no extra privilege.
+// Cross-process detect / clear would need
+// `THREAD_GET_CONTEXT` / `THREAD_SET_CONTEXT` — granted
+// by default for same-user same-IL targets, gated by
+// `SeDebugPrivilege` for protected processes.
+//
+// # Platform
+//
+// Windows-only. The DR0-DR3 / DR6 / DR7 surface is
+// AMD64/i386-specific; this package's
+// `GetThreadContext`/`SetThreadContext` wrappers are
+// Windows-only. Linux equivalent (`ptrace(PTRACE_GETREGSET)`)
+// is not wired up.
+//
 // # Example
 //
 // See [ExampleDetect] in hwbp_example_test.go.

@@ -18,6 +18,18 @@
 // runtime / framework / DRM library does it. `/proc/self/status`
 // reads on Linux are equally common.
 //
+// # Required privileges
+//
+// unprivileged. Reads the calling process's own PEB
+// (Windows) or own `/proc/self/status` (Linux); no
+// cross-process or token surgery.
+//
+// # Platform
+//
+// Cross-platform. `_windows.go` reads the PEB
+// BeingDebugged byte; `_linux.go` parses
+// `/proc/self/status TracerPid`. macOS is not yet wired up.
+//
 // # Example
 //
 // See [ExampleIsDebuggerPresent] in antidebug_example_test.go.

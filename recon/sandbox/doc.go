@@ -34,6 +34,22 @@
 // against multiple dimensions — may be flagged by behavioural
 // EDR but rarely is in practice.
 //
+// # Required privileges
+//
+// unprivileged. Each underlying check
+// (`recon/antidebug`, `recon/antivm`, `recon/timing`,
+// process / hostname / DNS reads) runs in any token; the
+// scoring orchestrator adds no extra gate.
+//
+// # Platform
+//
+// Cross-platform. Wraps the cross-platform `recon/*`
+// primitives + stdlib `net` for fake-DNS interception.
+// Per-check coverage matches each underlying package's
+// platform support (debugger / VM detection are
+// Windows + Linux; some hardware checks degrade on
+// macOS).
+//
 // # Example
 //
 // See [ExampleNew] in sandbox_example_test.go.

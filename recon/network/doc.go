@@ -26,6 +26,18 @@
 // against unusual domains may surface in DNS telemetry, but
 // the package itself only resolves what the caller hands it.
 //
+// # Required privileges
+//
+// unprivileged. `net.Interfaces` enumeration uses
+// `GetAdaptersAddresses` (Windows) and `getifaddrs(3)`
+// (POSIX) — both available to any user. DNS queries
+// dispatched by `IsLocal` for non-literal inputs use the
+// platform resolver with no privilege requirement.
+//
+// # Platform
+//
+// Cross-platform. Pure stdlib `net` package; no build tags.
+//
 // # Example
 //
 // See [ExampleInterfaceIPs] in network_example_test.go.

@@ -28,6 +28,17 @@
 // CPU-burn loops with no I/O as anomalous; the primality
 // variant blends better with mathematical workloads.
 //
+// # Required privileges
+//
+// unprivileged. Pure `time.Now()` polling +
+// stdlib `math/big.ProbablyPrime` arithmetic; no syscall,
+// no token.
+//
+// # Platform
+//
+// Cross-platform. Stdlib `time` + `math/big`; no build
+// tags.
+//
 // # Example
 //
 // See [ExampleBusyWait] in timing_example_test.go.

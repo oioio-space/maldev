@@ -50,6 +50,25 @@
 // path. ScanAutoElevate hits combined with the canonical
 // fodhelper / sdclt patterns are universally flagged.
 //
+// # Required privileges
+//
+// `ScanProcesses` and `ScanScheduledTasks` are unprivileged
+// — Toolhelp32 + ITaskService both surface what the calling
+// token can already see. `ScanServices` requires admin
+// (`OpenSCManager(SC_MANAGER_ENUMERATE_SERVICE)` is
+// unprivileged but `QueryServiceConfig` for the binary path
+// of restricted services needs `SERVICE_QUERY_CONFIG` on the
+// service object — admin in practice for the full SCM list).
+// `ScanAutoElevate` reads PE manifests off disk in `System32`
+// — unprivileged read access. Validation
+// (`Validate(canary, ...)`) inherits the DACL of the
+// candidate HijackedPath.
+//
+// # Platform
+//
+// Windows-only. Service / Toolhelp32 / ITaskService /
+// `KnownDLLs` registry surface is Windows-only.
+//
 // # Example
 //
 // See [ExampleScanAll] in dllhijack_example_test.go.

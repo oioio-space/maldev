@@ -24,6 +24,22 @@
 // flags it on its own. Combined with subsequent suspicious
 // actions an EDR may correlate.
 //
+// # Required privileges
+//
+// unprivileged. Registry reads target world-readable HKLM
+// keys (HARDWARE\DEVICEMAP\Scsi, ACPI vendor strings);
+// `wmic`-equivalent DMI/BIOS reads use `GetSystemFirmwareTable`
+// (no privilege). Process / file / MAC enumeration uses
+// standard Win32 APIs available to any token.
+//
+// # Platform
+//
+// Cross-platform. Per-vendor checks have Windows + Linux
+// implementations (registry / DMI surface on Windows;
+// `/sys/class/dmi/id/`, `/proc/cpuinfo`, `/proc/scsi/scsi`
+// on Linux). MAC + process checks use stdlib net + the
+// process/enum cross-platform layer.
+//
 // # Example
 //
 // See [ExampleDetect] in antivm_example_test.go.

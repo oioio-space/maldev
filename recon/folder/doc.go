@@ -41,6 +41,21 @@
 // APIs on a typical desktop — every installer, every Office
 // app, every browser invokes it continuously.
 //
+// # Required privileges
+//
+// unprivileged. `SHGetSpecialFolderPathW` and
+// `SHGetKnownFolderPath` resolve paths from the Shell
+// registry under HKCU / HKLM read-side; both are
+// world-readable on a default install. The Shell handles
+// per-user vs per-machine resolution transparently — calling
+// from a user token returns the user's own profile paths,
+// SYSTEM returns the machine paths.
+//
+// # Platform
+//
+// Windows-only. Shell32 / KnownFolders are Windows-specific.
+// Linux equivalents (`xdg-user-dirs`) are not wired up.
+//
 // # Example
 //
 // See [ExampleGet] in folder_example_test.go.

@@ -26,6 +26,21 @@
 // continuously. Polling intervals are configurable — sub-100 ms
 // polling may stand out behaviourally on idle systems.
 //
+// # Required privileges
+//
+// unprivileged. `GetLogicalDrives`, `GetDriveTypeW`,
+// `GetVolumeInformationW`, and the user32 message-only
+// window used by `WatchEvents` all run in any token. The
+// `WM_DEVICECHANGE` notification is delivered to every
+// top-level window in the session — no extra subscription
+// privilege.
+//
+// # Platform
+//
+// Windows-only. Drive-letter model + `WM_DEVICECHANGE`
+// pump are Windows-only constructs; POSIX uses
+// `udev` / `IORegistry` instead, neither wired up here.
+//
 // # Example
 //
 // See [ExampleNew] and [ExampleNewWatcher] in drive_example_test.go.
