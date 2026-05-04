@@ -42,7 +42,7 @@ func TestArgsPackInt(t *testing.T) {
 	args.AddInt(42)
 	packed := args.Pack()
 	require.Len(t, packed, 4)
-	v := binary.BigEndian.Uint32(packed)
+	v := binary.LittleEndian.Uint32(packed)
 	require.Equal(t, uint32(42), v)
 }
 
@@ -52,7 +52,7 @@ func TestArgsPackIntNegative(t *testing.T) {
 	packed := args.Pack()
 	require.Len(t, packed, 4)
 	// -1 as two's complement uint32 is 0xFFFFFFFF.
-	require.Equal(t, uint32(0xFFFFFFFF), binary.BigEndian.Uint32(packed))
+	require.Equal(t, uint32(0xFFFFFFFF), binary.LittleEndian.Uint32(packed))
 }
 
 func TestArgsPackShort(t *testing.T) {
@@ -60,7 +60,7 @@ func TestArgsPackShort(t *testing.T) {
 	args.AddShort(7)
 	packed := args.Pack()
 	require.Len(t, packed, 2)
-	require.Equal(t, uint16(7), binary.BigEndian.Uint16(packed))
+	require.Equal(t, uint16(7), binary.LittleEndian.Uint16(packed))
 }
 
 func TestArgsPackString(t *testing.T) {
@@ -69,7 +69,7 @@ func TestArgsPackString(t *testing.T) {
 	packed := args.Pack()
 	// 4-byte length prefix + "test" + null terminator = 9 bytes total.
 	require.Len(t, packed, 4+5)
-	length := binary.BigEndian.Uint32(packed[:4])
+	length := binary.LittleEndian.Uint32(packed[:4])
 	require.Equal(t, uint32(5), length)
 	require.Equal(t, "test", string(packed[4:8]))
 	require.Equal(t, byte(0), packed[8])
@@ -81,7 +81,7 @@ func TestArgsPackStringEmpty(t *testing.T) {
 	packed := args.Pack()
 	// Empty string: length = 1 (just null), 4-byte prefix + null.
 	require.Len(t, packed, 5)
-	require.Equal(t, uint32(1), binary.BigEndian.Uint32(packed[:4]))
+	require.Equal(t, uint32(1), binary.LittleEndian.Uint32(packed[:4]))
 	require.Equal(t, byte(0), packed[4])
 }
 
@@ -92,7 +92,7 @@ func TestArgsPackBytes(t *testing.T) {
 	packed := args.Pack()
 	// 4-byte length prefix + 4 data bytes = 8 bytes total.
 	require.Len(t, packed, 8)
-	length := binary.BigEndian.Uint32(packed[:4])
+	length := binary.LittleEndian.Uint32(packed[:4])
 	require.Equal(t, uint32(4), length)
 	require.Equal(t, data, packed[4:])
 }
@@ -102,7 +102,7 @@ func TestArgsPackBytesEmpty(t *testing.T) {
 	args.AddBytes([]byte{})
 	packed := args.Pack()
 	require.Len(t, packed, 4)
-	require.Equal(t, uint32(0), binary.BigEndian.Uint32(packed[:4]))
+	require.Equal(t, uint32(0), binary.LittleEndian.Uint32(packed[:4]))
 }
 
 func TestArgsPackMultiple(t *testing.T) {
@@ -123,5 +123,5 @@ func TestArgsPackIsolated(t *testing.T) {
 	first := args.Pack()
 	first[0] = 0xFF
 	second := args.Pack()
-	require.Equal(t, uint32(99), binary.BigEndian.Uint32(second))
+	require.Equal(t, uint32(99), binary.LittleEndian.Uint32(second))
 }

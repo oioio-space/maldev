@@ -58,35 +58,40 @@ func NewArgs() *Args {
 	return &Args{}
 }
 
-// AddInt appends a 32-bit signed integer in big-endian byte order.
+// Wire format: little-endian to match the CS canonical (TrustedSec
+// COFFLoader / Outflank read length prefixes via native-int memcpy,
+// which is LE on x64). The consumer side in beacon_api_windows.go
+// uses binary.LittleEndian for the same reason — keep this in sync.
+
+// AddInt appends a 32-bit signed integer in little-endian byte order.
 func (a *Args) AddInt(v int32) {
 	var b [4]byte
-	binary.BigEndian.PutUint32(b[:], uint32(v))
+	binary.LittleEndian.PutUint32(b[:], uint32(v))
 	a.buf.Write(b[:])
 }
 
-// AddShort appends a 16-bit signed integer in big-endian byte order.
+// AddShort appends a 16-bit signed integer in little-endian byte order.
 func (a *Args) AddShort(v int16) {
 	var b [2]byte
-	binary.BigEndian.PutUint16(b[:], uint16(v))
+	binary.LittleEndian.PutUint16(b[:], uint16(v))
 	a.buf.Write(b[:])
 }
 
-// AddString appends a null-terminated string with a 4-byte big-endian length
-// prefix. The length includes the null terminator.
+// AddString appends a null-terminated string with a 4-byte little-endian
+// length prefix. The length includes the null terminator.
 func (a *Args) AddString(s string) {
 	length := uint32(len(s) + 1) // +1 for the null terminator
 	var lb [4]byte
-	binary.BigEndian.PutUint32(lb[:], length)
+	binary.LittleEndian.PutUint32(lb[:], length)
 	a.buf.Write(lb[:])
 	a.buf.WriteString(s)
 	a.buf.WriteByte(0)
 }
 
-// AddBytes appends a byte slice with a 4-byte big-endian length prefix.
+// AddBytes appends a byte slice with a 4-byte little-endian length prefix.
 func (a *Args) AddBytes(data []byte) {
 	var lb [4]byte
-	binary.BigEndian.PutUint32(lb[:], uint32(len(data)))
+	binary.LittleEndian.PutUint32(lb[:], uint32(len(data)))
 	a.buf.Write(lb[:])
 	a.buf.Write(data)
 }

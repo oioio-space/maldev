@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/runtime/bof
-last_reviewed: 2026-04-27
-reflects_commit: 3797037
+last_reviewed: 2026-05-04
+reflects_commit: 3c3dcc2
 ---
 
 # BOF (Beacon Object File) loader
@@ -13,8 +13,11 @@ reflects_commit: 3797037
 Load + execute a Cobalt Strike-style Beacon Object File (BOF) —
 a compiled COFF object — entirely in process memory. Parses
 COFF, applies relocations, resolves entry-point, jumps into
-RWX memory. x64-only; no Beacon-API helpers (BOFs that call
-`BeaconOutput` etc. crash).
+RWX memory. x64-only. The Beacon API (`BeaconPrintf` /
+`BeaconOutput` / `BeaconData*` / `BeaconFormat*` / `BeaconError*`
+/ `BeaconGetSpawnTo`) is implemented in pure Go; dynamic-link
+imports resolve through the PEB walk + ROR13 hash route, so
+public TrustedSec / Outflank / FortyNorth BOFs run unmodified.
 
 ## Primer
 
@@ -54,6 +57,12 @@ flowchart LR
 | [`type BOF`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof#BOF) | Loaded BOF instance |
 | [`Load(data []byte) (*BOF, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof#Load) | Parse + relocate + ready to execute |
 | `(*BOF).Execute(args []byte) ([]byte, error)` | Run the entry point; return captured stdout |
+| `(*BOF).SetSpawnTo(path string)` | Configure the path returned by `BeaconGetSpawnTo` |
+| `(*BOF).Errors() []byte` | Snapshot of the per-BOF errors channel (`BeaconErrorD` / `DD` / `NA`) |
+| [`type Args`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof#Args) | CS-compatible argument packer (little-endian wire format) |
+| `NewArgs() *Args` | Allocate an empty argument packer |
+| `(*Args).AddInt(int32)` / `AddShort(int16)` / `AddString(string)` / `AddBytes([]byte)` | Append a length-prefixed value |
+| `(*Args).Pack() []byte` | Serialise for `BOF.Execute` |
 
 ## Examples
 
@@ -89,6 +98,27 @@ for _, path := range []string{"whoami.o", "netstat.o", "tasklist.o"} {
 }
 ```
 
+### Advanced — pack arguments via `Args`
+
+```go
+data, _ := os.ReadFile("parse_args.o")
+b, _ := bof.Load(data)
+
+a := bof.NewArgs()
+a.AddInt(42)
+a.AddString("hello-args")
+
+out, _ := b.Execute(a.Pack())
+fmt.Println(string(out))
+```
+
+The wire format is little-endian to match the Cobalt Strike
+canonical: TrustedSec COFFLoader, Outflank etc. read length
+prefixes via `memcpy` into a native `int`, which on x64 is a
+little-endian load. Use `AddInt` / `AddShort` for fixed-width
+ints, `AddString` for length-prefixed NUL-terminated strings,
+`AddBytes` for raw blobs.
+
 ## OPSEC & Detection
 
 | Artefact | Where defenders look |
@@ -120,18 +150,18 @@ for _, path := range []string{"whoami.o", "netstat.o", "tasklist.o"} {
 
 ## Limitations
 
-- **Partial Beacon-API surface.** Implemented today:
-  `BeaconPrintf` (format-string-only — varargs not expanded;
-  see "Beacon-API limitations" below), `BeaconOutput`,
-  `BeaconDataParse`, `BeaconDataInt`, `BeaconDataShort`,
-  `BeaconDataLength`, `BeaconDataExtract`,
-  `BeaconFormatAlloc` / `Reset` / `Free` / `Append` / `Int` /
-  `ToString`. **Not yet implemented:** `BeaconFormatPrintf`
-  (varargs unfeasible from a `syscall.NewCallback` thunk —
-  same constraint as `BeaconPrintf`), `BeaconErrorD` /
-  `ErrorDD` / `ErrorNA`, `BeaconGetSpawnTo`. BOFs that import
-  any of the unimplemented symbols fail at relocation time
-  with `unresolved external symbol __imp_BeaconXxx`.
+- **Beacon-API surface — full set with one varargs caveat.**
+  Implemented: `BeaconPrintf` + `BeaconFormatPrintf` (format
+  string forwarded verbatim — see vararg note below),
+  `BeaconOutput`, `BeaconDataParse` / `DataInt` / `DataShort` /
+  `DataLength` / `DataExtract`, `BeaconFormatAlloc` / `Reset` /
+  `Free` / `Append` / `Int` / `ToString`, `BeaconErrorD` /
+  `ErrorDD` / `ErrorNA` (routed to a per-BOF errors buffer
+  exposed via `(*BOF).Errors()`), `BeaconGetSpawnTo`
+  (path settable via `(*BOF).SetSpawnTo`). Any other
+  `__imp_Beacon*` import fails at relocation time with
+  `unresolved external symbol __imp_BeaconXxx` — the failure
+  is loud and traceable rather than silent NULL-patching.
 - **`BeaconPrintf` / `BeaconFormatPrintf` varargs are not
   expanded.** `syscall.NewCallback` binds a fixed-arity Go
   function as a stdcall callback; Go cannot introspect cdecl
@@ -169,13 +199,17 @@ for _, path := range []string{"whoami.o", "netstat.o", "tasklist.o"} {
     `resolveBeaconImport`. That extension point is intentionally
     left open; the default build prioritises pure-Go and
     accepts the verbatim-format trade-off.
-- **External Win32 imports unresolved.** CS BOFs encode dynamic-link
-  imports as `__imp_<DLLNAME>$<FuncName>` (e.g.
-  `__imp_KERNEL32$LoadLibraryA`). The current resolver only
-  handles `__imp_Beacon*`; any other external symbol fails
-  with `unresolved external symbol …`. See backlog row P2.23
-  (3rd row) for the planned `win/api.ResolveByHash`-backed
-  resolver.
+- **External Win32 imports — two forms supported.**
+  CS-canonical dollar-form (`__imp_KERNEL32$LoadLibraryA`)
+  resolves via `parseDollarImport` → `api.ResolveByHash` (PEB
+  walk + ROR13 module/function hash, no `GetProcAddress` /
+  `LoadLibrary` call appears in the API trail). Mingw-w64 bare
+  form (`__imp_LoadLibraryA` with no DLL prefix) resolves by
+  walking a curated module list — kernel32, advapi32, user32,
+  ws2_32, ole32, shell32 — first hit wins. Symbols not in the
+  curated set still fail loudly. Add a module to
+  `bareImportSearchOrder` in `beacon_api_windows.go` if a
+  particular BOF needs more coverage.
 - **Concurrency: BOF execution is serialised package-wide.** The
   Beacon API stubs read a single `currentBOF` pointer guarded
   by `bofMu`. Concurrent `Execute` calls block on each other.
