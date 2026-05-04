@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/pe/cert
-last_reviewed: 2026-04-29
-reflects_commit: b0327b4
+last_reviewed: 2026-05-04
+reflects_commit: c1f35d0
 ---
 
 # PE Certificate Theft
@@ -57,75 +57,225 @@ the raw blob; `Write` truncates / appends + patches.
 
 ## API Reference
 
-### `type Certificate`
+### `type Certificate struct { Raw []byte }`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#Certificate)
 
-| Field | Type | Description |
-|---|---|---|
-| `Raw` | `[]byte` | Raw `WIN_CERTIFICATE` bytes including header(s) and the embedded PKCS#7 signature blob |
+Holds the raw `WIN_CERTIFICATE` byte stream extracted from a
+signed PE — header(s) plus the embedded PKCS#7 signature blob.
+Travels as a single value between `Read`, `Write`, `Import`,
+`Export`.
+
+**Side effects:** none.
+
+**Platform:** cross-platform.
+
+### `var ErrNoCertificate`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#ErrNoCertificate)
+
+Returned by `Read` when the security directory entry is zero
+(unsigned PE). Pair with `errors.Is`.
+
+### `var ErrInvalidPE`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#ErrInvalidPE)
+
+Returned for malformed or non-PE inputs.
 
 ### `Has(pePath string) (bool, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#Has)
 
 Cheapest probe — true when the security directory entry is
-non-zero. Does not parse the certificate.
+non-zero. Does not parse the cert blob.
+
+**Parameters:** `pePath` — PE on disk.
+
+**Returns:** presence flag; error from file read or PE walk.
+
+**Side effects:** reads `pePath`.
+
+**OPSEC:** silent file read.
+
+**Platform:** cross-platform.
 
 ### `Read(pePath string) (*Certificate, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#Read)
 
 Parse the security directory and return the embedded cert.
-Returns `ErrNoCertificate` when the PE is unsigned.
+
+**Parameters:** `pePath` — signed PE.
+
+**Returns:** `*Certificate` with `Raw` populated; `ErrNoCertificate`
+when the PE is unsigned.
+
+**Side effects:** reads `pePath`.
+
+**Platform:** cross-platform.
 
 ### `Write(pePath string, c *Certificate) error`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#Write)
 
 Append `c.Raw` to the PE, 8-byte align, patch the security
-directory header in place.
+directory entry in place. Calls `PatchPECheckSum` post-splice.
+
+**Parameters:** `pePath` — target PE (rewritten in place);
+`c` — cert blob to graft.
+
+**Returns:** error from file I/O, PE walk, or checksum recompute.
+
+**Side effects:** truncates + appends bytes; rewrites the optional-header
+`CheckSum` and the security data-directory entry.
+
+**OPSEC:** modifies file size + last-write timestamp. Pair with
+[`cleanup/timestomp`](../cleanup/) to mask the change.
+
+**Required privileges:** write on `pePath`.
+
+**Platform:** cross-platform.
+
+### `WriteVia(creator stealthopen.Creator, pePath string, c *Certificate) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#WriteVia)
+
+Same byte output as `Write`, but routes the destination open
+through a [`stealthopen.Creator`](../evasion/stealthopen.md) — TxF,
+ADS, encrypted streams, or any other operator-controlled write
+primitive. Pass nil to fall back to `os.Create`.
+
+**Parameters:** `creator` — write primitive (nil → `os.Create`);
+`pePath`, `c` as `Write`.
+
+**Returns:** error from creator, file I/O, or checksum recompute.
+
+**Side effects:** as `Write`, via the supplied primitive.
+
+**OPSEC:** depends on the chosen Creator.
+
+**Platform:** cross-platform.
 
 ### `Copy(srcPE, dstPE string) error`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#Copy)
 
-`Read(srcPE)` + `Write(dstPE, …)` in a single call.
+`Read(srcPE)` + `Write(dstPE, …)` in one call — graft a donor's
+cert onto an unsigned implant.
+
+**Parameters:** `srcPE` — signed donor; `dstPE` — implant to
+rewrite.
+
+**Returns:** error from either step.
+
+**Side effects:** reads `srcPE`; rewrites `dstPE`.
+
+**OPSEC:** as `Write`.
+
+**Required privileges:** read on `srcPE`, write on `dstPE`.
+
+**Platform:** cross-platform.
 
 ### `Strip(pePath, dst string) error`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#Strip)
 
-Zero the security directory entry. When `dst` is non-empty, the
-removed cert bytes are written there for later restoration.
+Zero the security directory entry and truncate the appended cert
+bytes. When `dst` is non-empty, the removed bytes are written
+there for later restoration.
 
-### `Import(path string) (*Certificate, error)` / `(c *Certificate) Export(path string) error`
+**Parameters:** `pePath` — PE to strip; `dst` — optional backup
+path (`""` discards the bytes).
+
+**Returns:** error from file I/O or checksum recompute.
+
+**Side effects:** truncates `pePath`; recomputes checksum;
+optionally writes `dst`.
+
+**Required privileges:** write on `pePath` (and `dst`).
+
+**Platform:** cross-platform.
+
+### `StripVia(creator stealthopen.Creator, pePath, dst string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#StripVia)
+
+`Strip` routed through a `stealthopen.Creator` for the truncate
+and the `dst` write. Nil → `os.Create`.
+
+**Side effects:** as `Strip`, via the supplied primitive.
+
+**Platform:** cross-platform.
+
+### `Import(path string) (*Certificate, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#Import)
 
-Persist / re-load raw cert blobs to and from disk so they can
-travel between operations.
+Load a raw cert blob previously emitted by `Export` / `Strip`.
 
-### `WriteVia` / `StripVia` / `ExportVia` — operator-controlled write primitive
+**Parameters:** `path` — file holding `WIN_CERTIFICATE` bytes.
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#WriteVia)
+**Returns:** `*Certificate`; error from file read.
 
-Each disk-touching API has a `Via` variant that takes a
-[`stealthopen.Creator`](../evasion/stealthopen.md). Pass nil for the
-standard `os.Create` path; pass a custom Creator to land bytes through
-transactional NTFS, encrypted streams, ADS, or any other primitive
-the operator controls. The byte content is identical to the non-Via
-flavor.
+**Side effects:** reads `path`.
+
+**Platform:** cross-platform.
+
+### `(*Certificate).Export(path string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#Certificate.Export)
+
+Persist `c.Raw` to disk so the blob travels between operations.
+
+**Parameters:** `path` — destination file.
+
+**Returns:** error from `os.WriteFile`.
+
+**Side effects:** writes `path` (mode 0600).
+
+**Platform:** cross-platform.
+
+### `(*Certificate).ExportVia(creator stealthopen.Creator, path string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#Certificate.ExportVia)
+
+`Export` routed through a `stealthopen.Creator`. Nil → `os.Create`.
+
+**Platform:** cross-platform.
 
 ### `PatchPECheckSum(data []byte) error`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#PatchPECheckSum)
 
-Recomputes IMAGE_OPTIONAL_HEADER.CheckSum using the MS
-`ImageHlp!CheckSumMappedFile` algorithm (16-bit rolling-carry sum +
-file size, CheckSum field masked to zero). `Strip` and `Write` call
-it automatically post-splice; expose it for ad-hoc PE surgery
-performed outside the cert package.
+Recompute `IMAGE_OPTIONAL_HEADER.CheckSum` using the MS
+`ImageHlp!CheckSumMappedFile` algorithm (16-bit rolling-carry sum
+plus file size, CheckSum field masked to zero). `Strip`, `Write`,
+and `pe/dllproxy` (with `Options.PatchCheckSum`) call this
+internally; exposed for ad-hoc PE surgery outside the cert
+package.
+
+**Parameters:** `data` — full PE image, mutated in place.
+
+**Returns:** error from PE walk (no optional header, etc.).
+
+**Side effects:** writes 4 bytes at the optional-header CheckSum
+offset.
+
+**Platform:** cross-platform.
+
+### `PEChecksumOffset(data []byte) (int, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#PEChecksumOffset)
+
+Return the file offset of the `CheckSum` field for callers that
+want to read or surgically patch it without a full recompute.
+
+**Parameters:** `data` — PE image.
+
+**Returns:** offset; error on malformed input.
+
+**Platform:** cross-platform.
 
 ## Examples
 

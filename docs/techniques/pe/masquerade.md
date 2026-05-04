@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/pe/masquerade
-last_reviewed: 2026-04-29
-reflects_commit: 4d55e88
+last_reviewed: 2026-05-04
+reflects_commit: c1f35d0
 ---
 
 # PE Resource Masquerade
@@ -81,42 +81,229 @@ one and blank-import:
 
 ## API Reference
 
-### Programmatic entry points
+### `type Resources struct`
 
-| Symbol | Description |
-|---|---|
-| [`Extract(pePath) (*Resources, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Extract) | Open a PE; extract manifest + icons + VERSIONINFO + optional Authenticode cert. |
-| [`Clone(srcPE, outSyso, arch, level) error`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Clone) | One-shot `Extract` + `GenerateSyso`. |
-| [`Build(out, arch, opts ...Option) error`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Build) | Option-chain entry point — start from a source PE, override fields, emit. |
-| [`(*Resources).GenerateSyso(out, arch, level)`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Resources.GenerateSyso) | Write `.syso` from the current `Resources` state via plain `os.Create`. |
-| [`(*Resources).GenerateSysoVia(creator, out, arch, level)`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Resources.GenerateSysoVia) | Same as `GenerateSyso`, but routes through a [`stealthopen.Creator`](../evasion/stealthopen.md). nil → `os.Create`; non-nil → operator-controlled write primitive. The COFF byte stream is identical. |
-| [`(*Resources).IconCount() int`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Resources.IconCount) | How many icon groups were extracted. |
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Resources)
 
-### `Build` options
+In-memory bundle of cloned identity material — manifest XML,
+icon set (`[]*winres.Icon`), parsed VERSIONINFO, optional
+Authenticode `*cert.Certificate`. Returned by `Extract`,
+consumed by `GenerateSyso`. Mutate fields between to override
+specific elements.
 
-| Option | Effect |
-|---|---|
-| `WithSourcePE(path)` | Seed from existing PE (icons + manifest + VERSIONINFO). |
-| `WithExecLevel(level)` | Override `requestedExecutionLevel`. |
-| `WithManifest(xml)` | Replace entire manifest with raw XML. |
-| `WithVersionInfo(vi)` | Override all version resource strings. |
-| `WithIconFile(path)` | Load icon from PNG / ICO / BMP / JPEG. |
-| `WithIconImage(img)` | Create icon from Go `image.Image`. |
-| `WithIcons(icons)` | Advanced — pass `[]*winres.Icon` directly. |
-| `WithCertificate(c)` | Store a `*cert.Certificate` for post-build application via `cert.Write`. |
+**Side effects:** pure data.
 
-### Constants
+**Platform:** cross-platform.
 
-| Type | Values |
-|---|---|
-| `Arch` | `AMD64`, `I386` |
-| `ExecLevel` | `AsInvoker`, `HighestAvailable`, `RequireAdministrator` |
+### `type VersionInfo struct`
 
-### Sentinel errors
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#VersionInfo)
 
-| Error | Trigger |
-|---|---|
-| `ErrEmptySourcePE` | `WithSourcePE("")` |
+Parsed string-table fields: `CompanyName`, `FileDescription`,
+`FileVersion`, `InternalName`, `LegalCopyright`,
+`OriginalFilename`, `ProductName`, `ProductVersion`. Pass to
+`WithVersionInfo` to override all eight at once.
+
+**Platform:** cross-platform.
+
+### `type Arch int` — `AMD64`, `I386`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Arch)
+
+Target architecture for the emitted `.syso`. Must match the
+implant's `GOARCH` so the linker picks the right COFF.
+
+**Platform:** cross-platform.
+
+### `type ExecLevel int` — `AsInvoker`, `HighestAvailable`, `RequireAdministrator`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#ExecLevel)
+
+Manifest `requestedExecutionLevel`. `AsInvoker` is silent;
+`RequireAdministrator` triggers UAC at every launch.
+
+**OPSEC:** match the cloned identity's natural behaviour — a
+`cmd.exe`-styled binary asking for admin is suspicious.
+
+**Platform:** cross-platform (data); manifest is consumed only on
+Windows.
+
+### `var ErrEmptySourcePE`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#ErrEmptySourcePE)
+
+Returned when `WithSourcePE("")` is passed to `Build`.
+
+### `Extract(pePath string) (*Resources, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Extract)
+
+Open a PE and pull out manifest, icon groups, VERSIONINFO, and
+the Authenticode cert (if present).
+
+**Parameters:** `pePath` — donor PE.
+
+**Returns:** populated `*Resources`; error from file read or
+resource directory walk.
+
+**Side effects:** reads `pePath`.
+
+**Platform:** cross-platform.
+
+### `(*Resources).GenerateSyso(output string, arch Arch, level ExecLevel) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Resources.GenerateSyso)
+
+Emit a `.syso` COFF object from the current `Resources` state
+using `os.Create` for the output.
+
+**Parameters:** `output` — `.syso` path (must match
+`*_<GOOS>_<GOARCH>.syso` so `go build` picks it up); `arch` —
+`AMD64` / `I386`; `level` — manifest exec level.
+
+**Returns:** error from `winres` emit or file write.
+
+**Side effects:** writes `output`.
+
+**Required privileges:** write on the package directory holding
+the implant's `main`.
+
+**Platform:** cross-platform.
+
+### `(*Resources).GenerateSysoVia(creator stealthopen.Creator, output string, arch Arch, level ExecLevel) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Resources.GenerateSysoVia)
+
+`GenerateSyso` routed through a
+[`stealthopen.Creator`](../evasion/stealthopen.md). Nil →
+`os.Create`. The COFF byte stream is identical to the non-Via
+flavor.
+
+**Platform:** cross-platform.
+
+### `(*Resources).IconCount() int`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Resources.IconCount)
+
+Number of icon groups extracted. Useful as a sanity check after
+`Extract` on a stripped donor.
+
+**Platform:** cross-platform.
+
+### `Clone(srcPE, outputSyso string, arch Arch, level ExecLevel) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Clone)
+
+`Extract(srcPE)` + `GenerateSyso(outputSyso, …)` — the
+zero-config single-call path.
+
+**Parameters:** as the chained calls.
+
+**Returns:** error from either step.
+
+**Side effects:** reads `srcPE`; writes `outputSyso`.
+
+**Platform:** cross-platform.
+
+### `Build(output string, arch Arch, opts ...Option) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Build)
+
+Option-chain entry point — start from a source PE, override
+specific fields, emit the `.syso`. Use when individual
+VERSIONINFO strings, icon overrides, or a custom manifest XML
+need to be patched on top of a donor.
+
+**Parameters:** `output`, `arch` as `GenerateSyso`; `opts` —
+zero or more `With*` options.
+
+**Returns:** `ErrEmptySourcePE` for `WithSourcePE("")`; error
+from `winres` emit or file write.
+
+**Side effects:** reads any source PE referenced by options;
+writes `output`.
+
+**Platform:** cross-platform.
+
+### `type Option func(*buildConfig)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#Option)
+
+Functional option threaded through `Build`.
+
+### `WithSourcePE(pePath string) Option`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#WithSourcePE)
+
+Seed the build from a donor PE — icons + manifest + VERSIONINFO
+are extracted up front, then later options override individual
+fields.
+
+### `WithExecLevel(level ExecLevel) Option`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#WithExecLevel)
+
+Override the manifest `requestedExecutionLevel`.
+
+### `WithManifest(xml []byte) Option`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#WithManifest)
+
+Replace the manifest entirely with raw XML — escape hatch for
+manifest features beyond what `ExecLevel` covers (DPI awareness,
+COM activation, longPathAware).
+
+### `WithVersionInfo(vi *VersionInfo) Option`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#WithVersionInfo)
+
+Override every VERSIONINFO string at once.
+
+### `WithIcons(icons []*winres.Icon) Option`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#WithIcons)
+
+Replace the icon set with a pre-built `[]*winres.Icon`.
+
+### `WithIconFile(path string) Option`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#WithIconFile)
+
+Load a single icon from PNG / ICO / BMP / JPEG on disk.
+
+### `WithIconImage(img image.Image) Option`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#WithIconImage)
+
+Build an icon from an in-memory `image.Image` — useful for
+runtime-generated icons.
+
+### `WithCertificate(c *cert.Certificate) Option`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#WithCertificate)
+
+Stash a `*pe/cert.Certificate` on the build config for later
+post-link application via `cert.Write`. Does not affect the
+emitted `.syso`.
+
+### `IconFromFile(path string) (*winres.Icon, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#IconFromFile)
+
+Helper that decodes an image file (PNG / ICO / BMP / JPEG) into
+a `*winres.Icon` for later use with `WithIcons`.
+
+**Side effects:** reads `path`.
+
+**Platform:** cross-platform.
+
+### `IconFromImage(img image.Image) (*winres.Icon, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade#IconFromImage)
+
+In-memory counterpart to `IconFromFile`.
+
+**Platform:** cross-platform.
 
 ## Examples
 

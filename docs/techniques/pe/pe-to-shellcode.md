@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/pe/srdi
-last_reviewed: 2026-04-27
-reflects_commit: 23c9331
+last_reviewed: 2026-05-04
+reflects_commit: c1f35d0
 ---
 
 # PE-to-Shellcode (Donut)
@@ -78,48 +78,112 @@ Generated shellcode layout:
 
 ## API Reference
 
-### `type Arch int` / `type ModuleType int`
+### `type Arch int` — `ArchX32`, `ArchX64`, `ArchX84`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi#Arch)
 
-| Arch | Meaning |
-|---|---|
-| `ArchX32` | 32-bit only |
-| `ArchX64` | 64-bit only (default) |
-| `ArchX84` | dual-mode (32 + 64) |
+Target architecture for the emitted shellcode. `ArchX64` is the
+zero-value used by `DefaultConfig`; `ArchX84` produces a
+dual-mode blob that runs on both x86 and x64 hosts.
 
-ModuleType values are listed in the matrix above.
+**OPSEC:** `ArchX84` doubles signature surface — pick a single
+arch when the target environment is known.
 
-### `type Config`
+**Platform:** cross-platform (emitter); shellcode targets Windows.
+
+### `type ModuleType int`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi#ModuleType)
+
+Input format selector. Values: `ModuleNetDLL`, `ModuleNetEXE`,
+`ModuleDLL`, `ModuleEXE`, `ModuleVBS`, `ModuleJS`, `ModuleXSL`.
+See the format matrix above for which fields are required.
+
+**Platform:** cross-platform.
+
+### `type Config struct`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi#Config)
 
-| Field | Description |
-|---|---|
-| `Arch` | Target architecture (default `ArchX64`) |
-| `Type` | Input format (0 = auto-detect from filename in `ConvertFile`) |
-| `Class` | .NET class name (required for `ModuleNetDLL`) |
-| `Method` | .NET method or native DLL export to call |
-| `Parameters` | Command-line passed to the payload |
-| `Bypass` | AMSI/WLDP: 1 skip · 2 abort on fail · 3 continue on fail |
-| `Thread` | Run entry point in a new thread |
+Knob set passed to every `Convert*`. Fields: `Arch` (default
+`ArchX64`); `Type` (0 → auto-detected by `ConvertFile` only);
+`Class` — .NET class name (required for `ModuleNetDLL`);
+`Method` — .NET method or native DLL export to call;
+`Parameters` — command-line passed to the payload; `Bypass` —
+AMSI/WLDP behaviour (1 skip, 2 abort on fail, 3 continue on
+fail); `Thread` — run the entry point in a new thread.
+
+**Platform:** cross-platform.
 
 ### `DefaultConfig() *Config`
 
-`ArchX64` + `ModuleEXE` + `Bypass = 3`.
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi#DefaultConfig)
+
+Returns `&Config{Arch: ArchX64, Type: ModuleEXE, Bypass: 3}` —
+the most common stage-as-EXE path with continue-on-AMSI-fail.
+
+**Side effects:** none.
+
+**Platform:** cross-platform.
 
 ### `ConvertFile(path string, cfg *Config) ([]byte, error)`
 
-Auto-detect module type from extension when `cfg.Type == 0`.
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi#ConvertFile)
+
+Read a file from disk and produce position-independent shellcode.
+Auto-detects `cfg.Type` from the file extension when zero.
+
+**Parameters:** `path` — input PE / .NET assembly / script;
+`cfg` — nil → `DefaultConfig`.
+
+**Returns:** flat byte slice ready for any injection primitive;
+error from file read or Donut conversion.
+
+**Side effects:** reads `path`.
+
+**OPSEC:** silent at conversion; the resulting buffer carries
+Donut's signature byte pattern.
+
+**Platform:** cross-platform (emitter).
 
 ### `ConvertBytes(data []byte, cfg *Config) ([]byte, error)`
 
-Convert in-memory PE / script bytes. `cfg.Type` must be set
-explicitly.
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi#ConvertBytes)
 
-### `ConvertDLL(path string, cfg *Config) ([]byte, error)` / `ConvertDLLBytes(data []byte, cfg *Config) ([]byte, error)`
+Convert an in-memory PE buffer. Useful when the payload is
+decrypted in-process and never lands on disk. `cfg.Type` must be
+set explicitly — there's no extension to auto-detect.
 
-Shorthand wrappers that pin `cfg.Type = ModuleDLL`.
+**Parameters:** `data` — raw PE bytes (validates the `MZ`
+header); `cfg` — must set `Type`.
+
+**Returns:** shellcode bytes; error on short input, missing
+`MZ`, or Donut failure.
+
+**Side effects:** none.
+
+**Platform:** cross-platform.
+
+### `ConvertDLL(dllPath string, cfg *Config) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi#ConvertDLL)
+
+Shorthand for `ConvertFile` with `cfg.Type` pinned to
+`ModuleDLL`. `cfg.Method` should name the export to call.
+
+**Side effects:** reads `dllPath`.
+
+**Platform:** cross-platform.
+
+### `ConvertDLLBytes(dllBytes []byte, cfg *Config) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi#ConvertDLLBytes)
+
+In-memory variant of `ConvertDLL`.
+
+**Side effects:** none.
+
+**Platform:** cross-platform.
 
 ## Examples
 

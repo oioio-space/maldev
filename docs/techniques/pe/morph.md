@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/pe/morph
-last_reviewed: 2026-04-27
-reflects_commit: 23c9331
+last_reviewed: 2026-05-04
+reflects_commit: c1f35d0
 ---
 
 # PE Morphing (UPX section rename)
@@ -56,16 +56,38 @@ restores the canonical names.
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph#UPXMorph)
 
-Replace UPX section names with random bytes. Returns the input
-unchanged when the PE is not UPX-packed; returns an error on
-malformed PE input.
+Walk the section table; overwrite every 8-byte `Name` field
+containing the substring `"UPX"` with random printable bytes.
+Returns the input slice unchanged when the PE is not UPX-packed.
+
+**Parameters:** `peData` — full PE image. The function returns a
+fresh slice; the input is not mutated.
+
+**Returns:** morphed PE bytes; error from PE walk on malformed
+input.
+
+**Side effects:** none — pure byte manipulation, no syscalls.
+
+**OPSEC:** silent at emission; the file write that lands the
+morphed bytes is the detectable phase.
+
+**Platform:** cross-platform.
 
 ### `UPXFix(peData []byte) ([]byte, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph#UPXFix)
 
-Restore canonical UPX0 / UPX1 / UPX2 section names. The morphed
-binary becomes unpackable with `upx -d` again.
+Inverse of `UPXMorph` — restore canonical `UPX0` / `UPX1` /
+`UPX2` section names so `upx -d` recognises the binary again.
+Useful for debugging morphed implants and round-trip tests.
+
+**Parameters:** `peData` — morphed PE image.
+
+**Returns:** restored bytes; error on malformed PE input.
+
+**Side effects:** none.
+
+**Platform:** cross-platform.
 
 ## Examples
 

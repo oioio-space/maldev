@@ -1,6 +1,7 @@
 ---
-last_reviewed: 2026-04-29
-reflects_commit: 4d55e88
+package: github.com/oioio-space/maldev/pe/dllproxy
+last_reviewed: 2026-05-04
+reflects_commit: c1f35d0
 ---
 
 # DLL Proxy Generator
@@ -90,50 +91,117 @@ Windows performs a binary search on `AddressOfNames` when resolving exports by n
 
 ## API Reference
 
-```go
-type Machine uint16
-const (
-    MachineAMD64 Machine = 0x8664 // PE32+, default and only Phase 1 target
-    MachineI386  Machine = 0x14c  // Phase 3, not yet implemented
-)
-func (m Machine) String() string
+### `type Machine uint16`
 
-type PathScheme int
-const (
-    PathSchemeGlobalRoot PathScheme = iota // \\.\GLOBALROOT\SystemRoot\System32\target — default
-    PathSchemeSystem32                     // C:\Windows\System32\target — recurses if deployed in System32
-)
-func (p PathScheme) String() string
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy#Machine)
 
-type Options struct {
-    Machine       Machine    // zero → MachineAMD64
-    PathScheme    PathScheme // zero → PathSchemeGlobalRoot
-    PayloadDLL    string     // when set, embed a DllMain that LoadLibraryA's it
-    DOSStub       bool       // emit canonical 128-byte MSVC DOS header + program
-    PatchCheckSum bool       // recompute IMAGE_OPTIONAL_HEADER.CheckSum post-assembly
-}
+Target architecture for the emitted PE. Constants:
+`MachineAMD64` (0x8664, PE32+, default) and `MachineI386`
+(0x14c, PE32). `String()` returns the canonical name.
 
-type Export struct {
-    Name    string  // "" for ordinal-only exports
-    Ordinal uint16  // 0 → emitter assigns the next free slot from 1
-}
+**Side effects:** pure data.
 
-func Generate(targetName string, exports []string, opts Options) ([]byte, error)
-func GenerateExt(targetName string, exports []Export, opts Options) ([]byte, error)
-```
+**Platform:** cross-platform (emitter); produces a Windows DLL.
 
-`Generate` is sugar over `GenerateExt`: it wraps `[]string` into `[]Export{{Name: n}}` and lets the emitter auto-assign ordinals from 1. Use `GenerateExt` directly when proxying a target with ordinal-only exports (msvcrt, ws2_32, …) or when ordinals must match the legitimate target's table.
+### `type PathScheme int`
 
-Sentinel errors (use `errors.Is`):
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy#PathScheme)
 
-```go
-var (
-    ErrEmptyExports     // no exports supplied
-    ErrEmptyTargetName  // blank target name
-    ErrInvalidExport      // entry has neither name nor ordinal, or duplicate ordinals
-    ErrUnsupportedMachine // Options.Machine is something other than AMD64 or I386
-)
-```
+Forwarder string format. `PathSchemeGlobalRoot` (default) emits
+`\\.\GLOBALROOT\SystemRoot\System32\<target>.<export>` — safe
+when the proxy is deployed alongside the legitimate DLL.
+`PathSchemeSystem32` emits `C:\Windows\System32\<target>.<export>`
+— shorter but recurses into self if dropped inside System32.
+
+**OPSEC:** `PathSchemeGlobalRoot` is identifiable by image-load
+telemetry; `PathSchemeSystem32` is harder to fingerprint but
+unsafe inside System32.
+
+**Platform:** cross-platform (emitter).
+
+### `type Options struct`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy#Options)
+
+Knob set passed to `Generate` / `GenerateExt`. Fields:
+`Machine` (zero → `MachineAMD64`); `PathScheme` (zero →
+`PathSchemeGlobalRoot`); `PayloadDLL` — when non-empty, embed a
+DllMain stub that `LoadLibraryA`'s the named DLL on
+`DLL_PROCESS_ATTACH`; `DOSStub` — emit the canonical 128-byte
+MSVC DOS header instead of the minimal 64-byte stub;
+`PatchCheckSum` — recompute the optional-header `CheckSum`
+post-assembly via `pe/cert.PatchPECheckSum`.
+
+**Side effects:** pure data.
+
+**Platform:** cross-platform.
+
+### `type Export struct { Name string; Ordinal uint16 }`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy#Export)
+
+Single proxied export. `Name=""` + `Ordinal!=0` is an
+ordinal-only export; `Name` set + `Ordinal==0` lets the emitter
+auto-assign sequential ordinals from 1; both set pins the named
+export at a specific ordinal slot. Mirrors `pe/parse.Export`
+field-for-field.
+
+**Side effects:** pure data.
+
+**Platform:** cross-platform.
+
+### `Generate(targetName string, exports []string, opts Options) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy#Generate)
+
+Emit a forwarder DLL for `targetName` proxying every name in
+`exports`. Sugar over `GenerateExt` — wraps each name into an
+`Export{Name: n}` and lets the emitter assign ordinals
+alphabetically.
+
+**Parameters:** `targetName` — DLL filename (e.g.
+`"version.dll"`); `exports` — sorted alphabetically by emitter;
+`opts` — see `Options`.
+
+**Returns:** complete PE byte stream; sentinel error
+(`ErrEmptyTargetName`, `ErrEmptyExports`, `ErrUnsupportedMachine`).
+
+**Side effects:** none — pure assembler, no syscalls, no file I/O.
+
+**OPSEC:** silent at emission; the resulting file write is the
+detectable phase.
+
+**Platform:** cross-platform.
+
+### `GenerateExt(targetName string, exports []Export, opts Options) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy#GenerateExt)
+
+Rich-input variant accepting explicit ordinals and ordinal-only
+entries — required when proxying msvcrt, ws2_32, or other
+ordinal-heavy DLLs.
+
+**Parameters:** `exports` — entries may carry `Name`, `Ordinal`,
+or both; ordinal-only entries become `<target>.#<ordinal>`
+forwarders.
+
+**Returns:** PE byte stream; sentinel error including
+`ErrInvalidExport` for entries with neither name nor ordinal, or
+duplicate ordinals.
+
+**Side effects:** none.
+
+**OPSEC:** as `Generate`.
+
+**Platform:** cross-platform.
+
+### `var ErrEmptyExports`, `var ErrEmptyTargetName`, `var ErrInvalidExport`, `var ErrUnsupportedMachine`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy#pkg-variables)
+
+Sentinels — wrap with `errors.Is` to switch on cause.
+`ErrInvalidExport` covers both "no name + no ordinal" and
+duplicate ordinals.
 
 ---
 

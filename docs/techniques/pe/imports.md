@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/pe/imports
-last_reviewed: 2026-04-27
-reflects_commit: 23c9331
+last_reviewed: 2026-05-04
+reflects_commit: c1f35d0
 ---
 
 # PE Import Table Analysis
@@ -52,14 +52,17 @@ flowchart LR
 
 ## API Reference
 
-### `type Import`
+### `type Import struct { DLL, Function string }`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports#Import)
 
-| Field | Type | Description |
-|---|---|---|
-| `DLL` | `string` | Imported DLL name as it appears in the import descriptor |
-| `Function` | `string` | Imported function name (or `#<ordinal>` for ordinal-only entries) |
+One row of the import table. `DLL` is the descriptor name
+verbatim; `Function` is the imported symbol name, or
+`#<ordinal>` for ordinal-only entries.
+
+**Side effects:** pure data.
+
+**Platform:** cross-platform.
 
 ### `List(pePath string) ([]Import, error)`
 
@@ -67,19 +70,53 @@ flowchart LR
 
 Parse the PE on disk and return every import.
 
+**Parameters:** `pePath` — PE file (EXE or DLL).
+
+**Returns:** flat slice ordered by descriptor then thunk; error
+from file open or PE parse.
+
+**Side effects:** reads `pePath`.
+
+**OPSEC:** read-only file access — exceedingly common, not a
+useful signal on its own.
+
+**Platform:** cross-platform.
+
 ### `ListByDLL(pePath, dllName string) ([]Import, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports#ListByDLL)
 
-Filter `List`'s output to imports from the named DLL
-(case-insensitive match against `IMAGE_IMPORT_DESCRIPTOR.Name`).
+Filter `List`'s output to imports from the named DLL.
+Case-insensitive match against
+`IMAGE_IMPORT_DESCRIPTOR.Name`.
+
+**Parameters:** `pePath` — PE file; `dllName` — descriptor name
+to match (e.g. `"ntdll.dll"`).
+
+**Returns:** filtered slice; error as `List`.
+
+**Side effects:** reads `pePath`.
+
+**Platform:** cross-platform.
 
 ### `FromReader(r io.ReaderAt) ([]Import, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports#FromReader)
 
-Parse a PE buffer in memory. Useful when the PE bytes are
+Parse a PE buffer already in memory — useful when the bytes are
 decrypted in-process and never touch disk.
+
+**Parameters:** `r` — `io.ReaderAt` over the full PE image
+(`bytes.Reader` is the typical choice).
+
+**Returns:** import slice; error from `debug/pe.NewFile` or the
+import-directory walk.
+
+**Side effects:** none.
+
+**OPSEC:** silent — no file system access.
+
+**Platform:** cross-platform.
 
 ## Examples
 
