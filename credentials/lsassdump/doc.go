@@ -63,6 +63,28 @@
 //     file-hook never sees the ntoskrnl.exe path.
 //   - Writing the minidump to a non-standard path.
 //
+// # Required privileges
+//
+// admin + `SeDebugPrivilege` to open lsass.exe with
+// `PROCESS_VM_READ` (gated by the LSASS object DACL granted to
+// the local Administrators group). On Win 11 RunAsPPL=1 boxes
+// the DACL check passes but the kernel still denies VM_READ
+// because of `EPROCESS.Protection != 0` — the Unprotect /
+// Reprotect path needs a kernel write primitive (typically
+// RTCore64 BYOVD), which itself requires admin to install the
+// service. SYSTEM works without `SeDebugPrivilege` (token
+// already holds every privilege) but PPL still gates VM_READ.
+// Pure-Go on-disk Discover* helpers are unprivileged — they
+// only read ntoskrnl.exe bytes, which any user can map.
+//
+// # Platform
+//
+// Windows for the build / dump pipeline. The on-disk PE-parsing
+// helpers (`Discover*Offset`,
+// `DiscoverInitialSystemProcessRVA`) are pure Go and run on
+// Linux/macOS so analysts can resolve EPROCESS offsets from a
+// captured ntoskrnl.exe in CI without a Windows host.
+//
 // # Example
 //
 // See [ExampleDumpToFile] in lsassdump_example_test.go.

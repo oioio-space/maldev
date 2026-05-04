@@ -97,6 +97,23 @@
 // with pure-Go primitives — no syscalls, no file opens beyond the
 // caller-supplied dump bytes / path.
 //
+// # Required privileges
+//
+// unprivileged. The package never opens lsass.exe — it parses
+// dump bytes the caller already has. All loud privileged work
+// (PROCESS_VM_READ + NtReadVirtualMemory + optional PPL bypass)
+// lives upstream in `credentials/lsassdump`. The optional
+// `stealthopen.Opener` for [ParseFile] reads a regular dump
+// file and inherits whatever DACL gate that file imposes —
+// no privilege beyond standard read access.
+//
+// # Platform
+//
+// Cross-platform. Pure-Go MINIDUMP walker + AES/3DES via
+// `crypto/aes` + `crypto/des`; no syscalls, no win/api
+// dependency. Analysts can parse a Windows dump on Linux,
+// macOS, or in CI.
+//
 // # Example
 //
 // See [ExampleParseFile] in sekurlsa_example_test.go.

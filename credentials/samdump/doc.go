@@ -49,6 +49,25 @@
 // credential-dumping signals an EDR can watch. The queued NtSaveKey
 // path under win/ntapi lowers this.
 //
+// # Required privileges
+//
+// [Dump] is unprivileged — it consumes hive bytes the caller
+// already has. The privilege gate sits in the upstream
+// acquisition: `LiveDump` shells `reg.exe save HKLM\SAM`,
+// which requires admin to read SAM/SYSTEM hives (their DACL
+// is `SYSTEM:F, Administrators:R`). Other acquisition routes
+// (VSS shadow copy, NTFS raw read via `recon/shadowcopy`)
+// inherit their own privilege requirements — typically also
+// admin to attach a shadow.
+//
+// # Platform
+//
+// Cross-platform for [Dump] — pure-Go cell parsing + AES/RC4 +
+// DES math. `LiveDump` is Windows-only (relies on the
+// in-process `reg.exe save` invocation against a Windows
+// registry hive). Analysts on Linux can run [Dump] against a
+// captured hive pair without any Windows host.
+//
 // # Example
 //
 // See [ExampleDump] in samdump_example_test.go.

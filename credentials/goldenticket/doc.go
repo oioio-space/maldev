@@ -51,6 +51,24 @@
 //   - Tickets with weak etypes (RC4) when the domain has been
 //     enforced to AES-only.
 //
+// # Required privileges
+//
+// [Forge] is unprivileged — pure-Go assembly of an ASN.1 blob,
+// runs in any token. The privilege gate is upstream: the krbtgt
+// RC4/AES key has to come from somewhere (typically a Domain
+// Controller `lsassdump` → `sekurlsa` chain, requiring DA /
+// SYSTEM on a DC) or DCSync (Replicating-Directory-Changes on
+// the DC). [Submit] is also unprivileged —
+// `LsaCallAuthenticationPackage` injects into the calling
+// user's TGT cache only, no token elevation needed.
+//
+// # Platform
+//
+// Cross-platform [Forge]; Windows-only [Submit].
+// `LsaCallAuthenticationPackage` has no POSIX equivalent —
+// Linux operators must klist-import the produced kirbi via
+// MIT/Heimdal Kerberos or load it through gokrb5.
+//
 // # Example
 //
 // See [ExampleForge] and [ExampleSubmit] in goldenticket_example_test.go.
