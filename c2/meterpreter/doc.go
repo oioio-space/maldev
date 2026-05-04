@@ -39,6 +39,21 @@
 // `MethodEarlyBirdAPC` + indirect syscalls + XOR + CPU delay) to
 // blunt the host-side telemetry.
 //
+// # Required privileges
+//
+// unprivileged for the default self-injection path (own-process
+// VirtualAlloc + CreateThread / mmap). When Config.Injector is
+// set, the privilege requirement defers to the chosen
+// [inject.Injector] (typically medium-IL same-user / admin to
+// cross security boundaries).
+//
+// # Platform
+//
+// Cross-platform stager logic. Default self-injection uses
+// Windows APIs on Windows and mmap+purego on Linux; both are
+// covered. Config.Injector is Windows-only (the Linux wrapper
+// protocol needs the live socket fd).
+//
 // # Example
 //
 // See [ExampleNewStager] and [ExampleStager_withInjector] in

@@ -28,6 +28,19 @@
 // fingerprint pinning is moderate; named-pipe local IPC is quiet.
 // Each sub-package documents its own detection level.
 //
+// # Required privileges
+//
+// unprivileged for connect-side use across every transport.
+// Operator-side listeners on privileged ports (< 1024) require
+// the local platform's privileged-port permission. Each
+// sub-package documents its own per-export privilege.
+//
+// # Platform
+//
+// Cross-platform for [c2/transport], [c2/cert], [c2/shell],
+// [c2/meterpreter], [c2/multicat]. Windows-only for
+// [c2/transport/namedpipe].
+//
 // # Example
 //
 // See [github.com/oioio-space/maldev/c2/shell] and

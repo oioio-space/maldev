@@ -35,6 +35,21 @@
 // Pair with `c2/cert` fingerprint pinning to deny TLS-inspection
 // proxies.
 //
+// # Required privileges
+//
+// unprivileged for the connect-side implant across every
+// transport. Operator-side `Listener` use on a privileged port
+// (< 1024) requires the local platform's privileged-port
+// permission (CAP_NET_BIND_SERVICE on Linux; admin on Windows
+// for ports in the reserved-range exclusions). uTLS adds no
+// privilege requirement beyond standard TLS.
+//
+// # Platform
+//
+// Cross-platform. TCP / TLS / uTLS work on Windows, Linux,
+// macOS. Named-pipe IPC lives in the Windows-only sub-package
+// [github.com/oioio-space/maldev/c2/transport/namedpipe].
+//
 // # Example
 //
 // See [ExampleNew] in transport_example_test.go.

@@ -36,6 +36,23 @@
 // telemetry. Cross-host pipes raise more signal because SMB session
 // auditing catches the share access.
 //
+// # Required privileges
+//
+// unprivileged for both client and server when the pipe lives
+// under `\\.\pipe\` and the listener sets a permissive DACL
+// (the default). Cross-host pipes via SMB (`\\HOST\pipe\name`)
+// inherit the SMB session's authentication — typically a domain
+// user able to authenticate to the remote IPC$ share. SYSTEM
+// listeners may need to widen the pipe DACL explicitly to
+// accept low-IL clients (impersonation level is set by the
+// client via [SECURITY_QOS]).
+//
+// # Platform
+//
+// Windows-only. Build tag `_windows.go` enforces this; importers
+// targetting other GOOS values get a build error rather than a
+// silent stub.
+//
 // # Example
 //
 // See [ExampleNewListener] and [ExampleNew] in namedpipe_example_test.go.

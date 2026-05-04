@@ -25,6 +25,17 @@
 // to the agent side (`c2/shell`); the listener itself is invisible to
 // endpoint defenders.
 //
+// # Required privileges
+//
+// unprivileged for the typical operator listener on a high
+// non-standard port. Privileged ports (< 1024 on POSIX, < 1024
+// or reserved-range on Windows) require the platform's
+// privileged-port permission.
+//
+// # Platform
+//
+// Cross-platform.
+//
 // # Example
 //
 // See [ExampleNew] in multicat_example_test.go.

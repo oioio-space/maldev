@@ -28,6 +28,15 @@
 // is the resulting TLS handshake on the wire (self-signed by default,
 // no chain to a public CA).
 //
+// # Required privileges
+//
+// unprivileged. Pure Go crypto/x509 code path, no system calls beyond
+// crypto/rand.
+//
+// # Platform
+//
+// Cross-platform.
+//
 // # Example
 //
 // See [ExampleGenerate] in cert_example_test.go.
