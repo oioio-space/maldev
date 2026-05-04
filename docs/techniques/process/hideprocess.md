@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/process/tamper/hideprocess
-last_reviewed: 2026-04-27
-reflects_commit: d57d000
+last_reviewed: 2026-05-04
+reflects_commit: ecf5d89
 ---
 
 # Hide processes from Task Manager (NtQSI patch)
@@ -84,18 +84,63 @@ of reach by design.
 
 ## API Reference
 
-| Symbol | Description |
-|---|---|
-| [`PatchProcessMonitor(pid, caller) error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess#PatchProcessMonitor) | Patches `ntdll!NtQuerySystemInformation` to return `STATUS_NOT_IMPLEMENTED`. Blinds every Win32 enumeration that bottoms out in the Nt-level call (Task Manager, `tasklist`, ProcessHacker default view, …). |
-| [`PatchEnumProcesses(pid, caller) error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess#PatchEnumProcesses) | Patches `kernel32!K32EnumProcesses` to `xor eax, eax; ret` — clients that call `psapi!EnumProcesses` (which forwards to the kernel32 implementation) see the function as failed. |
-| [`PatchToolhelp(pid, caller) error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess#PatchToolhelp) | Patches `kernel32!Process32FirstW` and `kernel32!Process32NextW` to `xor eax, eax; ret` — `CreateToolhelp32Snapshot` walks return FALSE on the first iteration, so the snapshot appears empty. |
-| [`PatchAll(pid, caller) error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess#PatchAll) | Applies all three patches in order (NtQuerySystemInformation → K32EnumProcesses → Process32{First,Next}W). Stops at the first error and returns it wrapped with the failing step's name. |
+Every entry point opens the target with
+`PROCESS_VM_WRITE | PROCESS_VM_OPERATION` and writes a tiny
+prologue stub. `caller=nil` uses direct WinAPI; a non-nil
+`*wsyscall.Caller` routes the cross-process write through
+direct/indirect syscalls. Required privileges:
+`SeDebugPrivilege`, or ownership of the target process.
 
-`caller=nil` uses direct WinAPI; pass a `*wsyscall.Caller` to
-route the cross-process write through indirect syscalls.
-Requires `PROCESS_VM_WRITE | PROCESS_VM_OPERATION` —
-typically SeDebugPrivilege or a process the current token
-already owns.
+### `PatchProcessMonitor(pid int, caller *wsyscall.Caller) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess#PatchProcessMonitor)
+
+Patch the target's `ntdll!NtQuerySystemInformation` prologue with
+a 6-byte stub (`mov eax, 0xC0000002 ; ret` —
+`STATUS_NOT_IMPLEMENTED`). Blinds every Win32 enumeration that
+bottoms out in the Nt-level call (Task Manager, `tasklist`,
+ProcessHacker default view, …).
+
+**Side effects:** writes 6 bytes to the target's ntdll `.text`.
+
+**OPSEC:** EDRs that hash ntdll periodically detect the divergence.
+
+**Platform:** Windows; Linux stub returns
+`"hideprocess: not supported on this platform"`.
+
+### `PatchEnumProcesses(pid int, caller *wsyscall.Caller) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess#PatchEnumProcesses)
+
+Patch `kernel32!K32EnumProcesses` to `xor eax, eax ; ret`.
+Clients calling `psapi!EnumProcesses` (which forwards to the
+kernel32 implementation) see a failed call.
+
+**Side effects:** writes 3 bytes to the target's kernel32 `.text`.
+
+**Platform:** Windows; Linux stub errors out.
+
+### `PatchToolhelp(pid int, caller *wsyscall.Caller) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess#PatchToolhelp)
+
+Patch `kernel32!Process32FirstW` and `Process32NextW` to
+`xor eax, eax ; ret`. `CreateToolhelp32Snapshot` walks return
+FALSE on first iteration; the snapshot appears empty.
+
+**Side effects:** writes 3 bytes to each of two kernel32 exports.
+
+**Platform:** Windows; Linux stub errors out.
+
+### `PatchAll(pid int, caller *wsyscall.Caller) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess#PatchAll)
+
+Apply all three patches in order: `NtQuerySystemInformation` →
+`K32EnumProcesses` → `Process32{First,Next}W`. Stops at the first
+error and returns it wrapped with the failing step's name.
+
+**Platform:** Windows; Linux stub errors out.
 
 ## Examples
 

@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/process/tamper/fakecmd
-last_reviewed: 2026-04-27
-reflects_commit: d57d000
+last_reviewed: 2026-05-04
+reflects_commit: ecf5d89
 ---
 
 # PEB CommandLine spoof (FakeCmd)
@@ -79,15 +79,78 @@ Self vs remote:
 
 ## API Reference
 
-| Symbol | Description |
-|---|---|
-| [`Spoof(fakeCmd, caller) error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/fakecmd#Spoof) | Self PEB rewrite |
-| [`Restore() error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/fakecmd#Restore) | Write the saved original back |
-| [`Current() string`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/fakecmd#Current) | Read the current PEB CommandLine |
-| [`SpoofPID(pid, fakeCmd, caller) error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/fakecmd#SpoofPID) | Remote PEB rewrite (admin / SeDebugPrivilege) |
+`caller=nil` on every entry point uses direct WinAPI; pass a
+`*wsyscall.Caller` to route PEB reads/writes through direct or
+indirect syscalls.
 
-`caller=nil` uses direct WinAPI; pass a `*wsyscall.Caller` to
-route the PEB read/write through direct/indirect syscalls.
+### `Spoof(fakeCmd string, caller *wsyscall.Caller) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/fakecmd#Spoof)
+
+Rewrite the current process's PEB `CommandLine`. Saves the
+original `UNICODE_STRING` (Length, MaximumLength, Buffer) so
+`Restore` can revert.
+
+**Parameters:** `fakeCmd` — the UTF-16 string to install;
+`caller` — optional syscall router.
+
+**Side effects:** mutates `RTL_USER_PROCESS_PARAMETERS.CommandLine`
+in-place. `MaximumLength` is updated; the new buffer is allocated
+inside the current process.
+
+**OPSEC:** user-mode only. Kernel ETW-Ti, Sysmon Event 1, and
+`PsSetCreateProcessNotifyRoutineEx` still see the original.
+
+**Required privileges:** none — same-process write.
+
+**Platform:** Windows; Linux stub returns `errUnsupported`.
+
+### `Restore() error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/fakecmd#Restore)
+
+Write the original `UNICODE_STRING` saved by the most recent
+`Spoof` call back to the PEB. No-op when `Spoof` has not run.
+
+**Side effects:** restores `Length` / `MaximumLength` / `Buffer`.
+
+**Platform:** Windows; Linux stub returns `errUnsupported`.
+
+### `Current() string`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/fakecmd#Current)
+
+Read the current PEB `CommandLine` — convenience for verifying
+the spoof landed.
+
+**Returns:** the current value as a Go string; `""` on read
+failure or non-Windows builds.
+
+**Platform:** Windows; Linux stub returns `""`.
+
+### `SpoofPID(pid uint32, fakeCmd string, caller *wsyscall.Caller) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/fakecmd#SpoofPID)
+
+Rewrite another process's PEB `CommandLine`. Allocates a fresh
+buffer in the target via `NtAllocateVirtualMemory` and updates
+the `UNICODE_STRING` header in place.
+
+**Parameters:** `pid` — target; `fakeCmd` — replacement string;
+`caller` — optional syscall router.
+
+**Side effects:** `OpenProcess(VM_READ|VM_WRITE|VM_OPERATION|QUERY_INFORMATION)`,
+`NtQueryInformationProcess(ProcessBasicInformation)`,
+`NtAllocateVirtualMemory`, `WriteProcessMemory`. No `Restore`
+counterpart for the remote case.
+
+**OPSEC:** as `Spoof`, plus the cross-process write itself —
+Sysmon Event 10 (ProcessAccess) with `VM_WRITE` access mask.
+
+**Required privileges:** typically `SeDebugPrivilege` to open the
+target.
+
+**Platform:** Windows; Linux stub returns `errUnsupported`.
 
 ## Examples
 

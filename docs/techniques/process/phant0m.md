@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/process/tamper/phant0m
-last_reviewed: 2026-04-27
-reflects_commit: d57d000
+last_reviewed: 2026-05-04
+reflects_commit: ecf5d89
 ---
 
 # Phant0m — EventLog thread termination
@@ -65,12 +65,77 @@ terminating every thread in the EventLog PID.
 
 ## API Reference
 
-| Symbol | Description |
-|---|---|
-| [`Kill(caller *wsyscall.Caller) error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m#Kill) | Terminate EventLog worker threads. `caller=nil` uses WinAPI; non-nil routes `NtTerminateThread` through indirect syscalls. |
-| [`Heartbeat(ctx context.Context, interval time.Duration, caller *wsyscall.Caller) error`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m#Heartbeat) | First Kill is synchronous (returns its error); subsequent Kills run every `interval` until `ctx` is cancelled. Defeats SCM/WMI heartbeat re-spawns of the EventLog workers. |
-| [`Technique() evasion.Technique`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m#Technique) | `evasion.Technique` adapter for `evasion.ApplyAll`. |
-| [`var ErrNoTargetThreads`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m#ErrNoTargetThreads) | No EventLog worker threads identified — fallback also failed. |
+### `var ErrNoTargetThreads`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m#ErrNoTargetThreads)
+
+Sentinel returned by `Kill` when no EventLog worker threads were
+identified — `I_QueryTagInformation` matched none and the
+fallback (terminate every thread in the EventLog PID) also
+failed.
+
+**Platform:** Windows-only.
+
+### `Kill(caller *wsyscall.Caller) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m#Kill)
+
+Locate the EventLog service host PID, walk its threads, validate
+each via `I_QueryTagInformation`, terminate the EventLog
+workers. Falls back to terminating every thread in the EventLog
+PID when `I_QueryTagInformation` is unavailable.
+
+**Parameters:** `caller` — nil ⇒ WinAPI `TerminateThread`; non-nil
+routes `NtTerminateThread` through direct/indirect syscalls.
+
+**Returns:** `nil` on success; `ErrNoTargetThreads` when nothing
+was killed; otherwise an error from
+`OpenSCManager`/`OpenService`/`OpenThread`/`TerminateThread`.
+
+**Side effects:** EventLog service stays `RUNNING` in SCM but
+stops persisting events.
+
+**OPSEC:** loud once defenders notice the gap. No 4697 service-stop
+event; Sysmon Event 10 (ProcessAccess) on svchost.exe with
+`THREAD_TERMINATE` is the primary tell.
+
+**Required privileges:** `SeDebugPrivilege` (open svchost +
+threads with terminate access).
+
+**Platform:** Windows-only; x64 only (TEB offset `0x1720`).
+
+### `Heartbeat(ctx context.Context, interval time.Duration, caller *wsyscall.Caller) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m#Heartbeat)
+
+Re-kill on a ticker so SCM/WMI re-spawns of the EventLog workers
+don't restore logging. The first `Kill` is synchronous (returns
+its error); subsequent `Kill`s run every `interval` until `ctx`
+is cancelled.
+
+**Parameters:** `ctx` — cancellation; `interval` — kill cadence;
+`caller` — see `Kill`.
+
+**Returns:** the initial `Kill` error if it fails; otherwise
+`ctx.Err()` when the context is done. Transient errors after the
+first kill are silently retried on the next tick.
+
+**Side effects:** spawns no goroutines; runs in the caller's.
+
+**Required privileges:** as `Kill`.
+
+**Platform:** Windows-only.
+
+### `Technique() evasion.Technique`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/phant0m#Technique)
+
+`evasion.Technique` adapter for `evasion.ApplyAll`.
+
+**Returns:** a `Technique` whose `Name()` is `"phant0m:Kill"` and
+whose `Apply(c)` calls `Kill(evasion.AsCaller(c))`.
+
+**Platform:** Windows-only.
 
 ## Examples
 
