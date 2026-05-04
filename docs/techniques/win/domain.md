@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: 57c853b
+last_reviewed: 2026-05-04
+reflects_commit: ef13205
 mitre: T1082
 detection_level: very-quiet
 ---
@@ -55,38 +55,43 @@ Implementation:
 
 ## API Reference
 
-```go
-type JoinStatus uint32
+Package: `win/domain` ([pkg.go.dev](https://pkg.go.dev/github.com/oioio-space/maldev/win/domain))
 
-const (
-    StatusUnknown   JoinStatus = 0 // NetSetupUnknownStatus
-    StatusUnjoined  JoinStatus = 1 // NetSetupUnjoined
-    StatusWorkgroup JoinStatus = 2 // NetSetupWorkgroupName
-    StatusDomain    JoinStatus = 3 // NetSetupDomainName
-)
+### `type JoinStatus uint32`
 
-func (s JoinStatus) String() string
-func Name() (string, JoinStatus, error)
-```
+- godoc: typed enum mirroring `NETSETUP_JOIN_STATUS`. Values map 1:1 with the netapi32 codes returned by `NetGetJoinInformation`.
+- Description: usable as a switch discriminant to decide whether to walk a domain-trust chain (`StatusDomain`), enumerate workgroup-only data (`StatusWorkgroup`), or skip recon entirely (`StatusUnjoined` / `StatusUnknown`).
+- Required privileges: none.
+- Platform: Windows (the type still exists on the stub build with no constants populated).
+
+### Constants
+
+- `StatusUnknown` — `NetSetupUnknownStatus`. The netapi32 call returned a status the package doesn't know about, or the host is in an unusual state (image being prepared / first-boot).
+- `StatusUnjoined` — `NetSetupUnjoined`. Standalone workstation; not in any domain or workgroup.
+- `StatusWorkgroup` — `NetSetupWorkgroupName`. Member of a workgroup (the returned name is the workgroup name).
+- `StatusDomain` — `NetSetupDomainName`. Member of an Active Directory domain (the returned name is the NetBIOS domain).
+
+### `(JoinStatus).String() string`
+
+- godoc: human-readable label for the status enum.
+- Description: returns `"Unknown" / "Unjoined" / "Workgroup" / "Domain"` for the four canonical values; `"JoinStatus(<n>)"` for unknown numeric values (defensive).
+- Parameters: receiver only.
+- Returns: ASCII label.
+- Side effects: none.
+- OPSEC: pure local computation.
+- Required privileges: none.
+- Platform: any (the method is defined on a portable enum type).
 
 ### `Name() (string, JoinStatus, error)`
 
-**Parameters:** none.
-
-**Returns:**
-- `name` — NetBIOS domain or workgroup name. Empty when status is
-  `StatusUnknown` or `StatusUnjoined`.
-- `status` — one of the four `Status*` constants.
-- `error` — surface only when the netapi32 call itself fails (e.g.,
-  `RPC_S_SERVER_UNAVAILABLE` on stripped-down OS images). On normal
-  Windows hosts this never errors.
-
-**Side effects:** none (the netapi32-allocated buffer is freed
-internally before return).
-
-**OPSEC:** silent. `NetGetJoinInformation` is in every default
-Windows binary's import resolution path; user-mode RPC to local LSA
-generates no Sysmon event ID.
+- godoc: returns the host's join name and status by calling `netapi32!NetGetJoinInformation`.
+- Description: combined fingerprint of "what is this host attached to" — answers the workgroup-vs-domain question in one round-trip. Operators chain this with `win/version.Windows()` to build a cheap host-profile dossier.
+- Parameters: none.
+- Returns: `name` (NetBIOS domain or workgroup; empty on `StatusUnknown` / `StatusUnjoined`); `status` (one of the four `Status*` constants); `error` — surfaces only when the netapi32 call itself fails (e.g., `RPC_S_SERVER_UNAVAILABLE` on stripped-down OS images). On normal Windows hosts this never errors.
+- Side effects: none (the netapi32-allocated buffer is freed internally before return). One transient RPC to the local LSA.
+- OPSEC: silent. `NetGetJoinInformation` is in every default Windows binary's import path; user-mode RPC to local LSA generates no Sysmon event ID.
+- Required privileges: none (the call works from any IL — even AppContainer / Low IL).
+- Platform: Windows. Returns `("", StatusUnknown, ErrNotImplemented)` on the non-Windows stub build.
 
 ## Examples
 
