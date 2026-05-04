@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-05-04
-reflects_commit: 9809f0d
+reflects_commit: 3ccb443
 ---
 
 # Documentation refactor — progress tracker

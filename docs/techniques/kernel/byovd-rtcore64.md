@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: 57c853b
+last_reviewed: 2026-05-04
+reflects_commit: 3ccb443
 mitre: T1014, T1543.003, T1068
 detection_level: very-noisy
 ---
@@ -112,6 +112,88 @@ This split keeps the open-source repo free of MSI's licensed binary
 while still shipping every other piece of the BYOVD chain — the
 service-install plumbing, IOCTL wrappers, and lifecycle management
 all live in source-tree code.
+
+## API Reference
+
+Package: `kernel/driver/rtcore64` ([pkg.go.dev](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver/rtcore64))
+
+### `type Driver`
+
+- godoc: zero-value-usable handle to the RTCore64 device. Survives Install / Uninstall cycles within the same process; not safe for concurrent use across goroutines (the kernel handle is single-owner).
+- Description: composite that holds the SCM service handle + the open device handle. Implements `kernel/driver.ReadWriter` and `kernel/driver.Lifecycle`, so it plugs straight into `evasion/kcallback` and `credentials/lsassdump` without adapter glue.
+- Side effects: `Install` drops a binary on disk, registers an SCM service, opens a device handle. `Uninstall` undoes all three.
+- OPSEC: the device path `\\.\RTCore64` is in every EDR's known-IOC list. Renaming the dropped file is cosmetic — the IOCTL device path is hard-coded inside the driver binary.
+- Required privileges: admin (`SeLoadDriverPrivilege`).
+- Platform: Windows amd64. On other GOOS the type still exists via `rtcore64_stub.go` and every method returns `driver.ErrNotImplemented`.
+
+### `(*Driver).Install() error`
+
+- godoc: drops RTCore64.sys to `%WINDIR%\Temp`, registers it as a kernel-mode SCM service, starts it, and opens the device. Idempotent on success — calling twice without an intervening `Uninstall` is undefined.
+- Description: the full BYOVD bring-up sequence in one call. On failure each step rolls back the prior ones (file delete → service delete → handle close).
+- Parameters: none.
+- Returns: `nil` on success; `ErrDriverBytesMissing` when built without `-tags=byovd_rtcore64`; `driver.ErrPrivilegeRequired` when SCM rejects the open or start call with `ERROR_ACCESS_DENIED`; wrapped error otherwise.
+- Side effects: writes `%WINDIR%\Temp\RTCore64.sys`; creates SCM service `RTCore64`; opens `\\.\RTCore64`. All three steps are logged by Microsoft-Windows-Kernel-General + Microsoft-Windows-Services ETW providers.
+- OPSEC: very-noisy during this single call. The `NtLoadDriver` event is the loudest; service registration is second. Steady-state IOCTL traffic is comparatively quiet.
+- Required privileges: admin with `SeLoadDriverPrivilege` enabled.
+- Platform: Windows amd64.
+
+### `(*Driver).Uninstall() error`
+
+- godoc: closes the device handle, stops + deletes the SCM service, removes the dropped binary. Best-effort: every step runs even if earlier ones failed; the first error is returned but cleanup continues.
+- Description: the inverse of `Install`. Safe to call on a zero-value `Driver` (no-op, returns `nil`).
+- Parameters: none.
+- Returns: `nil` if every cleanup step succeeded, the first wrapped error otherwise.
+- Side effects: removes the SCM service, deletes `%WINDIR%\Temp\RTCore64.sys`, closes the device handle. Service-deletion event visible to ETW.
+- OPSEC: leaves a "service deleted" trail — operators who want to mask uninstall can defer this past the kill chain's noisy phase or skip it entirely (cost: dropped binary stays on disk).
+- Required privileges: admin (same as Install).
+- Platform: Windows amd64.
+
+### `(*Driver).Loaded() bool`
+
+- godoc: reports whether the device handle is open. Cheap pre-check before issuing IOCTLs.
+- Description: tests `d.device != 0`. Does not validate that the kernel-side service is still running.
+- Parameters: none.
+- Returns: `true` after a successful `Install`, `false` before / after `Uninstall` / on the stub build.
+- Side effects: none.
+- OPSEC: pure local check; no syscall.
+- Required privileges: none.
+- Platform: every GOOS (the stub returns `false`).
+
+### `(*Driver).ReadKernel(addr uintptr, buf []byte) (int, error)`
+
+- godoc: issues `IOCTL_RTCORE64_READ` against the open device, reading `len(buf)` bytes from kernel virtual address `addr`. The transfer must fit in a single IOCTL (`MaxPrimitiveBytes` cap); larger reads loop in the caller.
+- Description: arbitrary kernel read. Accepts any kernel VA — the driver does no bounds checking, so a bad address page-faults the kernel (BSOD risk).
+- Parameters: `addr` — kernel virtual address to read from; `buf` — destination slice, length determines bytes requested.
+- Returns: number of bytes read (always `len(buf)` on success), wrapped error otherwise. Returns `driver.ErrNotLoaded` if `Loaded() == false`. Returns a "transfer too large" error when `len(buf) > MaxPrimitiveBytes`.
+- Side effects: one `DeviceIoControl` call. ETW: Microsoft-Windows-Kernel-IO with the `RTCore64` device path.
+- OPSEC: every `DeviceIoControl(\\.\RTCore64, 0x80002048, ...)` is a strong IOC — the IOCTL code is in public PoCs verbatim. Mitigation: minimise call count (read once into a large staging buffer, then parse in userland).
+- Required privileges: admin (the device handle was opened with `GENERIC_READ|GENERIC_WRITE` during Install).
+- Platform: Windows amd64.
+
+### `(*Driver).WriteKernel(addr uintptr, data []byte) (int, error)`
+
+- godoc: arbitrary kernel write — IOCTL `IoctlWrite` against the open device. Same single-IOCTL constraint as ReadKernel.
+- Description: writes `len(data)` bytes from `data` to kernel VA `addr`. The driver performs no validation — operators must verify the target is writable kernel memory before calling, or the system bugchecks.
+- Parameters: `addr` — kernel virtual address to write to; `data` — source bytes.
+- Returns: number of bytes written, wrapped error otherwise. Same not-loaded / size-cap errors as `ReadKernel`.
+- Side effects: one `DeviceIoControl` call. Whatever kernel structure was overwritten now has the new value — typical use is NULL-ing a callback slot or flipping `EPROCESS.Protection`.
+- OPSEC: writes are loaded toward catastrophe — a wrong target BSODs. The IOCTL code `0x8000204C` is in every public PoC.
+- Required privileges: admin.
+- Platform: Windows amd64.
+
+### Constants
+
+- `ServiceName` — `"RTCore64"`. The SCM key under which the service registers. EDR vendors detect on this exact string; renaming the dropped file does not change it.
+- `DevicePath` — `\\.\RTCore64`. The DOS device the driver creates. Hard-coded in the driver binary; cannot be changed by the operator.
+- `IoctlRead` / `IoctlWrite` — `0x80002048` / `0x8000204C`. The two IOCTL codes the user-mode primitives invoke. Public CVE-2019-16098 PoCs all use these exact codes.
+- `MaxPrimitiveBytes` — `4096`. Per-IOCTL transfer cap. Larger transfers must loop in the caller; RTCore64's pool transfers are unstable above one page.
+
+### Errors
+
+- `ErrDriverBytesMissing` — returned by `Install` when built without `-tags=byovd_rtcore64`. Signals the operator must obtain RTCore64.sys, drop a tagged embed file, and rebuild (see [Driver binary](#driver-binary) above).
+- `driver.ErrNotImplemented` — returned by every method on the non-Windows / non-tagged stub build.
+- `driver.ErrPrivilegeRequired` — returned when SCM rejects the open or start call (token lacks `SeLoadDriverPrivilege`, or HVCI / vulnerable-driver block-list refused the load).
+- `driver.ErrNotLoaded` — returned by `ReadKernel` / `WriteKernel` when invoked before `Install` or after `Uninstall`.
 
 ## Advanced — looping reads beyond the per-IOCTL cap
 
