@@ -226,9 +226,10 @@ admin for boot/startup triggers and SYSTEM-scope tasks.
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#List)
 
 Enumerate the root folder (`\`) only — does NOT descend into
-sub-folders. (The TL;DR claim of "recursive sub-folders" was
-historically aspirational; current implementation only lists
-root.)
+sub-folders. Operators who need to walk `\Microsoft\…` (where
+most platform-shipped tasks live) should iterate sub-folders
+explicitly via the COM `ITaskFolder.GetFolders` surface; a
+recursive `ListAll()` helper is a candidate enhancement.
 
 **Returns:** populated `[]Task`; error from any COM stage.
 

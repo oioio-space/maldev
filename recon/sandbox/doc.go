@@ -21,6 +21,22 @@
 // [DefaultConfig] for the canonical defender baseline,
 // override individual fields for stricter or looser criteria.
 //
+// # Re-exported primitives
+//
+// [Checker] surfaces three thin convenience wrappers around the
+// sibling packages so callers driving a `*Checker` don't need a
+// second import for the common follow-up calls:
+//
+//   - [Checker.IsDebuggerPresent] → [antidebug.IsDebuggerPresent]
+//   - [Checker.IsRunningInVM]     → [antivm.IsRunningInVM]
+//   - [Checker.BusyWait]          → [timing.BusyWait] (timeout from Config.EvasionTimeout)
+//
+// They exist for ergonomics only — `recon/antidebug`,
+// `recon/antivm`, and `recon/timing` remain the canonical
+// entry points for callers that don't need the orchestrator.
+// `BusyWait` adds the small bit of state binding (Config.EvasionTimeout
+// becomes the duration), the other two are pure forwards.
+//
 // # MITRE ATT&CK
 //
 //   - T1497 (Virtualization/Sandbox Evasion)
