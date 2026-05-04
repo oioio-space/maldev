@@ -10,8 +10,10 @@
 //      acquisition technique). The recon/shadowcopy package handles
 //      live-hive acquisition on Windows.
 //   2. Call [Dump] with both hive readers — pure-Go, no OS calls.
-//      Returns []Account with username + RID + LM/NT hashes, plus
-//      computed pwdump/secretsdump output lines.
+//      Returns []Account with username + RID + current LM/NT hashes
+//      AND per-account password-history (NTHistory / LMHistory),
+//      plus computed pwdump/secretsdump output lines (Pwdump,
+//      PwdumpHistory, PwdumpWithHistory).
 //
 // Algorithm — clean-room from impacket secretsdump.py + Microsoft
 // MS-RegFile + SharpKatz Sam.cs reference (none vendored):
@@ -29,6 +31,10 @@
 //  5. For each user: derive per-user keys from hashed bootkey + RID,
 //     decrypt LM hash + NT hash (DES legacy or AES-128-CBC modern,
 //     Win10 1607+).
+//  6. For each user: decrypt the per-account NT and LM password-
+//     history blobs (same envelope, N×16-byte payload, NTPASSWORDHISTORY
+//     / LMPASSWORDHISTORY constants) — every prior hash surfaces as a
+//     pass-the-hash candidate.
 //
 // Platform: cross-platform (pure Go) for the offline [Dump] path;
 // LiveDump is Windows-only (shells out to reg.exe save).

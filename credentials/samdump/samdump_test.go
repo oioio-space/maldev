@@ -89,3 +89,70 @@ func TestResult_Pwdump_RendersSortedLines(t *testing.T) {
 		t.Errorf("Pwdump missing guest line: %q", out)
 	}
 }
+
+func TestAccount_PwdumpHistory_EmptyReturnsEmpty(t *testing.T) {
+	a := Account{Username: "alice", RID: 1001}
+	if got := a.PwdumpHistory(); got != "" {
+		t.Errorf("PwdumpHistory = %q, want empty for account without history", got)
+	}
+}
+
+func TestAccount_PwdumpHistory_RendersOneLinePerNTSlot(t *testing.T) {
+	a := Account{
+		Username: "alice",
+		RID:      1001,
+		NTHistory: [][]byte{
+			bytes.Repeat([]byte{0xAA}, 16),
+			bytes.Repeat([]byte{0xBB}, 16),
+		},
+	}
+	got := a.PwdumpHistory()
+	wantLines := []string{
+		"alice_history0:1001:00000000000000000000000000000000:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:::",
+		"alice_history1:1001:00000000000000000000000000000000:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:::",
+	}
+	for _, w := range wantLines {
+		if !strings.Contains(got, w) {
+			t.Errorf("PwdumpHistory missing line %q in:\n%s", w, got)
+		}
+	}
+	if c := strings.Count(got, "\n"); c != len(wantLines) {
+		t.Errorf("expected %d newlines, got %d in:\n%s", len(wantLines), c, got)
+	}
+}
+
+func TestAccount_PwdumpHistory_ZipsLMAndNT(t *testing.T) {
+	// LM history shorter than NT history — every NT slot still
+	// renders, missing LM positions fall back to inactive.
+	a := Account{
+		Username:  "carol",
+		RID:       1234,
+		NTHistory: [][]byte{bytes.Repeat([]byte{0xCC}, 16), bytes.Repeat([]byte{0xDD}, 16)},
+		LMHistory: [][]byte{bytes.Repeat([]byte{0xEE}, 16)}, // only one slot
+	}
+	got := a.PwdumpHistory()
+	if !strings.Contains(got, "carol_history0:1234:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee:cccccccccccccccccccccccccccccccc:::") {
+		t.Errorf("history0 line missing zipped LM+NT: %s", got)
+	}
+	if !strings.Contains(got, "carol_history1:1234:00000000000000000000000000000000:dddddddddddddddddddddddddddddddd:::") {
+		t.Errorf("history1 LM should fall back to inactive: %s", got)
+	}
+}
+
+func TestResult_PwdumpWithHistory_AppendsHistoryAfterCurrent(t *testing.T) {
+	r := Result{Accounts: []Account{{
+		Username:  "bob",
+		RID:       1002,
+		NT:        bytes.Repeat([]byte{0x11}, 16),
+		NTHistory: [][]byte{bytes.Repeat([]byte{0x22}, 16)},
+	}}}
+	out := r.PwdumpWithHistory()
+	currentIdx := strings.Index(out, "bob:1002:")
+	historyIdx := strings.Index(out, "bob_history0:1002:")
+	if currentIdx < 0 || historyIdx < 0 {
+		t.Fatalf("output missing one of the expected lines:\n%s", out)
+	}
+	if historyIdx < currentIdx {
+		t.Errorf("history line must come after the current-hash line:\n%s", out)
+	}
+}

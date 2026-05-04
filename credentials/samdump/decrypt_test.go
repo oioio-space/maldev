@@ -251,3 +251,175 @@ func TestDeriveLegacyHashKey_NTAndLMDiffer(t *testing.T) {
 		t.Fatal("NT and LM derived keys are identical (encMarker not bound)")
 	}
 }
+
+// fixtureLegacyHistoryEnc encrypts N hashes through the same legacy
+// MD5+RC4+DES pipeline used for a single-hash blob, but the RC4
+// keystream covers N×16 bytes (one continuous run) and each plaintext
+// 16-byte block is independently DES-permuted with the user's RID-
+// derived keys before encryption. Returns the on-disk SAM_HASH
+// wrapper (4-byte header + N×16 RC4-encrypted bytes).
+func fixtureLegacyHistoryEnc(t *testing.T, hashedBootkey []byte, rid uint32, hashes [][]byte, marker []byte) []byte {
+	t.Helper()
+	intermediate := make([]byte, 0, len(hashes)*16)
+	k1, k2 := desKeysForRID(rid)
+	c1, _ := des.NewCipher(k1)
+	c2, _ := des.NewCipher(k2)
+	for i, h := range hashes {
+		if len(h) != 16 {
+			t.Fatalf("fixtureLegacyHistoryEnc: hashes[%d] length %d, want 16", i, len(h))
+		}
+		block := make([]byte, 16)
+		c1.Encrypt(block[0:8], h[0:8])
+		c2.Encrypt(block[8:16], h[8:16])
+		intermediate = append(intermediate, block...)
+	}
+	rc4Key := deriveLegacyHashKey(hashedBootkey, rid, marker)
+	rc, _ := rc4.NewCipher(rc4Key)
+	cipherBytes := make([]byte, len(intermediate))
+	rc.XORKeyStream(cipherBytes, intermediate)
+	out := make([]byte, hashWrapperLen+len(cipherBytes))
+	binary.LittleEndian.PutUint16(out[0:2], 0x0001) // PekID
+	binary.LittleEndian.PutUint16(out[2:4], 0x0001) // Revision (legacy)
+	copy(out[hashWrapperLen:], cipherBytes)
+	return out
+}
+
+// fixtureAESHistoryEnc is the AES counterpart: PekID(2)+Revision=2(2)
+// +DataOffset(4)+Salt[16]+Cipher[N*16]. Each plaintext 16-byte block
+// is DES-permuted before being concatenated and AES-CBC encrypted as
+// a single payload.
+func fixtureAESHistoryEnc(t *testing.T, hashedBootkey []byte, rid uint32, hashes [][]byte) []byte {
+	t.Helper()
+	intermediate := make([]byte, 0, len(hashes)*16)
+	k1, k2 := desKeysForRID(rid)
+	c1, _ := des.NewCipher(k1)
+	c2, _ := des.NewCipher(k2)
+	for i, h := range hashes {
+		if len(h) != 16 {
+			t.Fatalf("fixtureAESHistoryEnc: hashes[%d] length %d, want 16", i, len(h))
+		}
+		block := make([]byte, 16)
+		c1.Encrypt(block[0:8], h[0:8])
+		c2.Encrypt(block[8:16], h[8:16])
+		intermediate = append(intermediate, block...)
+	}
+	salt := []byte{
+		0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x11,
+		0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
+	}
+	block, _ := aes.NewCipher(hashedBootkey)
+	mode := cipher.NewCBCEncrypter(block, salt)
+	cipherText := make([]byte, len(intermediate))
+	mode.CryptBlocks(cipherText, intermediate)
+	out := make([]byte, 0x18+len(cipherText))
+	binary.LittleEndian.PutUint16(out[0:2], 0x0001) // PekID
+	binary.LittleEndian.PutUint16(out[2:4], 0x0002) // Revision (AES)
+	binary.LittleEndian.PutUint32(out[4:8], 0x14)   // DataOffset
+	copy(out[0x08:0x18], salt)
+	copy(out[0x18:], cipherText)
+	return out
+}
+
+func TestDecryptUserNTHistory_LegacyRoundtrip(t *testing.T) {
+	hashedBootkey := bytes.Repeat([]byte{0x55}, 16)
+	rid := uint32(1001)
+	want := [][]byte{
+		bytes.Repeat([]byte{0x11}, 16), // most recent prior NT
+		bytes.Repeat([]byte{0x22}, 16),
+		bytes.Repeat([]byte{0x33}, 16), // oldest in the window
+	}
+	enc := fixtureLegacyHistoryEnc(t, hashedBootkey, rid, want, hashEncNTPasswordHistory)
+	got, err := decryptUserNTHistory(hashedBootkey, rid, enc)
+	if err != nil {
+		t.Fatalf("decryptUserNTHistory: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d historical hashes, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if !bytes.Equal(got[i], want[i]) {
+			t.Errorf("hash[%d]:\n  got  % X\n  want % X", i, got[i], want[i])
+		}
+	}
+}
+
+func TestDecryptUserNTHistory_AESRoundtrip(t *testing.T) {
+	hashedBootkey := bytes.Repeat([]byte{0x33}, 16)
+	rid := uint32(1234)
+	want := [][]byte{
+		bytes.Repeat([]byte{0xDE}, 16),
+		bytes.Repeat([]byte{0xAD}, 16),
+	}
+	enc := fixtureAESHistoryEnc(t, hashedBootkey, rid, want)
+	got, err := decryptUserNTHistory(hashedBootkey, rid, enc)
+	if err != nil {
+		t.Fatalf("decryptUserNTHistory: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d historical hashes, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if !bytes.Equal(got[i], want[i]) {
+			t.Errorf("hash[%d]:\n  got  % X\n  want % X", i, got[i], want[i])
+		}
+	}
+}
+
+func TestDecryptUserLMHistory_LegacyRoundtrip(t *testing.T) {
+	hashedBootkey := bytes.Repeat([]byte{0xAA}, 16)
+	rid := uint32(500)
+	want := [][]byte{bytes.Repeat([]byte{0xCC}, 16)}
+	enc := fixtureLegacyHistoryEnc(t, hashedBootkey, rid, want, hashEncLMPasswordHistory)
+	got, err := decryptUserLMHistory(hashedBootkey, rid, enc)
+	if err != nil {
+		t.Fatalf("decryptUserLMHistory: %v", err)
+	}
+	if len(got) != 1 || !bytes.Equal(got[0], want[0]) {
+		t.Fatalf("LM history hash:\n  got  %X\n  want %X", got, want)
+	}
+}
+
+func TestDecryptUserHashHistory_EmptyEnc(t *testing.T) {
+	got, err := decryptUserNTHistory(make([]byte, 16), 1001, nil)
+	if err != nil {
+		t.Errorf("err = %v, want nil for empty enc", err)
+	}
+	if got != nil {
+		t.Errorf("got = %X, want nil for empty enc", got)
+	}
+}
+
+func TestDecryptUserHashHistory_AESHeaderOnlyReturnsNil(t *testing.T) {
+	// 24-byte SAM_HASH_AES envelope with no Data field — this is the
+	// on-disk encoding when PasswordHistorySize=0 or no history yet.
+	enc := make([]byte, 0x18)
+	enc[0] = 0x01 // PekID
+	enc[2] = 0x02 // Revision = AES
+	enc[4] = 0x14 // DataOffset
+	got, err := decryptUserNTHistory(make([]byte, 16), 500, enc)
+	if err != nil {
+		t.Fatalf("err = %v, want nil for header-only history envelope", err)
+	}
+	if got != nil {
+		t.Errorf("got = %X, want nil for header-only history envelope", got)
+	}
+}
+
+func TestDecryptUserHashHistory_RejectsMisalignedLegacyData(t *testing.T) {
+	// 4-byte legacy SAM_HASH header + 17 bytes (not a 16-byte multiple).
+	enc := make([]byte, 4+17)
+	enc[0] = 0x01 // PekID
+	enc[2] = 0x01 // Revision = legacy
+	_, err := decryptUserNTHistory(bytes.Repeat([]byte{0x55}, 16), 1001, enc)
+	if !errors.Is(err, ErrUserHash) {
+		t.Fatalf("err = %v, want wrap of ErrUserHash for misaligned legacy history data", err)
+	}
+}
+
+func TestDecryptUserHashHistory_RejectsUnknownRevision(t *testing.T) {
+	enc := []byte{0x01, 0x00, 0x99, 0x00}
+	_, err := decryptUserNTHistory(make([]byte, 16), 1001, enc)
+	if !errors.Is(err, ErrUserHash) {
+		t.Fatalf("err = %v, want wrap of ErrUserHash for unknown history revision", err)
+	}
+}

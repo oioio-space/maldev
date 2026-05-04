@@ -46,13 +46,22 @@ const userVHeaderSize = 0xCC
 // impacket secretsdump.py USER_V structure. Each field is a 4-byte
 // uint32 (offset relative to header end) followed by a 4-byte length
 // followed by 4 bytes of padding/unused.
+//
+// History pairs (NT + LM) sit immediately after the current-hash
+// pair. Both are concatenations of N × 16-byte hash blocks wrapped
+// in the same SAM_HASH / SAM_HASH_AES envelope as the current-hash
+// slot — see decryptUserNTHistory / decryptUserLMHistory.
 const (
-	userVOffName     = 0x0C
-	userVLenName     = 0x10
-	userVOffLMHash   = 0x9C
-	userVLenLMHash   = 0xA0
-	userVOffNTHash   = 0xA8
-	userVLenNTHash   = 0xAC
+	userVOffName      = 0x0C
+	userVLenName      = 0x10
+	userVOffLMHash    = 0x9C
+	userVLenLMHash    = 0xA0
+	userVOffNTHash    = 0xA8
+	userVLenNTHash    = 0xAC
+	userVOffNTHistory = 0xB4
+	userVLenNTHistory = 0xB8
+	userVOffLMHistory = 0xC0
+	userVLenLMHistory = 0xC4
 )
 
 // Fixed positions inside the per-user F value (USER_F). impacket's
@@ -119,10 +128,19 @@ func readUserV(sam *hive, rid uint32) ([]byte, error) {
 
 // parsedUserV carries the fields the SAM-dump algorithm consumes
 // from a single V value. Empty fields are zero-length but never nil.
+//
+// NTHistoryEnc / LMHistoryEnc carry the encrypted password-history
+// blob: a SAM_HASH (legacy) or SAM_HASH_AES (modern) wrapper whose
+// Data is N × 16 bytes (N concatenated historical hashes encrypted
+// with NTPASSWORDHISTORY / LMPASSWORDHISTORY constants). Empty
+// when no history is present (a fresh account, or a host with
+// `PasswordHistorySize=0`).
 type parsedUserV struct {
-	Username  string
-	NTHashEnc []byte
-	LMHashEnc []byte
+	Username     string
+	NTHashEnc    []byte
+	LMHashEnc    []byte
+	NTHistoryEnc []byte
+	LMHistoryEnc []byte
 }
 
 // parseUserV decodes the offset table at the start of v and pulls
@@ -163,11 +181,21 @@ func parseUserV(v []byte) (parsedUserV, error) {
 	if err != nil {
 		return parsedUserV{}, fmt.Errorf("lmhash: %w", err)
 	}
+	ntHistBytes, err := pickSlice(userVOffNTHistory, userVLenNTHistory)
+	if err != nil {
+		return parsedUserV{}, fmt.Errorf("nthistory: %w", err)
+	}
+	lmHistBytes, err := pickSlice(userVOffLMHistory, userVLenLMHistory)
+	if err != nil {
+		return parsedUserV{}, fmt.Errorf("lmhistory: %w", err)
+	}
 
 	out := parsedUserV{
-		Username:  utf16BytesToString(nameBytes),
-		NTHashEnc: ntBytes,
-		LMHashEnc: lmBytes,
+		Username:     utf16BytesToString(nameBytes),
+		NTHashEnc:    ntBytes,
+		LMHashEnc:    lmBytes,
+		NTHistoryEnc: ntHistBytes,
+		LMHistoryEnc: lmHistBytes,
 	}
 	out.Username = strings.TrimRight(out.Username, "\x00")
 	return out, nil
