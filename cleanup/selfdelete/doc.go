@@ -32,6 +32,27 @@
 // awareness can flag the rename event. Batch-script variant is a known
 // signature.
 //
+// # Required privileges
+//
+// unprivileged for an implant deleting its own image — the
+// process itself holds the necessary `DELETE` access on the
+// file (every running EXE has DELETE in the granted access of
+// the file mapping's section). No elevation needed even when
+// the EXE lives under `C:\Windows\Temp\` or another protected
+// path, because the running process opened the file at start.
+// `MarkForDeletion` (`MOVEFILE_DELAY_UNTIL_REBOOT`) writes
+// `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager` and
+// therefore requires admin.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). The technique relies on
+// NTFS default-stream rename semantics; non-NTFS volumes
+// (FAT32, exFAT) cannot rename `:$DATA` and the `Run` /
+// `RunForce` paths fail. `RunWithScript` works on any
+// filesystem since it relies on a separate cmd.exe poller
+// rather than the rename trick.
+//
 // # Example
 //
 // See [ExampleRun] in selfdelete_example_test.go.

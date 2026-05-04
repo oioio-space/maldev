@@ -42,6 +42,21 @@
 // `SetFileInformationByHandle`, and ADS writes. `bsod` is the
 // outlier — `NtRaiseHardError` always emits a kernel crash dump.
 //
+// # Required privileges
+//
+// Per sub-package — the umbrella exports nothing. Quick map:
+// `memory` / `wipe` / `timestomp` / `ads` / `selfdelete` are
+// unprivileged for files the implant owns. `service` requires
+// admin (SCM `WRITE_DAC`). `bsod` requires `SeShutdownPrivilege`
+// (medium-IL admin). See each sub-package doc.go for the full
+// rule.
+//
+// # Platform
+//
+// `memory` is cross-platform (`SecureZero` everywhere; `WipeAndFree`
+// + `DoSecret` Windows-only). All other sub-packages are
+// Windows-only — they hinge on NTFS, the SCM, or `NtRaiseHardError`.
+//
 // # Example
 //
 // See each sub-package `<name>_example_test.go` for runnable

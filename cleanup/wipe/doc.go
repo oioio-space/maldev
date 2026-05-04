@@ -19,6 +19,20 @@
 // writes (especially on small files) form a weak signal but blend with
 // log rotation, image conversion, etc.
 //
+// # Required privileges
+//
+// unprivileged for files the implant has read+write access to.
+// Wiping under protected paths (`C:\Windows\System32\`,
+// `/etc`) requires admin / root, same as any other write.
+//
+// # Platform
+//
+// Cross-platform. The implementation uses pure-Go `os` calls
+// (`os.OpenFile`, `os.Remove`, `crypto/rand`); no platform-
+// specific surface. Wear-levelled SSDs and NTFS resident
+// `$DATA` (small files stored in the MFT) bypass the overwrite
+// regardless of OS — see Limitations in the tech md.
+//
 // # Example
 //
 // See [ExampleFile] in wipe_example_test.go.

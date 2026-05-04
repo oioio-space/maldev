@@ -24,6 +24,20 @@
 // DACL changes on services emit Security event 4670 when SACL auditing is
 // enabled. Sysmon Event 4697 logs the service control change.
 //
+// # Required privileges
+//
+// admin. `SetNamedSecurityInfo` on a service object needs
+// `WRITE_DAC` on the SCM service handle, which is gated on
+// membership in the local Administrators group (or
+// `SeTakeOwnershipPrivilege` if the implant first reassigns
+// ownership). The `SC_SDSET` mode invokes `sc.exe` and
+// inherits the same gate. SYSTEM works without elevation.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). The SCM is a Windows-only
+// subsystem; the API set has no POSIX equivalent.
+//
 // # Example
 //
 // See [ExampleHideService] in service_example_test.go.

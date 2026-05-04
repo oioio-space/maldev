@@ -20,6 +20,22 @@
 // originating process; `RtlAdjustPrivilege` may be logged by EDR before the
 // crash. Use only when the trade-off is acceptable.
 //
+// # Required privileges
+//
+// medium-IL admin. `RtlAdjustPrivilege` enables
+// `SeShutdownPrivilege`, which is held by every member of the
+// local Administrators group but disabled in the token until
+// asserted. A non-admin context cannot enable the privilege —
+// `NtRaiseHardError` returns `STATUS_PRIVILEGE_NOT_HELD`. SYSTEM
+// works without elevation.
+//
+// # Platform
+//
+// Windows-only. `NtRaiseHardError` is a Windows kernel surface
+// with no equivalent on POSIX; the package builds with a stub
+// on non-Windows so importers compile but every entry point
+// returns `ErrUnsupportedPlatform`.
+//
 // # Example
 //
 // See [ExampleTrigger] in bsod_example_test.go. The example is build-tag

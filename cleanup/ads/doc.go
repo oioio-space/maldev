@@ -20,6 +20,24 @@
 // dedicated tooling (Sysinternals Streams, `Get-Item -Stream *`,
 // EDR-with-MFT-aware-scanner).
 //
+// # Required privileges
+//
+// unprivileged for files the implant has standard read/write
+// access to (own profile, world-writable paths). Streams under
+// system-protected paths (`C:\Windows\System32\`, root of the
+// system drive for non-SYSTEM users) inherit the same DACL gate
+// as the default stream — admin / SYSTEM. ADS creation needs no
+// extra privilege beyond standard `CreateFileW` write access on
+// the host file.
+//
+// # Platform
+//
+// Windows-only. The API surface (`CreateFileW` with `:streamname`
+// syntax) only resolves on Windows; cross-compile to Linux yields
+// a build error rather than a silent stub. NTFS-only at runtime
+// — calls against FAT or exFAT volumes succeed at the API level
+// but the stream data is dropped silently.
+//
 // # Example
 //
 // See [ExampleWrite] in ads_example_test.go.

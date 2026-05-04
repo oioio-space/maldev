@@ -26,6 +26,25 @@
 // Standard-information modification leaves no event-log entry. Detection
 // requires forensic-grade MFT comparison.
 //
+// # Required privileges
+//
+// unprivileged for files the implant has `FILE_WRITE_ATTRIBUTES`
+// access to (own-profile drops, world-writable temp dirs).
+// Touching files under system-protected paths
+// (`C:\Windows\System32\`) requires admin to obtain the write-
+// attributes right. `$FILE_NAME` (the second timestamp record
+// forensic tools cross-check) is kernel-mode-only and not
+// touched by this package — that asymmetry is the canonical
+// timestomping signal.
+//
+// # Platform
+//
+// Windows-only (NTFS-only at runtime). The package builds
+// without a tag because `SetFileTime` exists on POSIX too, but
+// the `$STANDARD_INFORMATION` / `$FILE_NAME` MFT split is an
+// NTFS construct — calls against ext4, APFS, FAT, exFAT touch
+// only the standard timestamp and offer no anti-forensic value.
+//
 // # Example
 //
 // See [ExampleSet] and [ExampleCopyFrom] in timestomp_example_test.go.

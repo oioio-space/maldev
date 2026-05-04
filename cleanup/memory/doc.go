@@ -35,6 +35,24 @@
 // VirtualProtect + VirtualFree are high-volume legitimate calls with no
 // distinctive pattern.
 //
+// # Required privileges
+//
+// unprivileged. All three primitives operate on the calling
+// process's own memory: `SecureZero` is a pure-Go intrinsic;
+// `WipeAndFree` calls `VirtualProtect` + `VirtualFree` against
+// pages the process itself allocated; `DoSecret` runs entirely
+// in Go-managed memory. No special privilege, no token bump,
+// no remote handle.
+//
+// # Platform
+//
+// `SecureZero` and `DoSecret` are cross-platform.
+// `WipeAndFree` is Windows-only (`VirtualAlloc` lifecycle).
+// `DoSecret` only erases registers/stack/heap when built with
+// Go 1.26+ and `GOEXPERIMENT=runtimesecret` (linux/amd64+arm64
+// today); on every other build it is a plain call so callers
+// may wrap unconditionally.
+//
 // # Example
 //
 // See [ExampleSecureZero] and [ExampleWipeAndFree] in memory_example_test.go.
