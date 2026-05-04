@@ -20,6 +20,21 @@
 // detection (one screenshot per minute is normal; one per second is
 // not) is the typical signal.
 //
+// # Required privileges
+//
+// unprivileged for the implant's own interactive session — GDI
+// `BitBlt` against the screen DC reads the pixels the implant's
+// session can see. SYSTEM in session 0 captures a black image
+// from the implant's session unless `process/session` first
+// attaches the user's desktop. Capturing across sessions
+// requires impersonating a user with that session active.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). Sits on the GDI surface
+// (`gdi32!BitBlt`, `user32!GetDC`); other OSes need `Quartz` /
+// `XComposite` / Wayland-shot which are not wired up.
+//
 // # Example
 //
 // See [ExampleCapture] and [ExampleCaptureDisplay] in

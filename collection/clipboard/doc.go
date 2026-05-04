@@ -20,6 +20,21 @@
 // steady poll cadence — frequency-based hunts can flag unusually high
 // poll rates.
 //
+// # Required privileges
+//
+// unprivileged for the active interactive session. The clipboard
+// is per-session global state; `OpenClipboard` from the implant's
+// session reads what that session's user can see. SYSTEM in
+// session 0 cannot read an interactive user's clipboard without
+// first attaching to the user's window station via
+// `process/session`.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). Sits on the user32
+// clipboard API set (`OpenClipboard`, `GetClipboardData`,
+// `GetClipboardSequenceNumber`) — no POSIX equivalent.
+//
 // # Example
 //
 // See [ExampleReadText] in clipboard_example_test.go.
