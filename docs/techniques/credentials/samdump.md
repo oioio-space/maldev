@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/credentials/samdump
-last_reviewed: 2026-04-27
-reflects_commit: cfd7730
+last_reviewed: 2026-05-04
+reflects_commit: c48aaab
 ---
 
 # SAM hive dump
@@ -71,60 +71,84 @@ Implementation details:
 
 ## API Reference
 
-### `type Account`
+Package: `github.com/oioio-space/maldev/credentials/samdump`. Two
+modes: **offline** (`Dump` against `io.ReaderAt` for SYSTEM + SAM
+hive bytes — pure Go, cross-platform) and **live** (`LiveDump` which
+shells out to `reg.exe save` and feeds the files to `Dump`).
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/samdump#Account)
+### Types
 
-One decrypted user record.
+#### `type Account struct`
 
-| Field | Type | Description |
-|---|---|---|
-| `Username` | `string` | UTF-16 decoded sAMAccountName |
-| `RID` | `uint32` | Relative identifier (numeric SID component) |
-| `LM` | `[]byte` | 16-byte LM hash, or nil when inactive |
-| `NT` | `[]byte` | 16-byte NT (MD4) hash, or nil when inactive |
+- godoc: one decrypted user record from the SAM hive.
+- Description: fields — `Username string` (UTF-16 decoded sAMAccountName), `RID uint32` (relative identifier, the numeric tail of the user SID), `LM []byte` (16-byte LM hash or nil when inactive), `NT []byte` (16-byte NT/MD4 hash or nil when inactive). LM is nil on Vista+ unless explicitly enabled by GPO; NT is nil only for accounts with truly empty passwords.
+- Side effects: pure data.
+- OPSEC: silent (data type).
+- Required privileges: none (data).
+- Platform: cross-platform.
 
-`Account.Pwdump()` formats one secretsdump line. Empty hashes
-render as the all-zeros sentinel.
+#### `(Account).Pwdump() string`
 
-### `type Result`
+- godoc: format the account as one secretsdump-style pwdump line: `Username:RID:LM-hex:NT-hex:::`.
+- Description: renders the all-zeros sentinel `aad3b435b51404eeaad3b435b51404ee` (LM) / `31d6cfe0d16ae931b73c59d7e0c089c0` (NT empty-password MD4) when the corresponding hash is nil. Compatible with mimikatz / impacket consumers.
+- Parameters: receiver.
+- Returns: single ASCII line, no trailing newline.
+- Side effects: none.
+- OPSEC: pure formatting.
+- Required privileges: none.
+- Platform: cross-platform.
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/samdump#Result)
+#### `type Result struct`
 
-Aggregate output of a successful dump.
+- godoc: aggregate output of a successful dump.
+- Description: fields — `Accounts []Account` (one entry per user RID found in `SAM\\Domains\\Account\\Users`), `Warnings []string` (non-fatal per-user anomalies — parse failures on individual records, missing optional fields, unsupported encryption variants). Warnings allow partial-success dumps to surface what worked alongside what didn't.
+- Side effects: pure data.
+- OPSEC: silent (data).
+- Required privileges: none.
+- Platform: cross-platform.
 
-| Field | Type | Description |
-|---|---|---|
-| `Accounts` | `[]Account` | One entry per user RID |
-| `Warnings` | `[]string` | Non-fatal per-user anomalies (parse / decrypt failures, missing optional fields) |
+#### `(Result).Pwdump() string`
 
-`Result.Pwdump()` renders the multi-line pwdump file.
+- godoc: render the multi-line pwdump file — one `Account.Pwdump()` per line, joined with `\n`.
+- Description: convenience for piping the whole result to a `*os.File` or stdout.
+- Parameters: receiver.
+- Returns: ASCII multi-line string. Trailing newline included.
+- Side effects: none.
+- OPSEC: pure formatting.
+- Required privileges: none.
+- Platform: cross-platform.
 
-### `Dump(systemHive, systemSize, samHive, samSize) (Result, error)`
+#### Sentinel errors
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/samdump#Dump)
+```go
+ErrDump      // structural parse/decrypt failure inside Dump (wrapped — errors.Is detects)
+ErrLiveDump  // reg.exe save failed or hive files not found after reg returned
+ErrUserHash  // per-user hash decrypt failed (surfaced inside Result.Warnings, not returned)
+```
 
-Run the full offline algorithm. Both readers must support `ReadAt`
-over the entire hive bytes; `Dump` loads each into memory once. No
-syscalls, cross-platform.
+### Producers
 
-**Returns:** `Result` with per-user accounts; `error` wrapping
-`ErrDump` on structural failure.
+#### `Dump(systemHive io.ReaderAt, systemSize int64, samHive io.ReaderAt, samSize int64) (Result, error)`
 
-### `LiveDump(dir string) (Result, string, string, error)` (Windows)
+- godoc: full offline pipeline — extract bootkey from SYSTEM hive, derive hashedBootkey, walk SAM users, decrypt each LM/NT.
+- Description: parses each hive's CM_KEY_NODE / CM_KEY_VALUE cells (no Win32 reg APIs), reconstructs the obfuscated bootkey from the four `LSA\\JD/Skew1/GBG/Data` class names, derives the hashedBootkey via either AES (Win10+) or DES+MD5 (legacy). For each user under `SAM\\Domains\\Account\\Users\\<RID>`, parses the V-region for the encrypted hashes and decrypts them. Cross-platform — no syscalls, only `io.ReaderAt` reads.
+- Parameters: `systemHive` + `systemSize` for the SYSTEM hive; `samHive` + `samSize` for the SAM hive. Both readers must cover the entire hive bytes.
+- Returns: `Result` with `Accounts` populated; per-user failures land in `Result.Warnings` rather than aborting the whole dump. `error` wraps `ErrDump` on structural failure (corrupt hive, missing root key, bootkey extraction impossible).
+- Side effects: loads each hive into memory once (typical SAM is ~256KB, SYSTEM ~8MB).
+- OPSEC: pure CPU + memory work — no file system / registry / kernel touch points. The OPSEC concern is **how the hive bytes were acquired** (live `reg save` vs VSS shadow vs offline mount).
+- Required privileges: none for the parse itself; reading the actual hives requires admin + `SeBackupPrivilege` for the live case.
+- Platform: cross-platform. Useful from a Linux analyst host parsing exfiltrated hives.
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/credentials/samdump#LiveDump)
+#### `LiveDump(dir string) (Result, string, string, error)`
 
-Acquire the live `SYSTEM` + `SAM` hives via `reg save` to `dir`,
-then run `Dump` against them. Returns the `Result` plus the on-disk
-paths (`system.hive`, `sam.hive`) so the operator can re-feed
-the files to other tooling without re-acquiring.
-
-**Side effects:** spawns `reg.exe`; writes hive files to disk.
-Requires admin + `SeBackupPrivilege`.
-
-**Returns:** `error` wrapping `ErrLiveDump` if `reg save` or the
-underlying `Dump` fails.
+- godoc: acquire the live SYSTEM + SAM hives via `reg.exe save HKLM\SYSTEM` / `HKLM\SAM` to `dir`, then run `Dump` against them. Returns the `Result` plus the two on-disk paths so callers can re-feed the files to other tooling without re-acquiring.
+- Description: spawns `reg.exe save` twice (one per hive) with `/y` to overwrite. The hive files end up at `dir/system.hive` and `dir/sam.hive`. After parsing, the files are NOT deleted — the operator may want them for downstream tooling (mimikatz, impacket secretsdump, hashcat).
+- Parameters: `dir` writable directory; created by caller.
+- Returns: `Result` (same shape as `Dump`); `string` path of the saved system hive; `string` path of the saved SAM hive; `error` wrapping `ErrLiveDump` if `reg save` failed or the file is empty afterwards.
+- Side effects: spawns `reg.exe`. Two .hive files left at `dir`. If the operator does not delete them, they remain a flat-file artifact on disk.
+- OPSEC: `reg save HKLM\SAM` is one of the loudest possible audit triggers — Sysmon Event 1 on `reg.exe` with `SaveKey` arg is a high-fidelity Sigma rule. For stealth, prefer offline VSS shadow extraction (see "Advanced — VSS shadow-copy acquisition" example below).
+- Required privileges: admin + `SeBackupPrivilege` (held by default for the Administrators group). The hives are protected by ACLs that only admin can read directly.
+- Platform: Windows. Stub returns `ErrLiveDump` ("requires Windows").
 
 ## Examples
 
