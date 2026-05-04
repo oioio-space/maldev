@@ -261,16 +261,87 @@ strings.
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#DetectCPUID)
 
-Reads CPUID leaf 0x40000000 (hypervisor vendor signature) on
-Windows; reads `/proc/cpuinfo` and matches against hypervisor
-keywords on Linux.
+Despite the name, this helper does NOT execute the `CPUID`
+instruction — it reads `HKLM\HARDWARE\DESCRIPTION\System\BIOS`
+SystemProductName on Windows, and parses `/proc/cpuinfo` for
+the kernel-exposed `hypervisor` flag on Linux. Use it when the
+implant should match on the BIOS vendor string the hypervisor
+chose to expose.
+
+For the real `CPUID` instruction probes that work uniformly
+across OSes (and that the operator cannot evade by editing the
+registry / proc), use [HypervisorPresent] / [HypervisorVendor]
+below.
 
 **Returns:** `(true, vendorString)` on match.
 
-**OPSEC:** invisible to user-mode telemetry — CPUID is an
-unprivileged instruction.
+**OPSEC:** invisible to user-mode telemetry. Both the registry
+read and the `/proc/cpuinfo` parse are universally common.
+
+**Required privileges:** unprivileged.
 
 **Platform:** cross-platform.
+
+#### `func HypervisorPresent() bool`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#HypervisorPresent)
+
+Issues `CPUID.1` and reports `ECX[31]` — the hypervisor-present
+bit. Intel/AMD reserve this bit for hypervisor self-disclosure;
+every commercial hypervisor (KVM, Xen, VMware, Hyper-V, modern
+QEMU/TCG, VirtualBox HVM, Parallels) sets it unconditionally.
+Bare-metal CPUs always clear it. Cheaper and more reliable than
+the registry / DMI / process checks because the operator cannot
+evade it without modifying hypervisor source.
+
+**Returns:** `true` when the bit is set; `false` on bare metal
+or non-amd64 hosts (the stub returns `false`).
+
+**OPSEC:** very-quiet — `CPUID` is executed billions of times
+in ordinary userland (Go runtime, libc, every JIT). Stack walk
+shows a normal call site; no kernel transition.
+
+**Required privileges:** unprivileged.
+
+**Platform:** amd64 (Windows + Linux + macOS). Stub on other
+arches returns `false`.
+
+#### `func HypervisorVendor() string`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#HypervisorVendor)
+
+Reads the 12-byte ASCII vendor signature hypervisors expose at
+`CPUID.40000000h` (`EBX:ECX:EDX`). Returns `""` when no
+hypervisor is present (bit clear), the leaf is unsupported, or
+the host is non-amd64.
+
+**Returns:** the raw 12-byte signature ("VMwareVMware",
+"Microsoft Hv", "KVMKVMKVM\\0\\0\\0", …) or `""`. Pass through
+[HypervisorVendorName] for a friendly label.
+
+**OPSEC / Required privileges / Platform:** as
+[HypervisorPresent].
+
+#### `func HypervisorVendorName(sig string) string`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#HypervisorVendorName)
+
+Maps a raw [HypervisorVendor] signature to a friendly product
+label ("VMware", "KVM", "Hyper-V", …). Returns `""` for
+unrecognised signatures so callers can distinguish "I have a
+signature but don't recognise it" from "no hypervisor". The
+table covers the 11 major hypervisors as of 2026 (see
+`hypervisor.go` for the list).
+
+**Returns:** friendly product name, or `""` when sig is empty
+or not on the recognised list.
+
+**OPSEC:** offline lookup — no syscall, no I/O.
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform — the same table is shared between
+the amd64 build and the stub.
 
 ## Examples
 
@@ -303,6 +374,28 @@ cfg := antivm.Config{
 }
 if name, _ := antivm.Detect(cfg); name != "" {
     return
+}
+```
+
+### Composed — CPUID hypervisor probe (recommended)
+
+```go
+import "github.com/oioio-space/maldev/recon/antivm"
+
+// Single CPUID instruction — the strongest "am I in a VM" signal
+// userland can produce. Cannot be evaded by registry / file
+// rewrites; the bit is set by the hypervisor itself.
+if antivm.HypervisorPresent() {
+    if vendor := antivm.HypervisorVendor(); vendor != "" {
+        if name := antivm.HypervisorVendorName(vendor); name != "" {
+            // Recognised: VMware / Hyper-V / KVM / Xen / VirtualBox / …
+            log.Printf("guest of %s", name)
+        } else {
+            // Unknown vendor signature — surface raw bytes for forensics.
+            log.Printf("unknown hypervisor signature: %q", vendor)
+        }
+    }
+    os.Exit(0)
 }
 ```
 

@@ -11,6 +11,14 @@
 // Dimension-specific helpers ([DetectNic], [DetectFiles],
 // [DetectDMI]) let callers compose their own pipelines.
 //
+// CPUID-based probes ([HypervisorPresent], [HypervisorVendor],
+// [HypervisorVendorName]) are the strongest "am I in a VM"
+// signal userland can produce: they execute the `CPUID`
+// instruction directly and read the hypervisor-self-disclosure
+// bit + vendor signature, which the operator cannot evade with
+// registry / DMI / file rewrites. Recommended as the first
+// dimension in any sandbox-bail flow on amd64 hosts.
+//
 // # MITRE ATT&CK
 //
 //   - T1497.001 (Virtualization/Sandbox Evasion: System Checks)
