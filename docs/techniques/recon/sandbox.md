@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/recon/sandbox
 last_reviewed: 2026-05-04
-reflects_commit: 7a8c466
+reflects_commit: 3de532d
 ---
 
 # Sandbox detection orchestrator
@@ -78,6 +78,8 @@ Per-dimension thresholds + indicator lists. Fields:
 `EvasionTimeout`, `StopOnFirst`. A zero-value `Config` runs
 nothing useful — call `DefaultConfig()`.
 
+**Required privileges:** unprivileged (read-only system probes).
+
 **Platform:** cross-platform.
 
 ### `func DefaultConfig() Config`
@@ -91,6 +93,8 @@ usernames + hostnames + analysis-tool process names,
 `RequestTimeout=5s`, `StopOnFirst=true`. `DiskPath` is `C:\`
 on Windows and `/` elsewhere.
 
+**Required privileges:** unprivileged (read-only system probes).
+
 **Platform:** cross-platform.
 
 ### `type Result struct { Name string; Detected bool; Detail string; Err error }`
@@ -99,6 +103,8 @@ on Windows and `/` elsewhere.
 
 Per-check outcome emitted by `CheckAll`. `Name` matches one of
 the `Check*` constants.
+
+**Required privileges:** unprivileged (read-only system probes).
 
 **Platform:** cross-platform.
 
@@ -112,6 +118,8 @@ Canonical check-name constants used as `Result.Name` keys and
 `CheckDomain`, `CheckProcess`, `CheckProcessCount`,
 `CheckConnectivity`.
 
+**Required privileges:** unprivileged (read-only system probes).
+
 **Platform:** cross-platform.
 
 ### `func Score(results []Result) int`
@@ -124,6 +132,8 @@ using the package's per-check weight table. Total is capped at
 
 **Returns:** integer in `[0, 100]`.
 
+**Required privileges:** unprivileged (read-only system probes).
+
 **Platform:** cross-platform.
 
 ### `func Weights() map[string]int`
@@ -133,6 +143,8 @@ using the package's per-check weight table. Total is capped at
 Returns a copy of the per-check weight table for audit /
 tuning. Mutating the returned map is safe.
 
+**Required privileges:** unprivileged (read-only system probes).
+
 **Platform:** cross-platform.
 
 ### `type Checker`
@@ -141,6 +153,8 @@ tuning. Mutating the returned map is safe.
 
 Orchestrator wrapping a `Config`. All check methods are
 attached to `*Checker`.
+
+**Required privileges:** unprivileged (read-only system probes).
 
 **Platform:** cross-platform (separate Windows / Linux
 implementations under build tags).
@@ -153,6 +167,8 @@ Constructs a `Checker` bound to `cfg`.
 
 **Returns:** `*Checker`.
 
+**Required privileges:** unprivileged (read-only system probes).
+
 **Platform:** cross-platform.
 
 ### `func (c *Checker) IsDebuggerPresent() bool`
@@ -161,6 +177,8 @@ Constructs a `Checker` bound to `cfg`.
 
 Re-exports
 [`antidebug.IsDebuggerPresent`](anti-analysis.md).
+
+**Required privileges:** unprivileged (read-only system probes).
 
 **Platform:** cross-platform.
 
@@ -171,6 +189,8 @@ Re-exports
 Re-exports
 [`antivm.IsRunningInVM`](anti-analysis.md).
 
+**Required privileges:** unprivileged (read-only system probes).
+
 **Platform:** cross-platform.
 
 ### `func (c *Checker) BusyWait()`
@@ -178,6 +198,8 @@ Re-exports
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.BusyWait)
 
 Calls [`timing.BusyWait(c.cfg.EvasionTimeout)`](timing.md).
+
+**Required privileges:** unprivileged (read-only system probes).
 
 **Platform:** cross-platform.
 
@@ -188,6 +210,8 @@ Calls [`timing.BusyWait(c.cfg.EvasionTimeout)`](timing.md).
 Total physical RAM in bytes (`GlobalMemoryStatusEx` /
 `/proc/meminfo`).
 
+**Required privileges:** unprivileged (read-only system probes).
+
 **Platform:** cross-platform.
 
 ### `func (c *Checker) HasEnoughRAM() (bool, error)`
@@ -195,6 +219,8 @@ Total physical RAM in bytes (`GlobalMemoryStatusEx` /
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.HasEnoughRAM)
 
 Compares `RAMBytes()` against `cfg.MinRAMGB`.
+
+**Required privileges:** unprivileged (read-only system probes).
 
 **Platform:** cross-platform.
 
@@ -205,6 +231,8 @@ Compares `RAMBytes()` against `cfg.MinRAMGB`.
 Compares the total bytes of `cfg.DiskPath` against
 `cfg.MinDiskGB`.
 
+**Required privileges:** unprivileged (read-only system probes).
+
 **Platform:** cross-platform.
 
 ### `func (c *Checker) HasEnoughCPU() bool`
@@ -212,6 +240,8 @@ Compares the total bytes of `cfg.DiskPath` against
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.HasEnoughCPU)
 
 `runtime.NumCPU() >= cfg.MinCPUCores`.
+
+**Required privileges:** unprivileged (read-only system probes).
 
 **Platform:** cross-platform.
 
@@ -224,6 +254,8 @@ Resolves the current username and matches against
 
 **Returns:** `(matched, username, err)`.
 
+**Required privileges:** unprivileged (read-only system probes).
+
 **Platform:** cross-platform.
 
 ### `func (c *Checker) BadHostname() (bool, string, error)`
@@ -231,6 +263,8 @@ Resolves the current username and matches against
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.BadHostname)
 
 Same shape as `BadUsername`, against `cfg.BadHostnames`.
+
+**Required privileges:** unprivileged (read-only system probes).
 
 **Platform:** cross-platform.
 
@@ -242,6 +276,8 @@ Iterates the running-process snapshot and matches against
 `cfg.BadProcesses`.
 
 **Returns:** `(matched, processName, err)`.
+
+**Required privileges:** unprivileged (read-only system probes).
 
 **Platform:** cross-platform.
 
@@ -257,6 +293,8 @@ sinkholes resolve it.
 **OPSEC:** the DNS query for the fake domain is itself a
 fingerprint — operators must rotate per campaign.
 
+**Required privileges:** unprivileged (read-only system probes).
+
 **Platform:** cross-platform.
 
 ### `func (c *Checker) CheckProcessCount(ctx context.Context) (bool, string, error)`
@@ -265,6 +303,8 @@ fingerprint — operators must rotate per campaign.
 
 Returns `(true, detail, err)` when the live process count is
 below `cfg.MinProcesses`.
+
+**Required privileges:** unprivileged (read-only system probes).
 
 **Platform:** cross-platform.
 
@@ -275,6 +315,8 @@ below `cfg.MinProcesses`.
 GET against `cfg.ConnectivityURL`; treats non-2xx / no-response
 as "no real internet".
 
+**Required privileges:** unprivileged (read-only system probes).
+
 **Platform:** cross-platform.
 
 ### `func (c *Checker) CheckAll(ctx context.Context) []Result`
@@ -284,6 +326,8 @@ as "no real internet".
 Runs every dimension regardless of `cfg.StopOnFirst` and
 returns the full `[]Result`. Feed into `Score` for an
 aggregate verdict.
+
+**Required privileges:** unprivileged (read-only system probes).
 
 **Platform:** cross-platform.
 
@@ -302,6 +346,8 @@ matching `Result.Detail`.
 sandbox-self-flag pattern; consider score-based bail
 (`CheckAll` + `Score`) for tunable noise.
 
+**Required privileges:** unprivileged (read-only system probes).
+
 **Platform:** cross-platform.
 
 ### `func DiskTotalBytes(p string) (uint64, error)`
@@ -310,6 +356,8 @@ sandbox-self-flag pattern; consider score-based bail
 
 Standalone helper returning the total bytes of the volume
 hosting `p` via `GetDiskFreeSpaceExW`.
+
+**Required privileges:** unprivileged (read-only volume query).
 
 **Platform:** Windows-only.
 

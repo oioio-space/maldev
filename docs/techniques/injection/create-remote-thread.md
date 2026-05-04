@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/inject
-last_reviewed: 2026-04-27
-reflects_commit: 4798780
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # CreateRemoteThread injection
@@ -92,6 +92,8 @@ and the requested method + PID set.
 
 **Returns:** `*WindowsConfig` ready to pass to `NewWindowsInjector`.
 
+**Required privileges:** unprivileged (config struct only; no syscalls).
+
 ### `inject.NewWindowsInjector(cfg *WindowsConfig) (Injector, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/inject#NewWindowsInjector)
@@ -107,6 +109,11 @@ Build an `Injector` for the configured method.
 **Side effects:** none until `Inject` is called.
 
 **OPSEC:** very-noisy on `Inject` — see *OPSEC & Detection* below.
+
+**Required privileges:** medium-IL for same-user cross-process; admin
+to cross security boundaries (`OpenProcess(PROCESS_VM_OPERATION |
+PROCESS_VM_WRITE | PROCESS_CREATE_THREAD)` against another user's or
+elevated process).
 
 ### `Builder` pattern
 

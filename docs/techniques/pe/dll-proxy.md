@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/pe/dllproxy
 last_reviewed: 2026-05-04
-reflects_commit: c1f35d0
+reflects_commit: 3de532d
 ---
 
 # DLL Proxy Generator
@@ -101,6 +101,8 @@ Target architecture for the emitted PE. Constants:
 
 **Side effects:** pure data.
 
+**Required privileges:** unprivileged (pure data type).
+
 **Platform:** cross-platform (emitter); produces a Windows DLL.
 
 ### `type PathScheme int`
@@ -116,6 +118,8 @@ when the proxy is deployed alongside the legitimate DLL.
 **OPSEC:** `PathSchemeGlobalRoot` is identifiable by image-load
 telemetry; `PathSchemeSystem32` is harder to fingerprint but
 unsafe inside System32.
+
+**Required privileges:** unprivileged (pure data constant).
 
 **Platform:** cross-platform (emitter).
 
@@ -134,6 +138,8 @@ post-assembly via `pe/cert.PatchPECheckSum`.
 
 **Side effects:** pure data.
 
+**Required privileges:** unprivileged (pure data type).
+
 **Platform:** cross-platform.
 
 ### `type Export struct { Name string; Ordinal uint16 }`
@@ -147,6 +153,8 @@ export at a specific ordinal slot. Mirrors `pe/parse.Export`
 field-for-field.
 
 **Side effects:** pure data.
+
+**Required privileges:** unprivileged (pure data type).
 
 **Platform:** cross-platform.
 
@@ -171,6 +179,9 @@ alphabetically.
 **OPSEC:** silent at emission; the resulting file write is the
 detectable phase.
 
+**Required privileges:** unprivileged (pure offline assembler; no
+syscalls or filesystem access).
+
 **Platform:** cross-platform.
 
 ### `GenerateExt(targetName string, exports []Export, opts Options) ([]byte, error)`
@@ -192,6 +203,8 @@ duplicate ordinals.
 **Side effects:** none.
 
 **OPSEC:** as `Generate`.
+
+**Required privileges:** unprivileged (pure offline assembler).
 
 **Platform:** cross-platform.
 

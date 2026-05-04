@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/collection/keylog
-last_reviewed: 2026-04-27
-reflects_commit: b75160a
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # Keylogging
@@ -120,6 +120,9 @@ goroutine that calls `runtime.LockOSThread`.
 
 **OPSEC:** `SetWindowsHookEx(WH_KEYBOARD_LL)` is one of the highest-fidelity
 EDR signals — few legitimate processes install global keyboard hooks.
+
+**Required privileges:** unprivileged; must run in an interactive desktop
+session (LL hook is rejected from Session 0 / SYSTEM services).
 
 ## Examples
 

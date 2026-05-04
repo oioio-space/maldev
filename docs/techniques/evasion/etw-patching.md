@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/evasion/etw
-last_reviewed: 2026-04-27
-reflects_commit: 3fd7622
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # ETW patching
@@ -87,19 +87,28 @@ Patch all five `EtwEvent*` write functions in `ntdll.dll`. Idempotent.
 distinguishable in TI ETW. Run after `unhook.FullUnhook` so the
 subsequent ETW activity stays hidden from EDR hooks.
 
+**Required privileges:** unprivileged (own-process memory only).
+
 ### `Patch(caller *wsyscall.Caller) error`
 
 Patch only `EtwEventWrite` (the most-used variant). Cheaper alternative
 when you don't need the full set.
+
+**Required privileges:** unprivileged (own-process memory only).
 
 ### `PatchNtTraceEvent(caller *wsyscall.Caller) error`
 
 Patch the lower-level `NtTraceEvent` with a single RET. Use this when
 EDR is observed direct-calling the syscall layer.
 
+**Required privileges:** unprivileged (own-process memory only).
+
 ### `All() evasion.Technique`, `PatchTechnique() evasion.Technique`, `NtTraceTechnique() evasion.Technique`
 
 `evasion.Technique` adapters for composition with `evasion.ApplyAll`.
+
+**Required privileges:** unprivileged (own-process memory only when
+applied via `evasion.ApplyAll`).
 
 ## Examples
 

@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/evasion/cet
-last_reviewed: 2026-04-27
-reflects_commit: 3fd7622
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # Intel CET shadow-stack opt-out
@@ -78,6 +78,8 @@ enforcement active.
 **OPSEC:** invisible — reads MITIGATION_POLICY via `GetProcessMitigation
 Policy`.
 
+**Required privileges:** unprivileged (own-process query).
+
 ### `Disable() error`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/cet#Disable)
@@ -95,6 +97,8 @@ inside loops.
 **OPSEC:** **noisy.** `SetProcessMitigationPolicy` is itself logged by
 EDR; Defender ASR may emit an event. Prefer `Wrap` when you can.
 
+**Required privileges:** unprivileged (own-process mitigation policy).
+
 ### `Wrap(sc []byte) []byte`
 
 Return a copy of `sc` prefixed with `Marker` if not already present.
@@ -108,6 +112,8 @@ otherwise a new buffer of length `len(sc) + 4`.
 **Side effects:** none. Pure function.
 
 **OPSEC:** invisible — only modifies caller-owned memory.
+
+**Required privileges:** unprivileged (pure function).
 
 ## Examples
 

@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: 57c853b
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 mitre: T1548.002
 detection_level: noisy
 ---
@@ -113,6 +113,10 @@ hijack is registered and the binary is launched — the function does
 **OPSEC:** noisy. Process-tree (`fodhelper.exe → cmd.exe`) is the
 detection focus, plus `Microsoft-Windows-Sysmon/Operational` event
 13 (registry write) under `HKCU\Software\Classes\<unusual>`.
+
+**Required privileges:** medium-IL caller in the local Administrators
+group with UAC at "Default" (not "Always notify"); the bypass *yields*
+a high-IL token without prompting.
 
 ### `EventVwrLogon(domain, user, password, path)`
 

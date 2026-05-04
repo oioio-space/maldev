@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/inject
-last_reviewed: 2026-04-27
-reflects_commit: 4798780
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # Callback-based execution
@@ -131,6 +131,10 @@ None of the callback APIs persist state after the call returns.
 **OPSEC:** very low signal on thread-creation telemetry; medium on
 behavioural telemetry — the same six APIs in known-bad-behaviour rules
 exist in MDE / Defender catalogues.
+
+**Required privileges:** unprivileged — local-only, executes in the
+calling process; some methods (`CallbackReadDirectoryChanges`) need
+read access to `C:\Windows\Temp`, available to standard users.
 
 ## Examples
 

@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/inject
-last_reviewed: 2026-04-27
-reflects_commit: 4798780
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # KernelCallbackTable hijacking
@@ -108,6 +108,10 @@ synthetic `WM_COPYDATA` to a target window.
 
 **OPSEC:** the cross-process PEB read + write pair is the strongest
 signal; the `WM_COPYDATA` itself is normal IPC.
+
+**Required privileges:** medium-IL for same-user cross-process targets;
+admin to cross security boundaries (`PROCESS_VM_OPERATION |
+PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_QUERY_INFORMATION`).
 
 > [!CAUTION]
 > The slot restoration runs after the shellcode returns. Long-running

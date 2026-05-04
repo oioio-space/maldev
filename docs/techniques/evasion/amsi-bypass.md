@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/evasion/amsi
-last_reviewed: 2026-04-27
-reflects_commit: 3fd7622
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # AMSI bypass
@@ -102,20 +102,29 @@ patched (3 bytes). Persists for the process lifetime.
 **OPSEC:** the `NtProtectVirtualMemory(amsi.dll, RWX)` is the loudest
 event — visible in ETW Threat Intelligence (`EVENT_TI_NTPROTECT`).
 
+**Required privileges:** unprivileged (own-process memory only).
+
 ### `PatchOpenSession(caller *wsyscall.Caller) error`
 
 Flip the conditional jump in `AmsiOpenSession` so session creation
 always returns success without the provider initialising.
+
+**Required privileges:** unprivileged (own-process memory only).
 
 ### `PatchAll(caller *wsyscall.Caller) error`
 
 Apply both `PatchScanBuffer` and `PatchOpenSession`. Idempotent — safe
 to call multiple times.
 
+**Required privileges:** unprivileged (own-process memory only).
+
 ### `ScanBufferPatch() evasion.Technique`, `OpenSessionPatch() evasion.Technique`, `All() evasion.Technique`
 
 Adapt the patches to the `evasion.Technique` interface for composition
 with `evasion.ApplyAll`.
+
+**Required privileges:** unprivileged (own-process memory only when
+applied via `evasion.ApplyAll`).
 
 ## Examples
 

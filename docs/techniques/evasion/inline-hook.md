@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: a705c32
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # Inline Hook — x64 Function Interception
@@ -115,6 +115,8 @@ available), or write failure.
 **Side effects:** mutates the first 5 bytes of `targetAddr` (saved
 inside the Hook for restore), allocates two RX pages within ±2 GB of
 the target.
+
+**Required privileges:** unprivileged (own-process memory only).
 
 ### `InstallByName(dllName, funcName, handler)`
 

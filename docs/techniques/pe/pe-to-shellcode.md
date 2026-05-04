@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/pe/srdi
 last_reviewed: 2026-05-04
-reflects_commit: c1f35d0
+reflects_commit: 3de532d
 ---
 
 # PE-to-Shellcode (Donut)
@@ -89,6 +89,8 @@ dual-mode blob that runs on both x86 and x64 hosts.
 **OPSEC:** `ArchX84` doubles signature surface — pick a single
 arch when the target environment is known.
 
+**Required privileges:** unprivileged (pure data constant).
+
 **Platform:** cross-platform (emitter); shellcode targets Windows.
 
 ### `type ModuleType int`
@@ -98,6 +100,8 @@ arch when the target environment is known.
 Input format selector. Values: `ModuleNetDLL`, `ModuleNetEXE`,
 `ModuleDLL`, `ModuleEXE`, `ModuleVBS`, `ModuleJS`, `ModuleXSL`.
 See the format matrix above for which fields are required.
+
+**Required privileges:** unprivileged (pure data constant).
 
 **Platform:** cross-platform.
 
@@ -113,6 +117,8 @@ Knob set passed to every `Convert*`. Fields: `Arch` (default
 AMSI/WLDP behaviour (1 skip, 2 abort on fail, 3 continue on
 fail); `Thread` — run the entry point in a new thread.
 
+**Required privileges:** unprivileged (pure data type).
+
 **Platform:** cross-platform.
 
 ### `DefaultConfig() *Config`
@@ -123,6 +129,8 @@ Returns `&Config{Arch: ArchX64, Type: ModuleEXE, Bypass: 3}` —
 the most common stage-as-EXE path with continue-on-AMSI-fail.
 
 **Side effects:** none.
+
+**Required privileges:** unprivileged (pure data constructor).
 
 **Platform:** cross-platform.
 
@@ -144,6 +152,8 @@ error from file read or Donut conversion.
 **OPSEC:** silent at conversion; the resulting buffer carries
 Donut's signature byte pattern.
 
+**Required privileges:** unprivileged (read access on `path`).
+
 **Platform:** cross-platform (emitter).
 
 ### `ConvertBytes(data []byte, cfg *Config) ([]byte, error)`
@@ -162,6 +172,8 @@ header); `cfg` — must set `Type`.
 
 **Side effects:** none.
 
+**Required privileges:** unprivileged (in-memory conversion).
+
 **Platform:** cross-platform.
 
 ### `ConvertDLL(dllPath string, cfg *Config) ([]byte, error)`
@@ -173,6 +185,8 @@ Shorthand for `ConvertFile` with `cfg.Type` pinned to
 
 **Side effects:** reads `dllPath`.
 
+**Required privileges:** unprivileged (read access on `dllPath`).
+
 **Platform:** cross-platform.
 
 ### `ConvertDLLBytes(dllBytes []byte, cfg *Config) ([]byte, error)`
@@ -182,6 +196,8 @@ Shorthand for `ConvertFile` with `cfg.Type` pinned to
 In-memory variant of `ConvertDLL`.
 
 **Side effects:** none.
+
+**Required privileges:** unprivileged (in-memory conversion).
 
 **Platform:** cross-platform.
 

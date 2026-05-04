@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/cleanup/bsod
-last_reviewed: 2026-04-27
-reflects_commit: 07ced18
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # Controlled Blue Screen of Death
@@ -89,6 +89,10 @@ host doesn't come back).
 **OPSEC:** the bug-check itself is the artifact. Crash dump (if
 configured) names the originating process; the
 `SeShutdownPrivilege`-adjustment ETW event may precede the crash.
+
+**Required privileges:** medium-IL with `SeShutdownPrivilege` available in the token (most local accounts).
+
+**Platform:** Windows-only.
 
 ### `var ErrPrivilege error`
 

@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/cleanup/timestomp
-last_reviewed: 2026-04-27
-reflects_commit: 07ced18
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # Timestomp
@@ -73,6 +73,10 @@ overwritten. Creation time unchanged on this entry point.
 **OPSEC:** no event-log entry. Visible only to forensic-grade MFT
 comparison.
 
+**Required privileges:** unprivileged (caller's write rights on `path`).
+
+**Platform:** cross-platform (`os.Chtimes`).
+
 ### `CopyFrom(src, dst string) error`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/timestomp#CopyFrom)
@@ -87,6 +91,12 @@ Read `src`'s `ModTime` and apply it as both atime and mtime on `dst`.
 
 **Side effects:** all three `$SI` timestamps on `target` match
 `reference`. `$FN` unchanged.
+
+**OPSEC:** identical signature to `Set`; reference-blending makes statistical hunts harder than fixed dates.
+
+**Required privileges:** unprivileged (caller's read rights on `src`, write rights on `dst`).
+
+**Platform:** cross-platform (`os.Chtimes`).
 
 ## Examples
 

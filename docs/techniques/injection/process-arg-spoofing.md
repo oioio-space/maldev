@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/inject
-last_reviewed: 2026-04-27
-reflects_commit: 4798780
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # Process argument spoofing
@@ -114,6 +114,10 @@ return — caller owns its lifecycle.
 
 **OPSEC:** the fake args land in EDR / Sysmon / kernel-callback
 telemetry; the real args live only in the child's PEB at runtime.
+
+**Required privileges:** unprivileged — `CreateProcessW` plus
+`Read`/`WriteProcessMemory` against the implant's own freshly-spawned
+child (full handle rights granted at spawn time).
 
 > [!IMPORTANT]
 > The spoofed buffer cannot grow beyond what `CreateProcessW`

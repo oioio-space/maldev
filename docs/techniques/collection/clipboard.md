@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/collection/clipboard
-last_reviewed: 2026-04-27
-reflects_commit: b75160a
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # Clipboard capture
@@ -96,6 +96,10 @@ Return the current clipboard text as UTF-8.
 **OPSEC:** single `OpenClipboard` + `GetClipboardData` + `CloseClipboard`
 sequence — identical to any legitimate paste operation.
 
+**Required privileges:** unprivileged (caller's interactive session).
+
+**Platform:** Windows-only.
+
 ### `Watch(ctx context.Context, pollInterval time.Duration) <-chan string`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/collection/clipboard#Watch)
@@ -118,6 +122,10 @@ done.
 **OPSEC:** sustained poll cadence is the only fingerprint — unusually high
 `GetClipboardSequenceNumber` rates (>10/s) stand out in API-frequency
 telemetry.
+
+**Required privileges:** unprivileged (caller's interactive session).
+
+**Platform:** Windows-only.
 
 ## Examples
 

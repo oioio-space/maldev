@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/cleanup/wipe
-last_reviewed: 2026-04-27
-reflects_commit: 07ced18
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # Secure file wipe
@@ -73,6 +73,10 @@ Overwrite `path` with random data `passes` times, then delete it.
 **OPSEC:** generates write events of the same size as the file. Pair with
 [`timestomp`](timestomp.md) on the parent directory if directory mtime
 matters.
+
+**Required privileges:** unprivileged (caller's write rights on `path`).
+
+**Platform:** cross-platform.
 
 ## Examples
 

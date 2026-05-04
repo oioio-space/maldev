@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/inject
-last_reviewed: 2026-04-27
-reflects_commit: 4798780
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # Section mapping injection
@@ -99,6 +99,10 @@ mapping persists until the target process exits.
 **OPSEC:** **no `WriteProcessMemory`**. The remaining tells are the
 section creation, the cross-process map, and the final
 `NtCreateThreadEx`.
+
+**Required privileges:** medium-IL for same-user cross-process targets;
+admin to cross security boundaries (`PROCESS_DUP_HANDLE |
+PROCESS_VM_OPERATION | PROCESS_CREATE_THREAD`).
 
 ## Examples
 

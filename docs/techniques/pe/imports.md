@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/pe/imports
 last_reviewed: 2026-05-04
-reflects_commit: c1f35d0
+reflects_commit: 3de532d
 ---
 
 # PE Import Table Analysis
@@ -62,6 +62,8 @@ verbatim; `Function` is the imported symbol name, or
 
 **Side effects:** pure data.
 
+**Required privileges:** unprivileged (pure data type).
+
 **Platform:** cross-platform.
 
 ### `List(pePath string) ([]Import, error)`
@@ -80,6 +82,8 @@ from file open or PE parse.
 **OPSEC:** read-only file access — exceedingly common, not a
 useful signal on its own.
 
+**Required privileges:** unprivileged (read access on `pePath`).
+
 **Platform:** cross-platform.
 
 ### `ListByDLL(pePath, dllName string) ([]Import, error)`
@@ -96,6 +100,8 @@ to match (e.g. `"ntdll.dll"`).
 **Returns:** filtered slice; error as `List`.
 
 **Side effects:** reads `pePath`.
+
+**Required privileges:** unprivileged (read access on `pePath`).
 
 **Platform:** cross-platform.
 
@@ -115,6 +121,8 @@ import-directory walk.
 **Side effects:** none.
 
 **OPSEC:** silent — no file system access.
+
+**Required privileges:** unprivileged (in-memory parse).
 
 **Platform:** cross-platform.
 

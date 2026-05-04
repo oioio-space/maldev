@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/cleanup/memory
-last_reviewed: 2026-04-27
-reflects_commit: 07ced18
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # Secure memory cleanup
@@ -75,6 +75,10 @@ Overwrite `b` with zeros via `clear`.
 
 **OPSEC:** invisible to user-mode hooks. Kernel ETW sees nothing.
 
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform.
+
 ### `WipeAndFree(addr uintptr, size uint32) error` (Windows-only)
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/memory#WipeAndFree)
@@ -91,6 +95,10 @@ Reading `addr` afterwards faults.
 
 **OPSEC:** standard `VirtualProtect` + `VirtualFree` — high-volume
 legitimate calls.
+
+**Required privileges:** unprivileged (caller's own address space).
+
+**Platform:** Windows-only.
 
 ### `DoSecret(f func())`
 
@@ -111,6 +119,10 @@ is destroyed.
 
 **OPSEC:** invisible to user-mode hooks; the runtime erasure happens
 inside the Go runtime.
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform.
 
 ## Examples
 

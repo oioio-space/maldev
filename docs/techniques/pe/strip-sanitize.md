@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/pe/strip
 last_reviewed: 2026-05-04
-reflects_commit: c1f35d0
+reflects_commit: 3de532d
 ---
 
 # PE Sanitization (Go-toolchain scrub)
@@ -71,6 +71,8 @@ One-shot scrub. Apply `SetTimestamp` (random recent epoch),
 **OPSEC:** silent at emission; the file write that lands the
 sanitised bytes is the detectable phase.
 
+**Required privileges:** unprivileged (pure byte manipulation).
+
 **Platform:** cross-platform.
 
 ### `SetTimestamp(peData []byte, t time.Time) []byte`
@@ -91,6 +93,8 @@ timestamp.
 release window — a 1980 timestamp on a "Microsoft" binary is its
 own signal.
 
+**Required privileges:** unprivileged (pure byte manipulation).
+
 **Platform:** cross-platform.
 
 ### `WipePclntab(peData []byte) []byte`
@@ -107,6 +111,8 @@ Defeats redress, GoReSym, and IDA `go_parser` symbol recovery.
 zeroed.
 
 **Side effects:** none.
+
+**Required privileges:** unprivileged (pure byte manipulation).
 
 **Platform:** cross-platform.
 
@@ -129,6 +135,8 @@ rewritten.
 **OPSEC:** rename targets should match canonical Microsoft
 section names (`.rdata`, `.rsrc`, `.data`) so the output blends
 with non-Go binaries.
+
+**Required privileges:** unprivileged (pure byte manipulation).
 
 **Platform:** cross-platform.
 

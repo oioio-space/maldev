@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/cleanup/service
-last_reviewed: 2026-04-27
-reflects_commit: 07ced18
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # Hide Windows services via DACL
@@ -95,11 +95,23 @@ Apply the restrictive DACL to `name`.
 **Side effects:** rewrites the service security descriptor. Reversible
 via `UnHideService`.
 
+**OPSEC:** Security event 4670 (DACL change) when object-access auditing is on; `SC_SDSET` adds an `sc.exe` child process.
+
+**Required privileges:** admin (`WRITE_DAC` on the service object).
+
+**Platform:** Windows-only.
+
 ### `UnHideService(mode Mode, host, name string) (string, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/service#UnHideService)
 
 Restore the default DACL on `name`.
+
+**OPSEC:** another DACL change — symmetrical to `HideService`.
+
+**Required privileges:** admin.
+
+**Platform:** Windows-only.
 
 ## Examples
 

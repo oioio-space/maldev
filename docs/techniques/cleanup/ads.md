@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/cleanup/ads
-last_reviewed: 2026-04-29
-reflects_commit: 4d55e88
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # NTFS Alternate Data Streams
@@ -66,6 +66,12 @@ NTFS" when the volume doesn't support ADS.
 
 **Side effects:** stream is created if absent, replaced if present.
 
+**OPSEC:** `CreateFileW` with a colon-suffix path is a high-signal artefact for any EDR that aggregates file-IO events.
+
+**Required privileges:** unprivileged (caller's write rights on `path`).
+
+**Platform:** Windows-only (NTFS).
+
 ### `WriteVia(creator stealthopen.Creator, path, stream string, data []byte) error`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/ads#WriteVia)
@@ -77,11 +83,23 @@ NTFS, encryption, or any other write primitive on top of the ADS
 landing. Internally calls `stealthopen.WriteAll` with the
 `<path>:<stream>` composite path.
 
+**OPSEC:** Creator route can mask the colon-suffix open from path-hooking EDR, depending on the supplied primitive.
+
+**Required privileges:** unprivileged (caller's write rights on `path`).
+
+**Platform:** Windows-only (NTFS).
+
 ### `Read(path, stream string) ([]byte, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/ads#Read)
 
 Read the entire named stream into memory.
+
+**OPSEC:** path-based open with colon-suffix is visible to file-IO hooking; pair with [`ReadVia`](#readviaopener-stealthopenopener-path-stream-string-byte-error) for stealthier reads.
+
+**Required privileges:** unprivileged (caller's read rights on `path`).
+
+**Platform:** Windows-only (NTFS).
 
 ### `ReadVia(opener stealthopen.Opener, path, stream string) ([]byte, error)`
 
@@ -101,6 +119,10 @@ plain `os.Open` on the composite `<path>:<stream>` (identical to
 > through `NtCreateFile` with the composite path (FILE_OBJECT
 > resolution) rather than Object-ID resolution.
 
+**Required privileges:** unprivileged (caller's read rights on `path`).
+
+**Platform:** Windows-only (NTFS).
+
 ### `List(path string) ([]string, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/ads#List)
@@ -108,11 +130,21 @@ plain `os.Open` on the composite `<path>:<stream>` (identical to
 Enumerate all stream names attached to `path` (excluding the default
 unnamed stream).
 
+**OPSEC:** `NtQueryInformationFile(FileStreamInformation)` is a known ADS-discovery primitive — uncommon outside forensic tooling.
+
+**Required privileges:** unprivileged (caller's read rights on `path`).
+
+**Platform:** Windows-only (NTFS).
+
 ### `Delete(path, stream string) error`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/ads#Delete)
 
 Remove the named stream. The base file remains.
+
+**Required privileges:** unprivileged (caller's write rights on `path`).
+
+**Platform:** Windows-only (NTFS).
 
 ## Examples
 

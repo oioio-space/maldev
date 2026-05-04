@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/pe/morph
 last_reviewed: 2026-05-04
-reflects_commit: c1f35d0
+reflects_commit: 3de532d
 ---
 
 # PE Morphing (UPX section rename)
@@ -71,6 +71,8 @@ input.
 **OPSEC:** silent at emission; the file write that lands the
 morphed bytes is the detectable phase.
 
+**Required privileges:** unprivileged (pure byte manipulation).
+
 **Platform:** cross-platform.
 
 ### `UPXFix(peData []byte) ([]byte, error)`
@@ -86,6 +88,8 @@ Useful for debugging morphed implants and round-trip tests.
 **Returns:** restored bytes; error on malformed PE input.
 
 **Side effects:** none.
+
+**Required privileges:** unprivileged (pure byte manipulation).
 
 **Platform:** cross-platform.
 

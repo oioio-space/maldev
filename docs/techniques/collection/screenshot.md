@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/collection/screenshot
-last_reviewed: 2026-04-27
-reflects_commit: b75160a
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # Screen capture
@@ -87,6 +87,10 @@ Capture the entire virtual desktop (all monitors combined) as a PNG.
 **OPSEC:** `GetDC(0)` + `BitBlt` are high-volume legitimate APIs used by
 screen-sharing, video-capture, and accessibility software.
 
+**Required privileges:** unprivileged; requires an interactive desktop
+session (Session 0 / SYSTEM service has no desktop and `GetDC(0)` returns
+NULL).
+
 ### `CaptureRect(x, y, width, height int) ([]byte, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/collection/screenshot#CaptureRect)
@@ -102,12 +106,17 @@ Capture a specific rectangle of the virtual desktop as a PNG.
 - `error` — `ErrInvalidRect` if dimensions are ≤ 0; `ErrCapture` on GDI
   failure.
 
+**Required privileges:** unprivileged; requires an interactive desktop
+session.
+
 ### `DisplayCount() int`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/collection/screenshot#DisplayCount)
 
 Return the number of currently attached monitors via `EnumDisplayMonitors`.
 Returns 0 if enumeration fails.
+
+**Required privileges:** unprivileged.
 
 ### `DisplayBounds(index int) image.Rectangle`
 
@@ -116,6 +125,8 @@ Returns 0 if enumeration fails.
 Return the bounding rectangle of monitor `index` (zero-based) in
 virtual-desktop coordinates. Returns `image.Rectangle{}` if `index` is out
 of range.
+
+**Required privileges:** unprivileged.
 
 ### `CaptureDisplay(index int) ([]byte, error)`
 
@@ -130,6 +141,9 @@ Capture a single monitor by index as a PNG.
 - `[]byte` — PNG of the monitor.
 - `error` — `ErrDisplayIndex` if `index ≥ DisplayCount()`; `ErrCapture` on
   GDI failure.
+
+**Required privileges:** unprivileged; requires an interactive desktop
+session.
 
 ## Examples
 

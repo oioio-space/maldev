@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/inject
-last_reviewed: 2026-04-27
-reflects_commit: 4798780
+last_reviewed: 2026-05-04
+reflects_commit: 3de532d
 ---
 
 # Module stomping
@@ -87,6 +87,9 @@ unmap helper — the region persists until process exit.
 **OPSEC:** the strongest signal is the `VirtualProtect` flip on a
 loaded image's `.text`; mid-tier EDRs catch it. Memory scanners
 *by themselves* are defeated.
+
+**Required privileges:** unprivileged (own-process `LoadLibraryEx` +
+`VirtualProtect`).
 
 > [!CAUTION]
 > Pick a DLL the implant does not load anywhere else (no other code
