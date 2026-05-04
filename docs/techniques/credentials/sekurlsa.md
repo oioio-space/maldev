@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-29
-reflects_commit: 4d55e88
+last_reviewed: 2026-05-04
+reflects_commit: 0dfad37
 ---
 
 # LSASS Parsing — In-Process Credential Extraction
@@ -295,10 +295,98 @@ defer lsassdump.Reprotect(tok, &d)
 
 ## API Reference
 
-See [`docs/credentials.md`](README.md) for the inline API
-reference. Sentinel errors (`ErrNotMinidump`, `ErrUnsupportedBuild`,
-`ErrLSASRVNotFound`, `ErrMSV1_0NotFound`, `ErrKeyExtractFailed`) are
-all `errors.Is`-dispatchable.
+Package: `github.com/oioio-space/maldev/credentials/sekurlsa`. The
+parser consumes a MINIDUMP blob produced by `credentials/lsassdump`
+(or any other lsass.exe dump source — mimikatz, procdump, comsvcs.dll
+MiniDump). All decryption is offline and cross-platform.
+
+### Types
+
+#### `type Architecture int` + 3 constants + `(Architecture).String() string`
+
+- godoc: closed-set enum for the LSASS dump's processor architecture.
+- Description: `ArchUnknown = iota` (0), `ArchX86` (1), `ArchX64` (2). v1 only ships x64 walkers — x86/WoW64 dumps return `(*Result, ErrUnsupportedBuild)` with the partial Result populated for diagnostics. `String()` returns `"x86"`, `"x64"`, or `"unknown"`.
+- Side effects: pure data + pure switch.
+- OPSEC: silent.
+- Required privileges: none.
+- Platform: cross-platform.
+
+#### `type LogonType uint32` + 9 constants + `(LogonType).String() string`
+
+- godoc: mirrors the Windows `LOGON_TYPE` enum from `winnt.h`.
+- Description: constants `LogonTypeInteractive (2)`, `Network (3)`, `Batch (4)`, `Service (5)`, `Unlock (7)`, `NetworkClearText (8)`, `NewCredentials (9)`, `RemoteInteractive (10)`, `CachedInteractive (11)`, plus `Unknown (0)`. `String()` returns the LOGON32_LOGON_* friendly name (matches Security event log analyst-facing labels), with `LogonType(N)` fallback for unknown values.
+- Side effects: pure data + pure switch.
+- OPSEC: silent.
+- Required privileges: none.
+- Platform: cross-platform.
+
+#### `type Credential interface { AuthPackage() string }`
+
+- godoc: typed payload for a single logon session. Every shipped provider implements it (MSV / Wdigest / DPAPI / Kerberos / TSPkg / CredMan / CloudAP / LiveSSP).
+- Description: `AuthPackage()` returns the auth-package name string. The interface also has an unexported `wipe()` method — only the sekurlsa package can add Credential implementations, which keeps the wipe contract enforceable at compile time without exposing it externally. Pointer-receiver only: every concrete `Credential` is constructed as `&XxxCredential{...}` because `wipe()` mutates buffers in place.
+- Side effects: pure interface.
+- OPSEC: the per-credential `wipe()` zeroizes hash bytes / plaintext / PRT / master keys before the Result is GC'd — call `Result.Wipe()` to invoke it across every session.
+- Required privileges: none.
+- Platform: cross-platform.
+
+#### `type LogonSession struct`
+
+- godoc: aggregates everything the parser knows about a single active session.
+- Description: fields — `LUID uint64`, `LogonType`, `UserName string`, `LogonDomain string`, `LogonServer string`, `LogonTime time.Time`, `SID string`, `Credentials []Credential`, `MSVNodeVA uint64` (source-process VA of the MSV LIST_ENTRY node — zero on non-minidump-backed paths). The schema mirrors what pypykatz emits as JSON so external tools consume our output via the same shape.
+- Side effects: pure data.
+- OPSEC: `Credentials` may carry plaintext if Wdigest was enabled (Win7-) or the host is an RDP gateway (TSPkg) — handle accordingly.
+- Required privileges: none (data).
+- Platform: cross-platform.
+
+#### `type Result struct` + `(*Result).Wipe()`
+
+- godoc: aggregate parse output — `BuildNumber uint32`, `Architecture`, `Modules []Module`, `Sessions []LogonSession`, `Warnings []string`.
+- Description: `Warnings` accumulates non-fatal per-session decryption failures so a single corrupt session does not abort the whole walk. The unexported `lsaKey *lsaKey` field is retained so the in-package PTH chantier can re-encrypt mutated credential blobs with the same keys — `Wipe` does NOT zeroize the keys (the cipher.Block objects hold them internally and are non-mutable). `Wipe()` overwrites every Credential's sensitive byte buffers with zeros. Nil-receiver safe.
+- Parameters: `Wipe` takes the receiver.
+- Returns: nothing.
+- Side effects: zeroizes all hash/plaintext/PRT/master-key bytes inside every Credential of every Session.
+- OPSEC: callers holding a Result longer than the immediate decode-and-format cycle should `defer r.Wipe()` to limit post-extract in-memory exposure window.
+- Required privileges: none.
+- Platform: cross-platform.
+
+#### Sentinel errors
+
+```go
+ErrNotMinidump        // dump signature is not "MDMP" — caller fed a non-dump blob
+ErrUnsupportedBuild   // BuildNumber has no registered Template — partial Result returned for diagnostics
+ErrLSASRVNotFound     // lsasrv.dll module not present in the dump's MODULE_LIST_STREAM
+ErrMSV1_0NotFound     // msv1_0.dll module not present
+ErrKeyExtractFailed   // lsasrv h3DesKey/hAesKey extraction failed — keys are mandatory for any decryption
+```
+
+All `errors.Is`-dispatchable. `ErrUnsupportedBuild` is the
+"register a template and retry" signal — the partial Result still
+carries `BuildNumber + Architecture + Modules` so the caller knows
+what to register.
+
+### Producers
+
+#### `Parse(reader io.ReaderAt, size int64) (*Result, error)`
+
+- godoc: extract credentials from a MINIDUMP blob.
+- Description: reads MDMP header + stream directory, validates the dump signature, walks `SystemInfoStream` for build/arch, walks `ModuleListStream` for lsasrv/msv1_0/etc bases, then for each registered template walks the AVL trees (or LIST_ENTRY chains) inside lsasrv/msv1_0/wdigest/etc. and decodes per-session credentials. Decrypts via lsasrv's h3DesKey + hAesKey. Per-session decryption failures land in `Result.Warnings` rather than aborting.
+- Parameters: `reader` random-access reader over the dump bytes; `size` total dump length used to validate stream-descriptor offsets before dereferencing.
+- Returns: typed `*Result`. Successful x64 dump from a registered build returns `(*Result, nil)`. Unsupported build returns `(*Result-with-partial-info, ErrUnsupportedBuild)`. Non-MDMP blob returns `(nil, ErrNotMinidump)`.
+- Side effects: allocates per-session credential structs. No I/O beyond the reader.
+- OPSEC: completely offline — the parse runs anywhere with no network or kernel touch points. The OPSEC concern is **how the dump bytes were acquired** (see lsassdump.md).
+- Required privileges: none for the parse.
+- Platform: cross-platform — pure-Go pipeline analyses Windows dumps from a Linux/Mac analyst host.
+
+#### `ParseFile(path string, opener stealthopen.Opener) (*Result, error)`
+
+- godoc: convenience — open `path` (via the operator-supplied `stealthopen.Opener` if non-nil, else `os.Open`), `os.Stat` for the size, then `Parse`.
+- Description: nil opener falls back to `os.Open` (identical to `Parse` after a read). Non-nil routes through transactional NTFS, encrypted-file decryption, ADS sinks, or any operator-controlled read primitive. The opener returns an `io.ReaderAt` so streaming through arbitrary back-ends is supported.
+- Parameters: `path` to the dump on disk; `opener` strategy (nil = standard).
+- Returns: same shape as `Parse`.
+- Side effects: opens + reads `path`. The opener strategy controls everything beyond that.
+- OPSEC: read-only file access. The OPSEC concerns belong to the chosen `Opener` strategy — `stealthopen.md` enumerates the trade-offs per strategy.
+- Required privileges: read on `path`.
+- Platform: cross-platform.
 
 ## See also
 
