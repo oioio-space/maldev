@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/c2/multicat
-last_reviewed: 2026-04-27
-reflects_commit: 36484a4
+last_reviewed: 2026-05-04
+reflects_commit: 31f8854
 ---
 
 # Multicat — multi-session listener
@@ -55,36 +55,98 @@ sequenceDiagram
 
 ## API Reference
 
+Package: `github.com/oioio-space/maldev/c2/multicat`. The `Manager`
+is the multi-session accept loop. Sessions are opaque — consumers
+identify them via `SessionMetadata.ID` (UUID-style string assigned
+at accept time).
+
 ### `multicat.New() *Manager`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/multicat#New)
 
 Construct an empty manager.
 
+**Returns:** `*Manager` (never nil).
+
+**Side effects:** none until `Listen` runs.
+
+**OPSEC:** silent.
+
+**Required privileges:** none.
+
+**Platform:** cross-platform.
+
 ### `(*Manager).Listen(ctx context.Context, ln transport.Listener) error`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/multicat#Manager.Listen)
 
-Accept loop. Blocks until `ctx` is cancelled or the listener errors.
+Accept loop — every `ln.Accept` returns a new session, fed to
+`Events()` consumers as `EventOpened`.
+
+**Parameters:** `ctx` for cancellation; `ln` any
+`transport.Listener` (TCP / TLS / namedpipe).
+
+**Returns:** `nil` on `ctx.Done`; the listener's error otherwise.
+
+**Side effects:** runs an accept-loop goroutine per call. Each
+accepted connection spawns a per-session reader goroutine.
+
+**OPSEC:** the listener choice determines the wire footprint. The
+manager itself is silent.
+
+**Required privileges:** as the listener.
+
+**Platform:** cross-platform.
 
 ### `(*Manager).Events() <-chan Event`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/multicat#Manager.Events)
 
-Returns the lifecycle-event channel. Close-safe.
+Returns the lifecycle-event channel. Close-safe — multiple
+consumers can range over the same channel.
 
-### `multicat.Session` / `multicat.SessionMetadata`
+**Returns:** `<-chan Event` carrying `{Type EventType, Session *Session}`
+records as agents connect / disconnect.
+
+**Side effects:** the channel is closed only when the manager is
+shut down; consumers should expect arbitrarily many events.
+
+**OPSEC:** silent (in-process channel).
+
+**Required privileges:** none.
+
+**Platform:** cross-platform.
+
+### `type multicat.Session struct` + `type multicat.SessionMetadata struct`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/multicat#Session)
 
-`Session` holds the connection plus a `SessionMetadata` (`ID`,
-`Hostname`, `RemoteAddr`).
+`Session` carries the underlying `transport.Transport` connection
+plus a `SessionMetadata{ID string, Hostname string, RemoteAddr string}`.
+`Hostname` is populated from the BANNER agent handshake when
+present (see Composed example) — otherwise empty.
 
-### `multicat.EventType`
+**Side effects:** pure data.
+
+**OPSEC:** the `Hostname` field surfaces the agent's self-reported
+hostname — operator's choice whether to log it.
+
+**Required privileges:** none.
+
+**Platform:** cross-platform.
+
+### `type multicat.EventType` + 2 constants
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/multicat#EventType)
 
-Enum: `EventOpened`, `EventClosed`.
+Closed-set enum — `EventOpened` (new agent connected), `EventClosed`
+(agent disconnected or the manager closed the session). Channel
+consumers branch on this to update operator-side UI / per-session
+state.
+
+**Side effects:** pure data.
+
+**Platform:** cross-platform.
 
 ## Examples
 

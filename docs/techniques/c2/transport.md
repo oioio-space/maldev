@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/c2/transport
-last_reviewed: 2026-04-27
-reflects_commit: 36484a4
+last_reviewed: 2026-05-04
+reflects_commit: 31f8854
 ---
 
 # Transport (TCP / TLS / uTLS)
@@ -89,44 +89,130 @@ TLS-inspection CA is in the system trust store.
 
 ## API Reference
 
-### `transport.Transport`
+Packages: `github.com/oioio-space/maldev/c2/transport` (TCP / TLS /
+uTLS / malleable HTTP) + `github.com/oioio-space/maldev/c2/cert`
+(self-signed cert + pin generation). All transports implement the
+same five-method `Transport` contract.
+
+### `type transport.Transport interface { Connect(ctx); Read; Write; Close; RemoteAddr }`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport#Transport)
 
-The five-method interface every transport implements.
+The five-method interface every transport implements. `Read` /
+`Write` / `Close` follow `net.Conn` semantics; `Connect(ctx)` is
+the dial step that is decoupled from construction so the operator
+can apply timeouts via `ctx`; `RemoteAddr() string` returns the
+peer address (post-`Connect`).
+
+**Side effects:** implementation-defined.
+
+**OPSEC:** the contract is wire-protocol-agnostic; the OPSEC
+profile lives with the chosen concrete transport.
+
+**Required privileges:** outbound network connectivity.
+
+**Platform:** cross-platform.
 
 ### `transport.New(cfg *Config) (Transport, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport#New)
 
-Factory. Picks TCP or TLS based on `Config.UseTLS`. uTLS and
-malleable variants have dedicated constructors.
+Factory.
+
+**Parameters:** `cfg.Address` host:port; `cfg.Timeout` per-connect;
+`cfg.UseTLS` selects TLS vs raw TCP; `cfg.PinSHA256` hex string of
+the leaf cert hash for pinning.
+
+**Returns:** `*TCP` or `*TLS` (typed as `Transport`); error from
+config validation.
+
+**Side effects:** none at construction.
+
+**OPSEC:** raw TCP carries no application-layer cover — visible
+as a long-lived connection on a non-standard port. TLS at minimum.
+
+**Required privileges:** none.
+
+**Platform:** cross-platform.
 
 ### `transport.NewTCP(address string, timeout time.Duration) *TCP`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport#NewTCP)
 
-Raw TCP transport with `Connect` dial timeout.
+Raw TCP transport.
+
+**Parameters:** `address` `host:port`; `timeout` for `Connect`.
+
+**Returns:** `*TCP` (implements `Transport`).
+
+**Side effects:** none at construction.
+
+**OPSEC:** as `New` for raw TCP.
+
+**Platform:** cross-platform.
 
 ### `transport.NewTLS(address, timeout, certPath, keyPath string, opts ...TLSOption) *TLS`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport#NewTLS)
 
-TLS over TCP. Optional `TLSOption`s set client cert, skip-verify, and
-SHA-256 server-cert pin.
+TLS over TCP. Operator side passes `certPath` + `keyPath` (server
+cert); client side passes `""` for both and uses `WithPin(...)` for
+cert pinning.
+
+**Parameters:** `address` host:port; `timeout` for `Connect`;
+`certPath`/`keyPath` server cert + key (server side); `opts` —
+`WithClientCert(...)`, `WithSkipVerify(...)`, `WithPin(sha256hex)`.
+
+**Returns:** `*TLS` (implements `Transport`).
+
+**Side effects:** loads cert + key files at construction (server
+side).
+
+**OPSEC:** the JA3 fingerprint of Go's `crypto/tls` is well-known —
+use `NewUTLS` instead for traffic that should blend with browser
+TLS.
+
+**Required privileges:** none beyond file read on `certPath`/`keyPath`.
+
+**Platform:** cross-platform.
 
 ### `transport.NewUTLS(address string, timeout time.Duration, opts ...UTLSOption) *UTLS`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport#NewUTLS)
 
-uTLS over TCP. Combines a JA3 profile, an SNI, and an optional pin.
+uTLS over TCP — sends a ClientHello mimicking a chosen browser
+fingerprint.
 
-### `transport.JA3Profile` and `WithJA3Profile`
+**Parameters:** `address`, `timeout`; `opts` —
+`WithJA3Profile(JA3Profile)`, `WithSNI(string)`,
+`WithUTLSFingerprint(sha256hex)` for pinning.
+
+**Returns:** `*UTLS` (implements `Transport`).
+
+**Side effects:** initialises the uTLS state at construction.
+
+**OPSEC:** the highest-blending TLS option in the package — pick a
+`JA3Profile` that matches the host's actual browser usage.
+
+**Required privileges:** none.
+
+**Platform:** cross-platform.
+
+### `type transport.JA3Profile` + `transport.WithJA3Profile(JA3Profile) UTLSOption`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport#JA3Profile)
 
-Enum picking which browser to mimic (`HelloChrome_Auto`,
-`HelloFirefox_Auto`, `HelloIOS_Auto`, `HelloRandomized`).
+Enum: `HelloChrome_Auto`, `HelloFirefox_Auto`, `HelloIOS_Auto`,
+`HelloRandomized`. Matches the underlying uTLS library's spec set.
+
+**Side effects:** pure data; applied during the uTLS handshake.
+
+**OPSEC:** `HelloChrome_Auto` is the safest default on a typical
+office network. `HelloRandomized` defeats fingerprinting heuristics
+but stands out as anomalous to JA3-collection telemetry — choose
+based on the target environment.
+
+**Platform:** cross-platform.
 
 ### `transport.NewTCPListener(addr string) (Listener, error)`
 
@@ -134,19 +220,66 @@ Enum picking which browser to mimic (`HelloChrome_Auto`,
 
 Operator-side listener factory. Pair with `c2/multicat`.
 
-### `cert.Generate(cfg *Config, certPath, keyPath string) error`
+**Parameters:** `addr` `host:port` to bind.
+
+**Returns:** `Listener` (`Accept(ctx) (net.Conn, error)` shape);
+error from `net.Listen("tcp", addr)`.
+
+**Side effects:** binds + listens at construction.
+
+**OPSEC:** operator-side concern only.
+
+**Required privileges:** typically unprivileged for ports ≥ 1024;
+`CAP_NET_BIND_SERVICE` / admin for ports ≤ 1023.
+
+**Platform:** cross-platform.
+
+### Package `c2/cert`
+
+#### `cert.Generate(cfg *Config, certPath, keyPath string) error`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/cert#Generate)
 
 Generate a self-signed certificate + RSA private key in PEM at the
-given paths.
+given paths. `cfg` shapes the cert subject (`CommonName`,
+`Organization`, `ValidDays`, …).
 
-### `cert.Fingerprint(certPath string) (string, error)`
+**Parameters:** `cfg` cert config; `certPath`/`keyPath` output
+paths.
+
+**Returns:** error from RSA generation, x509 marshal, or file write.
+
+**Side effects:** writes two files (cert PEM, key PEM, mode 0600).
+
+**OPSEC:** the cert subject + issuer fields are observable in TLS
+handshakes — generate fields that match the apparent identity of
+the C2 endpoint (don't leave defaults like `O=Acme Co`).
+
+**Required privileges:** write on the output directory.
+
+**Platform:** cross-platform.
+
+#### `cert.Fingerprint(certPath string) (string, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/cert#Fingerprint)
 
-Compute SHA-256 hex digest of the leaf certificate. Hard-code the
-output into the implant's `PinSHA256`.
+Compute SHA-256 hex digest of the leaf certificate.
+
+**Parameters:** `certPath` PEM-encoded cert.
+
+**Returns:** lowercase hex string (64 chars); error from file read
+/ PEM decode / x509 parse.
+
+**Side effects:** reads `certPath`.
+
+**OPSEC:** silent. Hard-code the output into the implant's
+`PinSHA256` so that even if the host's CA store is compromised
+(corp TLS inspection, attacker-installed root), the C2 connection
+fails closed.
+
+**Required privileges:** read on `certPath`.
+
+**Platform:** cross-platform.
 
 ## Examples
 

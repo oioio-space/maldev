@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/c2/shell
-last_reviewed: 2026-04-27
-reflects_commit: 36484a4
+last_reviewed: 2026-05-04
+reflects_commit: 31f8854
 ---
 
 # Reverse shell
@@ -85,33 +85,84 @@ sequenceDiagram
 
 ## API Reference
 
+Package: `github.com/oioio-space/maldev/c2/shell`. The `Shell` type
+owns the connect-pipe-reconnect loop. PPID-spoofing primitives are
+covered in detail at [`evasion/ppid-spoofing.md`](../evasion/ppid-spoofing.md);
+this page focuses on the `Shell` lifecycle.
+
 ### `shell.New(trans transport.Transport, cfg *Config) *Shell`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell#New)
 
-Construct a `Shell` over the supplied transport. `cfg == nil`
-selects `DefaultConfig()`.
+Construct a `Shell` over the supplied transport.
+
+**Parameters:** `trans` any `c2/transport.Transport` (TCP / TLS /
+uTLS / namedpipe / malleable HTTP); `cfg` configuration (nil =
+`DefaultConfig()`).
+
+**Returns:** `*Shell` (never nil).
+
+**Side effects:** none at construction.
+
+**OPSEC:** as the chosen transport.
+
+**Required privileges:** none for construction.
+
+**Platform:** cross-platform.
 
 ### `shell.DefaultConfig() *Config`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell#DefaultConfig)
 
-Defaults: 5 reconnect attempts, 3 s back-off, no defence patching,
-PTY enabled on Unix.
+Returns a populated `*Config` with `MaxRetries=5`, `Backoff=3*time.Second`,
+no defence patching, PTY enabled on Unix.
+
+**Returns:** `*Config` (caller may mutate before passing to `New`).
+
+**Side effects:** none.
+
+**Platform:** cross-platform.
 
 ### `(*Shell).Start(ctx context.Context) error`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell#Shell.Start)
 
-Run the connect / pipe / reconnect loop. Returns when `ctx` is
-cancelled, `Stop` is called, or `MaxRetries` is exceeded.
+Run the connect / pipe / reconnect loop.
+
+**Parameters:** `ctx` for cancellation.
+
+**Returns:** `nil` on `ctx.Done` or `Stop`; the last reconnect
+error when `MaxRetries` is exceeded; transport errors on hard
+failure.
+
+**Side effects:** opens transport connections, spawns interpreter
+child processes (`cmd.exe` / `/bin/sh`), pipes stdio between them.
+
+**OPSEC:** spawning `cmd.exe` is the highest-fidelity Sysmon Event
+1 trigger when paired with a non-interactive parent. Pair with
+`PatchDefenses` + PPID spoofing.
+
+**Required privileges:** unprivileged for same-user; depends on
+PPID spoof target if enabled.
+
+**Platform:** cross-platform.
 
 ### `(*Shell).Stop() error`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell#Shell.Stop)
 
-Request graceful shutdown. Pair with `Wait` to block until the
-loop exits.
+Request graceful shutdown.
+
+**Returns:** `nil` after the loop transitions to "stopping"; idempotent.
+
+**Side effects:** signals the loop to exit on next iteration; kills
+the live interpreter child if any.
+
+**OPSEC:** silent.
+
+**Required privileges:** none.
+
+**Platform:** cross-platform.
 
 ### `(*Shell).Wait()`
 
@@ -119,28 +170,66 @@ loop exits.
 
 Block until `Start` returns.
 
+**Returns:** nothing — the `Start` error is captured at `Start`'s
+return site.
+
+**Side effects:** none.
+
+**Platform:** cross-platform.
+
 ### `(*Shell).IsRunning() bool` / `(*Shell).CurrentPhase() Phase`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell#Shell.CurrentPhase)
 
 State inspection helpers.
 
-### `shell.PatchDefenses() error` (Windows)
+**Returns:** `IsRunning` is `true` while the loop is alive (between
+`Start` invocation and `Stop`/cancellation); `CurrentPhase` returns
+one of the `Phase` constants (`PhaseConnecting` / `PhasePiping` /
+`PhaseBackoff` / `PhaseStopped`).
+
+**Side effects:** none (atomic loads).
+
+**Platform:** cross-platform.
+
+### `shell.PatchDefenses() error`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell#PatchDefenses)
 
-Apply the AMSI / ETW / CLM / WLDP / PS history patches in one call.
-Idempotent. Use **before** `Start` so the spawned `cmd.exe` /
-`powershell.exe` inherits the patched ntdll.
+Apply the AMSI + ETW + CLM (Constrained Language Mode) + WLDP
+(Windows Lockdown Policy) + PowerShell-history patches in one call.
+Idempotent.
 
-### `shell.NewPPIDSpoofer()` / `(*PPIDSpoofer).SysProcAttr()` (Windows)
+**Parameters:** none.
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell#PPIDSpoofer)
+**Returns:** error from any of the underlying patches (typically
+`ERROR_NOACCESS` if the in-memory write trips a hardware DEP / CET
+combination).
 
-Build a `*syscall.SysProcAttr` whose `ParentProcess` field points at
-a chosen target (default: `explorer.exe`, `services.exe`,
-`RuntimeBroker.exe`). Apply on the `exec.Cmd` the shell spawns to
-make process-tree telemetry show the spoofed parent.
+**Side effects:** memory writes to the calling process's
+`amsi.dll`, `ntdll.dll`, and PowerShell-related modules. Use
+**before** `Start` so the spawned interpreter child inherits the
+patched modules.
+
+**OPSEC:** the AMSI / ETW patches are heavily fingerprinted by EDR
+(specific byte sequences). Pair with `evasion/preset.Stealth`
+which goes further (full ntdll unhook).
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows.
+
+### PPID spoofing helpers (re-exported from `c2/shell`)
+
+The PPID-spoofing surface (`NewPPIDSpoofer`, `NewPPIDSpooferWithTargets`,
+`(*PPIDSpoofer).FindTargetProcess` / `TargetPID` / `SysProcAttr`,
+`ParentPID`, `IsAdmin`) lives in this same `c2/shell` package but
+is documented in detail at [`evasion/ppid-spoofing.md`](../evasion/ppid-spoofing.md).
+
+Apply the resulting `*syscall.SysProcAttr` on the `exec.Cmd` the
+shell spawns to make process-tree telemetry show the spoofed parent.
+
+**Platform:** Windows.
 
 ## Examples
 

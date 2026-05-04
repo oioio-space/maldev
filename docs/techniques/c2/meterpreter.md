@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/c2/meterpreter
-last_reviewed: 2026-04-27
-reflects_commit: 36484a4
+last_reviewed: 2026-05-04
+reflects_commit: 31f8854
 ---
 
 # Meterpreter stager
@@ -66,13 +66,27 @@ sequenceDiagram
 
 ## API Reference
 
-### `meterpreter.Transport`
+Package: `github.com/oioio-space/maldev/c2/meterpreter`. Stager
+that fetches and executes the second-stage `metsrv` payload from a
+Metasploit handler. Three transports — TCP raw, HTTP poll, HTTPS poll.
+
+### `type meterpreter.Transport int`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/meterpreter#Transport)
 
-Enum: `TCP`, `HTTP`, `HTTPS`. Selects the wire protocol.
+Closed-set enum: `TCP`, `HTTP`, `HTTPS`. Selects the wire protocol
+between the stager and the Metasploit handler.
 
-### `meterpreter.Config`
+**Side effects:** pure data.
+
+**OPSEC:** TCP raw triggers the most-fingerprinted Cobalt Strike /
+Meterpreter network signatures. HTTPS with a credible cert profile
+is the standard "blend with web traffic" choice. HTTP is mostly
+useful in lab / over-Tor setups.
+
+**Platform:** cross-platform.
+
+### `type meterpreter.Config struct`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/meterpreter#Config)
 
@@ -82,10 +96,22 @@ type Config struct {
     Host        string
     Port        string
     Timeout     time.Duration
-    TLSInsecure bool          // HTTPS only
-    Injector    inject.Injector // optional, Windows-only
+    TLSInsecure bool            // HTTPS only — disables cert validation
+    Injector    inject.Injector // optional, Windows-only — overrides default executor
 }
 ```
+
+**Side effects:** pure data.
+
+**OPSEC:** `TLSInsecure: true` against a real handler triggers
+TLS-anomaly rules in any monitored environment (no SNI mismatch
+check, no cert-pin). Use only for lab Kali or with known
+self-signed handler certificates.
+
+**Required privileges:** depend on `Injector` choice. Default
+executor (no Injector) runs the stage in the calling goroutine.
+
+**Platform:** cross-platform; `Injector` field is Windows-only.
 
 ### `meterpreter.NewStager(cfg *Config) *Stager`
 
@@ -93,13 +119,47 @@ type Config struct {
 
 Construct a stager from the config.
 
+**Parameters:** `cfg` non-nil; required fields are `Transport` +
+`Host` + `Port`.
+
+**Returns:** `*Stager` (never nil).
+
+**Side effects:** none until `Stage` runs.
+
+**OPSEC:** silent (no I/O at construction).
+
+**Required privileges:** none for construction.
+
+**Platform:** cross-platform.
+
 ### `(*Stager).Stage(ctx context.Context) error`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/meterpreter#Stager.Stage)
 
-Fetch and execute the stage. Blocks until the connection closes (or
-the spawned thread exits, depending on the executor). On Linux,
-returns an error if `cfg.Injector != nil`.
+Fetch and execute the stage.
+
+**Parameters:** `ctx` for cancellation of the fetch + connection.
+
+**Returns:** error from connect / fetch / inject paths. On Linux,
+returns `ErrInjectorOnLinux` if `cfg.Injector != nil` (the
+Injector type is Windows-only).
+
+**Side effects:** opens a network connection to `cfg.Host:cfg.Port`,
+downloads the metsrv stage (~750KB for x64 reverse_https), then
+either spawns a thread on the bytes (default executor) or routes
+through `cfg.Injector` (Windows; can target a remote PID, use
+indirect syscalls, etc.).
+
+**OPSEC:** the stage download is the loudest network signal — any
+Suricata / Snort ruleset with metsrv signatures alerts on the
+fetch. The `Injector` choice determines the in-process footprint
+(see the executor's own OPSEC bullet).
+
+**Required privileges:** depend on the `Injector`. Default
+self-thread executor: unprivileged. Cross-process executor:
+typically `SeDebugPrivilege` for cross-session targets.
+
+**Platform:** cross-platform; `Injector` field Windows-only.
 
 ## Examples
 
