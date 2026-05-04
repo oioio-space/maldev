@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/recon/sandbox
-last_reviewed: 2026-04-27
-reflects_commit: f31fca1
+last_reviewed: 2026-05-04
+reflects_commit: 7a8c466
 ---
 
 # Sandbox detection orchestrator
@@ -67,16 +67,251 @@ or relaxing.
 
 ## API Reference
 
-| Symbol | Description |
-|---|---|
-| [`type Config`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Config) | Per-dimension thresholds + enable flags |
-| [`DefaultConfig() Config`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#DefaultConfig) | Defender-baseline calibration |
-| [`type Checker`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker) | Orchestrator instance |
-| [`New(cfg) *Checker`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#New) | Build a checker |
-| `Checker.IsSandboxed(ctx) (bool, string, error)` | Run all enabled checks; first match wins (binary verdict) |
-| `Checker.CheckAll(ctx) []Result` | Run every check; return all results (per-check breakdown) |
-| [`Score(results []Result) int`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Score) | Aggregate `[]Result` into a 0..100 confidence score, capped at 100 |
-| [`Weights() map[string]int`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Weights) | Returns a copy of the per-check score weights for audit/tuning |
+### `type Config struct { ... }`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Config)
+
+Per-dimension thresholds + indicator lists. Fields:
+`MinDiskGB`, `MinRAMGB`, `MinCPUCores`, `BadUsernames`,
+`BadHostnames`, `BadProcesses`, `FakeDomain`, `DiskPath`,
+`MinProcesses`, `ConnectivityURL`, `RequestTimeout`,
+`EvasionTimeout`, `StopOnFirst`. A zero-value `Config` runs
+nothing useful — call `DefaultConfig()`.
+
+**Platform:** cross-platform.
+
+### `func DefaultConfig() Config`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#DefaultConfig)
+
+Returns the canonical defender-baseline configuration:
+2 cores / 4 GB RAM / 64 GB disk minimum, generic-analyst
+usernames + hostnames + analysis-tool process names,
+`MinProcesses=15`, `ConnectivityURL=https://www.google.com`,
+`RequestTimeout=5s`, `StopOnFirst=true`. `DiskPath` is `C:\`
+on Windows and `/` elsewhere.
+
+**Platform:** cross-platform.
+
+### `type Result struct { Name string; Detected bool; Detail string; Err error }`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Result)
+
+Per-check outcome emitted by `CheckAll`. `Name` matches one of
+the `Check*` constants.
+
+**Platform:** cross-platform.
+
+### `const Check*`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#CheckDebugger)
+
+Canonical check-name constants used as `Result.Name` keys and
+`Weights()` lookups: `CheckDebugger`, `CheckVM`, `CheckCPU`,
+`CheckRAM`, `CheckDisk`, `CheckUsername`, `CheckHostname`,
+`CheckDomain`, `CheckProcess`, `CheckProcessCount`,
+`CheckConnectivity`.
+
+**Platform:** cross-platform.
+
+### `func Score(results []Result) int`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Score)
+
+Aggregates `[]Result` into a single 0..100 confidence value
+using the package's per-check weight table. Total is capped at
+100; unknown `Result.Name` values contribute 0.
+
+**Returns:** integer in `[0, 100]`.
+
+**Platform:** cross-platform.
+
+### `func Weights() map[string]int`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Weights)
+
+Returns a copy of the per-check weight table for audit /
+tuning. Mutating the returned map is safe.
+
+**Platform:** cross-platform.
+
+### `type Checker`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker)
+
+Orchestrator wrapping a `Config`. All check methods are
+attached to `*Checker`.
+
+**Platform:** cross-platform (separate Windows / Linux
+implementations under build tags).
+
+### `func New(cfg Config) *Checker`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#New)
+
+Constructs a `Checker` bound to `cfg`.
+
+**Returns:** `*Checker`.
+
+**Platform:** cross-platform.
+
+### `func (c *Checker) IsDebuggerPresent() bool`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.IsDebuggerPresent)
+
+Re-exports
+[`antidebug.IsDebuggerPresent`](anti-analysis.md).
+
+**Platform:** cross-platform.
+
+### `func (c *Checker) IsRunningInVM() bool`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.IsRunningInVM)
+
+Re-exports
+[`antivm.IsRunningInVM`](anti-analysis.md).
+
+**Platform:** cross-platform.
+
+### `func (c *Checker) BusyWait()`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.BusyWait)
+
+Calls [`timing.BusyWait(c.cfg.EvasionTimeout)`](timing.md).
+
+**Platform:** cross-platform.
+
+### `func (c *Checker) RAMBytes() (uint64, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.RAMBytes)
+
+Total physical RAM in bytes (`GlobalMemoryStatusEx` /
+`/proc/meminfo`).
+
+**Platform:** cross-platform.
+
+### `func (c *Checker) HasEnoughRAM() (bool, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.HasEnoughRAM)
+
+Compares `RAMBytes()` against `cfg.MinRAMGB`.
+
+**Platform:** cross-platform.
+
+### `func (c *Checker) HasEnoughDisk() (bool, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.HasEnoughDisk)
+
+Compares the total bytes of `cfg.DiskPath` against
+`cfg.MinDiskGB`.
+
+**Platform:** cross-platform.
+
+### `func (c *Checker) HasEnoughCPU() bool`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.HasEnoughCPU)
+
+`runtime.NumCPU() >= cfg.MinCPUCores`.
+
+**Platform:** cross-platform.
+
+### `func (c *Checker) BadUsername() (bool, string, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.BadUsername)
+
+Resolves the current username and matches against
+`cfg.BadUsernames` (case-insensitive).
+
+**Returns:** `(matched, username, err)`.
+
+**Platform:** cross-platform.
+
+### `func (c *Checker) BadHostname() (bool, string, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.BadHostname)
+
+Same shape as `BadUsername`, against `cfg.BadHostnames`.
+
+**Platform:** cross-platform.
+
+### `func (c *Checker) CheckProcesses(ctx context.Context) (bool, string, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.CheckProcesses)
+
+Iterates the running-process snapshot and matches against
+`cfg.BadProcesses`.
+
+**Returns:** `(matched, processName, err)`.
+
+**Platform:** cross-platform.
+
+### `func (c *Checker) FakeDomainReachable(ctx context.Context) (bool, int, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.FakeDomainReachable)
+
+HTTPS HEAD against `cfg.FakeDomain`; sandboxes with broad
+sinkholes resolve it.
+
+**Returns:** `(reachable, statusCode, err)`.
+
+**OPSEC:** the DNS query for the fake domain is itself a
+fingerprint — operators must rotate per campaign.
+
+**Platform:** cross-platform.
+
+### `func (c *Checker) CheckProcessCount(ctx context.Context) (bool, string, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.CheckProcessCount)
+
+Returns `(true, detail, err)` when the live process count is
+below `cfg.MinProcesses`.
+
+**Platform:** cross-platform.
+
+### `func (c *Checker) CheckConnectivity(ctx context.Context) (bool, string, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.CheckConnectivity)
+
+GET against `cfg.ConnectivityURL`; treats non-2xx / no-response
+as "no real internet".
+
+**Platform:** cross-platform.
+
+### `func (c *Checker) CheckAll(ctx context.Context) []Result`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.CheckAll)
+
+Runs every dimension regardless of `cfg.StopOnFirst` and
+returns the full `[]Result`. Feed into `Score` for an
+aggregate verdict.
+
+**Platform:** cross-platform.
+
+### `func (c *Checker) IsSandboxed(ctx context.Context) (bool, string, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#Checker.IsSandboxed)
+
+Binary verdict. With `cfg.StopOnFirst=true`, returns on the
+first detection. Otherwise runs `CheckAll` and reports `true`
+when any check fired.
+
+**Returns:** `(detected, reason, err)` — `reason` is the first
+matching `Result.Detail`.
+
+**OPSEC:** running every check and bailing late is the
+sandbox-self-flag pattern; consider score-based bail
+(`CheckAll` + `Score`) for tunable noise.
+
+**Platform:** cross-platform.
+
+### `func DiskTotalBytes(p string) (uint64, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox#DiskTotalBytes)
+
+Standalone helper returning the total bytes of the volume
+hosting `p` via `GetDiskFreeSpaceExW`.
+
+**Platform:** Windows-only.
 
 ### Scoring weights
 
@@ -127,7 +362,7 @@ hardware thresholds and adding custom usernames.
 cfg := sandbox.DefaultConfig()
 cfg.MinCPUCores = 4
 cfg.MinRAMGB = 8
-cfg.SuspiciousUsernames = append(cfg.SuspiciousUsernames,
+cfg.BadUsernames = append(cfg.BadUsernames,
     "test", "demo", "vagrant",
 )
 c := sandbox.New(cfg)

@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/recon/timing
-last_reviewed: 2026-04-27
-reflects_commit: f31fca1
+last_reviewed: 2026-05-04
+reflects_commit: 7a8c466
 ---
 
 # Time-based sandbox evasion
@@ -55,12 +55,74 @@ sequenceDiagram
 
 ## API Reference
 
-| Symbol | Description |
-|---|---|
-| [`BusyWait(d time.Duration)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing#BusyWait) | Burn CPU for `d` via time comparison |
-| [`BusyWaitTrig(d)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing#BusyWaitTrig) | Same with trigonometric work for variation |
-| [`BusyWaitPrimality()`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing#BusyWaitPrimality) | Burn CPU via primality testing for ~30 s |
-| [`BusyWaitPrimalityN(n int)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing#BusyWaitPrimalityN) | N iterations of primality testing |
+### `func BusyWait(d time.Duration)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing#BusyWait)
+
+Spins on `time.Now()` until the deadline. Tightest possible
+busy-wait — the loop body is empty.
+
+**Parameters:** `d` — wall-clock duration to burn.
+
+**Side effects:** pins one logical CPU at 100% for `d`.
+
+**OPSEC:** behavioural EDR rarely flags CPU at 100% on its own;
+some hypervisor-aware sandboxes do. The empty `time.Now()` loop
+fingerprints as "spin-wait" against any CPU-pattern collector.
+
+**Required privileges:** none.
+
+**Platform:** cross-platform.
+
+### `func BusyWaitTrig(d time.Duration)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing#BusyWaitTrig)
+
+Same wall-clock contract as `BusyWait` but the inner loop
+performs `sin/cos` floating-point work — the CPU pattern
+resembles legitimate scientific compute. The accumulator is
+sunk into a package-level `var` to defeat dead-code
+elimination.
+
+**Parameters:** `d` — wall-clock duration to burn.
+
+**Side effects:** pins one logical CPU at 100% for `d`; touches
+the FPU.
+
+**OPSEC:** harder to fingerprint than `BusyWait` against
+CPU-pattern collectors.
+
+**Platform:** cross-platform.
+
+### `func BusyWaitPrimality()`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing#BusyWaitPrimality)
+
+Calls `BusyWaitPrimalityN(500_000)` — ~200 ms of primality
+testing on modern hardware.
+
+**Side effects:** pins one logical CPU for the duration.
+
+**Platform:** cross-platform.
+
+### `func BusyWaitPrimalityN(iterations int)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/timing#BusyWaitPrimalityN)
+
+Tests integers for primality until `iterations` primes have
+been found. Higher counts burn proportionally more CPU time.
+
+**Parameters:** `iterations` — number of primes to discover
+before returning (rough proxy for CPU duration).
+
+**Side effects:** pins one logical CPU until the iteration
+count is reached.
+
+**OPSEC:** the integer-only inner loop fingerprints as
+"prime-sieve workload" to CPU-pattern telemetry — harder to
+reject than a `time.Now()` spin.
+
+**Platform:** cross-platform.
 
 ## Examples
 

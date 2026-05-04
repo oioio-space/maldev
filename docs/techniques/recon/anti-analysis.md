@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/recon/antidebug + github.com/oioio-space/maldev/recon/antivm
-last_reviewed: 2026-04-27
-reflects_commit: f31fca1
+last_reviewed: 2026-05-04
+reflects_commit: 7a8c466
 ---
 
 # Anti-analysis (debugger + VM detection)
@@ -54,33 +54,223 @@ flowchart LR
 
 ## API Reference
 
-### `antidebug.IsDebuggerPresent() bool`
+Two packages: `recon/antidebug` (single-shot debugger probe) +
+`recon/antivm` (configurable multi-dimension hypervisor probe).
+
+### Package `recon/antidebug`
+
+#### `func IsDebuggerPresent() bool`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antidebug#IsDebuggerPresent)
 
-Returns true when a debugger is attached. Cross-platform.
+Returns `true` when a debugger is attached to the calling process.
+Windows path calls `kernel32!IsDebuggerPresent` (PEB
+`BeingDebugged` read); Linux path scans
+`/proc/self/status` for a non-zero `TracerPid`.
 
-### `antivm.Detect(cfg) (string, error)` / `DetectAll(cfg) ([]string, error)`
+**Returns:** `true` if a debugger is present; `false` on any read
+or parse failure (fail-open).
+
+**OPSEC:** the Win32 call is universal and unhooked on every
+EDR — no signature; the Linux read of `/proc/self/status` is
+similarly invisible.
+
+**Required privileges:** none — self-process only.
+
+**Platform:** cross-platform (Windows / Linux).
+
+### Package `recon/antivm`
+
+#### `type Vendor`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#Vendor)
+
+Per-platform record of indicators. Windows: `Name`, `Keys`
+(`[]RegKey`), `Files`, `Nic`, `Proc`. Linux: `Name`, `Files`,
+`Nic`, `Proc`, `DMI`. Constructed inline by callers or pulled
+from `DefaultVendors`.
+
+**Platform:** cross-platform (struct shape varies by build tag).
+
+#### `type RegKey struct { Hive registry.Key; Path string; ExpectedValue string }`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#RegKey)
+
+Registry-key indicator. Empty `ExpectedValue` matches existence
+only.
+
+**Platform:** Windows-only.
+
+#### `var DefaultVendors []Vendor`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#DefaultVendors)
+
+Built-in indicator list — Hyper-V, Parallels, VirtualBox,
+VirtualPC, VMware, Xen, QEMU, Proxmox, KVM, Docker, WSL. Used
+when `Config.Vendors` is nil.
+
+**Platform:** cross-platform (entries differ by build tag).
+
+#### `type CheckType uint`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#CheckType)
+
+Bitmask selecting detection dimensions. Constants:
+`CheckRegistry` (Windows-only, skipped on Linux), `CheckFiles`,
+`CheckNIC`, `CheckProcess`, `CheckCPUID`, and the union
+`CheckAll`.
+
+**Platform:** cross-platform.
+
+#### `type Config struct { Vendors []Vendor; Checks CheckType }`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#Config)
+
+Detection configuration. Nil `Vendors` falls back to
+`DefaultVendors`; zero `Checks` falls back to `CheckAll`.
+
+**Platform:** cross-platform.
+
+#### `func DefaultConfig() Config`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#DefaultConfig)
+
+Returns a zero-value `Config` (nil `Vendors`, zero `Checks`) —
+which expands to `DefaultVendors` + `CheckAll` at runtime.
+
+**Returns:** zero `Config`.
+
+**Platform:** cross-platform.
+
+#### `func Detect(cfg Config) (string, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#Detect)
 
-Returns the first / every matching vendor name across the
-configured check dimensions.
+Runs the configured checks against each vendor in order and
+returns the first matching vendor name.
 
-### `antivm.Config` + `Vendor` + `CheckType`
+**Parameters:** `cfg` — vendor list + check bitmask.
 
-| Constant | Bit |
-|---|---|
-| `CheckRegistry` | registry-key probe |
-| `CheckFiles` | driver-file existence |
-| `CheckNIC` | MAC-prefix match |
-| `CheckProcesses` | analysis-tool process names |
-| `CheckDMI` | `/sys/class/dmi/` (Linux) |
-| `CheckCPUID` | hypervisor leaf |
+**Returns:** vendor name on first match (e.g. `"VMware"`); empty
+string if no vendor matched; error from any check that failed
+to execute.
 
-`DefaultConfig()` enables all dimensions; `DefaultVendors`
-covers Hyper-V, Parallels, VirtualBox, VMware, Xen, QEMU,
-Proxmox, Docker, WSL.
+**OPSEC:** registry probes / NIC enumeration / file `Stat` are
+all universal user-mode operations — no individual signature.
+Behavioural correlation of "many vendor probes then early
+exit" is post-fact.
+
+**Required privileges:** none — most checks open `HKLM\SOFTWARE`
+keys readable by every authenticated user.
+
+**Platform:** cross-platform.
+
+#### `func DetectAll(cfg Config) ([]string, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#DetectAll)
+
+Like `Detect`, but iterates every vendor and returns the full
+list of matches.
+
+**Returns:** sorted-by-config-order slice of matching vendor
+names; error from any failing check.
+
+**Platform:** cross-platform.
+
+#### `func DetectVM() string`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#DetectVM)
+
+Convenience wrapper around `Detect(DefaultConfig())`. Returns
+the vendor name or empty string; swallows errors.
+
+**Platform:** cross-platform.
+
+#### `func IsRunningInVM() bool`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#IsRunningInVM)
+
+Boolean shorthand for `DetectVM() != ""`.
+
+**Platform:** cross-platform.
+
+#### `func DetectNic(macPrefixes []string) (bool, string, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#DetectNic)
+
+Walks `net.Interfaces` and returns the first NIC whose MAC
+starts with any prefix in `macPrefixes`.
+
+**Parameters:** `macPrefixes` — uppercase, colon-separated OUI
+prefixes (e.g. `"00:0C:29"` for VMware).
+
+**Returns:** `(true, "<MAC>:<ifname>", nil)` on match; empty
+string with `false` otherwise; error from interface
+enumeration.
+
+**Platform:** cross-platform.
+
+#### `func DetectFiles(files []string) (bool, string)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#DetectFiles)
+
+`os.Stat` each path; return on first hit.
+
+**Returns:** `(true, path)` on first existing file; `(false, "")`
+otherwise.
+
+**Platform:** cross-platform.
+
+#### `func DetectProcess(procNames []string) (bool, string, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#DetectProcess)
+
+Iterates running processes (Toolhelp32 on Windows, `/proc` on
+Linux) and matches against `procNames`.
+
+**Returns:** `(true, processName, nil)` on first match; error
+from the process snapshot.
+
+**Required privileges:** none beyond default process-list visibility.
+
+**Platform:** cross-platform.
+
+#### `func DetectRegKey(keys []RegKey) (bool, RegKey, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#DetectRegKey)
+
+Probes each `RegKey` for existence (and optional value match).
+
+**Returns:** `(true, matchedKey, nil)` on first hit.
+
+**Platform:** Windows-only.
+
+#### `func DetectDMI() (bool, string)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#DetectDMI)
+
+Reads `/sys/class/dmi/id/*` files (sys_vendor, product_name,
+board_vendor, …) and matches against well-known hypervisor
+strings.
+
+**Returns:** `(true, "<dmiPath>:<keyword>")` on first match.
+
+**Platform:** Linux-only.
+
+#### `func DetectCPUID() (bool, string)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#DetectCPUID)
+
+Reads CPUID leaf 0x40000000 (hypervisor vendor signature) on
+Windows; reads `/proc/cpuinfo` and matches against hypervisor
+keywords on Linux.
+
+**Returns:** `(true, vendorString)` on match.
+
+**OPSEC:** invisible to user-mode telemetry — CPUID is an
+unprivileged instruction.
+
+**Platform:** cross-platform.
 
 ## Examples
 

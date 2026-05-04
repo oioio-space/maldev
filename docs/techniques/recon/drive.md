@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/recon/drive
-last_reviewed: 2026-04-27
-reflects_commit: f31fca1
+last_reviewed: 2026-05-04
+reflects_commit: 7a8c466
 ---
 
 # Drive enumeration & monitoring
@@ -54,68 +54,205 @@ e.g. `TypeRemovable` only.
 
 ## API Reference
 
-| Symbol | Description |
-|---|---|
-| [`type Info`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#Info) | Letter + Type + Volume metadata |
-| [`type Type`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#Type) | `TypeFixed` / `TypeRemovable` / `TypeNetwork` / `TypeCDROM` / `TypeRAM` / `TypeUnknown` |
-| [`type EventKind`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#EventKind) | `EventAdded` / `EventRemoved` |
-| [`New(letter) (*Info, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#New) | Resolve single drive |
-| [`LogicalDriveLetters() ([]string, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#LogicalDriveLetters) | Every present drive letter |
-| [`TypeOf(root) Type`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#TypeOf) | Per-root classification |
-| [`VolumeOf(root) (*VolumeInfo, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#VolumeOf) | Volume label + serial + FS |
-| [`NewWatcher(ctx, filter) *Watcher`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#NewWatcher) | Watcher (consumed by both watcher modes below) |
-| `(*Watcher).Watch(interval) (<-chan Event, error)` | **Polling mode.** Re-enumerates drives every `interval`. Headless-process compatible — no message pump required. |
-| `(*Watcher).WatchEvents(buffer) (<-chan Event, error)` | **Event mode (NEW).** Hidden message-only window subscribed to `WM_DEVICECHANGE`. Zero CPU at idle, ms-latency wake on `DBT_DEVICEARRIVAL` / `DBT_DEVICEREMOVECOMPLETE`. Requires an interactive session for the broadcast to land. |
-| `(*Watcher).Snapshot() ([]*Info, error)` | Current snapshot |
+### `type Type uint32`
 
-### `(*Watcher).WatchEvents(buffer int) (<-chan Event, error)`
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#Type)
+
+Windows `DRIVE_*` enum: `TypeUnknown`, `TypeNoRootDir`,
+`TypeRemovable`, `TypeFixed`, `TypeRemote`, `TypeCDROM`,
+`TypeRAMDisk`. `String()` returns the MSDN constant name.
+
+**Platform:** Windows-only.
+
+### `type VolumeInfo struct { Name, FileSystemName string; SerialNumber uint32 }`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#VolumeInfo)
+
+Volume metadata harvested via `GetVolumeInformationW`.
+
+**Platform:** Windows-only.
+
+### `type Info struct { Letter string; Type Type; Volume *VolumeInfo; GUID, DevicePath string }`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#Info)
+
+Per-drive descriptor. `GUID` (`\\?\Volume{...}\`) is the stable
+identifier across reboots and letter reassignments;
+`DevicePath` is the kernel device name
+(`\Device\HarddiskVolumeN`).
+
+**Platform:** Windows-only.
+
+### `func New(letter string) (*Info, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#New)
+
+Resolves a drive letter (e.g. `"C:\\"`) into a populated
+`*Info`.
+
+**Parameters:** `letter` — root path with trailing backslash.
+
+**Returns:** populated `*Info`; error when the volume is
+unreadable.
+
+**Platform:** Windows-only.
+
+### `func LogicalDriveLetters() ([]string, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#LogicalDriveLetters)
+
+Wraps `GetLogicalDrives` and returns each present root path.
+
+**Returns:** slice of `"X:\\"` strings; error from the API.
+
+**Platform:** Windows-only.
+
+### `func TypeOf(root string) Type`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#TypeOf)
+
+Wraps `GetDriveTypeW`. Returns `TypeUnknown` on failure.
+
+**Platform:** Windows-only.
+
+### `func VolumeOf(root string) (*VolumeInfo, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#VolumeOf)
+
+Wraps `GetVolumeInformationW`.
+
+**Returns:** populated `*VolumeInfo`; error on API failure.
+
+**Platform:** Windows-only.
+
+### `type FilterFunc func(d *Info) bool`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#FilterFunc)
+
+Predicate accepted by `NewWatcher` to narrow the watch set
+(e.g. `TypeRemovable` only).
+
+**Platform:** Windows-only.
+
+### `type EventKind int`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#EventKind)
+
+Enum: `EventAdded`, `EventRemoved`. `String()` returns
+`"added"` / `"removed"`.
+
+**Platform:** Windows-only.
+
+### `type Event struct { Kind EventKind; Drive *Info; Err error }`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#Event)
+
+Watcher-channel payload. `Drive` is non-nil for `Added` /
+`Removed`; `Err` is non-nil on enumeration failure.
+
+**Platform:** Windows-only.
+
+### `type Watcher`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#Watcher)
+
+Stateful drive-change observer. Constructed via `NewWatcher`;
+exposes `Snapshot`, `Watch`, `WatchEvents`.
+
+**Platform:** Windows-only.
+
+### `func NewWatcher(ctx context.Context, filter FilterFunc) *Watcher`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#NewWatcher)
+
+Constructs a Watcher whose lifetime is tied to `ctx`. `filter`
+may be nil (matches every drive).
+
+**Returns:** `*Watcher` — single-use; do not call both `Watch`
+and `WatchEvents` on the same instance.
+
+**Platform:** Windows-only.
+
+### `func (w *Watcher) Snapshot() ([]*Info, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#Watcher.Snapshot)
+
+Enumerates current drives matching the filter, populates the
+internal known-drive map, and returns the slice. Used as the
+baseline by both `Watch` and `WatchEvents`.
+
+**Platform:** Windows-only.
+
+### `func (w *Watcher) Watch(pollInterval time.Duration) (<-chan Event, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#Watcher.Watch)
+
+Polling-mode watcher. Calls `Snapshot` once for the baseline,
+then polls `GetLogicalDrives` every `pollInterval` (default
+500 ms when zero) and diffs against the previous snapshot.
+
+**Parameters:** `pollInterval` — tick duration; zero falls back
+to 500 ms.
+
+**Returns:** read-only event channel closed on `ctx.Done()`;
+error from the baseline `Snapshot`.
+
+**Side effects:** spawns one goroutine for the poll loop.
+
+**OPSEC:** `GetLogicalDrives` is universal user-mode and
+invisible; sustained 500 ms polling on an idle process is
+the only behavioural fingerprint.
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows-only — works in headless / SYSTEM /
+service contexts (no message pump required).
+
+### `func (w *Watcher) WatchEvents(buffer int) (<-chan Event, error)`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive#Watcher.WatchEvents)
 
-Event-driven watcher. Internally:
+Event-driven watcher. Locks the goroutine to its OS thread,
+registers a `WNDCLASSEXW`, creates a message-only window
+(`HWND_MESSAGE`), and pumps `WM_DEVICECHANGE`. Each
+`DBT_DEVICEARRIVAL` / `DBT_DEVICEREMOVECOMPLETE` triggers a
+`Snapshot+diff` and emits the resulting `Added` / `Removed`
+events. On `ctx.Done()` posts `WM_CLOSE`, lets the pump exit
+through `WM_DESTROY → WM_QUIT`, destroys the window,
+unregisters the class.
 
-1. Locks the goroutine to its OS thread (mandatory — Win32 message
-   pumps can't migrate).
-2. Registers a `WNDCLASSEXW` and creates a message-only window
-   (`HWND_MESSAGE`).
-3. Receives `WM_DEVICECHANGE` and triggers `Snapshot+diff` on
-   `DBT_DEVICEARRIVAL` / `DBT_DEVICEREMOVECOMPLETE`.
-4. On `ctx.Done()`, posts `WM_CLOSE` so the pump exits via
-   `WM_DESTROY → WM_QUIT`, destroys the window, unregisters the
-   class, closes the channel.
+**Parameters:** `buffer` — channel capacity; `0` is synchronous;
+`≥ 4` is recommended for burst-friendly consumers (USB hub
+re-enumeration emits several `WM_DEVICECHANGE`s in quick
+succession).
 
-**Parameters:**
-- `buffer` — channel capacity. `0` is synchronous; `≥ 4` recommended
-  for burst-friendly consumers (USB hub re-enumeration emits multiple
-  `WM_DEVICECHANGE`s in quick succession).
+**Returns:** read-only event channel closed on cancel; error
+when `RegisterClassExW` / `CreateWindowExW` fails before the
+pump starts. Runtime errors mid-watch arrive on the channel as
+`Event{Err: ...}`.
 
-**Returns:**
-- `<-chan Event` — closed on `ctx` cancel.
-- `error` — non-nil when `RegisterClassExW` / `CreateWindowExW`
-  fails before the pump starts. Per-iteration errors arrive on
-  the channel as `Event{Err: ...}` instead of being returned.
+**Side effects:** registers a window class
+(`MaldevDriveWatcher`) for the lifetime of the watcher; pins
+one OS thread.
 
-**Side effects:** registers a window class on the calling
-process for the lifetime of the watcher.
+**OPSEC:** very quiet — message-only windows are absent from
+`EnumWindows` and Spy++ defaults. Visible only to a debugger
+walking the user-atom tables.
 
-**OPSEC:** very-quiet — message-only windows aren't enumerated by
-`EnumWindows` and don't appear in Spy++ default views. Visible only
-to a debugger walking `User Atom Tables` for the registered class
-name (`MaldevDriveWatcher`).
+**Required privileges:** unprivileged.
 
-**Required privileges:** `unprivileged`.
+**Platform:** Windows-only — requires an interactive session
+(service / SYSTEM contexts receive no `WM_DEVICECHANGE`
+broadcasts; use `Watch` there).
 
-**Platform:** `windows` (interactive session — service / SYSTEM
-contexts receive no `WM_DEVICECHANGE` broadcasts).
-
-When to pick which:
+### When to pick which watcher
 
 | Situation | Use |
 |---|---|
-| Headless / SYSTEM service / no interactive session | `Watch(interval)` (polling) |
-| Foreground / interactive process | `WatchEvents(buffer)` (event-driven) |
-| You don't care about CPU at idle and want simple semantics | `Watch(interval)` |
-| You want sub-second latency and zero idle CPU | `WatchEvents(buffer)` |
+| Headless / SYSTEM service / no interactive session | `Watch(interval)` |
+| Foreground / interactive process | `WatchEvents(buffer)` |
+| Simple semantics, idle CPU acceptable | `Watch(interval)` |
+| Sub-second latency + zero idle CPU | `WatchEvents(buffer)` |
 
 ## Examples
 

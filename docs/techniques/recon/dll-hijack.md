@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/recon/dllhijack
-last_reviewed: 2026-04-27
-reflects_commit: f31fca1
+last_reviewed: 2026-05-04
+reflects_commit: 7a8c466
 ---
 
 # DLL search-order hijack discovery
@@ -66,18 +66,219 @@ flowchart LR
 
 ## API Reference
 
-| Symbol | Description |
-|---|---|
-| [`ScanAll(opts...) ([]Opportunity, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#ScanAll) | Aggregate all four scanners |
-| `ScanServices`, `ScanProcesses`, `ScanScheduledTasks`, `ScanAutoElevate` | Individual scanners |
-| [`Rank(opps) []Opportunity`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#Rank) | Score by integrity gain + autoElevate |
-| [`Validate(opp, canary, opts) (*ValidationResult, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#Validate) | Drop canary, trigger, observe |
-| [`SearchOrder(exeDir) []string`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#SearchOrder) | DLL search-order resolution |
-| [`HijackPath(exeDir, dllName) (hijackDir, resolvedDir string)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#HijackPath) | First writable dir < first legitimate dir |
-| [`IsAutoElevate(peBytes) bool`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#IsAutoElevate) | Manifest probe |
+### `type ScanOpts struct { Opener stealthopen.Opener }`
 
-`Opportunity` carries: `Kind`, `ID`, `DisplayName`,
-`HijackedPath`, `ResolvedDLL`, `IntegrityGain`, `AutoElevate`.
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#ScanOpts)
+
+Optional knob accepted by every scanner. Setting `Opener` routes
+PE file reads through a [`stealthopen.Opener`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/stealthopen)
+(e.g. NTFS Object-ID open) so path-keyed EDR file hooks see no
+scan. Zero value is plain `os.Open`.
+
+**Platform:** cross-platform.
+
+### `type Kind int`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#Kind)
+
+Victim surface enum: `KindService`, `KindProcess`,
+`KindScheduledTask`, `KindAutoElevate`. `String()` returns the
+lowercase label.
+
+**Platform:** cross-platform.
+
+### `type Opportunity struct { ... }`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#Opportunity)
+
+One discovered hijack candidate. Fields: `Kind`, `ID`,
+`DisplayName`, `BinaryPath`, `HijackedDLL`, `HijackedPath`
+(writable target), `ResolvedDLL` (current legitimate path),
+`SearchDir`, `Writable`, `Reason`, `AutoElevate`,
+`IntegrityGain`, `Score` (filled by `Rank`).
+
+**Platform:** cross-platform.
+
+### `func ScanAll(opts ...ScanOpts) ([]Opportunity, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#ScanAll)
+
+Aggregates `ScanServices` + `ScanProcesses` +
+`ScanScheduledTasks` + `ScanAutoElevate`. Pass at most one
+`ScanOpts`.
+
+**Returns:** flat `[]Opportunity` (un-ranked); first non-nil
+scanner error.
+
+**OPSEC:** SCM enumeration, Toolhelp32 process walk, ITaskService
+COM enumeration — all routine reconnaissance APIs, but each
+emits ETW + Sysmon events at high volume. Stealth-Opener swap
+shifts file-read indicators from path-based to ObjectID-based.
+
+**Required privileges:** unprivileged for `ScanProcesses`/
+`ScanAutoElevate`; some service entries return `ACCESS_DENIED`
+without admin.
+
+**Platform:** Windows-only (stub on other OSes returns nil).
+
+### `func ScanServices(opts ...ScanOpts) ([]Opportunity, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#ScanServices)
+
+Walks SCM-registered services + their PE imports.
+
+**Returns:** opportunities pointing at SYSTEM-context binaries.
+
+**Required privileges:** non-admin sees only services with
+`SERVICE_QUERY_CONFIG` granted; admin sees the full list.
+
+**Platform:** Windows-only.
+
+### `func ScanProcesses(opts ...ScanOpts) ([]Opportunity, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#ScanProcesses)
+
+Toolhelp32 process snapshot + per-process IAT walk via the PE
+on disk.
+
+**Platform:** Windows-only.
+
+### `func ScanScheduledTasks(opts ...ScanOpts) ([]Opportunity, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#ScanScheduledTasks)
+
+ITaskService COM enumeration of registered tasks + IAT walk.
+
+**Platform:** Windows-only.
+
+### `func ScanAutoElevate(opts ...ScanOpts) ([]Opportunity, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#ScanAutoElevate)
+
+Walks `%WinDir%\System32` for `.exe` whose manifest carries
+`autoElevate=true` (fodhelper, sdclt, eventvwr, …); each hit
+becomes a UAC-bypass candidate.
+
+**Side effects:** reads every PE under System32 — Defender file-IO
+heuristics may flag the bulk read pattern.
+
+**Platform:** Windows-only.
+
+### `func Rank(opps []Opportunity) []Opportunity`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#Rank)
+
+In-place scores every Opportunity (+200 AutoElevate, +100
+IntegrityGain, +50 Service, +20 ScheduledTask, +10
+AutoElevate-base, +5 Process) and returns a new slice sorted by
+descending `Score`. Ties broken by `BinaryPath` then
+`HijackedDLL`.
+
+**Returns:** copy of `opps`, sorted; original slice
+score-mutated.
+
+**Platform:** cross-platform.
+
+### `func Validate(opp Opportunity, canaryDLL []byte, opts ValidateOpts) (*ValidationResult, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#Validate)
+
+Drops `canaryDLL` at `opp.HijackedPath`, triggers the victim
+(restart service / run task), and polls `opts.MarkerDir` for a
+file matching `opts.MarkerGlob`. Cleanup is unconditional.
+
+**Parameters:** `opp` — target Opportunity (`KindProcess` is
+unsupported and returns an error); `canaryDLL` — bytes of a DLL
+whose `DllMain` writes the marker file; `opts` — see
+`ValidateOpts`.
+
+**Returns:** `*ValidationResult` describing each phase
+(`Dropped`, `Triggered`, `Confirmed`, `MarkerPath`,
+`MarkerContents`, `TriggerAt`, `ConfirmedAt`, `CleanedUp`,
+`Errors`); error only on validation-fatal failures (missing
+`HijackedPath`, empty canary, drop / trigger failure).
+
+**Side effects:** writes a DLL to disk, restarts the target
+service or invokes the scheduled task, removes both the canary
+and any new markers on exit.
+
+**OPSEC:** loud — file write + service restart is high-fidelity
+EDR telemetry. Run only on dedicated test boxes; never on a
+production target before first-run validation.
+
+**Required privileges:** write to the hijack path (admin for
+`%WinDir%\System32` siblings; SCM `SERVICE_STOP`/`SERVICE_START`
+to restart services).
+
+**Platform:** Windows-only.
+
+### `type ValidateOpts struct { MarkerGlob, MarkerDir string; Timeout, PollInterval time.Duration; KeepCanary bool }`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#ValidateOpts)
+
+Knobs for `Validate`. Zero value polls
+`%ProgramData%\maldev-canary-*.marker` for 15 s every 200 ms
+and removes the canary DLL on exit.
+
+**Platform:** Windows-only.
+
+### `type ValidationResult struct { ... }`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#ValidationResult)
+
+Phase-by-phase outcome of `Validate`: `Dropped`, `Triggered`,
+`Confirmed`, `MarkerPath`, `MarkerContents`, `TriggerAt`,
+`ConfirmedAt`, `CleanedUp`, `Errors`.
+
+**Platform:** Windows-only.
+
+### `func SearchOrder(exeDir string) []string`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#SearchOrder)
+
+Returns the directories the loader walks for a DLL load from
+`exeDir`: app dir → System32 → SysWOW64 → Windows. Assumes
+SafeDllSearchMode is enabled (default since XP SP1).
+
+**Platform:** Windows-only (stub returns nil elsewhere).
+
+### `func HijackPath(exeDir, dllName string) (hijackDir, resolvedDir string)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#HijackPath)
+
+Computes the hijack candidate for one (exe, DLL) pair. Skips
+KnownDLLs (registry-listed, loader bypasses search). Returns
+the first writable directory earlier than the resolved
+location.
+
+**Returns:** `(hijackDir, resolvedDir)` — both empty when no
+hijack is possible.
+
+**Platform:** Windows-only (stub returns empty pair elsewhere).
+
+### `func IsAutoElevate(peBytes []byte) bool`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#IsAutoElevate)
+
+Byte-level scan of the PE for an embedded manifest with
+`<autoElevate>true</autoElevate>` or `autoElevate="true"`. No
+XML parser.
+
+**Returns:** `true` when the marker is present.
+
+**Platform:** cross-platform — operates on bytes.
+
+### `func ParseBinaryPath(cmdline string) string`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack#ParseBinaryPath)
+
+Extracts the executable path from an SCM-style
+`BinaryPathName` (handles quoted / unquoted forms with
+trailing args).
+
+**Returns:** the path or empty string on parse failure.
+
+**Platform:** cross-platform.
 
 ## Examples
 
@@ -104,16 +305,19 @@ for _, o := range ae {
 ### Advanced — validate before deploying
 
 ```go
-canary, _ := os.ReadFile("canary.dll") // emits a marker file on load
+canary, _ := os.ReadFile("canary.dll") // emits %ProgramData%\maldev-canary-*.marker on load
 
 res, err := dllhijack.Validate(opp, canary, dllhijack.ValidateOpts{
-    TriggerFunc: func() error { /* invoke the victim */ return nil },
-    Timeout:     30 * time.Second,
+    Timeout: 30 * time.Second,
 })
 if err == nil && res.Triggered {
     // confirmed; safe to drop the real payload
 }
 ```
+
+The caller must invoke the victim binary out-of-band (e.g.
+restart the service that owns the hijack target) so the
+canary DLL is actually loaded and emits its marker.
 
 ## OPSEC & Detection
 

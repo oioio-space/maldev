@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/recon/network
-last_reviewed: 2026-04-27
-reflects_commit: f31fca1
+last_reviewed: 2026-05-04
+reflects_commit: 7a8c466
 ---
 
 # IP address & local-network detection
@@ -31,11 +31,58 @@ hairpinning)?" probes.
 
 ## API Reference
 
-| Symbol | Description |
-|---|---|
-| [`InterfaceIPs() ([]net.IP, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/network#InterfaceIPs) | Every IP across every interface |
-| [`IsLocal(IPorDN any) (bool, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/network#IsLocal) | Input is one of host's IPs |
-| [`var ErrNotIPorDN`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/network#ErrNotIPorDN) | Input is neither IP nor parseable hostname |
+### `func InterfaceIPs() ([]net.IP, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/network#InterfaceIPs)
+
+Walks `net.Interfaces` + each interface's `Addrs` and returns
+every assigned IP (loopback + physical + virtual + VPN).
+
+**Returns:** flat `[]net.IP`; error from
+`net.Interfaces` or any interface's `Addrs`.
+
+**OPSEC:** stdlib network enumeration — invisible to user-mode
+EDR. The kernel-side syscalls (`ioctl SIOCGIFCONF` on Linux,
+`GetAdaptersAddresses` on Windows) are universal.
+
+**Required privileges:** none.
+
+**Platform:** cross-platform.
+
+### `func IsLocal(IPorDN any) (bool, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/network#IsLocal)
+
+Decides whether the input — `net.IP`, IP-literal string, or
+hostname — resolves to one of the host's own interface
+addresses.
+
+**Parameters:** `IPorDN` — `net.IP`, IP-literal string, or
+hostname. Any other type returns `ErrNotIPorDN`.
+
+**Returns:** `true` when at least one resolved address matches
+an interface IP; error from `net.LookupIP` (wrapped as
+`ErrNotIPorDN` on resolution failure) or from the underlying
+`InterfaceIPs` call.
+
+**Side effects:** triggers DNS resolution for hostname inputs.
+
+**OPSEC:** the DNS query for an arbitrary hostname is logged
+end-to-end; do not pass the implant's own C2 domain to
+`IsLocal`.
+
+**Required privileges:** none.
+
+**Platform:** cross-platform.
+
+### `var ErrNotIPorDN`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/network#ErrNotIPorDN)
+
+Sentinel returned by `IsLocal` when the input is neither a
+`net.IP`, an IP literal, nor a resolvable hostname.
+
+**Platform:** cross-platform.
 
 ## Examples
 

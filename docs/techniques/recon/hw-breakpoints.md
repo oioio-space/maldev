@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/recon/hwbp
-last_reviewed: 2026-04-27
-reflects_commit: f31fca1
+last_reviewed: 2026-05-04
+reflects_commit: 7a8c466
 ---
 
 # Hardware breakpoint detection & clear
@@ -58,15 +58,93 @@ flowchart TD
 
 ## API Reference
 
-| Symbol | Description |
-|---|---|
-| [`Detect() ([]Breakpoint, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp#Detect) | HWBPs pointing into ntdll |
-| [`DetectAll() ([]Breakpoint, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp#DetectAll) | Every set HWBP regardless of target |
-| [`ClearAll() (int, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp#ClearAll) | Zero DR0-DR3 + DR7 across all threads; returns count cleared |
-| [`Technique() evasion.Technique`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp#Technique) | `evasion.Technique` adapter for `evasion.ApplyAll` |
+### `type Breakpoint struct { Register int; Address uintptr; ThreadID uint32 }`
 
-`type Breakpoint`: `TID`, `Register` (0-3), `Address`,
-`Module` (e.g. "ntdll.dll").
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp#Breakpoint)
+
+One active hardware breakpoint. `Register` is the DR index
+(0-3); `Address` is the watched virtual address; `ThreadID`
+identifies the owning thread. The package does not resolve
+addresses to module names — operators map them via
+[`process/enum`](../../process/enum.md) or
+`golang.org/x/sys/windows`.
+
+**Platform:** Windows-only.
+
+### `func Detect() ([]Breakpoint, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp#Detect)
+
+Reads `CONTEXT_DEBUG_REGISTERS` for the **current thread** and
+returns active breakpoints (DR0-DR3 with the matching DR7
+enable bit).
+
+**Returns:** slice of populated `Breakpoint`; error from
+`OpenThread` / `GetThreadContext`.
+
+**Side effects:** opens a handle on the current thread.
+
+**OPSEC:** `GetThreadContext` is universal; user-mode telemetry
+rarely flags it. ETW Microsoft-Windows-Threat-Intelligence (Win11
+22H2+) emits DR-register-read events but few SOCs subscribe.
+
+**Required privileges:** unprivileged — own thread.
+
+**Platform:** Windows-only.
+
+### `func DetectAll() ([]Breakpoint, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp#DetectAll)
+
+Enumerates every thread in the current process via
+[`process/enum.Threads`](https://pkg.go.dev/github.com/oioio-space/maldev/process/enum#Threads)
+and aggregates `Detect`-style results across all of them.
+
+**Returns:** flat `[]Breakpoint`; error only from the thread
+enumeration. Per-thread `OpenThread` / `GetThreadContext`
+failures are silently skipped.
+
+**Side effects:** opens a thread handle per discovered TID.
+
+**OPSEC:** as `Detect`, scaled by thread count.
+
+**Required privileges:** unprivileged for own-process threads.
+
+**Platform:** Windows-only.
+
+### `func ClearAll() (int, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp#ClearAll)
+
+Zeros DR0-DR3, DR6, DR7 on every thread in the current process
+via `SetThreadContext`.
+
+**Returns:** count of threads successfully cleared; error only
+from the thread enumeration. Per-thread failures are skipped.
+
+**Side effects:** mutates debug-register state on every thread —
+breaks any external debugger session attached to the process.
+
+**OPSEC:** EDRs that hook `SetThreadContext` see the clear; rare
+on production stacks. Win11 22H2+ ETW-Ti also surfaces it.
+
+**Required privileges:** unprivileged for own-process threads
+(`THREAD_SET_CONTEXT`).
+
+**Platform:** Windows-only.
+
+### `func Technique() evasion.Technique`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp#Technique)
+
+Adapter that runs `DetectAll` followed by `ClearAll` for
+inclusion in an [`evasion.ApplyAll`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion#ApplyAll)
+chain. Name: `"hwbp:DetectAll"`. The technique uses WinAPI
+directly — `evasion.Caller` is ignored.
+
+**Returns:** `evasion.Technique` value.
+
+**Platform:** Windows-only.
 
 ## Examples
 
