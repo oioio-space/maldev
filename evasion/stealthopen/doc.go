@@ -11,10 +11,21 @@
 // reads of `ntdll.dll` during unhooking, payload reads from a known
 // dropper file, etc.
 //
-// The Opener interface is implemented by Standard (path-based, the
-// fallback) and Stealth (Object-ID-based). Consumers like
-// [github.com/oioio-space/maldev/evasion/unhook] take an Opener so
-// they can route reads through the GUID path with one config knob.
+// The Opener interface has three implementations:
+//
+//   - Standard — plain os.Open(path); the path-based fallback.
+//   - MultiStealth — the recommended drop-in for callers that don't
+//     know the consumer's file list up front. Per-path lazy
+//     ObjectID capture + cache, so the path hook only fires once
+//     per unique file. Zero value works.
+//   - Stealth — pre-bound to a single file (captured at construction).
+//     Use when you know the target file ahead of time and want zero
+//     per-call overhead — the path arg to Open is ignored.
+//
+// Consumers like [github.com/oioio-space/maldev/evasion/unhook] take
+// an Opener so they can route reads through the GUID path with one
+// config knob; passing `&stealthopen.MultiStealth{}` is the typical
+// "make it stealth" wiring.
 //
 // # MITRE ATT&CK
 //

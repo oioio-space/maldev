@@ -166,22 +166,36 @@ type Opener interface {
 // Standard: plain os.Open. Default when the caller passes nil.
 type Standard struct{}
 
-// Stealth: captures (volume, ObjectID) once, then all Open() calls go
-// through OpenFileById — path-based file hooks never fire.
+// MultiStealth (recommended default): per-path lazy ObjectID capture
+// + cache. The path-based hook fires once per unique path; every
+// subsequent open of the same path routes through OpenByID. Zero
+// value works.
+type MultiStealth struct{ /* unexported cache + mutex */ }
+
+// Stealth: pre-bound to one file, captured at construction. Use when
+// you know the target up front and want zero per-call overhead — Open
+// ignores its path argument.
 type Stealth struct {
     VolumePath string
     ObjectID   [16]byte
 }
 
-// NewStealth derives both fields from a real path in one call, so the
-// caller just hands the result to the consuming package.
+// NewStealth derives both fields from a real path in one call.
 func NewStealth(path string) (*Stealth, error)
 
 // Use normalizes the nil case to Standard.
 func Use(opener Opener) Opener
 ```
 
-### The pattern in practice
+### When to pick which
+
+| Situation | Pick |
+|---|---|
+| You don't know which files the consumer opens | `&MultiStealth{}` |
+| You know the single target file and want zero overhead | `NewStealth(path)` |
+| You want plain path-based opens (the default) | `nil` (or `&Standard{}`) |
+
+### The pattern in practice — recommended (MultiStealth)
 
 ```go
 import (
@@ -189,6 +203,20 @@ import (
     "github.com/oioio-space/maldev/evasion/unhook"
 )
 
+// Zero-config: any file the consumer opens is captured + cached
+// transparently. The first open of each unique path pays one
+// path-based hook event; every subsequent open of the same path
+// routes through OpenByID and never re-touches the hook.
+opener := &stealthopen.MultiStealth{}
+
+_ = unhook.ClassicUnhook("NtCreateSection", caller, opener)
+_ = unhook.FullUnhook(caller, opener)
+// You don't have to know that unhook reads ntdll.dll repeatedly.
+```
+
+### The pattern in practice — pre-bound (Stealth)
+
+```go
 sysDir, _ := windows.GetSystemDirectory()
 ntdllPath := filepath.Join(sysDir, "ntdll.dll")
 
@@ -196,8 +224,7 @@ ntdllPath := filepath.Join(sysDir, "ntdll.dll")
 stealth, err := stealthopen.NewStealth(ntdllPath)
 if err != nil { /* non-NTFS, or no ObjectID — fall back to nil */ }
 
-// Hand it to every unhook call; any path-based EDR hook on CreateFile
-// for ntdll.dll never fires. nil = same as before (path-based read).
+// Same wiring; this variant skips the per-call cache lookup.
 _ = unhook.ClassicUnhook("NtCreateSection", caller, stealth)
 _ = unhook.FullUnhook(caller, stealth)
 ```
@@ -308,6 +335,46 @@ without writing the same nil-check at each call site.
 **Required privileges:** read on `path`.
 
 **Platform:** cross-platform.
+
+#### `type MultiStealth struct{...}` + `(*MultiStealth).Open(path string) (*os.File, error)`
+
+Recommended drop-in [Opener] for callers that don't know the consumer's
+file list ahead of time. Per-path lazy ObjectID capture + cache: the
+first `Open(path)` for a given path delegates to `NewStealth(path)` and
+remembers the resulting `*Stealth`; every subsequent `Open(path)` for
+the same path routes through `OpenByID` and never re-touches a
+path-based file hook for that path. Negative cache: when capture fails
+(non-NTFS, missing file, FSCTL denied) the path is remembered as "fall
+back to `os.Open`" so the failure isn't retried.
+
+**Parameters:** `path` to open; cache key is the absolute path so two
+different relative spellings resolve to the same slot.
+
+**Returns:** `*os.File` (caller closes); first error from open.
+Capture errors are intentionally swallowed — callers that need them
+surfaced should use `*Stealth` directly.
+
+**Side effects:** first call per unique path issues
+`FSCTL_CREATE_OR_GET_OBJECT_ID` (one path-based open). Subsequent calls
+are ObjectID-only. Cache grows monotonically — N entries for N unique
+paths.
+
+**OPSEC:** equivalent to `*Stealth` after the first call per path. The
+first call's path-based open is identical to `*Standard`'s
+visibility — same hook event, same telemetry.
+
+**Required privileges:** as `*Stealth` (read + ObjectID FSCTL on the
+path being captured).
+
+**Platform:** Windows + NTFS. Stub on non-Windows degrades silently to
+`os.Open` so cross-platform implants can wire `&MultiStealth{}` into
+any `Opener` slot without conditional logic.
+
+**Concurrency:** safe for concurrent use. Two simultaneous first-calls
+for the same path may both call `NewStealth`; the second resolver to
+acquire the cache mutex defers to the first's entry. Per-key
+single-flight is not implemented (negligible cost in the typical
+"a few unique paths, called many times" workload).
 
 #### `type Stealth struct{...}` + `(*Stealth).Open(path string) (*os.File, error)` + `stealthopen.NewStealth(path string) (*Stealth, error)`
 

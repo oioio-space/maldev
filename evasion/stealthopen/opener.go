@@ -16,9 +16,14 @@ import (
 //
 //   - Standard (this package): plain os.Open(path). Default when no Opener
 //     is provided. Path-based EDR file hooks see the real path.
-//   - Stealth (windows only): OpenByID via the file's NTFS Object ID. Path
-//     filters on CreateFile / NtCreateFile never see the target path —
-//     only the volume root handle.
+//   - MultiStealth (windows): drop-in replacement for *Standard that
+//     transparently captures + caches the NTFS Object ID per path on
+//     first encounter. Recommended default when the consumer's file
+//     list isn't part of the call site (the typical case). Zero
+//     value works; degrades silently to os.Open on non-Windows.
+//   - Stealth (windows): OpenByID via a pre-captured NTFS Object ID.
+//     Use when you know the single target file ahead of time and want
+//     zero per-call overhead — the path argument to Open is ignored.
 //
 // Implementations are free to add caching, logging, or per-call policy.
 // The contract is intentionally narrow: take a path, return an open

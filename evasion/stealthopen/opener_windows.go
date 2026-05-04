@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"golang.org/x/sys/windows"
 )
@@ -74,6 +75,99 @@ func NewStealth(path string) (*Stealth, error) {
 		return nil, fmt.Errorf("stealthopen: obtain ObjectID: %w", err)
 	}
 	return &Stealth{VolumePath: vol, ObjectID: id}, nil
+}
+
+// MultiStealth is the recommended drop-in [Opener] for callers that
+// don't know up front which file the consumer will open. It accepts
+// any path at call time, transparently captures the NTFS Object ID on
+// first encounter, caches it, and routes every subsequent open of the
+// same path through `OpenByID` — so the path-based EDR file hook only
+// fires once per unique path for the lifetime of the *MultiStealth.
+//
+// Compared to [*Stealth] (one fixed file, captured at construction),
+// MultiStealth trades a single sync.Mutex per call for the convenience
+// of a generic Opener that mirrors `*Standard`'s ergonomics. Use it
+// when:
+//
+//   - You're plugging stealth into a consumer whose file list isn't
+//     part of your call site (the typical case for `evasion/unhook`,
+//     `process/tamper/herpaderping`, `credentials/lsassdump`).
+//   - You'd otherwise have to instantiate one *Stealth per path the
+//     consumer might touch.
+//
+// Use [*Stealth] directly when you know the single target file ahead
+// of time and want zero per-call overhead.
+//
+// The zero value (`var m MultiStealth` or `&MultiStealth{}`) is
+// ready to use — no constructor required. Safe for concurrent use.
+//
+// Negative caching: when `NewStealth(path)` fails (file isn't on
+// NTFS, file doesn't exist, FSCTL denied) the path is remembered as
+// "fall back to os.Open" so the failure isn't retried on every call.
+// The error itself is swallowed; callers that need the failure
+// surfaced should use [*Stealth] directly.
+type MultiStealth struct {
+	mu    sync.Mutex
+	cache map[string]*Stealth // nil entry = negative cached (use os.Open)
+}
+
+// Open implements [Opener]. First call for a given path captures the
+// (volume, ObjectID) pair (paying the path-based hook cost ONCE);
+// subsequent calls route through OpenByID and never re-touch a
+// path-based file hook for that path.
+//
+// Cache key is the absolute path — two different relative spellings
+// of the same file resolve to the same cache slot.
+func (m *MultiStealth) Open(path string) (*os.File, error) {
+	if m == nil {
+		return nil, fmt.Errorf("stealthopen: nil MultiStealth opener")
+	}
+	if path == "" {
+		return nil, fmt.Errorf("stealthopen: empty path")
+	}
+
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		// Can't normalise — best-effort: fall through with the raw path
+		// as the cache key. Open will likely fail too, but consistently.
+		abs = path
+	}
+
+	m.mu.Lock()
+	s, tried := m.cache[abs]
+	m.mu.Unlock()
+	if tried {
+		if s == nil {
+			return os.Open(path) // negative cached — silent fallback
+		}
+		return s.Open("") // path arg ignored by *Stealth
+	}
+
+	// First time for this path — capture the ID through NewStealth.
+	s, capErr := NewStealth(path)
+	m.mu.Lock()
+	if m.cache == nil {
+		m.cache = make(map[string]*Stealth)
+	}
+	if existing, ok := m.cache[abs]; ok {
+		// Race: another goroutine resolved this path while we were
+		// in flight. Prefer the existing entry (positive or negative)
+		// so we converge on a single binding per path.
+		s = existing
+	} else {
+		m.cache[abs] = s // s may be nil → negative cached
+	}
+	m.mu.Unlock()
+
+	if s == nil {
+		// Either capErr fired or the race winner negative-cached: fall
+		// back to plain path open, silently. The capture error is
+		// intentionally swallowed (operators who want to see it use
+		// *Stealth directly).
+		_ = capErr
+		return os.Open(path)
+	}
+	return s.Open("")
 }
 
 // VolumeFromPath returns the volume-root path (e.g. `C:\`) for a file

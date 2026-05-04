@@ -92,6 +92,134 @@ func TestNewStealth_RoundTrip(t *testing.T) {
 	assert.Equal(t, want, got, "bytes round-tripped via Object ID must match the original content")
 }
 
+// TestMultiStealth_Open_NilReceiver guards the nil-receiver path so a
+// caller wiring `var op stealthopen.Opener = (*MultiStealth)(nil)` by
+// mistake gets a clear error instead of a nil-deref panic.
+func TestMultiStealth_Open_NilReceiver(t *testing.T) {
+	var nilM *MultiStealth
+	_, err := nilM.Open("anything")
+	require.Error(t, err)
+}
+
+// TestMultiStealth_Open_EmptyPath guards the explicit empty-path
+// rejection — `os.Open("")` would otherwise surface as ENOENT and
+// pollute the cache.
+func TestMultiStealth_Open_EmptyPath(t *testing.T) {
+	m := &MultiStealth{}
+	_, err := m.Open("")
+	require.Error(t, err)
+}
+
+// TestMultiStealth_Open_ZeroValueWorks captures the zero-value
+// usability promise: `var m MultiStealth` is valid, no constructor.
+func TestMultiStealth_Open_ZeroValueWorks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "z.bin")
+	require.NoError(t, os.WriteFile(path, []byte("zv"), 0o600))
+
+	var m MultiStealth // zero value
+	f, err := m.Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+	got, _ := io.ReadAll(f)
+	assert.Equal(t, []byte("zv"), got)
+}
+
+// TestMultiStealth_Open_RoundTrip exercises the happy path: write a
+// temp file, open it twice via *MultiStealth, verify both reads
+// return the same bytes. The second call goes through the cache.
+func TestMultiStealth_Open_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "round.bin")
+	want := []byte("MULTISTEALTH_ROUNDTRIP_OK")
+	require.NoError(t, os.WriteFile(path, want, 0o600))
+
+	m := &MultiStealth{}
+
+	// First call — captures ID + caches.
+	f1, err := m.Open(path)
+	require.NoError(t, err)
+	got1, _ := io.ReadAll(f1)
+	f1.Close()
+	assert.Equal(t, want, got1)
+
+	// Second call — cache hit, routes through OpenByID.
+	f2, err := m.Open(path)
+	require.NoError(t, err)
+	got2, _ := io.ReadAll(f2)
+	f2.Close()
+	assert.Equal(t, want, got2)
+
+	// Cache is populated for this abs path.
+	abs, _ := filepath.Abs(path)
+	m.mu.Lock()
+	entry, tried := m.cache[abs]
+	m.mu.Unlock()
+	require.True(t, tried, "abs path must be in the cache after first call")
+	if entry == nil {
+		// NewStealth failed (likely non-NTFS temp dir) — round-trip
+		// still succeeded via the negative-cache fallback. Skip the
+		// stronger Object-ID assertion in that environment.
+		t.Skipf("MultiStealth fell back to os.Open (non-NTFS temp dir likely); round-trip still verified")
+	}
+	var zero [16]byte
+	assert.NotEqual(t, zero, entry.ObjectID, "cached Stealth must carry a non-zero ObjectID")
+}
+
+// TestMultiStealth_Open_NegativeCacheFallsBack verifies that a
+// missing-file open errors out (via os.Open) AND that the
+// negative-cache entry is recorded so we don't retry NewStealth on
+// the next call for the same path.
+func TestMultiStealth_Open_NegativeCacheFallsBack(t *testing.T) {
+	bogus := filepath.Join(t.TempDir(), "does-not-exist.bin")
+	m := &MultiStealth{}
+
+	_, err := m.Open(bogus)
+	require.Error(t, err, "missing file must surface as an error")
+
+	abs, _ := filepath.Abs(bogus)
+	m.mu.Lock()
+	entry, tried := m.cache[abs]
+	m.mu.Unlock()
+	require.True(t, tried, "missing-path attempt must populate the cache")
+	assert.Nil(t, entry, "negative cache entry must be nil so subsequent calls go straight to os.Open")
+}
+
+// TestMultiStealth_Open_DifferentPathsKeptSeparate makes sure the
+// per-path cache binds the right ObjectID to the right path —
+// different paths must not collide.
+func TestMultiStealth_Open_DifferentPathsKeptSeparate(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "alpha.bin")
+	pathB := filepath.Join(dir, "bravo.bin")
+	dataA := []byte("ALPHA_separate_AAAA")
+	dataB := []byte("BRAVO_separate_BBBB")
+	require.NoError(t, os.WriteFile(pathA, dataA, 0o600))
+	require.NoError(t, os.WriteFile(pathB, dataB, 0o600))
+
+	m := &MultiStealth{}
+
+	// Prime both paths.
+	for _, p := range []string{pathA, pathB} {
+		f, err := m.Open(p)
+		require.NoError(t, err)
+		f.Close()
+	}
+
+	// Re-read both and assert no path-collision in the cache.
+	fA, err := m.Open(pathA)
+	require.NoError(t, err)
+	gotA, _ := io.ReadAll(fA)
+	fA.Close()
+	assert.Equal(t, dataA, gotA, "path A must still return file A on cache hit")
+
+	fB, err := m.Open(pathB)
+	require.NoError(t, err)
+	gotB, _ := io.ReadAll(fB)
+	fB.Close()
+	assert.Equal(t, dataB, gotB, "path B must still return file B on cache hit")
+}
+
 // TestStealth_DefeatsPathHookSemantics sanity-checks that Stealth.Open
 // does not consult the path argument — two Stealth openers built for
 // two different files must return their OWN file regardless of which
