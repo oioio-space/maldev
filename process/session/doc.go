@@ -38,6 +38,21 @@
 // children launched under a different user as anomalous.
 // Plain `WTSEnumerateSessions` is invisible.
 //
+// # Required privileges
+//
+// `List` / `Active` are unprivileged
+// (`WTSEnumerateSessions` against the local server).
+// `CreateProcessOnActiveSessions` and
+// `ImpersonateThreadOnActiveSession` require SYSTEM —
+// `WTSQueryUserToken` is gated to LocalSystem on a default
+// install. Admin alone is insufficient unless paired with
+// an explicit SYSTEM hop (`win/impersonate.GetSystem`).
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). The session / WTS /
+// window-station model is Windows-only; no POSIX equivalent.
+//
 // # Example
 //
 // See [ExampleList] and [ExampleCreateProcessOnActiveSessions]

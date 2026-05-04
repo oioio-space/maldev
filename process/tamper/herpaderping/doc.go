@@ -67,6 +67,26 @@
 // decoy PE while memory layout matches a different
 // executable.
 //
+// # Required privileges
+//
+// unprivileged. The technique only manipulates files +
+// kernel objects the calling user already owns —
+// `NtCreateSection(SEC_IMAGE)` against a writable file in
+// the operator's own scratch dir, then file overwrite /
+// delete via standard Win32 file APIs. No
+// `SeDebugPrivilege`, no admin. The on-disk decoy / ghost
+// destination only needs the caller's write permission,
+// typically `%TEMP%` or any user-writable path.
+//
+// # Platform
+//
+// Windows-only. Kernel image-section cache + Sysmon Event 25
+// detection are Windows-specific kernel surfaces; no POSIX
+// equivalent. Effective only on Win11 < 26100 — newer builds
+// reject the section-from-tampered-file path with
+// STATUS_NOT_SUPPORTED (see Limitations + the version-gating
+// in `Run`).
+//
 // # Example
 //
 // See [ExampleRun] in herpaderping_example_test.go.

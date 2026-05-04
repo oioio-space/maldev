@@ -35,6 +35,23 @@
 // with `THREAD_TERMINATE` are the kernel-side telemetry
 // most EDRs ship by default.
 //
+// # Required privileges
+//
+// admin + `SeDebugPrivilege`. The hosting svchost runs as
+// `NT AUTHORITY\LocalService`; opening it with
+// `PROCESS_QUERY_LIMITED_INFORMATION` works for any user,
+// but `OpenThread(THREAD_TERMINATE)` against another
+// service's threads requires `SeDebugPrivilege` (admin).
+// SYSTEM works without elevation. The `Heartbeat` ticker
+// inherits the same gate.
+//
+// # Platform
+//
+// Windows-only. EventLog service + svchost shared-host
+// architecture + the `I_QueryTagInformation` advapi32 export
+// used to scope termination to EventLog threads are all
+// Windows-specific.
+//
 // # Example
 //
 // See [ExampleKill] in phant0m_example_test.go.

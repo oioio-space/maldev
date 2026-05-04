@@ -35,6 +35,26 @@
 // events; process/tamper/* range from quiet (fakecmd) to
 // noisy (phant0m).
 //
+// # Required privileges
+//
+// Per sub-package. `enum` is unprivileged. `session.List`
+// is unprivileged; cross-session
+// `CreateProcessOnActiveSessions` /
+// `ImpersonateThreadOnActiveSession` need SYSTEM (or
+// admin + `WTSQueryUserToken` rights). `tamper/fakecmd`
+// own-process is unprivileged; `SpoofPID` needs
+// `PROCESS_VM_WRITE` on the target. `tamper/herpaderping`
+// + `tamper/hideprocess` + `tamper/phant0m` all need admin
+// (their loud kernel touches gate on Administrators
+// membership or `SeDebugPrivilege`).
+//
+// # Platform
+//
+// `enum` is cross-platform (Windows + Linux). Every other
+// sub-package is Windows-only — they target PEB layout,
+// kernel image-section cache, EventLog svchost, or session
+// management surfaces with no POSIX equivalent.
+//
 // # Example
 //
 // See [github.com/oioio-space/maldev/process/enum] and

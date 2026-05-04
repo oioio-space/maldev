@@ -35,6 +35,21 @@
 // of the live system (or a memory dump) reveals both values
 // side-by-side.
 //
+// # Required privileges
+//
+// `Spoof` / `Restore` (own-process) are unprivileged — write
+// to the calling process's own PEB requires no extra
+// privilege. `SpoofPID` requires `PROCESS_VM_WRITE` on the
+// target: same-user same-IL is unprivileged; cross-user /
+// protected targets need `SeDebugPrivilege` (admin).
+//
+// # Platform
+//
+// Windows-only. PEB layout is a Windows kernel construct;
+// no POSIX equivalent. The package's source files are
+// `_windows.go`-suffixed so cross-compile yields an empty
+// build.
+//
 // # Example
 //
 // See [ExampleSpoof] in fakecmd_example_test.go.

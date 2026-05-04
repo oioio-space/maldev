@@ -29,6 +29,24 @@
 // enumeration itself; they correlate it against subsequent
 // suspicious actions (lsass open, token theft).
 //
+// # Required privileges
+//
+// unprivileged. `CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS)`
+// returns every process visible to the calling token without
+// privilege; `/proc` walk reads world-readable
+// `/proc/<pid>/comm` + `/proc/<pid>/status`. The PPID is
+// always available; the executable path requires
+// `PROCESS_QUERY_LIMITED_INFORMATION` (granted by default
+// for same-user, denied for protected processes) — when
+// denied, the entry still surfaces with PID + name only.
+//
+// # Platform
+//
+// Cross-platform. Same `Process` struct shape on Windows
+// (`_windows.go` Toolhelp32 snapshot) and Linux
+// (`_linux.go` /proc walk). Build tags pick the right
+// implementation.
+//
 // # Example
 //
 // See [ExampleFindByName] in enum_example_test.go.
