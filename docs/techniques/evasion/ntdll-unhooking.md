@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: a705c32
+last_reviewed: 2026-05-04
+reflects_commit: 0dc2bb2
 ---
 
 # ntdll Unhooking
@@ -168,32 +168,156 @@ func main() {
 
 ## API Reference
 
-```go
-// ClassicUnhook restores the first 5 bytes of a hooked ntdll function.
-// opener is optional (nil = plain os.Open of ntdll.dll). Pass a
-// *stealthopen.Stealth built for ntdll.dll to bypass path-based EDR
-// hooks on the CreateFile for System32\ntdll.dll.
-func ClassicUnhook(funcName string, caller *wsyscall.Caller, opener stealthopen.Opener) error
+Package: `github.com/oioio-space/maldev/evasion/unhook`. Three
+strategies — `ClassicUnhook` (per-function), `FullUnhook` (whole
+.text), `PerunUnhook` (sacrificial-child source). Each has a
+matching Technique constructor for use in
+[`evasion/preset`](preset.md) stacks.
 
-// FullUnhook replaces the entire .text section from disk. Same opener
-// semantics as ClassicUnhook.
-func FullUnhook(caller *wsyscall.Caller, opener stealthopen.Opener) error
+### `unhook.ClassicUnhook(funcName string, caller *wsyscall.Caller, opener stealthopen.Opener) error`
 
-// PerunUnhook reads pristine ntdll from a suspended notepad.exe child.
-func PerunUnhook(caller *wsyscall.Caller) error
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook#ClassicUnhook)
 
-// PerunUnhookTarget uses a custom host process.
-func PerunUnhookTarget(target string, caller *wsyscall.Caller) error
+Restore the first 5 bytes of a hooked ntdll function from the
+on-disk image.
 
-// Technique constructors:
-func Classic(funcName string) evasion.Technique
-func CommonClassic() []evasion.Technique  // common hooked functions
-func Full() evasion.Technique
-func Perun() evasion.Technique
+**Parameters:** `funcName` — ntdll export name (`"NtCreateThreadEx"`,
+`"NtReadVirtualMemory"`, …). `caller` — optional `*wsyscall.Caller`
+(nil = WinAPI). `opener` — optional `stealthopen.Opener` (nil =
+`os.Open`); pass a `*stealthopen.Stealth` built for ntdll.dll to
+bypass path-based EDR hooks on the `CreateFile` for
+`System32\ntdll.dll`.
 
-// Hook detection:
-func IsHooked(funcName string) (bool, error)
-```
+**Returns:** error from PE parse, opener, or the
+`VirtualProtect` round-trip required to write back the prologue.
+
+**Side effects:** flips the ntdll page protection RX → RWX → RX
+during the patch (one `VirtualProtect` cycle).
+
+**OPSEC:** the page-protection flip is the loudest signal —
+`NtProtectVirtualMemory` against an ntdll page is rare in benign
+code. Pair with `MethodIndirectAsm` so the call originates from
+inside ntdll itself.
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows.
+
+### `unhook.FullUnhook(caller *wsyscall.Caller, opener stealthopen.Opener) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook#FullUnhook)
+
+Replace the entire `.text` section of in-memory ntdll with the
+on-disk version. Same opener semantics as `ClassicUnhook`.
+
+**Returns:** error from PE parse / opener / `VirtualProtect`.
+
+**Side effects:** flips ntdll's `.text` (~1.5 MB) RX → RWX → RX,
+overwrites it, then flips back. ~3 ms on modern hardware.
+
+**OPSEC:** the bulk write is detectable by any EDR that mmap-
+checksums ntdll. Trade-off: erases every hook in one shot — no
+need to enumerate. The Stealth preset uses this as the first step.
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows.
+
+### `unhook.PerunUnhook(caller *wsyscall.Caller) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook#PerunUnhook)
+
+Source pristine ntdll bytes from a freshly-spawned `notepad.exe`
+suspended child rather than from disk.
+
+**Parameters:** `caller` optional.
+
+**Returns:** error from spawn / read / write paths.
+
+**Side effects:** spawns a child suspended, reads its loaded
+(unhooked) ntdll via `NtReadVirtualMemory`, writes them over the
+parent's hooked ntdll, then terminates the child.
+
+**OPSEC:** sidesteps the on-disk read — no `CreateFile(ntdll.dll)`
+artifact. The cost is the child-spawn footprint (Sysmon Event 1).
+Use `PerunUnhookTarget` with a process-tree-blending host instead
+of notepad for stealth.
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows.
+
+### `unhook.PerunUnhookTarget(target string, caller *wsyscall.Caller) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook#PerunUnhookTarget)
+
+Like `PerunUnhook` but accepts an arbitrary host process path.
+
+**Parameters:** `target` absolute path to the sacrificial host
+binary; `caller` optional.
+
+**Returns / Side effects / OPSEC:** as `PerunUnhook` but the
+spawned process matches `target`.
+
+**Required privileges:** read on `target`.
+
+**Platform:** Windows.
+
+### Technique constructors
+
+#### `unhook.Classic(funcName string) evasion.Technique`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook#Classic)
+
+Wraps `ClassicUnhook` as a single-function `evasion.Technique`.
+**Name:** `"unhook.Classic(<funcName>)"`. Calls `ClassicUnhook(funcName, nil, nil)` on `Apply`.
+
+#### `unhook.CommonClassic() []evasion.Technique`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook#CommonClassic)
+
+Returns the slice of `Classic` Techniques covering the
+commonly-hooked NT functions (`NtCreateThreadEx`,
+`NtReadVirtualMemory`, `NtWriteVirtualMemory`,
+`NtAllocateVirtualMemory`, `NtProtectVirtualMemory`,
+`NtMapViewOfSection`, `NtOpenProcess`, `NtQueueApcThread`).
+
+#### `unhook.Full() evasion.Technique`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook#Full)
+
+Wraps `FullUnhook(nil, nil)`. **Name:** `"unhook.Full"`.
+
+#### `unhook.Perun() evasion.Technique`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook#Perun)
+
+Wraps `PerunUnhook(nil)`. **Name:** `"unhook.Perun"`.
+
+### Hook detection
+
+#### `unhook.IsHooked(funcName string) (bool, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/unhook#IsHooked)
+
+Compare the in-memory prologue against the on-disk prologue and
+report whether they differ. Use as a pre-flight check before
+deciding whether to unhook (skip the page flip when no hook is
+present).
+
+**Returns:** `true` if the in-memory function differs from the disk
+version; error from PE parse.
+
+**Side effects:** reads ntdll.dll from disk — same opener
+considerations as `ClassicUnhook` (no opener override exposed
+yet on `IsHooked` — uses `os.Open`).
+
+**OPSEC:** read-only; no page flip. Detection is the file open
+itself.
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows.
 
 ## See also
 

@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: a705c32
+last_reviewed: 2026-05-04
+reflects_commit: 0dc2bb2
 ---
 
 # ACG + BlockDLLs
@@ -132,23 +132,93 @@ func main() {
 
 ## API Reference
 
-```go
-// acg package
-// Enable activates Arbitrary Code Guard for the current process.
-// Requires Windows 10 1709+.
-func Enable(caller *wsyscall.Caller) error
+Two sibling packages: `evasion/acg` (Arbitrary Code Guard) and
+`evasion/blockdlls` (Microsoft-signed-only DLL gate). Both expose
+parallel `Enable` / Technique-constructor pairs and are typically
+used together.
 
-// Technique constructor:
-func Guard() evasion.Technique
+### Package `evasion/acg`
 
-// blockdlls package
-// Enable blocks loading of non-Microsoft-signed DLLs.
-// Requires Windows 10 1709+.
-func Enable(caller *wsyscall.Caller) error
+#### `acg.Enable(caller *wsyscall.Caller) error`
 
-// Technique constructor:
-func MicrosoftOnly() evasion.Technique
-```
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/acg#Enable)
+
+Activates Arbitrary Code Guard for the current process via
+`SetProcessMitigationPolicy(ProcessDynamicCodePolicy, {ProhibitDynamicCode: 1})`.
+
+**Parameters:** `caller` optional `*wsyscall.Caller` (nil = WinAPI
+default) for routing the underlying syscall.
+
+**Returns:** error if the policy call fails — most often when the
+process has already executed `VirtualAlloc(PAGE_EXECUTE_*)` and the
+kernel rejects the late opt-in.
+
+**Side effects:** **irreversible for the lifetime of the process** —
+ACG cannot be unset once enabled. All subsequent `VirtualAlloc(RX)` /
+`VirtualProtect(→ RX)` calls are blocked by the kernel.
+
+**OPSEC:** the policy enable itself is silent. Detection focuses on
+the *absence* of dynamic-code allocations afterwards — fingerprint
+of "implant that is done expanding its working set". Run **after**
+any RWX allocations the implant needs (shellcode region, stub pages).
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows ≥ 10 1709. Returns "not implemented" on
+older builds.
+
+#### `acg.Guard() evasion.Technique`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/acg#Guard)
+
+Wraps `acg.Enable` as an `evasion.Technique` for use in
+[`evasion/preset`](preset.md) stacks (`Hardened`, `Aggressive`).
+
+**Returns:** `evasion.Technique` whose `Apply` calls `Enable` and
+whose `Name` is `"acg.Guard"`.
+
+**Side effects / OPSEC / Required privileges / Platform:** as
+`Enable`.
+
+### Package `evasion/blockdlls`
+
+#### `blockdlls.Enable(caller *wsyscall.Caller) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/blockdlls#Enable)
+
+Blocks loading of non-Microsoft-signed DLLs into the current process
+via `SetProcessMitigationPolicy(ProcessSignaturePolicy, {MicrosoftSignedOnly: 1})`.
+
+**Parameters:** `caller` optional `*wsyscall.Caller` (nil = WinAPI
+default).
+
+**Returns:** error if the policy call fails — typically when an
+unsigned DLL is already loaded (cannot retroactively unload it).
+
+**Side effects:** **irreversible for the lifetime of the process** —
+matches ACG's one-way contract. All subsequent `LoadLibrary*`
+attempts on non-Microsoft-signed binaries return `ERROR_BAD_EXE_FORMAT`.
+
+**OPSEC:** silent enable; subsequent failed `LoadLibrary` attempts
+by EDR injection drivers may surface in EDR's own logs as failed
+hooks. The policy is the standard browser-sandbox hardening — its
+*presence* is unremarkable.
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows ≥ 10 1709.
+
+#### `blockdlls.MicrosoftOnly() evasion.Technique`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/blockdlls#MicrosoftOnly)
+
+Wraps `blockdlls.Enable` as an `evasion.Technique`.
+
+**Returns:** `evasion.Technique` whose `Apply` calls `Enable` and
+whose `Name` is `"blockdlls.MicrosoftOnly"`.
+
+**Side effects / OPSEC / Required privileges / Platform:** as
+`Enable`.
 
 ## See also
 

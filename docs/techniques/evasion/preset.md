@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: a705c32
+last_reviewed: 2026-05-04
+reflects_commit: 0dc2bb2
 ---
 
 # Preset — Ready-to-Use Evasion Combinations
@@ -341,11 +341,126 @@ remediation without overlapping.
 
 ## API Reference
 
-See the [package godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/preset) for the
-canonical `Apply(c Caller) error` / `ApplyAll(c Caller) map[string]error`
-surface. Each preset (`Minimal`, `Stealth`, `Aggressive`)
-returns a `[]evasion.Technique` ready to plug into
-`evasion.ApplyAll`.
+Package: `github.com/oioio-space/maldev/evasion/preset`. Four
+shipped presets (`Minimal`, `Stealth`, `Hardened`, `Aggressive`)
+plus the `CETOptOut` standalone helper. Each preset returns a
+`[]evasion.Technique` ready to plug into `evasion.ApplyAll(c Caller)`.
+
+The `evasion.Technique` interface (defined in the parent
+`evasion` package) carries `Name() string` + `Apply(Caller) error`.
+`Apply` is fail-soft per technique — `evasion.ApplyAll` collects
+per-technique errors into a `map[string]error` so one failure does
+not abort the rest of the stack.
+
+### `preset.Minimal() []evasion.Technique`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/preset#Minimal)
+
+The two-Technique baseline: AMSI bypass + ETW patching. Reversible
+mitigations only — leaves the process able to inject afterwards.
+
+**Returns:** `[]evasion.Technique` of length 2.
+
+**Side effects:** none until `ApplyAll` runs the slice.
+
+**OPSEC:** the smallest possible footprint that still neutralises
+in-process script-engine logging (AMSI) and event tracing (ETW).
+Best for short-lived implants that don't need full hardening.
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows. Stub returns `nil` on non-Windows.
+
+### `preset.Stealth() []evasion.Technique`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/preset#Stealth)
+
+The 12-Technique stack: full ntdll unhook (covers the common 8
+hooked NT functions) + AMSI + ETW + standard reversible mitigations.
+The "default red-team posture" preset.
+
+**Returns:** `[]evasion.Technique` of length 12.
+
+**Side effects:** as `Minimal` plus the bulk page-protection flip
+on ntdll's `.text` (~3 ms one-time cost during `ApplyAll`).
+
+**OPSEC:** ntdll page flip is the loudest signal — pair with
+`MethodIndirectAsm` so the `NtProtectVirtualMemory` call against
+the ntdll page originates from inside ntdll itself.
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows.
+
+### `preset.Hardened() []evasion.Technique`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/preset#Hardened)
+
+Sits between `Stealth` and `Aggressive`: bundles AMSI + ETW + full
+ntdll unhook + CET opt-out. **Drops** the irreversible per-process
+mitigations (ACG, BlockDLLs) so callers can still inject afterwards.
+
+**Returns:** `[]evasion.Technique` of length 4.
+
+**Side effects:** as `Stealth` plus a one-time CET shadow-stack
+opt-out (graceful no-op when CET is not enforced — see
+`evasion/cet`).
+
+**OPSEC:** ideal for implants that need to inject AFTER the preset
+applies (Aggressive prevents that).
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows.
+
+### `preset.Aggressive() []evasion.Technique`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/preset#Aggressive)
+
+The 6-Technique full-hardening stack: AMSI + ETW + full unhook +
+CET opt-out + **ACG** (`acg.Guard`) + **BlockDLLs**
+(`blockdlls.MicrosoftOnly`). The two latter mitigations are
+**irreversible** for the lifetime of the process — apply only
+after the implant has finished allocating any RX regions and
+loading any unsigned DLLs.
+
+**Returns:** `[]evasion.Technique` of length 6.
+
+**Side effects:** as `Hardened` plus the one-way ACG / BlockDLLs
+toggles (see [`acg-blockdlls.md`](acg-blockdlls.md) for the
+irreversibility contract).
+
+**OPSEC:** post-Aggressive the process cannot inject again, cannot
+load unsigned DLLs, cannot allocate executable memory. Maximum
+defence; minimum flexibility. Use as the *last* preset in a chain
+that has finished its setup.
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows.
+
+### `preset.CETOptOut() evasion.Technique`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/preset#CETOptOut)
+
+Standalone CET-disable helper, exported separately so callers can
+plug it into custom Technique stacks without pulling the whole
+`Hardened` / `Aggressive` preset.
+
+**Returns:** `evasion.Technique` (`Name() == "cet.Disable"`)
+whose `Apply` calls `cet.Disable` with a graceful no-op when CET is
+not enforced.
+
+**Side effects:** flips the process's
+`ProcessUserShadowStackPolicy.AuditUserShadowStack` to disabled when
+applicable.
+
+**OPSEC:** silent on non-CET hosts (no-op). Detectable via
+`SetProcessMitigationPolicy` ETW provider on CET-enforced hosts.
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows. Stub returns a no-op Technique on non-Windows.
 
 ## See also
 

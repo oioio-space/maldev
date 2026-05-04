@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: a705c32
+last_reviewed: 2026-05-04
+reflects_commit: 0dc2bb2
 ---
 
 # Encrypted Sleep (Sleep Mask)
@@ -383,67 +383,166 @@ The scanner prints `HIT` before/after each cycle and `MISS` throughout the maske
 
 ## API Reference
 
-```go
-// Region is one memory window to protect during sleep.
-type Region struct {
-    Addr uintptr
-    Size uintptr
-}
+Package: `github.com/oioio-space/maldev/evasion/sleepmask`. The
+contract is `Mask` for in-process regions, `RemoteMask` for cross-
+process. Both follow the same `WithCipher(...).WithStrategy(...).Sleep(ctx, d)`
+shape. Cipher implementations must be **self-inverse**
+(`Apply(Apply(x, k), k) == x`) so encrypt and decrypt are the same
+call.
 
-// Cipher transforms region bytes in-place. Implementations must be
-// self-inverse (Apply(Apply(x, k), k) == x) so encrypt and decrypt are
-// the same call. XORCipher, RC4Cipher, AESCTRCipher ship.
-type Cipher interface {
-    Apply(buf, key []byte)
-    KeySize() int
-}
+### Local Mask
 
-func NewXORCipher() *XORCipher
-func NewRC4Cipher() *RC4Cipher
-func NewAESCTRCipher() *AESCTRCipher
+#### `type Region struct { Addr, Size uintptr }`
 
-// Strategy encapsulates the encrypt → wait → decrypt cycle. InlineStrategy,
-// TimerQueueStrategy, EkkoStrategy, and FoliageStrategy (windows+amd64, RC4 only
-// — last two) ship.
-type Strategy interface {
-    Cycle(ctx context.Context, regions []Region, cipher Cipher, key []byte, d time.Duration) error
-}
+Single memory window descriptor. Multi-region setups pass a slice
+to `New(...regions)`.
 
-// FoliageStrategy is Ekko + a stack-scrub gadget that zeroes the used
-// gadget shadow frames before the wait. ScrubBytes is clamped to a
-// safe max that does not clobber the memset gadget's own return frame.
-type FoliageStrategy struct {
-    ScrubBytes uintptr // 0 = default (2 * ekkoShadowStride); max is clamped internally
-}
+**Side effects:** pure data.
 
-// New creates a Mask covering the given regions. Defaults: XORCipher + InlineStrategy.
-func New(regions ...Region) *Mask
-func (m *Mask) WithCipher(c Cipher) *Mask     // nil → XORCipher
-func (m *Mask) WithStrategy(s Strategy) *Mask // nil → InlineStrategy
+**OPSEC / Required privileges / Platform:** N/A.
 
-// Sleep runs one encrypt → wait → decrypt cycle.
-// Returns ctx.Err() if the wait was cancelled; the strategy's error on syscall
-// failure; nil on success. Zero regions or non-positive d short-circuits.
-// Decrypt always runs, even on ctx cancellation.
-func (m *Mask) Sleep(ctx context.Context, d time.Duration) error
+#### `type Cipher interface { Apply(buf, key []byte); KeySize() int }`
 
-// RemoteRegion / RemoteMask mask memory in another process. Handle must carry
-// PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ.
-type RemoteRegion struct {
-    Handle uintptr
-    Addr   uintptr
-    Size   uintptr
-}
+Self-inverse byte transform applied to region bytes during the
+encrypt + decrypt halves of one Sleep cycle.
 
-type RemoteStrategy interface {
-    Cycle(ctx context.Context, regions []RemoteRegion, cipher Cipher, key []byte, d time.Duration) error
-}
+**OPSEC:** the cipher choice trades CPU cost vs entropy delta — XOR
+is fast but produces a region that still carries the shellcode's
+byte distribution; RC4 / AES-CTR fully randomise.
 
-func NewRemote(regions ...RemoteRegion) *RemoteMask
-func (m *RemoteMask) WithCipher(c Cipher) *RemoteMask
-func (m *RemoteMask) WithStrategy(s RemoteStrategy) *RemoteMask
-func (m *RemoteMask) Sleep(ctx context.Context, d time.Duration) error
-```
+**Platform:** cross-platform.
+
+#### `sleepmask.NewXORCipher() *XORCipher` / `NewRC4Cipher() *RC4Cipher` / `NewAESCTRCipher() *AESCTRCipher`
+
+Concrete `Cipher` constructors. XOR is the package default for
+`Mask` when no `WithCipher` is set. RC4 is required when using
+`EkkoStrategy` / `FoliageStrategy` (those do their own scratch RC4
+internally and the API parity matters).
+
+**Returns:** the typed cipher (each implements `Cipher`).
+
+**Side effects:** none at construction.
+
+**OPSEC / Required privileges / Platform:** as `Cipher`.
+
+#### `type Strategy interface { Cycle(ctx, regions []Region, cipher Cipher, key []byte, d time.Duration) error }`
+
+The encrypt → wait → decrypt cycle, abstracted so callers can
+swap between in-thread (`InlineStrategy`), timer-queue
+(`TimerQueueStrategy`), and ROP-gadget-driven
+(`EkkoStrategy`, `FoliageStrategy`) execution.
+
+**Platform:** Inline / TimerQueue cross-platform; Ekko / Foliage
+Windows + amd64 only.
+
+#### `type FoliageStrategy struct { ScrubBytes uintptr }`
+
+Ekko + a stack-scrub gadget that zeroes the used gadget shadow
+frames before the wait. `ScrubBytes == 0` defaults to `2 *
+ekkoShadowStride`; oversized values are clamped to a safe max so
+the memset gadget cannot clobber its own return frame.
+
+**Side effects:** writes zeros over the recorded shadow stack
+during each cycle.
+
+**OPSEC:** the most thorough hibernation primitive — masked region
++ scrubbed gadget chain. Detection focuses on the gadget addresses
+themselves (Cobalt Strike's Ekko/Foliage signatures hit here too).
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows + amd64.
+
+#### `sleepmask.New(regions ...Region) *Mask`
+
+Construct a `Mask` covering the given regions with defaults
+(`XORCipher` + `InlineStrategy`).
+
+**Returns:** `*Mask` (never nil).
+
+**Side effects:** none at construction; key buffer allocated on
+first `Sleep`.
+
+**OPSEC:** as the chosen cipher + strategy.
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform (with strategy-specific Windows-only
+restrictions noted above).
+
+#### `(*Mask).WithCipher(c Cipher) *Mask` / `(*Mask).WithStrategy(s Strategy) *Mask`
+
+Fluent setters. `nil` reverts to the package default for that slot.
+
+**Returns:** the receiver (chainable).
+
+**Side effects:** mutates the Mask state.
+
+#### `(*Mask).Sleep(ctx context.Context, d time.Duration) error`
+
+Run one encrypt → wait → decrypt cycle.
+
+**Parameters:** `ctx` for cancellation; `d` the wait duration.
+
+**Returns:** `ctx.Err()` if the wait was cancelled; the strategy's
+error on syscall failure; `nil` on success. Zero regions or
+non-positive `d` short-circuits to nil.
+
+**Side effects:** writes the cipher output over each region (encrypt),
+sleeps via the chosen strategy, writes the cipher output again
+(decrypt — equivalent to encrypt thanks to self-inverse property).
+**Decrypt always runs, even on context cancellation** — region is
+never left ciphered.
+
+**OPSEC:** during the wait window, the regions hold ciphered
+bytes — memory scanners will not match shellcode signatures. The
+wait-strategy choice determines stack/thread visibility (Inline:
+caller's thread parked; TimerQueue: kernel-managed; Ekko/Foliage:
+ROP-gadget-driven, no implant code on the stack).
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform.
+
+### Remote Mask (cross-process)
+
+#### `type RemoteRegion struct { Handle, Addr, Size uintptr }`
+
+Cross-process region descriptor. `Handle` must carry
+`PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ`.
+
+**Side effects:** pure data (the handle itself is not closed by
+the package).
+
+**OPSEC:** holding a handle with these access rights against another
+process is the high-fidelity Sysmon Event 10 trigger; the masking
+itself is the secondary signal.
+
+**Required privileges:** as the handle.
+
+**Platform:** Windows.
+
+#### `type RemoteStrategy interface { Cycle(ctx, regions []RemoteRegion, cipher, key, d) error }`
+
+Cross-process counterpart of `Strategy`. Currently only an inline
+implementation ships.
+
+#### `sleepmask.NewRemote(regions ...RemoteRegion) *RemoteMask` / `(*RemoteMask).WithCipher` / `WithStrategy` / `Sleep`
+
+Same fluent shape and semantics as the local Mask, but the
+encrypt + decrypt happen via `NtReadVirtualMemory` /
+`NtWriteVirtualMemory` against the remote process.
+
+**Side effects:** N reads + N writes per cycle, where N is the
+region count.
+
+**OPSEC:** doubles the cross-process IPC traffic per cycle.
+Detection: `NtReadVirtualMemory` / `NtWriteVirtualMemory` patterns
+against a non-self handle.
+
+**Required privileges:** as the handle.
+
+**Platform:** Windows.
 
 ## See also
 

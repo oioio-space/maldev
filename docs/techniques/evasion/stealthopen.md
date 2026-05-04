@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: a705c32
+last_reviewed: 2026-05-04
+reflects_commit: 0dc2bb2
 ---
 
 # StealthOpen — NTFS Object ID File Access
@@ -237,10 +237,191 @@ through OpenFileById).
 
 ## API Reference
 
-See the [package godoc](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/stealthopen).
-The `Opener` interface is the seam — pass any implementation
-(`stealthopen.New(...)`, a test spy, etc.) to consumers that
-accept it (`cleanup/wipe`, `persistence/lnk` once P2.16 lands).
+Package: `github.com/oioio-space/maldev/evasion/stealthopen`. Two
+parallel seams — `Opener` for read paths, `Creator` for write paths.
+Each has a `Standard` implementation (plain `os.Open`/`os.Create`)
+and a `Stealth` implementation (NTFS-Object-ID-based open, bypasses
+path-based EDR file hooks). Helper functions `OpenRead` /
+`WriteAll` short-circuit common one-shot use cases.
+
+### Read seam
+
+#### `type Opener interface { Open(path string) (*os.File, error) }`
+
+The seam consumed by every package that needs to read from disk
+under operator-controlled strategy: `cleanup/wipe`,
+`evasion/unhook`, `credentials/lsassdump.DumpToFileVia`'s read side
+(via the consumer's `Opener`), `persistence/lnk` (P2.16).
+
+**Side effects:** implementation-defined.
+
+**OPSEC:** the whole point — pass a `Stealth` opener to bypass
+`CreateFile`-on-path EDR hooks for the consumer's read path,
+without changing the consumer's signature.
+
+**Required privileges:** as the target file.
+
+**Platform:** cross-platform interface (Windows-only `Stealth`
+implementation).
+
+#### `type Standard struct{}` + `(*Standard).Open(path string) (*os.File, error)`
+
+Plain `os.Open` wrapper. Default when `Use(nil)` is called.
+
+**Returns:** `*os.File` from the standard library.
+
+**Side effects:** opens a file handle the standard library way.
+
+**OPSEC:** standard `CreateFile(path, …)` — fully visible to EDR
+file-system minifilters.
+
+**Required privileges:** read on `path`.
+
+**Platform:** cross-platform.
+
+#### `stealthopen.Use(opener Opener) Opener`
+
+Helper that returns `opener` if non-nil, else a `*Standard`. Use at
+package boundaries so consumers can accept `nil` for "default behaviour"
+without writing the same nil-check at each call site.
+
+**Returns:** the resolved `Opener` (never nil).
+
+**Side effects:** none.
+
+**Platform:** cross-platform.
+
+#### `stealthopen.OpenRead(opener Opener, path string) ([]byte, error)`
+
+`opener.Open(path)` then `io.ReadAll` then `Close`. One-shot read.
+
+**Parameters:** `opener` (nil falls through `Use` to `Standard`),
+`path` to read.
+
+**Returns:** file bytes; first error from open / read.
+
+**Side effects:** loads the entire file into memory. Use the raw
+`Opener.Open` path for streaming.
+
+**OPSEC:** as the chosen `Opener`.
+
+**Required privileges:** read on `path`.
+
+**Platform:** cross-platform.
+
+#### `type Stealth struct{...}` + `(*Stealth).Open(path string) (*os.File, error)` + `stealthopen.NewStealth(path string) (*Stealth, error)`
+
+NTFS-Object-ID-based opener. `NewStealth(path)` reads the on-disk
+file's ObjectID via `FSCTL_GET_OBJECT_ID` (or assigns a fresh one
+via `FSCTL_CREATE_OR_GET_OBJECT_ID`), caches it, and returns a
+`*Stealth` whose `Open` ignores the path argument and opens the
+file by `OBJECT_ID_BUFFER` instead. Path-based EDR hooks miss the
+open entirely.
+
+**Parameters:** `path` to register; the returned `*Stealth.Open`
+ignores its `path` argument (kept for `Opener` interface
+compatibility).
+
+**Returns:** `*Stealth`; error from the FSCTL or path validation.
+
+**Side effects:** if no ObjectID is present, one is created and
+persists on the file (NTFS attribute, not visible in dir listings).
+
+**OPSEC:** the FSCTL is rare in benign code — first-use of
+`NewStealth` is detectable. Subsequent `Open` calls are
+ID-based and bypass path hooks. Persistence of the ObjectID is a
+forensic artifact (see `OBJECT_ID` carved from `$Extend\$ObjId`).
+
+**Required privileges:** read + `FSCTL_GET_OBJECT_ID` access on
+`path` — typically requires write access on the volume's `$Extend`
+namespace, which means admin in practice.
+
+**Platform:** Windows + NTFS. Stub returns "not implemented".
+
+#### `stealthopen.VolumeFromPath(path string) (string, error)`
+
+Returns the volume root (e.g., `\\?\Volume{GUID}\`) for `path`.
+Used internally by `NewStealth` and exported for callers building
+their own object-ID flows.
+
+**Parameters:** `path` any file-system path.
+
+**Returns:** volume root string; error if `path` is not on a
+mounted volume.
+
+**Side effects:** one `GetVolumePathName` + `GetVolumeNameForVolumeMountPoint` call.
+
+**OPSEC:** silent (mountpoint enumeration is benign).
+
+**Required privileges:** none.
+
+**Platform:** Windows.
+
+#### `stealthopen.GetObjectID(path string) ([16]byte, error)` / `SetObjectID(path string, id [16]byte) error` / `OpenByID(volumeRoot string, id [16]byte) (*os.File, error)`
+
+Lower-level NTFS Object ID primitives — same code path Stealth uses
+but exposed for callers building their own opener flows.
+
+**Returns:** GUID-style 16-byte object ID; error from FSCTL.
+
+**Side effects:** `SetObjectID` persists the ID on the file (NTFS
+attribute). `OpenByID` opens by ID, bypassing path lookup.
+
+**OPSEC:** as `Stealth.Open`.
+
+**Required privileges:** as `Stealth.Open`.
+
+**Platform:** Windows + NTFS.
+
+### Write seam
+
+#### `type Creator interface { Create(path string) (io.WriteCloser, error) }`
+
+Symmetric to `Opener` for write paths. Consumed by
+`credentials/lsassdump.DumpToFileVia` and `persistence/lnk` (P2.16).
+
+**Platform:** cross-platform interface.
+
+#### `type StandardCreator struct{}` + `(*StandardCreator).Create(path string) (io.WriteCloser, error)`
+
+Plain `os.Create` wrapper. Default when `UseCreator(nil)` is called.
+
+**Returns:** `*os.File` (which implements `io.WriteCloser`).
+
+**Side effects:** creates / truncates the file at `path`.
+
+**OPSEC:** standard `CreateFile(path, GENERIC_WRITE)` — fully
+visible to EDR.
+
+**Required privileges:** write on the parent directory.
+
+**Platform:** cross-platform.
+
+#### `stealthopen.UseCreator(creator Creator) Creator`
+
+Same nil-default helper as `Use`, for the write seam.
+
+**Returns:** the resolved `Creator` (never nil).
+
+**Side effects / OPSEC / Required privileges / Platform:** N/A.
+
+#### `stealthopen.WriteAll(creator Creator, path string, data []byte) error`
+
+`creator.Create(path)` then `Write(data)` then `Close`. One-shot
+write convenience.
+
+**Parameters:** `creator` (nil falls through `UseCreator` to
+`StandardCreator`); `path` destination; `data` bytes to write.
+
+**Returns:** first error from create / write / close.
+
+**Side effects:** as the chosen `Creator`.
+
+**OPSEC:** as the chosen `Creator`.
+
+**Required privileges:** as `StandardCreator`.
+
+**Platform:** cross-platform.
 
 ## See also
 

@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: a705c32
+last_reviewed: 2026-05-04
+reflects_commit: 0dc2bb2
 ---
 
 # PPID Spoofing
@@ -144,29 +144,154 @@ Defenders can detect PPID spoofing via:
 
 ## API Reference
 
-```go
-// Create with default targets (explorer, svchost, sihost, RuntimeBroker)
-spoofer := shell.NewPPIDSpoofer()
+Package: `github.com/oioio-space/maldev/c2/shell`. PPID spoofing
+lives under `c2/shell` because the operational use case is "spawn
+the C2 reverse-shell binary under a benign parent". The page is
+classified under evasion since the technique is a process-tree
+evasion primitive rather than a c2-protocol concern.
 
-// Create with custom targets
-spoofer := shell.NewPPIDSpooferWithTargets([]string{"explorer.exe", "notepad.exe"})
+### `shell.NewPPIDSpoofer() *PPIDSpoofer`
 
-// Find a running target process
-err := spoofer.FindTargetProcess()
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell#NewPPIDSpoofer)
 
-// Get the selected PID
-pid := spoofer.TargetPID()
+Construct a spoofer with the default target list:
+`["explorer.exe", "svchost.exe", "sihost.exe", "RuntimeBroker.exe"]`
+— processes that are always running on a desktop Windows box and
+routinely spawn short-lived children, so the process-tree-blending
+factor is high.
 
-// Get SysProcAttr for exec.Command -- caller must close handle
-attr, parentHandle, err := spoofer.SysProcAttr()
-defer windows.CloseHandle(parentHandle)
+**Returns:** `*PPIDSpoofer` (never nil).
 
-// Check actual parent PID of any process
-ppid, err := shell.ParentPID(childPID)
+**Side effects:** none — target enumeration is deferred until
+`FindTargetProcess`.
 
-// Check if current process is admin
-admin := shell.IsAdmin()
-```
+**OPSEC:** as the constructor — silent. Detection focuses on the
+spawned child, not the spoofer itself.
+
+**Required privileges:** none for construction.
+
+**Platform:** Windows.
+
+### `shell.NewPPIDSpooferWithTargets(targets []string) *PPIDSpoofer`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell#NewPPIDSpooferWithTargets)
+
+Same as `NewPPIDSpoofer` but with a caller-supplied target list.
+
+**Parameters:** `targets` slice of image-name strings (case-insensitive
+match). Order is preference order — first match wins inside
+`FindTargetProcess`.
+
+**Returns / Side effects / OPSEC / Required privileges / Platform:**
+as `NewPPIDSpoofer`. Custom target lists are stealthier than the
+default — the standard four are heavily flagged when used as PPID
+hosts.
+
+### `(*PPIDSpoofer).FindTargetProcess() error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell#PPIDSpoofer.FindTargetProcess)
+
+Enumerate processes via `CreateToolhelp32Snapshot`, pick the first
+one whose image name matches any entry in the target list, and
+record its PID internally for `SysProcAttr` to use.
+
+**Returns:** `nil` on success; `"no target process found"` if no
+match in the snapshot.
+
+**Side effects:** one `CreateToolhelp32Snapshot` enumeration.
+
+**OPSEC:** snapshot enumeration is benign on its own. The follow-on
+`OpenProcess(PROCESS_CREATE_PROCESS)` against the matched parent is
+where the high-fidelity Sysmon Event 10 fires.
+
+**Required privileges:** unprivileged for the snapshot. The later
+`OpenProcess` may require admin if the parent is elevated (e.g.,
+spoofing a child of `services.exe`).
+
+**Platform:** Windows.
+
+### `(*PPIDSpoofer).TargetPID() uint32`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell#PPIDSpoofer.TargetPID)
+
+Returns the PID selected by the most recent `FindTargetProcess`
+call. Zero before any call succeeds.
+
+**Returns:** `uint32` PID; zero if not yet selected.
+
+**Side effects:** none.
+
+**OPSEC:** silent.
+
+**Required privileges:** none.
+
+**Platform:** Windows.
+
+### `(*PPIDSpoofer).SysProcAttr() (*syscall.SysProcAttr, windows.Handle, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell#PPIDSpoofer.SysProcAttr)
+
+Open the parent process with `PROCESS_CREATE_PROCESS` and build the
+`syscall.SysProcAttr{ParentProcess: hParent}` for use with
+`exec.Cmd`. **Caller must `CloseHandle(parentHandle)` after the
+spawned child exits.**
+
+**Returns:** populated `*syscall.SysProcAttr` ready to drop into an
+`exec.Cmd`; the parent process handle (caller must close); error
+from `OpenProcess` if the target is inaccessible (PPL, denied, etc.).
+
+**Side effects:** opens a `PROCESS_CREATE_PROCESS` handle on the
+spoofed parent — this handle remains open until the caller closes
+it.
+
+**OPSEC:** highest-fidelity Sysmon Event 10 trigger of any
+PPID-spoofing primitive. EDRs alert specifically on
+`PROCESS_CREATE_PROCESS` access against canonical parents
+(explorer, svchost, etc.). Combine with custom target lists.
+
+**Required privileges:** unprivileged for same-user parents; admin
++ `SeDebugPrivilege` for elevated / cross-session parents.
+
+**Platform:** Windows.
+
+### `shell.ParentPID(childPID uint32) (uint32, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell#ParentPID)
+
+Return the actual `ParentProcessID` field of `childPID`'s
+`PROCESSENTRY32W`. Use post-spawn to verify the spoofed parent
+attached correctly.
+
+**Parameters:** `childPID` PID of the spawned child.
+
+**Returns:** parent PID; error if `childPID` not found in the
+process snapshot.
+
+**Side effects:** one `CreateToolhelp32Snapshot` enumeration.
+
+**OPSEC:** silent (read-only enumeration).
+
+**Required privileges:** unprivileged.
+
+**Platform:** Windows.
+
+### `shell.IsAdmin() bool`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/c2/shell#IsAdmin)
+
+Convenience predicate: returns `true` if the current process token
+is `IsElevated`. Use to gate PPID spoofing against elevated parents
+that require `SeDebugPrivilege`.
+
+**Returns:** `bool`.
+
+**Side effects:** opens + reads the current process token.
+
+**OPSEC:** silent (in-process token query).
+
+**Required privileges:** none.
+
+**Platform:** Windows.
 
 ## See also
 
