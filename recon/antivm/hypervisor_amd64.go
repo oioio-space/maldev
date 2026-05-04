@@ -2,6 +2,8 @@
 
 package antivm
 
+import "encoding/binary"
+
 // cpuidRaw issues the CPUID instruction with EAX=leaf, ECX=subleaf
 // and returns the four register outputs. Implemented in
 // cpuid_amd64.s.
@@ -51,11 +53,9 @@ func HypervisorVendor() string {
 	}
 	_, ebx, ecx, edx := cpuidRaw(0x40000000, 0)
 	var b [12]byte
-	for i := 0; i < 4; i++ {
-		b[i] = byte(ebx >> (8 * i))
-		b[i+4] = byte(ecx >> (8 * i))
-		b[i+8] = byte(edx >> (8 * i))
-	}
+	binary.LittleEndian.PutUint32(b[0:4], ebx)
+	binary.LittleEndian.PutUint32(b[4:8], ecx)
+	binary.LittleEndian.PutUint32(b[8:12], edx)
 	return string(b[:])
 }
 

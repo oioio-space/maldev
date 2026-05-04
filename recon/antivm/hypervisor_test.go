@@ -20,7 +20,7 @@ func TestHypervisorVendorName_KnownSignatures(t *testing.T) {
 		{"KVMKVMKVM\x00\x00\x00", "KVM"},
 		{"Microsoft Hv", "Hyper-V"},
 		{"XenVMMXenVMM", "Xen"},
-		{"TCGTCGTCGTCG", "QEMU/TCG"},
+		{"TCGTCGTCGTCG", "QEMU"},
 		{"VBoxVBoxVBox", "VirtualBox"},
 		{"bhyve bhyve ", "bhyve"},
 		{" lrpepyh vr", "Parallels"},
@@ -28,6 +28,11 @@ func TestHypervisorVendorName_KnownSignatures(t *testing.T) {
 		{"ACRNACRNACRN", "ACRN"},
 		{"QNXQVMBSQG  ", "QNX Hypervisor"},
 	}
+	// Divergence guard — fails when someone adds a vendor to the map
+	// without extending this table (silent coverage drop) or vice
+	// versa (orphan test row).
+	assert.Len(t, hypervisorVendors, len(cases),
+		"hypervisorVendors and test cases out of sync")
 	for _, tc := range cases {
 		t.Run(tc.want, func(t *testing.T) {
 			assert.Equal(t, tc.want, HypervisorVendorName(tc.sig))

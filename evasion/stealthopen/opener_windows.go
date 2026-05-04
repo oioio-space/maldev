@@ -87,13 +87,9 @@ func NewStealth(path string) (*Stealth, error) {
 // Compared to [*Stealth] (one fixed file, captured at construction),
 // MultiStealth trades a single sync.Mutex per call for the convenience
 // of a generic Opener that mirrors `*Standard`'s ergonomics. Use it
-// when:
-//
-//   - You're plugging stealth into a consumer whose file list isn't
-//     part of your call site (the typical case for `evasion/unhook`,
-//     `process/tamper/herpaderping`, `credentials/lsassdump`).
-//   - You'd otherwise have to instantiate one *Stealth per path the
-//     consumer might touch.
+// whenever you're plugging stealth into a consumer whose file list
+// isn't part of your call site, or when you'd otherwise have to
+// instantiate one *Stealth per path the consumer might touch.
 //
 // Use [*Stealth] directly when you know the single target file ahead
 // of time and want zero per-call overhead.
@@ -116,8 +112,8 @@ type MultiStealth struct {
 // subsequent calls route through OpenByID and never re-touch a
 // path-based file hook for that path.
 //
-// Cache key is the absolute path — two different relative spellings
-// of the same file resolve to the same cache slot.
+// Cache key is the lowercased absolute path — Windows file paths are
+// case-insensitive, so `C:\Foo` and `c:\foo` collapse to one slot.
 func (m *MultiStealth) Open(path string) (*os.File, error) {
 	if m == nil {
 		return nil, fmt.Errorf("stealthopen: nil MultiStealth opener")
@@ -132,6 +128,7 @@ func (m *MultiStealth) Open(path string) (*os.File, error) {
 		// as the cache key. Open will likely fail too, but consistently.
 		abs = path
 	}
+	abs = strings.ToLower(abs)
 
 	m.mu.Lock()
 	s, tried := m.cache[abs]
@@ -143,8 +140,7 @@ func (m *MultiStealth) Open(path string) (*os.File, error) {
 		return s.Open("") // path arg ignored by *Stealth
 	}
 
-	// First time for this path — capture the ID through NewStealth.
-	s, capErr := NewStealth(path)
+	s, _ = NewStealth(path)
 	m.mu.Lock()
 	if m.cache == nil {
 		m.cache = make(map[string]*Stealth)
@@ -160,11 +156,6 @@ func (m *MultiStealth) Open(path string) (*os.File, error) {
 	m.mu.Unlock()
 
 	if s == nil {
-		// Either capErr fired or the race winner negative-cached: fall
-		// back to plain path open, silently. The capture error is
-		// intentionally swallowed (operators who want to see it use
-		// *Stealth directly).
-		_ = capErr
 		return os.Open(path)
 	}
 	return s.Open("")

@@ -2,7 +2,10 @@
 
 package antivm
 
-import "testing"
+import (
+	"encoding/binary"
+	"testing"
+)
 
 // TestCpuidRaw_VendorLeaf verifies the asm wrapper round-trips
 // correctly. Leaf 0 returns the CPU vendor string in EBX:EDX:ECX
@@ -23,12 +26,13 @@ func TestCpuidRaw_VendorLeaf(t *testing.T) {
 	if ebx == 0 && ecx == 0 && edx == 0 {
 		t.Fatal("cpuidRaw(0, 0) returned all-zero — asm stub is broken")
 	}
+	// CPU vendor leaf 0 returns the 12-byte signature in EBX:EDX:ECX
+	// (note: hypervisor leaf 0x40000000 uses EBX:ECX:EDX — different
+	// register order).
 	var b [12]byte
-	for i := 0; i < 4; i++ {
-		b[i] = byte(ebx >> (8 * i))
-		b[i+4] = byte(edx >> (8 * i)) // CPU vendor uses EBX:EDX:ECX
-		b[i+8] = byte(ecx >> (8 * i))
-	}
+	binary.LittleEndian.PutUint32(b[0:4], ebx)
+	binary.LittleEndian.PutUint32(b[4:8], edx)
+	binary.LittleEndian.PutUint32(b[8:12], ecx)
 	for _, c := range b {
 		if c < 0x20 || c > 0x7E {
 			t.Fatalf("cpuidRaw(0, 0) returned non-printable vendor bytes: %q", b)

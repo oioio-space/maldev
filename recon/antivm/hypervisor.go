@@ -2,20 +2,22 @@ package antivm
 
 // hypervisorVendors maps every recognised `CPUID.40000000h`
 // vendor signature (12 ASCII bytes) to its friendly product name.
-// Keep entries sorted by vendor for grep-ability when adding new
-// hypervisors.
+// Display strings match `DefaultVendors[].Name` so the package
+// emits one canonical name per hypervisor regardless of detection
+// axis (registry, DMI, NIC, CPUID). Map literal sorted by display
+// name for grep-ability.
 var hypervisorVendors = map[string]string{
-	"VMwareVMware":        "VMware",
+	"ACRNACRNACRN":          "ACRN",
+	" lrpepyh vr":           "Parallels",
+	"prl hyperv  ":          "Parallels",
+	"bhyve bhyve ":          "bhyve",
 	"KVMKVMKVM\x00\x00\x00": "KVM",
-	"Microsoft Hv":        "Hyper-V",
-	"XenVMMXenVMM":        "Xen",
-	"TCGTCGTCGTCG":        "QEMU/TCG",
-	"VBoxVBoxVBox":        "VirtualBox",
-	"bhyve bhyve ":        "bhyve",
-	" lrpepyh vr":         "Parallels",
-	"prl hyperv  ":        "Parallels",
-	"ACRNACRNACRN":        "ACRN",
-	"QNXQVMBSQG  ":        "QNX Hypervisor",
+	"Microsoft Hv":          "Hyper-V",
+	"QNXQVMBSQG  ":          "QNX Hypervisor",
+	"TCGTCGTCGTCG":          "QEMU",
+	"VBoxVBoxVBox":          "VirtualBox",
+	"VMwareVMware":          "VMware",
+	"XenVMMXenVMM":          "Xen",
 }
 
 // HypervisorVendorName maps a raw [HypervisorVendor] signature to

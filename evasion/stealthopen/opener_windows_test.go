@@ -150,8 +150,10 @@ func TestMultiStealth_Open_RoundTrip(t *testing.T) {
 	f2.Close()
 	assert.Equal(t, want, got2)
 
-	// Cache is populated for this abs path.
+	// Cache is populated for this abs path (lowercased — Windows paths
+	// are case-insensitive, see MultiStealth.Open).
 	abs, _ := filepath.Abs(path)
+	abs = strings.ToLower(abs)
 	m.mu.Lock()
 	entry, tried := m.cache[abs]
 	m.mu.Unlock()
@@ -178,6 +180,7 @@ func TestMultiStealth_Open_NegativeCacheFallsBack(t *testing.T) {
 	require.Error(t, err, "missing file must surface as an error")
 
 	abs, _ := filepath.Abs(bogus)
+	abs = strings.ToLower(abs)
 	m.mu.Lock()
 	entry, tried := m.cache[abs]
 	m.mu.Unlock()
