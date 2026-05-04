@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/crypto
-last_reviewed: 2026-04-27
-reflects_commit: f815d85
+last_reviewed: 2026-05-04
+reflects_commit: 6382de0
 ---
 
 # Payload encryption & obfuscation
@@ -161,119 +161,116 @@ $$
 
 ## API Reference
 
+Package: `crypto` ([pkg.go.dev](https://pkg.go.dev/github.com/oioio-space/maldev/crypto)).
+Every primitive is pure Go — no syscalls beyond the OS CSPRNG that key
+generators consult. None require elevated privileges; all run on any
+Go-supported platform (the per-entry **Required privileges** / **Platform**
+fields say `none` / `any` unless the entry calls out a Windows-specific
+detail).
+
 ### `NewAESKey() ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#NewAESKey)
-
-Generate a fresh 32-byte AES-256 key from `crypto/rand`.
-
-**Returns:**
-- `[]byte` — 32 random bytes suitable as input to `EncryptAESGCM`.
-- `error` — wraps `crypto/rand` failure (extremely rare, OS entropy
-  exhaustion).
-
-**Side effects:** none — pure call into the OS CSPRNG.
-
-**OPSEC:** invisible. Reads `RtlGenRandom` / `BCryptGenRandom` on Windows.
+- godoc: generate a fresh 32-byte AES-256 key from `crypto/rand`.
+- Description: convenience wrapper over the OS CSPRNG. Useful when the operator wants a fresh per-implant or per-session key without dragging in `crypto/rand` directly.
+- Parameters: none.
+- Returns: 32 random bytes; `error` wrapping `crypto/rand` failure (rare — OS entropy exhaustion).
+- Side effects: one CSPRNG read.
+- OPSEC: invisible. Reads `RtlGenRandom` / `BCryptGenRandom` on Windows.
+- Required privileges: none.
+- Platform: any.
 
 ### `EncryptAESGCM(key, plaintext []byte) ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#EncryptAESGCM)
-
-AES-256-GCM AEAD encryption with a fresh random 12-byte nonce.
-
-**Parameters:**
-- `key` — 32 bytes (AES-256). Shorter or longer keys return an error.
-- `plaintext` — payload to encrypt; any length, including zero.
-
-**Returns:**
-- `[]byte` — `nonce ‖ ciphertext ‖ tag` (12 + len(plaintext) + 16 bytes).
-- `error` — invalid key length or `crypto/rand` failure.
-
-**Side effects:** allocates `len(plaintext) + 28` bytes.
-
-**OPSEC:** very-quiet. Pure userland arithmetic.
+- godoc: AES-256-GCM AEAD encryption with a fresh random 12-byte nonce.
+- Description: the package's default outer envelope. The nonce is prepended to the ciphertext so callers do not manage nonces; re-encrypting the same plaintext yields a different ciphertext every call.
+- Parameters: `key` — 32 bytes (AES-256; shorter / longer returns an error). `plaintext` — payload to encrypt, any length including zero.
+- Returns: `nonce ‖ ciphertext ‖ tag` (12 + `len(plaintext)` + 16 bytes); `error` for invalid key length or `crypto/rand` failure.
+- Side effects: allocates `len(plaintext) + 28` bytes.
+- OPSEC: very-quiet. Pure userland arithmetic; AES-NI accelerated on modern x64.
+- Required privileges: none.
+- Platform: any.
 
 ### `DecryptAESGCM(key, ciphertext []byte) ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#DecryptAESGCM)
-
-Inverse of `EncryptAESGCM`. Extracts the prepended nonce, verifies the
-GCM tag, returns the plaintext.
-
-**Parameters:**
-- `key` — same 32-byte key used to encrypt.
-- `ciphertext` — output of `EncryptAESGCM` (must be at least 28 bytes).
-
-**Returns:**
-- `[]byte` — original plaintext.
-- `error` — invalid key length, ciphertext too short, or
-  authentication-tag failure (tampering or wrong key).
+- godoc: inverse of `EncryptAESGCM`. Extracts the prepended nonce, verifies the GCM tag, returns the plaintext.
+- Description: tag verification means a wrong key, truncated ciphertext, or any single-bit tampering returns an error rather than garbage. Pair with `crypto.UseDecrypted` to wipe the plaintext after consumption.
+- Parameters: `key` — same 32-byte key used to encrypt; `ciphertext` — output of `EncryptAESGCM` (must be at least 28 bytes).
+- Returns: original plaintext; `error` for invalid key length, ciphertext too short, or authentication-tag failure.
+- Side effects: allocates `len(ciphertext) - 28` bytes.
+- OPSEC: very-quiet.
+- Required privileges: none.
+- Platform: any.
 
 ### `NewChaCha20Key() ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#NewChaCha20Key)
-
-Generate a fresh 32-byte XChaCha20-Poly1305 key.
+- godoc: generate a fresh 32-byte XChaCha20-Poly1305 key.
+- Description: same shape as `NewAESKey`; only the cipher choice differs.
+- Parameters: none.
+- Returns: 32 random bytes; `error` for `crypto/rand` failure.
+- Side effects: one CSPRNG read.
+- OPSEC: invisible.
+- Required privileges: none.
+- Platform: any.
 
 ### `EncryptChaCha20(key, plaintext []byte) ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#EncryptChaCha20)
-
-XChaCha20-Poly1305 AEAD encryption with a fresh random 24-byte nonce.
-
-**Parameters:** `key` 32 bytes; `plaintext` any length.
-
-**Returns:** `nonce ‖ ciphertext ‖ tag` (24 + len(plaintext) + 16 bytes).
-
-**OPSEC:** very-quiet. Prefer over AES-GCM on targets without AES-NI
-(older CPUs, ARM) — pure ChaCha20 is faster there.
+- godoc: XChaCha20-Poly1305 AEAD encryption with a fresh random 24-byte nonce.
+- Description: misuse-resistant — the 24-byte random nonce is large enough that birthday-collision risk is negligible across implant lifetimes. Prefer over AES-GCM on targets without AES-NI (older CPUs, ARM) where pure ChaCha20 is faster.
+- Parameters: `key` — 32 bytes; `plaintext` — any length.
+- Returns: `nonce ‖ ciphertext ‖ tag` (24 + `len(plaintext)` + 16 bytes); `error` for invalid key length or `crypto/rand` failure.
+- Side effects: allocates `len(plaintext) + 40` bytes.
+- OPSEC: very-quiet.
+- Required privileges: none.
+- Platform: any.
 
 ### `DecryptChaCha20(key, ciphertext []byte) ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#DecryptChaCha20)
-
-Inverse of `EncryptChaCha20`.
+- godoc: inverse of `EncryptChaCha20`.
+- Description: same tag-verification semantics as `DecryptAESGCM` — tampering returns an error.
+- Parameters: `key` — 32 bytes; `ciphertext` — output of `EncryptChaCha20`.
+- Returns: plaintext; `error` for invalid key length, short ciphertext, or tag failure.
+- Side effects: allocates `len(ciphertext) - 40` bytes.
+- OPSEC: very-quiet.
+- Required privileges: none.
+- Platform: any.
 
 ### `EncryptRC4(key, data []byte) ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#EncryptRC4)
-
-RC4 stream cipher. Symmetric — call again to decrypt.
+- godoc: RC4 stream cipher. Symmetric — call again with the same key to decrypt.
+- Description: provided for compatibility with Metasploit's `rc4` payload format and other CS-style legacy stagers. Not for confidentiality on its own.
+- Parameters: `key` — 1–256 bytes; `data` — any length.
+- Returns: XORed buffer (same length as input); `error` for empty key.
+- Side effects: allocates `len(data)` bytes.
+- OPSEC: keystream bias is detectable across long ciphertexts. Layer over an AEAD if used.
+- Required privileges: none.
+- Platform: any.
 
 > [!CAUTION]
 > RC4 is cryptographically broken (biased keystream, related-key
 > attacks). The only legitimate use case in this package is matching
 > Metasploit's `rc4` payload format on the handler side.
 
-**Parameters:** `key` 1–256 bytes; `data` any length.
-
-**Returns:** XORed buffer (same length as input).
-
 ### `XORWithRepeatingKey(data, key []byte) ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#XORWithRepeatingKey)
-
-XOR each byte of `data` with the cyclic key. Symmetric.
-
-**Parameters:** `data` any length; `key` ≥ 1 byte (zero-length returns an
-error).
-
-**Returns:** XORed buffer.
-
-**OPSEC:** very-quiet but trivially reversible if any plaintext is
-known. Use only as a layer atop an AEAD.
+- godoc: XOR each byte of `data` with the cyclic key. Symmetric.
+- Description: trivially reversible by anyone who knows or can guess any plaintext byte. Use only as a layer atop an AEAD — the value is signature-breaking, not confidentiality.
+- Parameters: `data` — any length; `key` — at least 1 byte (zero-length returns an error).
+- Returns: XORed buffer; `error` for empty key.
+- Side effects: allocates `len(data)` bytes.
+- OPSEC: very-quiet but trivially reversible if any plaintext is known.
+- Required privileges: none.
+- Platform: any.
 
 ### `EncryptTEA(key [16]byte, data []byte) ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#EncryptTEA)
-
-TEA block cipher (8-byte block, 64 rounds). PKCS#7-padded.
-
-**Parameters:** `key` exactly 16 bytes; `data` any length (padded
-internally).
-
-**Returns:** ciphertext, length rounded up to the next multiple of 8.
+- godoc: TEA block cipher (8-byte block, 64 rounds), PKCS#7-padded.
+- Description: tiny implementation (a few dozen lines of arithmetic) — useful when binary footprint matters more than cryptographic strength. ECB mode, so identical blocks encrypt identically; layer with `EncryptAESGCM` for confidentiality.
+- Parameters: `key` — exactly 16 bytes (typed `[16]byte` so the compiler enforces it); `data` — any length (padded internally to a multiple of 8).
+- Returns: ciphertext, length rounded up to the next multiple of 8; `error` only on padding failure (impossible with valid input).
+- Side effects: allocates the padded ciphertext.
+- OPSEC: ECB-mode block reuse is visible on highly-repetitive plaintexts.
+- Required privileges: none.
+- Platform: any.
 
 > [!WARNING]
 > TEA has an equivalent-key weakness — every key has three "siblings"
@@ -281,113 +278,151 @@ internally).
 
 ### `DecryptTEA(key [16]byte, data []byte) ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#DecryptTEA)
-
-Inverse of `EncryptTEA`. Strips PKCS#7 padding.
+- godoc: inverse of `EncryptTEA`. Strips PKCS#7 padding.
+- Description: rejects ciphertexts that are not a multiple of 8 bytes or whose padding bytes don't validate.
+- Parameters: `key` — same 16-byte key; `data` — TEA ciphertext.
+- Returns: plaintext; `error` for misaligned input or padding failure.
+- Side effects: allocates `len(data)` bytes (then re-slices for padding).
+- OPSEC: very-quiet.
+- Required privileges: none.
+- Platform: any.
 
 ### `EncryptXTEA(key [16]byte, data []byte) ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#EncryptXTEA)
-
-XTEA block cipher — TEA with a fixed key schedule. Same block size and
-round count.
+- godoc: XTEA block cipher — TEA with a corrected key schedule.
+- Description: same 8-byte block / 64-round structure as TEA, but the round counter is mixed into the key schedule, eliminating TEA's equivalent-key weakness. Recommended over TEA for any new code.
+- Parameters: `key` — 16 bytes; `data` — any length, padded internally.
+- Returns: ciphertext, length rounded up to next multiple of 8; `error` only on padding failure.
+- Side effects: allocates the padded ciphertext.
+- OPSEC: same ECB-mode caveats as TEA.
+- Required privileges: none.
+- Platform: any.
 
 ### `DecryptXTEA(key [16]byte, data []byte) ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#DecryptXTEA)
-
-Inverse of `EncryptXTEA`.
+- godoc: inverse of `EncryptXTEA`.
+- Description: rejects misaligned input or invalid PKCS#7 padding.
+- Parameters: `key` — 16 bytes; `data` — XTEA ciphertext.
+- Returns: plaintext; `error` for misalignment or bad padding.
+- Side effects: allocates the plaintext.
+- OPSEC: very-quiet.
+- Required privileges: none.
+- Platform: any.
 
 ### `NewSBox() (sbox [256]byte, inverse [256]byte, err error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#NewSBox)
-
-Generate a random byte permutation and its inverse. Use as a non-linear
-mixing layer between cryptographic stages.
-
-**Returns:** the forward and inverse permutation tables, plus
-`crypto/rand` errors.
+- godoc: generate a random byte permutation and its inverse.
+- Description: a non-linear mixing layer between cryptographic stages. The forward and inverse tables are computed once at build time (or implant init) and applied byte-by-byte via `SubstituteBytes` / `ReverseSubstituteBytes`. Pair with an AEAD outer envelope to flatten byte-frequency YARA rules.
+- Parameters: none.
+- Returns: forward permutation table, inverse permutation table, `error` wrapping `crypto/rand` failure.
+- Side effects: 256 CSPRNG reads (Fisher-Yates shuffle).
+- OPSEC: invisible.
+- Required privileges: none.
+- Platform: any.
 
 ### `SubstituteBytes(data []byte, sbox [256]byte) []byte`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#SubstituteBytes)
-
-Apply the S-Box byte-by-byte. Pair with `ReverseSubstituteBytes` to undo.
+- godoc: apply the S-Box byte-by-byte.
+- Description: pure permutation — output length matches input. Pair with `ReverseSubstituteBytes` to undo.
+- Parameters: `data` — any length; `sbox` — forward table from `NewSBox`.
+- Returns: substituted buffer.
+- Side effects: allocates `len(data)` bytes.
+- OPSEC: byte-frequency histogram changes shape (the whole point) but the operation itself leaves no syscall trail.
+- Required privileges: none.
+- Platform: any.
 
 ### `ReverseSubstituteBytes(data []byte, inverse [256]byte) []byte`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#ReverseSubstituteBytes)
-
-Inverse of `SubstituteBytes`.
+- godoc: inverse of `SubstituteBytes`.
+- Description: same shape as `SubstituteBytes` but consumes the inverse table.
+- Parameters: `data` — substituted bytes; `inverse` — inverse table from `NewSBox`.
+- Returns: original buffer.
+- Side effects: allocates `len(data)` bytes.
+- OPSEC: invisible.
+- Required privileges: none.
+- Platform: any.
 
 ### `NewMatrixKey(n int) (key, inverse [][]byte, err error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#NewMatrixKey)
-
-Generate a random invertible $n \times n$ matrix mod 256. Searches until
-$\gcd(\det K, 256) = 1$.
-
-**Parameters:** `n` ∈ {2, 3, 4}.
-
-**Returns:** key matrix, inverse matrix, `error` for invalid `n` or
-search exhaustion.
+- godoc: generate a random invertible $n \times n$ matrix mod 256.
+- Description: searches random matrices until one is invertible mod 256 ($\gcd(\det K, 256) = 1$). The search is bounded; on rare failures the function returns an error rather than looping forever.
+- Parameters: `n` ∈ {2, 3, 4}.
+- Returns: key matrix, inverse matrix; `error` for invalid `n` or search exhaustion.
+- Side effects: $O(n^2)$ CSPRNG reads per candidate matrix.
+- OPSEC: invisible.
+- Required privileges: none.
+- Platform: any.
 
 ### `MatrixTransform(data []byte, key [][]byte) ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#MatrixTransform)
+- godoc: Hill-cipher block transform mod 256 — each $n$-byte block becomes $K\vec{p} \mod 256$, PKCS#7-padded.
+- Description: breaks contiguous-byte YARA rules (4-byte / 8-byte signatures over the input no longer apply to the output). Pair with S-Box for combined histogram + contiguity flattening.
+- Parameters: `data` — any length, padded internally to a multiple of $n$; `key` — square invertible matrix from `NewMatrixKey`.
+- Returns: transformed buffer; `error` for invalid key shape.
+- Side effects: per-block allocation of one `[]byte` row vector of length `n`. For a 1 MiB payload with `n=4` that is 262 144 transient allocations on the encryption path (and the same on `ReverseMatrixTransform`). The output buffer is allocated once.
+- OPSEC: contiguous-byte signatures of the input no longer match. Output entropy is uniform.
+- Required privileges: none.
+- Platform: any.
 
-Hill-cipher block transform mod 256. Each $n$-byte block becomes
-$K\vec{p} \mod 256$. PKCS#7-padded.
-
-> **Allocation cost.** Per-block: one `[]byte` row vector of length
-> `n`. For a 1 MiB payload with `n=4` that's 262 144 transient
-> allocations on the encryption path (and the same on
-> `ReverseMatrixTransform`). The output buffer itself is allocated
-> once. For multi-MiB payloads where allocator pressure matters, use
-> `EncryptAESGCM` / `EncryptChaCha20` as the outer envelope and apply
-> `MatrixTransform` only to a small key/header chunk.
+> **Allocation cost.** For multi-MiB payloads where allocator pressure
+> matters, use `EncryptAESGCM` / `EncryptChaCha20` as the outer
+> envelope and apply `MatrixTransform` only to a small key/header
+> chunk.
 
 ### `ReverseMatrixTransform(data []byte, inverse [][]byte) ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#ReverseMatrixTransform)
-
-Inverse Hill-cipher transform.
+- godoc: inverse Hill-cipher transform.
+- Description: strips PKCS#7 padding from the result. Same per-block allocation cost as `MatrixTransform`.
+- Parameters: `data` — transformed bytes; `inverse` — inverse matrix from `NewMatrixKey`.
+- Returns: original buffer; `error` for invalid key shape, misaligned input, or bad padding.
+- Side effects: same per-block allocation profile as `MatrixTransform`.
+- OPSEC: invisible.
+- Required privileges: none.
+- Platform: any.
 
 ### `ArithShift(data, key []byte) ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#ArithShift)
-
-Position-dependent byte add (mod 256). Adds `key[i % len(key)] + i` to
-each byte. Defeats simple frequency analysis that XOR doesn't.
+- godoc: position-dependent byte add (mod 256) — adds `key[i % len(key)] + i` to each byte.
+- Description: produces *non*-uniform output entropy on uniform input — useful as the outermost layer when the goal is hiding "this looks like AES output" from entropy-based scanners. Defeats simple byte-frequency analysis that XOR doesn't.
+- Parameters: `data` — any length; `key` — 1–4 bytes typical (longer keys are accepted).
+- Returns: shifted buffer; `error` for empty key.
+- Side effects: allocates `len(data)` bytes.
+- OPSEC: very-quiet, and uniquely useful as a final entropy-mask layer over an AEAD envelope.
+- Required privileges: none.
+- Platform: any.
 
 ### `ReverseArithShift(data, key []byte) ([]byte, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#ReverseArithShift)
-
-Inverse of `ArithShift`.
+- godoc: inverse of `ArithShift`.
+- Description: subtracts `key[i % len(key)] + i` from each byte (mod 256).
+- Parameters: `data` — shifted bytes; `key` — same key used for `ArithShift`.
+- Returns: original buffer; `error` for empty key.
+- Side effects: allocates `len(data)` bytes.
+- OPSEC: very-quiet.
+- Required privileges: none.
+- Platform: any.
 
 ### `Wipe(buf []byte)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#Wipe)
-
-Compiler-resistant memclear over `buf`. Convenience re-export of
-`cleanup/memory.SecureZero` so the most common
-"decrypt → consume → forget" sequence can stay in the `crypto` package
-without an extra import.
+- godoc: compiler-resistant memclear over `buf`.
+- Description: convenience re-export of `cleanup/memory.SecureZero` so the most common "decrypt → consume → forget" sequence can stay in the `crypto` package without an extra import. Uses runtime-level barriers to defeat the optimiser's dead-store elimination.
+- Parameters: `buf` — slice to zero. nil and empty slices are no-ops.
+- Returns: nothing.
+- Side effects: writes zero bytes to the slice's backing memory.
+- OPSEC: defeats heap-scanner / forensic memory-dump recovery of the wiped bytes — provided the plaintext was never copied elsewhere.
+- Required privileges: none.
+- Platform: any.
 
 ### `UseDecrypted(decrypt func() ([]byte, error), fn func([]byte) error) error`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#UseDecrypted)
-
-Runs `decrypt`, hands the resulting plaintext to `fn`, and zeroes the
-plaintext via `defer Wipe(...)` before returning. The wipe runs even
-when `fn` returns an error or panics, so the only way to leave
-plaintext in heap-resident bytes is for `fn` to copy them out — which
-the doc comment forbids.
-
-`decrypt` is a closure rather than a typed function so any decrypt
-shape (fixed-size keys for TEA/XTEA, AAD-aware AEAD wrappers) fits
-without per-cipher overloads.
+- godoc: scoped plaintext lifetime — runs `decrypt`, hands the resulting plaintext to `fn`, and `defer`-wipes the plaintext before returning.
+- Description: the wipe runs even when `fn` returns an error or panics, so the only way to leave plaintext in heap-resident bytes is for `fn` to copy them out — which the doc comment forbids. `decrypt` is a closure rather than a typed function so any decrypt shape (fixed-size keys for TEA/XTEA, AAD-aware AEAD wrappers) fits without per-cipher overloads.
+- Parameters: `decrypt` — closure that produces the plaintext (or returns an error); `fn` — consumer that operates on the plaintext in place.
+- Returns: the error returned by `decrypt` or `fn`, whichever fired first; `nil` when both succeed.
+- Side effects: one decrypt call + one consumer call + one `Wipe` over the plaintext slice.
+- OPSEC: this is the canonical "ephemeral plaintext" pattern — combine with `EncryptAESGCM` for confidentiality and `Wipe` (auto-deferred) for cleartext-at-rest mitigation.
+- Required privileges: whatever `decrypt` and `fn` themselves require — `UseDecrypted` adds nothing.
+- Platform: any.
 
 ## Examples
 
