@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/persistence/lnk
-last_reviewed: 2026-04-29
-reflects_commit: 087539d
+last_reviewed: 2026-05-04
+reflects_commit: f774f7e
 ---
 
 # LNK shortcut creation
@@ -100,29 +100,201 @@ made at any point.**
 
 ## API Reference
 
-| Symbol | Description |
-|---|---|
-| [`type Shortcut`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#Shortcut) | Builder; chained setters return `*Shortcut` |
-| [`New() *Shortcut`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#New) | Fresh builder |
-| `(*Shortcut).SetTargetPath(string)` | Required — the launched binary |
-| `(*Shortcut).SetArguments(string)` | Command-line passed to target |
-| `(*Shortcut).SetWorkingDir(string)` | CWD for the launched process |
-| `(*Shortcut).SetDescription(string)` | Tooltip text |
-| `(*Shortcut).SetIconLocation(string)` | Icon donor (`"path,index"` packing — `"shell32.dll,3"`) |
-| `(*Shortcut).SetHotkey(string)` | Keyboard shortcut (`"Ctrl+Alt+T"`) |
-| `(*Shortcut).SetWindowStyle(WindowStyle)` | `StyleNormal` / `StyleMaximized` / `StyleMinimized` |
-| `(*Shortcut).Save(path string) error` | Persist to `path` (disk, via `WScript.Shell`) |
-| `(*Shortcut).BuildBytes() ([]byte, error)` | Serialise to raw bytes — **zero-disk** (IShellLinkW + IPersistStream + HGLOBAL IStream) |
-| `(*Shortcut).WriteTo(w io.Writer) (int64, error)` | Same zero-disk path, streamed to any `io.Writer` |
-| `(*Shortcut).WriteVia(creator stealthopen.Creator, path string) error` | Build bytes in memory, then land them on disk via the operator-supplied [`stealthopen.Creator`](../evasion/stealthopen.md). nil falls back to `os.Create` |
+### `type Shortcut struct`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#Shortcut)
+
+Builder for a Windows `.lnk`. Configure via `Set*` methods (each
+returns `*Shortcut` for chaining) and feed into one of the three
+sinks: [`Save`](#shortcutsavepath-string-error),
+[`BuildBytes`](#shortcutbuildbytes-byte-error),
+[`WriteTo`](#shortcutwritetow-iowriter-int64-error), or
+[`WriteVia`](#shortcutwriteviacreator-stealthopencreator-path-string-error).
+
+**Side effects:** none until a sink is invoked.
+
+**Platform:** Windows-only.
 
 ### `type WindowStyle int`
 
-| Value | Manifest |
-|---|---|
-| `StyleNormal` | 1 — default visible window |
-| `StyleMaximized` | 3 — full-screen |
-| `StyleMinimized` | 7 — minimised to taskbar (typical for stealthy auto-launch) |
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#WindowStyle)
+
+Window-display hint — values constrained to those `IWshShortcut`
+accepts.
+
+- `StyleNormal` = 1 — default visible window.
+- `StyleMaximized` = 3 — full-screen.
+- `StyleMinimized` = 7 — minimised to taskbar; canonical for
+  stealthy auto-launch.
+
+**Platform:** Windows-only.
+
+### `New() *Shortcut`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#New)
+
+Returns a zero-value [`Shortcut`](#type-shortcut-struct) ready
+for configuration.
+
+**Side effects:** none.
+
+**Platform:** Windows-only.
+
+### `(*Shortcut).SetTargetPath(path string) *Shortcut`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#Shortcut.SetTargetPath)
+
+Required — the executable or document the shortcut points to.
+
+**Side effects:** none.
+
+**Platform:** Windows-only.
+
+### `(*Shortcut).SetArguments(args string) *Shortcut`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#Shortcut.SetArguments)
+
+Command-line passed to the target.
+
+**Platform:** Windows-only.
+
+### `(*Shortcut).SetWorkingDir(dir string) *Shortcut`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#Shortcut.SetWorkingDir)
+
+CWD for the launched process.
+
+**Platform:** Windows-only.
+
+### `(*Shortcut).SetIconLocation(icon string) *Shortcut`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#Shortcut.SetIconLocation)
+
+Icon donor in WSH-style packed form `"path,index"`
+(e.g. `"shell32.dll,3"`).
+
+**Platform:** Windows-only.
+
+### `(*Shortcut).SetIconLocationIndexed(path string, index int) *Shortcut`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#Shortcut.SetIconLocationIndexed)
+
+Typed two-arg form of `SetIconLocation` — packs `(path, index)`
+into the `"path,index"` string both sinks expect.
+
+**Platform:** Windows-only.
+
+### `(*Shortcut).SetDescription(desc string) *Shortcut`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#Shortcut.SetDescription)
+
+Tooltip text shown by Explorer.
+
+**Platform:** Windows-only.
+
+### `(*Shortcut).SetHotkey(hotkey string) *Shortcut`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#Shortcut.SetHotkey)
+
+Keyboard shortcut, WSH string form (`"Ctrl+Alt+T"`,
+`"Shift+F1"`). Recognised modifiers: `Ctrl`/`Control`, `Alt`,
+`Shift`, `Ext`. Recognised keys: A–Z, 0–9, F1–F24. Anything else
+silently dropped on the `BuildBytes` path.
+
+**Platform:** Windows-only.
+
+### `(*Shortcut).SetWindowStyle(style WindowStyle) *Shortcut`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#Shortcut.SetWindowStyle)
+
+Set the `WindowStyle` field; an unset call leaves the
+property out of the LNK so the system default applies.
+
+**Platform:** Windows-only.
+
+### `(*Shortcut).Save(path string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#Shortcut.Save)
+
+Persist the LNK to disk via `WScript.Shell.CreateShortcut` →
+`IWshShortcut.Save`. Manages the COM apartment lifecycle
+internally (`runtime.LockOSThread`, `CoInitializeEx STA`,
+`CoUninitialize`).
+
+**Parameters:** `path` `.lnk` output path.
+
+**Returns:** error from COM init / property set / `Save`.
+
+**Side effects:** writes one file; opens + tears down a COM
+apartment.
+
+**OPSEC:** `WScript.Shell` instantiation from a non-script
+process is observable via ETW
+(`Microsoft-Windows-WMI-Activity` / COM activation telemetry).
+Use [`BuildBytes`](#shortcutbuildbytes-byte-error) +
+[`WriteVia`](#shortcutwriteviacreator-stealthopencreator-path-string-error)
+to bypass the WSH path entirely.
+
+**Required privileges:** write on `path`'s directory.
+
+**Platform:** Windows-only.
+
+### `(*Shortcut).BuildBytes() ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#Shortcut.BuildBytes)
+
+Zero-disk LNK serialisation:
+`CoCreateInstance(CLSID_ShellLink, IID_IShellLinkW)` +
+`QueryInterface(IID_IPersistStream)` +
+`IPersistStream::Save` against an HGLOBAL-backed `IStream`. No
+filesystem call.
+
+**Returns:** raw LNK bytes; error from any COM step.
+
+**Side effects:** allocates an HGLOBAL released before return.
+
+**OPSEC:** does NOT touch `WScript.Shell` — the WSH-activation
+telemetry that flags `Save` is absent here. Output is byte-divergent
+from `Save` (no `RELATIVE_PATH` block — see Limitations).
+
+**Platform:** Windows-only (zero-disk path is amd64-tested).
+
+### `(*Shortcut).WriteTo(w io.Writer) (int64, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#Shortcut.WriteTo)
+
+Convenience: [`BuildBytes`](#shortcutbuildbytes-byte-error)
+followed by `w.Write`. Same OPSEC profile.
+
+**Returns:** bytes written; error from build or write.
+
+**Platform:** Windows-only.
+
+### `(*Shortcut).WriteVia(creator stealthopen.Creator, path string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/lnk#Shortcut.WriteVia)
+
+Build bytes in memory via `BuildBytes`, then land on disk through
+an operator-supplied
+[`stealthopen.Creator`](../evasion/stealthopen.md). Nil
+`creator` falls back to `stealthopen.StandardCreator` (plain
+`os.Create`) — drop-in replacement for `Save` with byte-divergent
+output.
+
+**Parameters:** `creator` write primitive (transactional NTFS,
+encrypted-stream, ADS, raw `NtCreateFile`, …); `path` final
+landing path.
+
+**Returns:** error from build, `Creator.Create`, or write.
+
+**Side effects:** one write through `creator`.
+
+**OPSEC:** as `BuildBytes` for the serialisation; the on-disk
+write inherits the `Creator`'s evasion profile.
+
+**Required privileges:** depend on the supplied `Creator`.
+
+**Platform:** Windows-only.
 
 ## Examples
 

@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/persistence/startup
-last_reviewed: 2026-04-27
-reflects_commit: f8b1a51
+last_reviewed: 2026-05-04
+reflects_commit: f774f7e
 ---
 
 # StartUp folder persistence
@@ -56,21 +56,162 @@ encapsulate that.
 
 ## API Reference
 
-### Functions
+`name` arguments throughout this package are the LNK's basename
+*without* the `.lnk` suffix — every function appends it before
+hitting disk.
 
-| Symbol | Description |
-|---|---|
-| [`UserDir() (string, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#UserDir) | Resolve `%APPDATA%\…\Startup` for the calling user |
-| [`MachineDir() (string, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#MachineDir) | Resolve `%PROGRAMDATA%\…\StartUp` |
-| [`Install(name, target, args)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#Install) | Drop a `.lnk` into the user folder |
-| [`InstallMachine(name, target, args)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#InstallMachine) | Drop a `.lnk` into the machine folder (admin) |
-| [`Remove(name) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#Remove) | Delete the user-folder shortcut |
-| [`RemoveMachine(name) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#RemoveMachine) | Delete the machine-folder shortcut |
-| [`Exists(name) bool`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#Exists) | User-folder presence probe |
-| [`Shortcut(name, target, args) *ShortcutMechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#Shortcut) | `Mechanism` adapter for `persistence.InstallAll` |
+### `UserDir() (string, error)`
 
-`name` must be the value the LNK file will get *without* the
-`.lnk` suffix — `Install` appends it.
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#UserDir)
+
+`SHGetKnownFolderPath(FOLDERID_Startup)` — typically
+`%APPDATA%\Microsoft\Windows\Start Menu\Programs\StartUp`.
+
+**Returns:** absolute path; wrapped error from
+`folder.GetKnown`.
+
+**Side effects:** none.
+
+**OPSEC:** silent (read-only known-folder query).
+
+**Required privileges:** none.
+
+**Platform:** Windows-only.
+
+### `MachineDir() (string, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#MachineDir)
+
+`SHGetKnownFolderPath(FOLDERID_CommonStartup)` — typically
+`%ProgramData%\Microsoft\Windows\Start Menu\Programs\StartUp`.
+
+**Returns:** absolute path; wrapped error.
+
+**Side effects:** none.
+
+**OPSEC:** silent.
+
+**Required privileges:** none for resolution; admin to write into
+the resolved path.
+
+**Platform:** Windows-only.
+
+### `Install(name, targetPath, args string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#Install)
+
+Resolve [`UserDir`](#userdir-string-error) and drop
+`<dir>/<name>.lnk` via
+[`lnk.New().SetTargetPath(targetPath).SetArguments(args).Save(...)`](lnk.md#shortcutsavepath-string-error).
+Window style is left at the system default (no
+`SetWindowStyle`).
+
+**Returns:** error from `UserDir` or `Save`.
+
+**Side effects:** writes one `.lnk`; opens + closes a COM
+apartment.
+
+**OPSEC:** path is path-scoped on every mature EDR; the LNK
+itself inherits the OPSEC profile of `lnk.Save` (WSH
+activation telemetry).
+
+**Required privileges:** none (user-scope folder).
+
+**Platform:** Windows-only.
+
+### `InstallMachine(name, targetPath, args string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#InstallMachine)
+
+Same as `Install` but writes into
+[`MachineDir`](#machinedir-string-error). Fires the LNK at every
+user logon.
+
+**Returns:** error from `MachineDir` or `Save`.
+
+**Side effects:** writes one `.lnk` under `%ProgramData%`.
+
+**OPSEC:** machine-folder writes draw stricter rules than
+user-folder writes — admin involvement adds to the signal.
+
+**Required privileges:** local admin (write on
+`%ProgramData%\…\StartUp`).
+
+**Platform:** Windows-only.
+
+### `Remove(name string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#Remove)
+
+`os.Remove` on `<UserDir>/<name>.lnk`.
+
+**Returns:** wrapped `os.Remove` error (includes ENOENT).
+
+**Side effects:** one file unlink.
+
+**OPSEC:** file-deletion event under `%APPDATA%` — pair with
+`cleanup`.
+
+**Required privileges:** none (user-scope).
+
+**Platform:** Windows-only.
+
+### `RemoveMachine(name string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#RemoveMachine)
+
+`os.Remove` on `<MachineDir>/<name>.lnk`.
+
+**Side effects:** one file unlink under `%ProgramData%`.
+
+**Required privileges:** local admin.
+
+**Platform:** Windows-only.
+
+### `Exists(name string) bool`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#Exists)
+
+`os.Stat` against the user-scope path. No `ExistsMachine`
+counterpart — caller can compose `MachineDir` + `os.Stat`
+inline.
+
+**Returns:** true iff `<UserDir>/<name>.lnk` exists and is
+stat-able.
+
+**Side effects:** none.
+
+**OPSEC:** silent.
+
+**Required privileges:** none.
+
+**Platform:** Windows-only.
+
+### `Shortcut(name, targetPath, args string) *ShortcutMechanism`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#Shortcut)
+
+Constructor for the `persistence.Mechanism` adapter (duck-typed,
+user-scope only).
+
+**Returns:** `*ShortcutMechanism` for use with
+`persistence.InstallAll`.
+
+**Side effects:** none until `Install`.
+
+**Platform:** Windows-only.
+
+### `type ShortcutMechanism struct`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/startup#ShortcutMechanism)
+
+Implements `persistence.Mechanism`:
+`Name()` returns `"startup:user"`,
+`Install()` delegates to [`Install`](#installname-targetpath-args-string-error),
+`Uninstall()` to [`Remove`](#removename-string-error),
+`Installed()` to [`Exists`](#existsname-string-bool).
+
+**Platform:** Windows-only.
 
 ## Examples
 

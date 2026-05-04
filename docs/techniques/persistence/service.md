@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/persistence/service
-last_reviewed: 2026-04-29
-reflects_commit: 4caf628
+last_reviewed: 2026-05-04
+reflects_commit: f774f7e
 ---
 
 # Windows service persistence
@@ -66,53 +66,226 @@ the SCM interaction contract well-tested and conventional.
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#StartType)
 
-| Value | Meaning |
-|---|---|
-| `StartAuto` | `SERVICE_AUTO_START` — launched at boot, post-network init |
-| `StartManual` | `SERVICE_DEMAND_START` — operator triggers via `sc start` |
-| `StartDisabled` | `SERVICE_DISABLED` — registered but won't launch |
-| `StartBoot` | `SERVICE_BOOT_START` — kernel driver only (special case) |
-| `StartSystem` | `SERVICE_SYSTEM_START` — kernel driver only (special case) |
+Service start mode.
 
-### `type Config`
+- `StartAuto` — `SERVICE_AUTO_START`; launched at boot post-network
+  init.
+- `StartDelayed` — auto-start with the delayed-auto-start flag set
+  via a separate `ChangeServiceConfig2` after creation.
+- `StartManual` — `SERVICE_DEMAND_START`; operator triggers via
+  `sc start` / `Start`.
+
+`StartBoot` / `StartSystem` (kernel-driver-only) and
+`StartDisabled` are NOT exposed by this package.
+
+**Platform:** Windows-only.
+
+### `type Config struct`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#Config)
 
-| Field | Description |
-|---|---|
-| `Name` | Service short name (registry key under `HKLM\SYSTEM\CurrentControlSet\Services`) |
-| `BinPath` | Full path to the service executable |
-| `DisplayName` | UI-visible name (shown in services.msc) |
-| `Description` | Long description (shown in services.msc properties) |
-| `StartType` | One of the `StartType` constants |
-| `Args` | Command-line arguments appended to `BinPath` at launch |
-| `Account` | **Optional** service-account override. Empty → `LocalSystem` (default). Forms accepted: `.\\<user>` / `<host>\\<user>` (local), `<DOMAIN>\\<user>` (domain), `NT AUTHORITY\\NetworkService` / `NT AUTHORITY\\LocalService` (built-in low-priv). |
-| `Password` | Plaintext password for the account. Ignored for built-in `NT AUTHORITY\\*` principals. |
+Describes a service to install.
+
+- `Name` — service short name (`HKLM\SYSTEM\CurrentControlSet\Services\<Name>`).
+- `DisplayName` — UI label (services.msc).
+- `Description` — long description.
+- `BinPath` — full path to the executable.
+- `Args` — command-line; whitespace-split into argv entries.
+- `StartType` — one of the constants above.
+- `Account` — optional service-account override. Empty →
+  `LocalSystem` (default). Accepted forms: `.\<user>` /
+  `<host>\<user>` (local), `<DOMAIN>\<user>` (domain),
+  `NT AUTHORITY\NetworkService` / `NT AUTHORITY\LocalService`
+  (built-in low-priv).
+- `Password` — plaintext password. Ignored for built-in
+  `NT AUTHORITY\*` principals.
 
 > [!IMPORTANT]
-> When `Account` is set to a normal local or domain user, the
-> account MUST hold `SeServiceLogonRight`. Use
-> [`GrantSeServiceLogonRight(account)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#GrantSeServiceLogonRight)
-> to add the right via `LsaOpenPolicy` + `LsaAddAccountRights`
-> before calling `Install`. Idempotent — granting an already-held
-> right is a no-op. Requires elevation (`SeSecurityPrivilege`).
->
-> Equivalent operator workflows: `secedit /import …`,
-> `ntrights -u <user> +r SeServiceLogonRight`, or a Group Policy
-> drop. Built-in `NT AUTHORITY\NetworkService` / `LocalService`
-> already hold the right and need no password.
+> When `Account` is a normal local/domain user the account MUST
+> hold `SeServiceLogonRight`. Call
+> [`GrantSeServiceLogonRight`](#grantseservicelogonrightaccount-string-error)
+> before [`Install`](#installcfg-config-error). Built-in
+> `NT AUTHORITY\NetworkService` / `LocalService` already hold the
+> right and need no password.
 
-### Functions
+**Platform:** Windows-only.
 
-| Symbol | Description |
-|---|---|
-| [`Install(cfg *Config) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#Install) | Standalone install — creates SCM entry, no start |
-| [`Uninstall(name string) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#Uninstall) | Stop-if-running + delete |
-| [`Service(cfg *Config) *Mechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#Service) | `Mechanism` adapter for use with `persistence.InstallAll` |
-| [`Exists(name string) bool`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#Exists) | SCM probe |
-| [`IsRunning(name string) bool`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#IsRunning) | `QueryServiceStatusEx` SERVICE_RUNNING |
-| [`Start(name string) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#Start) | `StartService` |
-| [`Stop(name string) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#Stop) | `ControlService` SERVICE_CONTROL_STOP |
+### `Install(cfg *Config) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#Install)
+
+Connect to SCM (`mgr.Connect`) and `CreateService` from `cfg`.
+Applies the delayed-auto-start flag separately when
+`StartType == StartDelayed`.
+
+**Parameters:** `cfg.Name` and `cfg.BinPath` mandatory; the rest
+optional.
+
+**Returns:** wrapped error (`fmt.Errorf` against the empty-field
+guards or `mapError` against SCM errors).
+
+**Side effects:** SCM database write under `HKLM\SYSTEM\…\Services\<Name>`;
+emits System 7045 + Security 4697.
+
+**OPSEC:** universally audited; correlation against unsigned
+binary path / user-writable directory is the high-fidelity SIEM
+pattern.
+
+**Required privileges:** local admin (SCM `SC_MANAGER_CREATE_SERVICE`).
+
+**Platform:** Windows-only.
+
+### `Uninstall(name string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#Uninstall)
+
+Open + best-effort `Stop` + `DeleteService`.
+
+**Parameters:** `name` service short name.
+
+**Returns:** error from open / delete (stop is best-effort).
+
+**Side effects:** SCM delete; the service binary is unlinked
+from SCM but the file on disk is untouched.
+
+**OPSEC:** delete is audited (Security 4699 / 4700 depending on
+audit policy).
+
+**Required privileges:** local admin.
+
+**Platform:** Windows-only.
+
+### `Service(cfg *Config) *Mechanism`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#Service)
+
+Constructor for the `persistence.Mechanism` adapter (duck-typed —
+no parent-package import). The returned `*Mechanism` exposes
+`Name() string` (`"service:<Name>"`), `Install() error` (=
+`Install(cfg)`), `Uninstall() error` (= `Uninstall(cfg.Name)`),
+`Installed() (bool, error)` (= `Exists(cfg.Name)`).
+
+**Side effects:** none until `Install`.
+
+**Platform:** Windows-only.
+
+### `type Mechanism struct`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#Mechanism)
+
+Returned by `Service(cfg)`. See above for method surface.
+
+**Platform:** Windows-only.
+
+### `Exists(name string) bool`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#Exists)
+
+SCM probe: `OpenSCManager` + `OpenService`. Closes both handles
+before return.
+
+**Returns:** true iff the service exists.
+
+**Side effects:** none audited beyond the SCM open.
+
+**OPSEC:** silent.
+
+**Required privileges:** SCM read (default for any user).
+
+**Platform:** Windows-only.
+
+### `IsRunning(name string) bool`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#IsRunning)
+
+Probe via `QueryServiceStatusEx`. Returns true iff state is
+`SERVICE_RUNNING`.
+
+**Side effects:** none audited.
+
+**OPSEC:** silent.
+
+**Required privileges:** SCM read.
+
+**Platform:** Windows-only.
+
+### `Start(name string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#Start)
+
+`StartService` — services.exe spawns the binary as the
+configured account.
+
+**Returns:** error from open / `StartService`.
+
+**Side effects:** Security 4688 (process created) under
+services.exe; ETW
+`Microsoft-Windows-Services/Operational` 7036.
+
+**OPSEC:** start lineage is `services.exe → BinPath`; pair the
+binary with `pe/masquerade` to clone svchost identity.
+
+**Required privileges:** SCM `SERVICE_START`; admin in practice
+for installed services.
+
+**Platform:** Windows-only.
+
+### `Stop(name string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#Stop)
+
+`ControlService SERVICE_CONTROL_STOP` then poll up to ~10 s for
+`SERVICE_STOPPED`.
+
+**Returns:** error from `ControlService` / mapped to wrapped form.
+
+**Side effects:** the targeted service receives the stop control;
+ETW services event.
+
+**Required privileges:** SCM `SERVICE_STOP`.
+
+**Platform:** Windows-only.
+
+### `GrantSeServiceLogonRight(account string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#GrantSeServiceLogonRight)
+
+`LsaOpenPolicy(POLICY_CREATE_ACCOUNT|POLICY_LOOKUP_NAMES)` +
+`LsaAddAccountRights("SeServiceLogonRight")`. Idempotent —
+granting an already-held right returns nil. Built-in
+`NT AUTHORITY\NetworkService` / `LocalService` already hold it.
+
+**Parameters:** `account` SAM-form name (resolved via
+`LookupAccountName`).
+
+**Returns:** wrapped error from LSA / lookup; rejects empty
+`account`.
+
+**Side effects:** LSA policy DB write — Security 4717 (rights
+assigned to account).
+
+**OPSEC:** loud — `SeServiceLogonRight` grant is correlated with
+service-creation in mature SIEM rules.
+
+**Required privileges:** `SeSecurityPrivilege` (typical for
+elevated admin shells).
+
+**Platform:** Windows-only.
+
+### `var ErrLsaCallFailed`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#pkg-variables)
+
+Sentinel wrapped by every LSA-call failure
+(`ntStatusErr` / `modifyAccountRights`). `errors.Is` against it
+to detect LSA-pathway problems vs name-lookup / argument issues.
+
+### `const SeServiceLogonRight = "SeServiceLogonRight"`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/service#pkg-constants)
+
+The right name granted by `GrantSeServiceLogonRight`. Exposed for
+callers that want to call `LsaAddAccountRights` themselves.
 
 ## Examples
 

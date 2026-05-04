@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/persistence/scheduler
-last_reviewed: 2026-04-27
-reflects_commit: f8b1a51
+last_reviewed: 2026-05-04
+reflects_commit: f774f7e
 ---
 
 # Scheduled task persistence
@@ -68,35 +68,237 @@ folder, `\Folder\TaskName` for sub-folders.
 
 ## API Reference
 
-### `type Task`
+Task names must start with `\` — `\TaskName` for the root folder,
+`\Folder\TaskName` for sub-folders.
+
+### `type Task struct`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Task)
 
-Surface of a registered task — name, path, hidden flag, last
-run, next run, state.
+Surface form returned by [`List`](#list-task-error).
 
-### Options (`type Option func(*options)`)
+- `Name` — leaf name.
+- `Path` — full task path (`\Folder\TaskName`).
+- `Enabled` — task's `Enabled` flag.
 
-| Option | Effect |
-|---|---|
-| `WithAction(path, args...)` | Required — the binary + args to launch |
-| `WithTriggerLogon()` | Any-user-logon trigger |
-| `WithTriggerStartup()` | Boot trigger |
-| `WithTriggerDaily(interval int)` | Daily trigger every N days |
-| `WithTriggerTime(t time.Time)` | One-shot at `t` |
-| `WithHidden()` | Set the task's `Hidden` flag (taskschd.msc must "Show Hidden Tasks") |
+`LastRun` / `NextRun` / `State` are NOT exposed — extend the
+struct + `List` if needed.
 
-### Functions
+**Platform:** Windows-only.
 
-| Symbol | Description |
-|---|---|
-| [`Create(name string, opts ...Option) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Create) | Register the task |
-| [`Delete(name string) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Delete) | Remove the task |
-| [`Exists(name string) (bool, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Exists) | Presence probe |
-| [`List() ([]Task, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#List) | Enumerate root + recursive sub-folders |
-| [`Actions(name string) ([]string, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Actions) | Read-back action paths for an existing task |
-| [`Run(name string) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Run) | Trigger an immediate run via the COM `Run` method |
-| [`ScheduledTask(name, opts...) *TaskMechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#ScheduledTask) | `Mechanism` adapter |
+### `type Option func(*options)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Option)
+
+Functional-options token applied to internal `options` by
+[`Create`](#createname-string-opts-option-error). Construct via
+the `With*` factories below.
+
+**Platform:** Windows-only.
+
+### `WithAction(path string, args ...string) Option`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#WithAction)
+
+Required — the binary + variadic args to launch (`args` is
+space-joined into a single `Arguments` string for `IExecAction`).
+
+**Side effects:** none.
+
+**Platform:** Windows-only.
+
+### `WithTriggerLogon() Option`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#WithTriggerLogon)
+
+Fires at any-user logon (TASK_TRIGGER_LOGON).
+
+**Required privileges:** elevation in practice — registering
+logon triggers without admin is silently downgraded by Task
+Scheduler.
+
+**Platform:** Windows-only.
+
+### `WithTriggerStartup() Option`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#WithTriggerStartup)
+
+Fires at system boot (TASK_TRIGGER_BOOT). Task runs as SYSTEM by
+default.
+
+**Required privileges:** local admin.
+
+**Platform:** Windows-only.
+
+### `WithTriggerDaily(interval int) Option`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#WithTriggerDaily)
+
+Fires every `interval` days (TASK_TRIGGER_DAILY). `StartBoundary`
+defaults to "now" at registration time.
+
+**Platform:** Windows-only.
+
+### `WithTriggerTime(t time.Time) Option`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#WithTriggerTime)
+
+One-shot at `t` (TASK_TRIGGER_TIME). `StartBoundary` is the
+formatted form of `t`.
+
+**Platform:** Windows-only.
+
+### `WithHidden() Option`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#WithHidden)
+
+Sets the task's `Hidden` flag — `taskschd.msc` must "Show Hidden
+Tasks" to surface it. Cosmetic only; `schtasks /query /xml` and
+`Get-ScheduledTask` still surface hidden tasks.
+
+**Platform:** Windows-only.
+
+### `Create(name string, opts ...Option) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Create)
+
+Register a task via the COM `Schedule.Service`
+(`ITaskService.Connect` →
+`ITaskFolder.RegisterTaskDefinition`). Default trigger is
+`TASK_TRIGGER_DAILY` with interval=1 if no `WithTrigger*` is
+supplied. Logon mode is `TASK_LOGON_INTERACTIVE_TOKEN`. Always
+sets `Settings.StartWhenAvailable = true` and
+`RegistrationInfo.Description = "System maintenance task"`.
+
+**Parameters:** `name` task path (must start with `\`); `opts`
+including a mandatory `WithAction`.
+
+**Returns:** error from COM init / RegisterTaskDefinition; rejects
+empty action with `"WithAction is required"`.
+
+**Side effects:** writes task XML to
+`%SystemRoot%\System32\Tasks\<path>\<name>`; emits Security 4698
+(scheduled task created); ETW
+`Microsoft-Windows-TaskScheduler/Operational`.
+
+**OPSEC:** 4698 fires regardless of registration path; the win
+over `schtasks.exe` is the absent child-process telemetry, not
+audit suppression.
+
+**Required privileges:** none for current-user logon triggers;
+admin for boot/startup triggers and SYSTEM-scope tasks.
+
+**Platform:** Windows-only.
+
+### `Delete(name string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Delete)
+
+`ITaskFolder.DeleteTask` against the (folder, leaf) split of
+`name`.
+
+**Returns:** error from `GetFolder` / `DeleteTask`.
+
+**Side effects:** task XML deleted; Security 4699.
+
+**Required privileges:** as `Create`.
+
+**Platform:** Windows-only.
+
+### `Exists(name string) (bool, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Exists)
+
+`GetTask` probe; treats `GetTask` failure as "not found"
+(returns `(false, nil)`). Errors from earlier COM stages
+(`GetFolder` etc.) propagate.
+
+**Returns:** presence flag; error only on COM failure.
+
+**Side effects:** none audited.
+
+**OPSEC:** silent.
+
+**Platform:** Windows-only.
+
+### `List() ([]Task, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#List)
+
+Enumerate the root folder (`\`) only — does NOT descend into
+sub-folders. (The TL;DR claim of "recursive sub-folders" was
+historically aspirational; current implementation only lists
+root.)
+
+**Returns:** populated `[]Task`; error from any COM stage.
+
+**Side effects:** none audited.
+
+**OPSEC:** silent.
+
+**Platform:** Windows-only.
+
+### `Actions(name string) ([]string, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Actions)
+
+Read back binary paths for `IExecAction` entries on a registered
+task. COM/email/message actions have no `Path` and are skipped.
+Iteration is bounded at 64 to avoid unbounded enum on weakly-typed
+COM collections.
+
+**Returns:** slice of action paths (possibly empty); error from
+`GetTask` / `Definition` / `Actions`.
+
+**Side effects:** none audited.
+
+**OPSEC:** silent.
+
+**Platform:** Windows-only.
+
+### `Run(name string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#Run)
+
+`IRegisteredTask.RunEx` for an immediate launch — does NOT wait
+for the action to complete.
+
+**Returns:** error from `GetTask` / `RunEx`.
+
+**Side effects:** spawns the action under the task's logon
+context.
+
+**OPSEC:** services.exe-style spawn under
+`svchost.exe -k netsvcs` lineage (Task Scheduler service); not
+attributed to the caller.
+
+**Required privileges:** `Schedule.Service` connect default
+allows current-user manual run; admin required to run
+SYSTEM-scoped tasks.
+
+**Platform:** Windows-only.
+
+### `ScheduledTask(name string, opts ...Option) *TaskMechanism`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#ScheduledTask)
+
+Constructor for the `persistence.Mechanism` adapter.
+
+**Side effects:** none until `Install`.
+
+**Platform:** Windows-only.
+
+### `type TaskMechanism struct`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/scheduler#TaskMechanism)
+
+Duck-typed `persistence.Mechanism`:
+`Name()` returns `"scheduler:<name>"`,
+`Install()` delegates to [`Create`](#createname-string-opts-option-error),
+`Uninstall()` to [`Delete`](#deletename-string-error),
+`Installed()` to [`Exists`](#existsname-string-bool-error).
+
+**Platform:** Windows-only.
 
 ## Examples
 

@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/persistence/account
-last_reviewed: 2026-04-27
-reflects_commit: f8b1a51
+last_reviewed: 2026-05-04
+reflects_commit: f774f7e
 ---
 
 # Local account creation
@@ -58,21 +58,218 @@ the well-known `Administrators` alias.
 
 ## API Reference
 
-| Symbol | Description |
-|---|---|
-| [`Add(name, password string) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#Add) | `NetUserAdd` USER_INFO_1 — creates + enables in one call |
-| [`Delete(name string) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#Delete) | `NetUserDel` |
-| [`SetPassword(name, password string) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#SetPassword) | `NetUserSetInfo` USER_INFO_1003 |
-| [`AddToGroup(name, group string) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#AddToGroup) | `NetLocalGroupAddMembers` |
-| [`RemoveFromGroup(name, group string) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#RemoveFromGroup) | `NetLocalGroupDelMembers` |
-| [`SetAdmin(name string) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#SetAdmin) | `AddToGroup(name, "Administrators")` |
-| [`RevokeAdmin(name string) error`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#RevokeAdmin) | `RemoveFromGroup(name, "Administrators")` |
-| [`Exists(name string) bool`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#Exists) | `NetUserGetInfo` probe |
-| [`List() ([]Info, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#List) | `NetUserEnum` walk |
-| [`IsAdmin() bool`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#IsAdmin) | Caller-side privilege check |
+The directory is `persistence/account`; the package itself
+declares `package user`. Import as
+`account "github.com/oioio-space/maldev/persistence/account"`
+and call as `account.Add(...)` (Go aliases imports to the
+declared package name `user` by default — explicit alias
+recommended).
 
-`type Info struct` carries name, full-name, comment, RID, flags,
-last-login — surfaced by `List` and `NetUserGetInfo`.
+### `type Info struct`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#Info)
+
+Surface form of a local account, populated by [`List`].
+
+- `Name` — sAMAccountName.
+- `FullName` — display name (typically empty for service-style
+  accounts).
+- `Comment` — admin-set description.
+- `Flags` — `UF_*` bitmask (account disabled, password-never-expires,
+  …).
+
+**Platform:** Windows-only.
+
+### `Add(name, password string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#Add)
+
+Wraps `NetUserAdd` at level 1 (USER_INFO_1). Creates the account
+enabled with password set, `UF_SCRIPT | UF_DONT_EXPIRE_PASSWD`,
+priv `USER_PRIV_USER`.
+
+**Parameters:** `name` sAMAccountName; `password` plaintext —
+LSASS hashes on the receiving end.
+
+**Returns:** error via `mapNetError` (NERR_* / Win32 mapped).
+
+**Side effects:** SAM write; emits Security 4720 (created) +
+4722 (enabled).
+
+**OPSEC:** loudest call in the package. Two events fire per call;
+both default-audited on every modern Windows host.
+
+**Required privileges:** local admin.
+
+**Platform:** Windows-only.
+
+### `Delete(name string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#Delete)
+
+Wraps `NetUserDel`.
+
+**Parameters:** `name` sAMAccountName.
+
+**Returns:** error from `NetUserDel` (NERR_UserNotFound mapped).
+
+**Side effects:** SAM delete; emits Security 4726.
+
+**OPSEC:** mid-loudness — pair with `cleanup` at op end.
+
+**Required privileges:** local admin.
+
+**Platform:** Windows-only.
+
+### `SetPassword(name, password string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#SetPassword)
+
+Wraps `NetUserSetInfo` at level 1003 (USER_INFO_1003 — password
+only).
+
+**Parameters:** `name`, `password` (plaintext).
+
+**Returns:** error from `NetUserSetInfo`.
+
+**Side effects:** Security 4724 (password reset by another
+account) when `name` is not the caller, 4723 when it is.
+
+**OPSEC:** 4724 against a non-self account is a high-fidelity
+SIEM signal in non-IT context.
+
+**Required privileges:** local admin (resetting another account).
+
+**Platform:** Windows-only.
+
+### `AddToGroup(name, group string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#AddToGroup)
+
+Wraps `NetLocalGroupAddMembers` at level 3
+(LOCALGROUP_MEMBERS_INFO_3 — domain-qualified name). Bare names
+are auto-qualified with the local hostname.
+
+**Parameters:** `name` user (qualified or bare); `group` local
+group name (locale-dependent — see `SetAdmin` for SID-based).
+
+**Returns:** error from `NetLocalGroupAddMembers`.
+
+**Side effects:** Security 4732 (member added to group).
+
+**OPSEC:** 4732 against `Administrators` SID-500 fires
+high-fidelity rules; lower-priority groups (Backup Operators,
+Remote Desktop Users) draw less attention.
+
+**Required privileges:** local admin.
+
+**Platform:** Windows-only.
+
+### `RemoveFromGroup(name, group string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#RemoveFromGroup)
+
+Wraps `NetLocalGroupDelMembers` (level 3).
+
+**Parameters:** as `AddToGroup`.
+
+**Returns:** error from `NetLocalGroupDelMembers`.
+
+**Side effects:** Security 4733 (member removed).
+
+**Required privileges:** local admin.
+
+**Platform:** Windows-only.
+
+### `SetAdmin(name string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#SetAdmin)
+
+`AddToGroup` with the locale-correct name of the built-in
+`Administrators` group, resolved via
+`CreateWellKnownSid(WinBuiltinAdministratorsSid)` +
+`LookupAccount`. Works on non-English Windows
+(e.g. `Administratoren` on de-DE).
+
+**Parameters:** `name` user.
+
+**Returns:** error from SID lookup or `NetLocalGroupAddMembers`.
+
+**Side effects:** Security 4732 against the SID-500 group.
+
+**OPSEC:** highest-fidelity audit signal in the package — split
+the create + admin-add across hours if the target's SOC
+correlates lineage.
+
+**Required privileges:** local admin.
+
+**Platform:** Windows-only.
+
+### `RevokeAdmin(name string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#RevokeAdmin)
+
+Inverse of `SetAdmin`. SID-resolved + `RemoveFromGroup`.
+
+**Side effects:** Security 4733.
+
+**Required privileges:** local admin.
+
+**Platform:** Windows-only.
+
+### `Exists(name string) bool`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#Exists)
+
+Probe via `NetUserGetInfo` at level 0. Frees the returned buffer
+with `NetApiBufferFree`.
+
+**Returns:** true iff the call returns `NERR_Success`.
+
+**Side effects:** none audited (read-only `NetUserGetInfo`).
+
+**OPSEC:** silent — read-only path is not audited by default.
+
+**Required privileges:** none beyond the caller's token (works
+unprivileged on most builds).
+
+**Platform:** Windows-only.
+
+### `List() ([]Info, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#List)
+
+Wraps `NetUserEnum` at level 0 with `MAX_PREFERRED_LENGTH`
+chunking; only `Info.Name` is populated (other fields require a
+higher level).
+
+**Returns:** every local user; error on `NetUserEnum` failure.
+
+**Side effects:** none audited.
+
+**OPSEC:** silent.
+
+**Required privileges:** none on most builds.
+
+**Platform:** Windows-only.
+
+### `IsAdmin() bool`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/account#IsAdmin)
+
+SID-membership probe against the built-in Administrators SID
+(S-1-5-32-544) on the current process token. Honours UAC split
+tokens correctly (does not just look at elevation).
+
+**Returns:** true iff the token carries the SID.
+
+**Side effects:** none.
+
+**OPSEC:** silent — local token query.
+
+**Required privileges:** none.
+
+**Platform:** Windows-only.
 
 ## Examples
 

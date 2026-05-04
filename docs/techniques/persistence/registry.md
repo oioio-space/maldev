@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/persistence/registry
-last_reviewed: 2026-04-27
-reflects_commit: f8b1a51
+last_reviewed: 2026-05-04
+reflects_commit: f774f7e
 ---
 
 # Registry Run / RunOnce persistence
@@ -60,32 +60,136 @@ registry, which is itself a forensic tell.
 
 ## API Reference
 
-### `type Hive int` / `type KeyType int`
+### `type Hive int`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry#Hive)
 
-| Constant | Maps to |
-|---|---|
-| `HiveCurrentUser` | `HKEY_CURRENT_USER` |
-| `HiveLocalMachine` | `HKEY_LOCAL_MACHINE` |
-| `KeyRun` | `…\CurrentVersion\Run` |
-| `KeyRunOnce` | `…\CurrentVersion\RunOnce` |
+Registry root selector.
 
-### Functions
+- `HiveCurrentUser` → `HKEY_CURRENT_USER` (per-user, no
+  elevation).
+- `HiveLocalMachine` → `HKEY_LOCAL_MACHINE` (machine-wide,
+  admin).
 
-| Symbol | Description |
-|---|---|
-| [`Set(hive, keyType, name, value)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry#Set) | Write the value; create the key if missing |
-| [`Get(hive, keyType, name)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry#Get) | Read a single value |
-| [`Delete(hive, keyType, name)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry#Delete) | Remove the value (idempotent) |
-| [`Exists(hive, keyType, name)`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry#Exists) | Cheap presence probe |
-| [`RunKey(hive, keyType, name, value) *RunKeyMechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry#RunKey) | `Mechanism` adapter for `persistence.InstallAll` |
+**Platform:** Windows-only.
 
-### Sentinel errors
+### `type KeyType int`
 
-| Error | Trigger |
-|---|---|
-| `ErrNotFound` | `Get` / `Exists` on a value that doesn't exist |
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry#KeyType)
+
+Autostart key selector under
+`Software\Microsoft\Windows\CurrentVersion\`.
+
+- `KeyRun` → `…\Run` (persistent).
+- `KeyRunOnce` → `…\RunOnce` (deleted after first successful
+  launch).
+
+**Platform:** Windows-only.
+
+### `var ErrNotFound`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry#pkg-variables)
+
+Returned by `Get` / wrapped by `Exists` when the requested value
+does not exist on the target key.
+
+### `Set(hive Hive, keyType KeyType, name, value string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry#Set)
+
+`RegOpenKeyEx(QUERY_VALUE|SET_VALUE)` + `RegSetValueEx`
+(`REG_SZ`). Overwrites silently on collision.
+
+**Parameters:** `hive`, `keyType` route the call;
+`name` value name; `value` command-line string.
+
+**Returns:** error wrapping the underlying `registry.OpenKey` /
+`SetStringValue`.
+
+**Side effects:** registry write; Sysmon Event 13 if registry
+auditing is on.
+
+**OPSEC:** HKLM\…\Run is a default-monitored key on every mature
+EDR; HKCU\…\Run draws less coverage.
+
+**Required privileges:** none for HKCU; admin for HKLM.
+
+**Platform:** Windows-only.
+
+### `Get(hive Hive, keyType KeyType, name string) (string, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry#Get)
+
+Read a single value.
+
+**Returns:** the `REG_SZ` content; `ErrNotFound` when the value
+is absent; wrapped errors from `OpenKey` / `GetStringValue`.
+
+**Side effects:** none audited (read-only).
+
+**OPSEC:** silent.
+
+**Required privileges:** read on the target hive (HKCU is the
+caller's; HKLM works unprivileged for read).
+
+**Platform:** Windows-only.
+
+### `Delete(hive Hive, keyType KeyType, name string) error`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry#Delete)
+
+`RegDeleteValue`. Surfaces an error when the value does not
+exist (not idempotent across that boundary — pair with `Exists`
+when caller wants idempotency).
+
+**Side effects:** registry write; Sysmon Event 13.
+
+**Required privileges:** as `Set`.
+
+**Platform:** Windows-only.
+
+### `Exists(hive Hive, keyType KeyType, name string) (bool, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry#Exists)
+
+Convenience over `Get` — returns `(false, nil)` for `ErrNotFound`,
+`(true, nil)` on success, `(false, err)` for any other failure.
+
+**Side effects:** none audited.
+
+**OPSEC:** silent.
+
+**Required privileges:** read.
+
+**Platform:** Windows-only.
+
+### `RunKey(hive Hive, keyType KeyType, name, value string) *RunKeyMechanism`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry#RunKey)
+
+Constructs a [`*RunKeyMechanism`](#type-runkeymechanism-struct)
+that satisfies `persistence.Mechanism` via duck typing — pair
+with `persistence.InstallAll` for redundant composition.
+
+**Side effects:** none until `Install`.
+
+**Platform:** Windows-only.
+
+### `type RunKeyMechanism struct`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/persistence/registry#RunKeyMechanism)
+
+Implements `persistence.Mechanism` over a single Run/RunOnce
+value. Exposes `Name() string` (e.g. `"registry:HKCU:Run"`),
+`Install() error` (delegates to `Set`), `Uninstall() error`
+(delegates to `Delete`), `Installed() (bool, error)`
+(delegates to `Exists`).
+
+**Side effects:** as the underlying call.
+
+**Required privileges:** as `Set`/`Delete`/`Exists`.
+
+**Platform:** Windows-only.
 
 ## Examples
 
