@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/hash
-last_reviewed: 2026-04-27
-reflects_commit: f815d85
+last_reviewed: 2026-05-04
+reflects_commit: 4236b30
 ---
 
 # Cryptographic hashes & ROR13
@@ -80,11 +80,18 @@ to encode in a few shellcode bytes.
 
 ## API Reference
 
+Package: `hash` ([pkg.go.dev](https://pkg.go.dev/github.com/oioio-space/maldev/hash))
+
 ### `MD5(data []byte) string`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/hash#MD5)
-
-Lower-case hex digest of `md5.Sum(data)`. 32 hex characters.
+- godoc: lower-case hex digest of `md5.Sum(data)`.
+- Description: 32 hex characters. Thin wrapper over `crypto/md5`. Cache key / log-correlation use only — collision-broken for any security purpose.
+- Parameters: `data` — bytes to hash.
+- Returns: 32-char lowercase hex string.
+- Side effects: allocates one hex string (~64 bytes).
+- OPSEC: pure userland transform.
+- Required privileges: none.
+- Platform: any.
 
 > [!CAUTION]
 > MD5 is collision-broken. Use only for non-security identifiers
@@ -92,42 +99,61 @@ Lower-case hex digest of `md5.Sum(data)`. 32 hex characters.
 
 ### `SHA1(data []byte) string`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/hash#SHA1)
-
-Lower-case hex digest. 40 hex characters.
+- godoc: lower-case hex digest from `crypto/sha1`.
+- Description: 40 hex characters.
+- Parameters: `data` — bytes to hash.
+- Returns: 40-char lowercase hex.
+- Side effects: allocates the hex string.
+- OPSEC: pure userland transform.
+- Required privileges: none.
+- Platform: any.
 
 > [!WARNING]
 > SHA-1 is also collision-broken (SHAttered, 2017). Prefer SHA-256.
 
 ### `SHA256(data []byte) string`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/hash#SHA256)
-
-Lower-case hex digest. 64 hex characters. The default integrity hash.
+- godoc: lower-case hex digest from `crypto/sha256`.
+- Description: 64 hex characters. The default integrity hash.
+- Parameters: `data` — bytes to hash.
+- Returns: 64-char lowercase hex.
+- Side effects: allocates the hex string.
+- OPSEC: pure userland transform.
+- Required privileges: none.
+- Platform: any.
 
 ### `SHA512(data []byte) string`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/hash#SHA512)
-
-Lower-case hex digest. 128 hex characters. Use when truncation-resistant
-output is required.
+- godoc: lower-case hex digest from `crypto/sha512`.
+- Description: 128 hex characters. Use when truncation-resistant output is required.
+- Parameters: `data` — bytes to hash.
+- Returns: 128-char lowercase hex.
+- Side effects: allocates the hex string.
+- OPSEC: pure userland transform.
+- Required privileges: none.
+- Platform: any.
 
 ### `ROR13(name string) uint32`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/hash#ROR13)
-
-Compute the 32-bit ROR13 hash of `name`. Case-sensitive. Used to match
-Win32 export names exactly as they appear in the export directory.
-
-**Example output:** `ROR13("LoadLibraryA") == 0xec0e4e8e`.
+- godoc: compute the 32-bit ROR13 hash of `name`.
+- Description: case-sensitive — matches Win32 export names exactly as they appear in the export directory. Used by PEB-walk + export-table-search code paths to resolve API addresses without GetProcAddress / LoadLibrary in the import table.
+- Parameters: `name` — ASCII function name (e.g. `"LoadLibraryA"`).
+- Returns: 32-bit hash. Example: `ROR13("LoadLibraryA") == 0xec0e4e8e`.
+- Side effects: none — pure arithmetic.
+- OPSEC: very-quiet. The whole point of ROR13 is to keep API name strings out of the binary. Pre-compute hashes at build time for maximum stealth.
+- Required privileges: none.
+- Platform: any (the hash itself is portable; the resolver consuming it is Windows-only).
 
 ### `ROR13Module(name string) uint32`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/hash#ROR13Module)
-
-Same as `ROR13` but appends a null terminator before hashing — matches
-the convention that PEB-walk shellcode uses when hashing module names
-from `LDR_DATA_TABLE_ENTRY.BaseDllName.Buffer`.
+- godoc: ROR13 with a NUL terminator appended before hashing.
+- Description: matches the convention used by PEB-walk shellcode that hashes module names read from `LDR_DATA_TABLE_ENTRY.BaseDllName.Buffer`. The Windows loader stores those as wide strings without explicit terminators inside the buffer; the canonical hash convention treats the trailing NUL as part of the input. Use this for module names (`KERNEL32.DLL`); use plain `ROR13` for export names (`LoadLibraryA`).
+- Parameters: `name` — ASCII module name.
+- Returns: 32-bit hash.
+- Side effects: none.
+- OPSEC: same as `ROR13`.
+- Required privileges: none.
+- Platform: any.
 
 ## Examples
 

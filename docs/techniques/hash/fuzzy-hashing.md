@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/hash
-last_reviewed: 2026-04-27
-reflects_commit: f815d85
+last_reviewed: 2026-05-04
+reflects_commit: 4236b30
 ---
 
 # Fuzzy hashing (ssdeep + TLSH)
@@ -70,49 +70,73 @@ the quantised histogram.
 
 ## API Reference
 
+Package: `hash` ([pkg.go.dev](https://pkg.go.dev/github.com/oioio-space/maldev/hash))
+
 ### `Ssdeep(data []byte) (string, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/hash#Ssdeep)
-
-Compute the ssdeep hash of a buffer. Returns a string of the form
-`12:abcd...:efgh...` where the leading number is the block-size
-magnitude.
+- godoc: compute the ssdeep hash of a buffer.
+- Description: returns a string of the form `12:abcd...:efgh...` where the leading number is the block-size magnitude. Pair with `SsdeepCompare` to score similarity between two hashes.
+- Parameters: `data` — bytes to hash.
+- Returns: ssdeep string; `error` for buffers too small to produce a valid hash (`< 4096` bytes by ssdeep convention).
+- Side effects: allocates the result string and intermediate FNV state.
+- OPSEC: pure userland; no syscalls.
+- Required privileges: none.
+- Platform: any.
 
 ### `SsdeepFile(path string) (string, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/hash#SsdeepFile)
-
-Same as `Ssdeep` but reads from disk.
+- godoc: ssdeep over a file's contents.
+- Description: opens the file, streams it through ssdeep, returns the hash. Equivalent to reading the whole file then calling `Ssdeep`, but avoids loading the entire payload into a Go-managed buffer.
+- Parameters: `path` — local filesystem path.
+- Returns: ssdeep string; `error` for I/O failures or a too-small file.
+- Side effects: opens and reads the file.
+- OPSEC: file-open events are visible to filesystem audit policies and Sysmon event 11 / event 24. The hashing itself is invisible.
+- Required privileges: read access to `path`.
+- Platform: any.
 
 ### `SsdeepCompare(hash1, hash2 string) (int, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/hash#SsdeepCompare)
-
-Compare two ssdeep hashes. Returns a similarity score in $[0, 100]$
-(higher = more similar) or `error` if the hashes have non-adjacent
-block-size magnitudes (incomparable).
+- godoc: similarity score between two ssdeep hashes.
+- Description: returns 0..100 (higher = more similar). Errors when the hashes have non-adjacent block-size magnitudes (incomparable — pick a different hash or upgrade to TLSH).
+- Parameters: `hash1`, `hash2` — outputs from `Ssdeep` / `SsdeepFile`.
+- Returns: int in [0, 100]; `error` for malformed input or non-adjacent block sizes.
+- Side effects: pure arithmetic.
+- OPSEC: silent.
+- Required privileges: none.
+- Platform: any.
 
 ### `TLSH(data []byte) (string, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/hash#TLSH)
-
-Compute the TLSH hash of a buffer. Returns a 70-character hex string.
-Errors if `len(data) < 50`.
+- godoc: compute the TLSH hash of a buffer.
+- Description: 70-character hex string. More robust than ssdeep on small / heavily-compressed payloads — TLSH was designed for malware-similarity work.
+- Parameters: `data` — bytes to hash.
+- Returns: 70-char hex string; `error` if `len(data) < 50` (TLSH's hard floor).
+- Side effects: allocates the hex string + intermediate quartile-stats state.
+- OPSEC: silent.
+- Required privileges: none.
+- Platform: any.
 
 ### `TLSHFile(path string) (string, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/hash#TLSHFile)
-
-Same as `TLSH` but reads from disk.
+- godoc: TLSH over a file's contents.
+- Description: streams the file through TLSH. Same caveats as `SsdeepFile` for filesystem audit visibility.
+- Parameters: `path` — local filesystem path.
+- Returns: TLSH hex string; `error` for I/O failures or files smaller than 50 bytes.
+- Side effects: opens and reads the file.
+- OPSEC: file-open events are visible; the hashing itself is invisible.
+- Required privileges: read access to `path`.
+- Platform: any.
 
 ### `TLSHCompare(hash1, hash2 string) (int, error)`
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/hash#TLSHCompare)
-
-Compare two TLSH hashes. Returns a distance in $[0, \infty)$ — lower
-means more similar.
-
-Rough scale: $<30$ very close, $<70$ same family, $>200$ unrelated.
+- godoc: distance between two TLSH hashes.
+- Description: lower = more similar. Rough scale: `<30` very close (same binary, different timestamp / signing), `<70` same family (variant or recompile), `>200` unrelated.
+- Parameters: `hash1`, `hash2` — outputs from `TLSH` / `TLSHFile`.
+- Returns: int in [0, ∞); `error` for malformed input.
+- Side effects: pure arithmetic.
+- OPSEC: silent.
+- Required privileges: none.
+- Platform: any.
 
 ## Examples
 
