@@ -28,6 +28,20 @@
 //
 // `MessageBoxW` is the most-used Windows API; no signal.
 //
+// # Required privileges
+//
+// unprivileged for the implant's own interactive
+// session. `MessageBoxW` and `MessageBeep` render to
+// the calling process's window station; SYSTEM in
+// session 0 has no interactive desktop and dialogs
+// stay invisible (the call still returns a default
+// response immediately).
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). user32
+// `MessageBoxW` + `MessageBeep`; no POSIX equivalent.
+//
 // # Example
 //
 // See [ExampleShow] and [ExampleBeep] in ui_example_test.go.

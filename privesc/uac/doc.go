@@ -50,6 +50,25 @@
 // process-tree anomaly (`fodhelper.exe` parent of `cmd.exe` is rare
 // in non-attacker telemetry) lights up behavioural detectors.
 //
+// # Required privileges
+//
+// medium-IL caller already in the local Administrators
+// group. Counter-intuitively, UAC-bypass elevates an
+// already-admin user from a filtered (non-elevated)
+// token to a full admin token without prompting — it
+// does NOT escalate from a standard user. UAC level
+// must NOT be "Always notify" (the prompt cannot be
+// silenced at that level). All five primitives write
+// `HKCU\Software\Classes\<scheme>` (per-user, no extra
+// privilege beyond own-hive write).
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). The auto-elevate
+// binaries (`fodhelper.exe`, `slui.exe`, `eventvwr.exe`)
+// and the `SilentCleanup` Scheduled Task are all
+// Windows-specific.
+//
 // # Example
 //
 // See [ExampleFODHelper] in uac_example_test.go.

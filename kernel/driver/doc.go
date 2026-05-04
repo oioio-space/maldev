@@ -44,6 +44,23 @@
 // service handle: noise scales to whether the specific driver name
 // (`RTCore64`, `gdrv`, `pcdsrvc`) is on the EDR's known-IOCs list.
 //
+// # Required privileges
+//
+// Interface contracts only — the umbrella exports no
+// runtime functions. Concrete implementations
+// (`kernel/driver/rtcore64`, future BYOVD drivers) all
+// require admin + `SeLoadDriverPrivilege` for
+// `Install` (`NtLoadDriver` is gated to Administrators).
+// Read/Write IOCTLs after Install run at ring-0; the
+// service handle is open-by-name for any user that knows
+// the device name.
+//
+// # Platform
+//
+// Windows-only. Kernel-driver model + `NtLoadDriver` /
+// SCM are Windows-specific; Linux equivalent (kernel
+// module load) is not wired up.
+//
 // # Example
 //
 // See [github.com/oioio-space/maldev/kernel/driver/rtcore64] for an

@@ -44,6 +44,23 @@
 // querying [_EPROCESS.Token] across snapshots. Pre-patch hosts are
 // in vendor signature databases as of mid-2024.
 //
+// # Required privileges
+//
+// unprivileged. The whole point of the bug is that any
+// medium-IL token can win the race and end up SYSTEM —
+// no admin, no `SeDebugPrivilege`, no driver load. Run
+// from a standard user shell on a vulnerable build and
+// emerge SYSTEM. Pre-flight `CheckVersion` is also
+// unprivileged.
+//
+// # Platform
+//
+// Windows-only. The TOCTOU lives in
+// `AuthzBasepCopyoutInternalSecurityAttributes` —
+// Windows kernel exclusive. amd64 / i386 / arm64 all
+// affected pre-patch; current implementation targets
+// amd64.
+//
 // # Example
 //
 // See [ExampleRun] in cve202430088_example_test.go.

@@ -28,6 +28,25 @@
 // `VirtualAlloc(RWX)` + `EXECUTE` from non-text regions flag
 // the loader.
 //
+// # Required privileges
+//
+// unprivileged. Loader runs entirely in the calling
+// process's own address space — `VirtualAlloc(RWX)`
+// for the COFF text + Beacon-API stub table, no
+// cross-process work. The privilege requirements
+// of the loaded BOF itself depend on what it does
+// (a `whoami` BOF needs no extra; an LSA secrets
+// BOF needs admin) and route through the same
+// gates as native code at runtime.
+//
+// # Platform
+//
+// Windows-only and amd64-only. The COFF format the
+// loader parses targets x64 PE/COFF; the Beacon API
+// stub thunks created via `syscall.NewCallback` are
+// Windows-only. ARM64 BOFs would need a parallel
+// relocation table.
+//
 // # Example
 //
 // See [ExampleLoad] in bof_example_test.go.

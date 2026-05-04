@@ -45,6 +45,33 @@
 // kernel callback path that this package can travel. Per-method detail
 // lives in docs/techniques/injection/<method>.md.
 //
+// # Required privileges
+//
+// Self-process injection (Self / CreateThread / CreateFiber /
+// EtwpCreateEtwThread / Self APC variants) is unprivileged.
+// Cross-process methods need a target handle with the right
+// access mask (`PROCESS_VM_OPERATION |
+// PROCESS_VM_WRITE | PROCESS_CREATE_THREAD` for most;
+// `PROCESS_DUP_HANDLE` for the section-mapping variants):
+// same-user same-IL is unprivileged; protected (PPL/PP) or
+// cross-user / cross-IL targets need `SeDebugPrivilege`
+// (admin). Linux ptrace-based methods require either
+// `CAP_SYS_PTRACE` or `Yama ptrace_scope = 0`. The
+// `MethodEarlyBirdAPC` / `MethodThreadHijack` variants
+// spawn a child suspended — that step inherits the
+// caller's `CreateProcess` privilege (unprivileged for
+// own-user spawns).
+//
+// # Platform
+//
+// Cross-platform with platform-specific method sets:
+// 16 Windows methods, 3 Linux methods (ptrace,
+// memfd_create, /proc/pid/mem) plus a CGo-free purego
+// path. Method selection happens via the [InjectorBuilder];
+// callers can request only the methods their target OS
+// supports. `MethodIndirectAsm` (paired through
+// `*wsyscall.Caller`) is amd64-only.
+//
 // # Example
 //
 // See [ExampleNewWindowsInjector], [ExampleBuild], and [ExamplePipeline]

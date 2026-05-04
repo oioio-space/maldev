@@ -47,6 +47,25 @@
 // the driver is signed Microsoft-attested, but its service handle
 // name `RTCore64` is on every vendor's known-IOCs list as of 2024+.
 //
+// # Required privileges
+//
+// admin + `SeLoadDriverPrivilege` for `Install`
+// (`NtLoadDriver` is gated to Administrators; the
+// privilege is enabled-by-default for admins). Once
+// loaded, `ReadKernel` / `WriteKernel` IOCTLs run at
+// ring-0; the service handle is open-by-name and any
+// process that holds it can issue IOCTLs. Default
+// builds carry no driver bytes and `Install` returns
+// `ErrDriverBytesMissing` until built with the
+// `byovd_rtcore64` build tag.
+//
+// # Platform
+//
+// Windows-only. RTCore64.sys is a Windows kernel driver;
+// HVCI / Defender Driver Block-list / 2021-09 patch
+// level all interact with whether `Install` succeeds —
+// see Limitations in the tech md.
+//
 // # Example
 //
 // See [ExampleDriver_Install] and [ExampleDriver_ReadKernel] in
