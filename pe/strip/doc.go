@@ -26,6 +26,16 @@
 // context. Forensic re-analysis on a copy that was hashed
 // pre-strip can still surface the modification.
 //
+// # Required privileges
+//
+// unprivileged. Pure-byte editor over the PE image; only the
+// read+write DACL on the path applies.
+//
+// # Platform
+//
+// Cross-platform. Pure-Go offline editor — wipe pclntab,
+// rename Go sections, scrub TimeDateStamp from any host.
+//
 // # Example
 //
 // See [ExampleSanitize] in strip_example_test.go.

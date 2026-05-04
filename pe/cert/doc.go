@@ -33,6 +33,19 @@
 // at rest in directory listings, file properties, and basic
 // EDR PE-metadata scans.
 //
+// # Required privileges
+//
+// unprivileged. Pure-byte manipulation of the PE security
+// directory; no Windows crypto API, no syscall. The DACL on
+// source / destination paths is the only upstream gate.
+//
+// # Platform
+//
+// Cross-platform. Pure-Go offline editor — analysts can
+// extract or splice WIN_CERTIFICATE blobs from any host.
+// `PatchPECheckSum` reproduces the MS `ImageHlp!CheckSumMappedFile`
+// algorithm in pure Go for the same reason.
+//
 // # Example
 //
 // See [ExampleRead] and [ExampleCopy] in cert_example_test.go.

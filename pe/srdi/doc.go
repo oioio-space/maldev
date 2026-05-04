@@ -41,6 +41,22 @@
 // [github.com/oioio-space/maldev/inject]'s sleep masking to
 // hide the stub when not actively executing.
 //
+// # Required privileges
+//
+// unprivileged. Donut conversion is offline byte assembly +
+// AES-CTR encryption — no syscall, no token. The DACL on
+// source PE / output destination is the only upstream gate.
+// Privilege requirements only re-emerge at execution time
+// when `inject/*` delivers the produced shellcode to a
+// target process.
+//
+// # Platform
+//
+// Cross-platform converter (pure-Go go-donut + crypto/aes).
+// The produced reflective-loader shellcode runs on Windows
+// only; analysts on Linux can stage payloads from CI without
+// a Windows host.
+//
 // # Example
 //
 // See [ExampleConvertFile] and [ExampleConvertBytes] in

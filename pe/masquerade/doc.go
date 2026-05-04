@@ -39,6 +39,24 @@
 // cloned binary; behavioural EDRs ignore the metadata and
 // score on actual runtime activity.
 //
+// # Required privileges
+//
+// unprivileged. Build-time tooling: read the source PE bytes
+// + emit a `.syso` COFF object. The Windows DACL on the source
+// (`C:\Windows\System32\svchost.exe`, etc.) gates read access
+// — analysts cloning on Linux read the file directly with no
+// Windows ACL involved. The `.syso` is consumed by the Go
+// linker at build time, also unprivileged.
+//
+// # Platform
+//
+// Cross-platform. The extractor reads PE-format bytes (any
+// host) and the emitter produces a COFF `.syso` (any host
+// — the link target's GOOS doesn't matter for the .syso
+// itself). The cloned identity only renders meaningfully on
+// Windows where the loader honours VERSIONINFO / manifest /
+// icon resources.
+//
 // # Example
 //
 // See [ExampleClone] and [ExampleBuild] in masquerade_example_test.go.

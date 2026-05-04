@@ -55,6 +55,24 @@
 // to disk + triggering the victim) is moderate, owned by the
 // caller and already covered by [recon/dllhijack].
 //
+// # Required privileges
+//
+// unprivileged for the emitter — pure-byte assembly of a PE
+// in memory; no syscall, no token. The deployment side
+// inherits the DACL of the chosen HijackedPath: user-writable
+// paths (per-user `%LOCALAPPDATA%\…`, third-party app dirs)
+// work in any token; system-protected paths
+// (`C:\Windows\System32\`, `C:\Program Files\…`) require
+// admin to drop the proxy.
+//
+// # Platform
+//
+// Cross-platform emitter (pure-Go PE assembly). The produced
+// DLL only loads on Windows; the technique itself is
+// Windows-only at runtime. PE32 + PE32+ outputs are both
+// supported, so a Linux operator can stage either WOW64 or
+// 64-bit hijack payloads from CI.
+//
 // # Example
 //
 // See [ExampleGenerate] in dllproxy_example_test.go.

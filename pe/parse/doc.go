@@ -19,6 +19,17 @@
 // caller-supplied reader. The package is invisible to runtime
 // telemetry.
 //
+// # Required privileges
+//
+// unprivileged. Pure-Go `debug/pe` walker over caller-supplied
+// bytes; only the read DACL on the source path applies.
+//
+// # Platform
+//
+// Cross-platform. Stdlib `debug/pe` runs everywhere — analysts
+// can dissect Windows PEs from Linux / macOS / CI without a
+// Windows host.
+//
 // # Example
 //
 // See [ExampleOpen] in parse_example_test.go.

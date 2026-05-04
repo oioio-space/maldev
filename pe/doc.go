@@ -39,6 +39,23 @@
 // visible to forensic re-analysis. Each sub-package documents
 // its own detection level.
 //
+// # Required privileges
+//
+// unprivileged across every sub-package — pe/* operates
+// offline on caller-supplied bytes (file paths or readers).
+// No syscall, no token, no network. The implant-side gate
+// is upstream (read access on the source PE for clone /
+// inspect, write access on the destination path for emit)
+// and follows whatever DACL the chosen path imposes.
+//
+// # Platform
+//
+// Cross-platform. Every sub-package is pure-Go byte
+// manipulation — analysts on Linux / macOS / CI can clone,
+// strip, morph, parse, or sRDI-convert Windows PEs without
+// a Windows host. Produced PE / .syso / shellcode is
+// consumed on Windows.
+//
 // # Example
 //
 // See [github.com/oioio-space/maldev/pe/strip],

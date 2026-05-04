@@ -27,6 +27,17 @@
 // binaries by entropy + section layout will still flag the
 // file; only signature-based unpacker matching is defeated.
 //
+// # Required privileges
+//
+// unprivileged. Pure-byte mutation of header offsets in a
+// UPX-packed PE; only the read+write DACL on the path
+// applies.
+//
+// # Platform
+//
+// Cross-platform. Pure-Go offline editor — analysts can
+// morph or restore UPX headers from any host.
+//
 // # Example
 //
 // See [ExampleUPXMorph] in morph_example_test.go.

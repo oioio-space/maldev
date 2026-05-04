@@ -19,6 +19,16 @@
 // Static analysis only — no syscalls, no file opens beyond the
 // caller-supplied path / reader. Runtime invisible.
 //
+// # Required privileges
+//
+// unprivileged. Pure-Go offline read of the PE import
+// directory; only the read-DACL on the source path applies.
+//
+// # Platform
+//
+// Cross-platform. Pure-Go `debug/pe` walker — runs on any
+// host the Go toolchain supports.
+//
 // # Example
 //
 // See [ExampleList] in imports_example_test.go.
