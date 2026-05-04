@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: a705c32
+last_reviewed: 2026-05-04
+reflects_commit: b6e0e63
 ---
 
 # SSN Resolvers: Hell's Gate, Halo's Gate, Tartarus Gate, HashGate
@@ -347,32 +347,162 @@ func main() {
 
 ## API Reference
 
-### SSNResolver Interface
+Package: `github.com/oioio-space/maldev/win/syscall`. Every resolver
+implements `SSNResolver` and is plugged into `Caller` via the `r`
+parameter of [`syscall.New(method, r)`](direct-indirect.md#newmethod-method-r-ssnresolver-caller).
+Resolvers are pure PEB-walk + memory-read code — no syscalls, no
+strings on the wire, and no allocations beyond temporary lookup
+buffers.
 
-```go
-type SSNResolver interface {
-    Resolve(ntFuncName string) (uint16, error)
-}
-```
+### `SSNResolver` interface
 
-### Resolvers
+#### `type SSNResolver interface { Resolve(ntFuncName string) (uint16, error) }`
 
-```go
-// HellsGateResolver reads SSN from unhooked ntdll prologue.
-func NewHellsGate() *HellsGateResolver
+- godoc: returns the System Service Number for the named NT function (without the `Nt` prefix preserved — pass the full `"NtAllocateVirtualMemory"`).
+- Description: the seam between Caller and SSN-extraction strategy. Implementations are stateless from the caller's perspective (HashGate caches an ntdll base internally via `sync.Once`, but the cache is per-instance, not global). Compose multiple strategies with `Chain(...)`.
+- Parameters: `ntFuncName` — full NT name as it appears in ntdll's export table.
+- Returns: SSN (uint16) on success; on failure a wrapped error explaining which extraction step missed (`"prologue hooked or unrecognized"`, `"no unhooked neighbor found within 500 stubs"`, `"HashGate: export 0x%08X not found"`, etc.).
+- Side effects: in-process memory reads only.
+- OPSEC: silent on success. The error messages on failure are descriptive and would land in the implant's log if not suppressed.
+- Required privileges: none.
+- Platform: Windows.
 
-// HalosGateResolver scans neighboring stubs when target is hooked.
-func NewHalosGate() *HalosGateResolver
+### Hell's Gate
 
-// TartarusGateResolver follows JMP hooks to extract SSN from trampoline.
-func NewTartarus() *TartarusGateResolver
+#### `NewHellsGate() *HellsGateResolver`
 
-// HashGateResolver resolves via PEB walk + ROR13 hashing (no strings).
-func NewHashGate() *HashGateResolver
+- godoc: returns a Hell's Gate resolver — direct prologue read, no fallback.
+- Description: pure constructor returning a zero-value struct (`&HellsGateResolver{}`). No initialisation, no allocations.
+- Parameters: none.
+- Returns: `*HellsGateResolver`. Never nil.
+- Side effects: none.
+- OPSEC: silent.
+- Required privileges: none.
+- Platform: Windows.
 
-// Chain tries multiple resolvers in sequence, returning first success.
-func Chain(resolvers ...SSNResolver) *ChainResolver
-```
+#### `(*HellsGateResolver).Resolve(name string) (uint16, error)`
+
+- godoc: read the SSN from the named ntdll function's prologue.
+- Description: `ntdll.NewProc(name).Find()` to locate the export, then read 32 bytes at the address. Looks for the canonical x64 prologue `4C 8B D1 B8 XX XX 00 00` (`mov r10, rcx; mov eax, <SSN>`) and extracts the little-endian SSN at offset +4. Returns `"prologue hooked or unrecognized"` if the first four bytes do not match — typical signal of an EDR JMP/CALL hook that overwrote the prologue.
+- Parameters: receiver; `name` the NT function (e.g. `"NtAllocateVirtualMemory"`).
+- Returns: SSN; wrapped `resolve: %w` from `Find` failure; literal `"prologue hooked or unrecognized"` on hook detection.
+- Side effects: 32 bytes of read-only memory dereference at the export address.
+- OPSEC: silent. Failure-then-fallback through `Chain` is the visible pattern, not Hell's Gate itself.
+- Required privileges: none.
+- Platform: Windows + amd64. The 32-byte prologue layout assumed is x64-specific.
+
+### Halo's Gate
+
+#### `NewHalosGate() *HalosGateResolver`
+
+- godoc: returns a Halo's Gate resolver — neighbour-walk fallback when Hell's Gate fails.
+- Description: pure constructor.
+- Parameters: none.
+- Returns: `*HalosGateResolver`. Never nil.
+- Side effects: none.
+- OPSEC: silent.
+- Required privileges: none.
+- Platform: Windows.
+
+#### `(*HalosGateResolver).Resolve(name string) (uint16, error)`
+
+- godoc: try Hell's Gate first; on hook, walk ±N neighbour stubs (32 bytes each) up to 500 hops away until an unhooked prologue is found, then offset-arithmetic to derive the target SSN.
+- Description: composes a fresh `HellsGateResolver` internally and short-circuits on success. On failure, `proc.Find()` to get the target address, then iterates `offset = 1..500`, checking both `addr - offset*32` (yields `neighborSSN + offset`) and `addr + offset*32` (yields `neighborSSN - offset`, with an underflow guard `if uint16(offset) > neighborSSN { continue }`). The 32-byte stub assumption holds for ntdll's contiguous Nt-stub region only — system DLLs outside that region won't resolve.
+- Parameters: receiver; `name` NT function.
+- Returns: SSN derived from neighbour; `resolve: %w` from `Find`; `"no unhooked neighbor found within 500 stubs"` if every probe in range was also hooked.
+- Side effects: up to 1000 read-only 8-byte memory dereferences in worst case (500 above + 500 below). Allocates nothing.
+- OPSEC: silent. The 500-stub window covers ntdll's full Nt* surface on every shipped Windows build (Win11 25H2 has ~400 syscalls); 500 is comfortably above that.
+- Required privileges: none.
+- Platform: Windows + amd64.
+
+### Tartarus Gate
+
+#### `NewTartarus() *TartarusGateResolver`
+
+- godoc: returns a Tartarus Gate resolver — JMP-hook trampoline reader, falls back to Halo's Gate.
+- Description: pure constructor.
+- Parameters: none.
+- Returns: `*TartarusGateResolver`. Never nil.
+- Side effects: none.
+- OPSEC: silent.
+- Required privileges: none.
+- Platform: Windows.
+
+#### `(*TartarusGateResolver).Resolve(name string) (uint16, error)`
+
+- godoc: handle JMP-hooked exports by following the displacement and scanning the trampoline for the original `mov eax, <SSN>`. Falls through to Halo's Gate on miss.
+- Description: reads the 32-byte prologue. Three branches: (1) clean prologue (`4C 8B D1 B8`) — return immediately; (2) near-JMP hook (`E9 XX XX XX XX`) — read the rel32 displacement, jump to `addr + 5 + disp`, scan the next 60 bytes for `B8 XX XX` (mov eax, imm32), return the imm16; (3) short-JMP hook (`EB XX`) — read the rel8 displacement, jump to `addr + 2 + disp`, same 60-byte scan. If none match, delegate to a fresh `HalosGateResolver`.
+- Parameters: receiver; `name` NT function.
+- Returns: SSN extracted from clean prologue / trampoline / neighbour walk; `resolve: %w` from `Find`; whatever Halo's Gate returns on full fallback.
+- Side effects: read-only memory reads. Allocates nothing.
+- OPSEC: silent. The 60-byte trampoline scan is a heuristic — EDR vendors who emit non-canonical trampoline shapes (e.g., scratch-register save first) will fall through to Halo's Gate.
+- Required privileges: none. Reading the EDR trampoline page is read-only — does not require write access.
+- Platform: Windows + amd64.
+
+### HashGate (string-free resolver)
+
+#### `NewHashGate() *HashGateResolver`
+
+- godoc: returns a HashGate resolver using the package default ROR13 — equivalent to `NewHashGateWith(nil)`.
+- Description: returns `&HashGateResolver{ntdllHash: hashNtdll}`. The `hashNtdll` constant is the precomputed `ROR13("ntdll.dll")` baked into the binary at build. Use `NewHashGateWith` with a custom `HashFunc` to remove this fingerprint.
+- Parameters: none.
+- Returns: `*HashGateResolver`. Never nil.
+- Side effects: none until the first `Resolve` call.
+- OPSEC: a binary using `NewHashGate()` carries the well-known ROR13 hash of `"ntdll.dll"` — recognised by `capa` and several public YARA rules. Switch to `NewHashGateWith` for fresh families.
+- Required privileges: none.
+- Platform: Windows.
+
+#### `NewHashGateWith(fn HashFunc) *HashGateResolver`
+
+- godoc: returns a HashGate resolver using the supplied hash function for both module-name and export-name lookups.
+- Description: short-circuits to `NewHashGate()` if `fn == nil`. Otherwise computes `fn("ntdll.dll")` and stores it as `ntdllHash` so the binary no longer carries the canonical ROR13 module-name constant. **The same `fn` must be used by the caller to pre-compute the function-hash constants** — both ends of the lookup must agree on the hash family.
+- Parameters: `fn` a `HashFunc` (or nil).
+- Returns: `*HashGateResolver`. Never nil.
+- Side effects: one `fn("ntdll.dll")` call at construction time.
+- OPSEC: per-implant fresh family eliminates the static-analysis fingerprint of canonical ROR13 hash constants.
+- Required privileges: none.
+- Platform: Windows.
+
+#### `(*HashGateResolver).Resolve(name string) (uint16, error)`
+
+- godoc: PEB-walk → export hash match → prologue read.
+- Description: thread-safe lazy init via `sync.Once` — first call walks the PEB by `ntdllHash` (via internal `pebModuleByHashFunc`) and caches the resolved base; subsequent calls reuse the cache. Then hashes `name` (with `r.hashFunc` or ROR13 fallback), walks ntdll's export table by hash to find the function address, and extracts the SSN from the prologue using the same `4C 8B D1 B8` pattern as Hell's Gate. Does NOT chain to Halo's Gate on hook detection — composers wanting that behaviour use `Chain(NewHashGate(), NewHalosGate())`.
+- Parameters: receiver; `name` NT function (caller may pre-hash and use `Caller.CallByHash` to avoid the string entirely from outside).
+- Returns: SSN; wrapped errors `HashGate: ntdll not found via PEB walk: %w`, `HashGate: export 0x%08X not found: %w`, or literal `"HashGate: prologue hooked"`.
+- Side effects: one PEB walk on first call (cached). Per-call: one export-table hash walk + one 32-byte prologue read. Allocates nothing on the hot path.
+- OPSEC: completely string-free — no `"NtAllocateVirtualMemory"` or `"ntdll.dll"` constant in `.rdata` when paired with a non-ROR13 family. Memory accesses are local and read-only.
+- Required privileges: none.
+- Platform: Windows + amd64.
+
+### Composition
+
+#### `Chain(resolvers ...SSNResolver) *ChainResolver`
+
+- godoc: build a resolver that tries each child in order and returns the first success.
+- Description: stores the slice as-is. Pass the cheapest-first ordering, e.g. `Chain(NewHellsGate(), NewHashGate(), NewHalosGate(), NewTartarus())` — short-circuits on the first clean prologue read.
+- Parameters: variadic resolver list (zero-length is legal — resulting Resolve always errors with `"all resolvers failed"`).
+- Returns: `*ChainResolver`. Never nil.
+- Side effects: none at construction.
+- OPSEC: silent.
+- Required privileges: none.
+- Platform: Windows.
+
+#### `(*ChainResolver).Resolve(name string) (uint16, error)`
+
+- godoc: try each child resolver in order; first success wins.
+- Description: iterates `c.resolvers`, calls `Resolve` on each, returns on first nil-error. Captures the **last** error in the chain (not all of them) and wraps it as `all resolvers failed: %w` if every child failed.
+- Parameters: receiver; `name` NT function.
+- Returns: first SSN; `all resolvers failed: %w` containing the last child's error if every probe missed.
+- Side effects: union of side effects of each invoked child.
+- OPSEC: silent on success; chain-failure log line on miss is the only signal.
+- Required privileges: none.
+- Platform: Windows.
+
+### Hash function plumbing (cross-reference)
+
+`HashFunc` and `HashROR13` are documented in the [direct-indirect §
+"Hash function plumbing"](direct-indirect.md#hash-function-plumbing)
+section — they are used identically by Caller and HashGateResolver.
 
 ## See also
 
