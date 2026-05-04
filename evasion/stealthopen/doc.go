@@ -28,6 +28,23 @@
 // initial GetObjectID still goes through path-based hooks, so the
 // strategy is "open once, reuse the GUID".
 //
+// # Required privileges
+//
+// unprivileged for files the implant has standard read
+// access to. `GetObjectID` performs a one-shot path-based
+// open; subsequent `OpenByID` calls reach the file via the
+// volume handle + Object-ID GUID and inherit the same
+// DACL gate as a normal open of that file. Reading
+// `ntdll.dll` is unprivileged for any user; reading
+// system-protected paths needs admin / SYSTEM as usual.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). Object-ID open is
+// an NTFS-specific feature; FAT / exFAT volumes have no
+// MFT-stored object IDs and the technique falls back to
+// path open.
+//
 // # Example
 //
 // See [ExampleOpenByID] in stealthopen_example_test.go.

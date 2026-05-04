@@ -33,6 +33,26 @@
 // "running" (silent failure for blue), but the driver-load forensics
 // still mark the host.
 //
+// # Required privileges
+//
+// kernel. Reads + writes target ntoskrnl-resident
+// callback arrays via a caller-supplied
+// KernelReader / KernelReadWriter — typically a BYOVD
+// driver such as RTCore64. Loading that driver requires
+// admin to install the service; the read/write itself
+// runs at ring-0 once the driver is loaded. Pure-Go
+// helpers (`NtoskrnlBase`, `DriverAt`) need
+// `SeDebugPrivilege` (admin) for the
+// `SystemModuleInformation` query.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). The kernel
+// callback arrays are Windows-specific surfaces.
+// HVCI / Defender Driver Block-list / attested-driver
+// list interact with the technique on modern Win10/11
+// hosts (see Limitations in the tech md).
+//
 // # Example
 //
 // See [ExampleNtoskrnlBase] in kcallback_example_test.go.

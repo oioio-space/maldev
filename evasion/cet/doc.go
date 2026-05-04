@@ -45,6 +45,22 @@
 // may emit an event when CET is relaxed. Wrap is invisible (it only
 // modifies user-supplied shellcode in memory).
 //
+// # Required privileges
+//
+// unprivileged. `Enforced` queries the calling process's
+// own mitigation-policy state. `Disable` calls
+// `SetProcessMitigationPolicy` against the calling
+// process — same self-only gate as the other mitigations.
+// `Wrap` is pure byte manipulation on a caller-supplied
+// shellcode buffer.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`) and amd64-only —
+// CET enforcement and the ENDBR64 marker are CPU-feature
+// gated. On hosts without CET hardware support `Enforced`
+// returns false and `Wrap` is a harmless no-op-prepend.
+//
 // # Example
 //
 // See [ExampleEnforced], [ExampleDisable], and [ExampleWrap] in

@@ -33,6 +33,21 @@
 // hooked processes are common EDR signals. Standalone mode is
 // silent (no IPC), but loses runtime configurability.
 //
+// # Required privileges
+//
+// unprivileged. The transport (named pipe, TCP socket,
+// `net.Pipe`) is operator-supplied — pipe DACL / port
+// binding gates apply at transport open time, not inside
+// this package. The IPC framing layer is pure-Go gob
+// serialisation with no syscall, no token surgery.
+//
+// # Platform
+//
+// Cross-platform IPC framing. Pairs naturally with
+// `c2/transport/namedpipe` (Windows-only) when the
+// hook handler lives inside a Windows process; any
+// `io.ReadWriter` works elsewhere.
+//
 // # Example
 //
 // See [ExampleStandalone] and [ExampleConnect] in

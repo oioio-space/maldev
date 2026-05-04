@@ -25,6 +25,20 @@
 // ETW Threat Intelligence and EDRs that cross-check RIP against the
 // real unwind metadata can detect synthesised frames.
 //
+// # Required privileges
+//
+// unprivileged. The frame chain is built on the calling
+// thread's own stack — no cross-thread surgery, no token
+// bump. `FindReturnGadget` reads the in-process ntdll
+// image, also unprivileged.
+//
+// # Platform
+//
+// Windows-only. AMD64-only (the assembly stub uses x64
+// calling convention + Win64 unwind). The package builds
+// without an explicit `//go:build windows` tag because
+// every implementation file is `_windows.go`-suffixed.
+//
 // # Example
 //
 // See [ExampleSpoofCall] in callstack_example_test.go.

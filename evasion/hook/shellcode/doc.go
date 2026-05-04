@@ -36,6 +36,19 @@
 // [github.com/oioio-space/maldev/evasion/sleepmask] to encrypt the
 // blob between callbacks for hardened targets.
 //
+// # Required privileges
+//
+// unprivileged. Generators emit byte slices in-process —
+// no syscall, no token. The privilege gate appears only
+// when the consuming hook layer (`evasion/hook`) writes
+// the bytes into a target process.
+//
+// # Platform
+//
+// Cross-platform generator (pure-Go byte assembly). The
+// produced shellcode is amd64 Windows; consumed by
+// `evasion/hook.RemoteInstall` on Windows targets only.
+//
 // # Example
 //
 // See [ExampleBlock] in shellcode_example_test.go.

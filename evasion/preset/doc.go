@@ -60,6 +60,21 @@
 // bit but the per-process mitigations are absent); Aggressive is
 // `noisy` (full ntdll `.text` rewrite + ACG/BlockDLLs trail).
 //
+// # Required privileges
+//
+// unprivileged. Each composed technique
+// (`amsi`, `etw`, `unhook`, `cet`, `acg`, `blockdlls`)
+// patches / hardens the calling process only. No
+// elevation required regardless of the chosen tier.
+//
+// # Platform
+//
+// Windows-only — every composed sub-package targets
+// ntdll, AMSI, ETW, or process-mitigation policies, all
+// Windows-only constructs. The package itself has a
+// non-Windows stub so cross-compile produces empty
+// preset slices instead of build errors.
+//
 // # Example
 //
 // See [ExampleStealth] in preset_example_test.go.

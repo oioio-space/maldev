@@ -31,6 +31,23 @@
 // process install path triggers `EVENT_TI_NTPROTECT` on the target's
 // loaded modules.
 //
+// # Required privileges
+//
+// In-process `Install` is unprivileged — RW flip + JMP
+// patch on the calling process's own pages. `RemoteInstall`
+// / `RemoteInstallByName` need a handle to the target with
+// `PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_CREATE_THREAD`:
+// same-user same-IL is unprivileged; cross-user / protected
+// targets need `SeDebugPrivilege` (admin).
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`) and amd64-only —
+// the prologue analyser uses x86asm and the JMP relay
+// assumes x64 register layout. Win11 26100+ may interact
+// with CET — see `evasion/cet` for the ENDBR64 prefix
+// helper.
+//
 // # Example
 //
 // See [ExampleNew] and [ExampleInstallByName] in hook_example_test.go.

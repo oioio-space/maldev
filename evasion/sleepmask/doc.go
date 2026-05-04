@@ -42,6 +42,26 @@
 // based scanners turn up nothing. ROP-based strategies (Ekko, Foliage)
 // produce distinctive call-stack signatures that some EDRs catch.
 //
+// # Required privileges
+//
+// unprivileged. Mask operates on the calling process's own
+// pages — `VirtualProtect` flips on own-process regions,
+// AES/RC4 in-place over caller-supplied buffers,
+// `CreateTimerQueueTimer` / `NtQueueApcThreadEx` against
+// the calling process's own threads. No token bump.
+// `RemoteInlineStrategy` requires
+// `PROCESS_VM_OPERATION | PROCESS_VM_WRITE` on the target
+// — same-user same-IL is unprivileged; protected targets
+// need `SeDebugPrivilege` (admin).
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`) and amd64-only
+// (Ekko / Foliage ROP chains assume x64 unwind layout).
+// The cipher pieces are stdlib `crypto/aes` + RC4 — those
+// would port elsewhere; the strategies that thread them
+// into the sleep would not.
+//
 // # Example
 //
 // See [ExampleMask_Sleep] and [ExampleMask_chain] in sleepmask_example_test.go.

@@ -52,6 +52,25 @@
 // `quiet` (sleepmask region rotation) to `noisy` (`NtUnloadDriver`
 // in unhook).
 //
+// # Required privileges
+//
+// Per sub-package. Quick map: `acg`, `amsi`, `etw`,
+// `blockdlls`, `cet`, `unhook`, `sleepmask`, `callstack`,
+// `stealthopen`, `preset`, `hook` (own-process), and the
+// hook `bridge` / `shellcode` helpers all run unprivileged
+// — they patch / observe / harden the calling process only.
+// `kcallback` requires admin + `SeDebugPrivilege` (BYOVD
+// driver load + kernel callback array writes). Cross-process
+// `hook.RemoteInstall` inherits the privilege gate of the
+// chosen injection technique (typically same-user same-IL
+// unprivileged; SeDebugPrivilege for protected targets).
+//
+// # Platform
+//
+// Windows-only across every sub-package — every primitive
+// targets ntdll / kernel callbacks / NTFS Object IDs / CET
+// / process mitigation policies, all Windows-specific.
+//
 // # Example
 //
 // See [ExampleApplyAll] in evasion_example_test.go.

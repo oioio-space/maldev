@@ -26,6 +26,17 @@
 // the policy itself is a legitimate hardening feature so the signal is
 // low.
 //
+// # Required privileges
+//
+// unprivileged. `SetProcessMitigationPolicy` against the
+// calling process needs no extra privilege — it's a
+// self-hardening API any token can call.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). ACG is a Windows
+// kernel mitigation; no POSIX equivalent.
+//
 // # Example
 //
 // See [ExampleEnable] in acg_example_test.go.

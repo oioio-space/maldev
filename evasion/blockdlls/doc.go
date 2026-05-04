@@ -22,6 +22,19 @@
 // `SetProcessMitigationPolicy` call is visible to ETW TI. EDRs that
 // notice their own DLL failed to load may flag the process.
 //
+// # Required privileges
+//
+// unprivileged. `SetProcessMitigationPolicy` against the
+// calling process needs no privilege; the mitigation
+// applies to subsequent loader requests in the same
+// process.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). The
+// `BLOCK_NON_MICROSOFT_BINARIES` mitigation is a Windows
+// loader-policy primitive; no POSIX equivalent.
+//
 // # Example
 //
 // See [ExampleEnable] in blockdlls_example_test.go.

@@ -30,6 +30,18 @@
 // Threat Intelligence (`EVENT_TI_NTPROTECT`); the resulting
 // `xor eax,eax; ret` byte pattern is detectable by memory scanners.
 //
+// # Required privileges
+//
+// unprivileged. The patch flips RX→RW on `amsi.dll` pages
+// already mapped into the calling process —
+// `NtProtectVirtualMemory` against own-process pages needs
+// no extra privilege.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). AMSI is a Windows
+// API set; macOS / Linux have no equivalent.
+//
 // # Example
 //
 // See [ExampleScanBufferPatch] in amsi_example_test.go.

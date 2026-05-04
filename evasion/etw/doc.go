@@ -30,6 +30,18 @@
 // from outside; integrity-checking EDR stages catch this. The
 // `NtProtectVirtualMemory` calls show up in TI ETW events.
 //
+// # Required privileges
+//
+// unprivileged. The patch flips RX→RW on `ntdll.dll`
+// pages already mapped into the calling process —
+// own-process `NtProtectVirtualMemory`, no extra privilege.
+//
+// # Platform
+//
+// Windows-only (`//go:build windows`). ETW is the
+// Windows-only event-tracing subsystem; no POSIX
+// equivalent.
+//
 // # Example
 //
 // See [ExamplePatchAll] in etw_example_test.go.
