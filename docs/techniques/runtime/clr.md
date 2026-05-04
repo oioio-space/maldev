@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/runtime/clr
-last_reviewed: 2026-04-27
-reflects_commit: 3797037
+last_reviewed: 2026-05-04
+reflects_commit: 4d87569
 ---
 
 # CLR (.NET) in-process hosting
@@ -76,17 +76,100 @@ can't be activated.
 
 ## API Reference
 
-| Symbol | Description |
-|---|---|
-| [`type Runtime`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#Runtime) | Active CLR host instance |
-| [`Load(caller *wsyscall.Caller) (*Runtime, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#Load) | Bring up the CLR; pick preferred runtime |
-| `(*Runtime).ExecuteAssembly(asm []byte, args []string) error` | Load + invoke entry point |
-| `(*Runtime).Close() error` | Tear down the AppDomain + release COM |
-| [`InstalledRuntimes() ([]string, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#InstalledRuntimes) | Enumerate installed .NET versions |
-| [`InstallRuntimeActivationPolicy() error`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#InstallRuntimeActivationPolicy) | Register .NET 3.5 CLSID for legacy hosting |
-| [`RemoveRuntimeActivationPolicy() error`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#RemoveRuntimeActivationPolicy) | Reverse the install |
-| [`var ErrLegacyRuntimeUnavailable`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#ErrLegacyRuntimeUnavailable) | .NET 3.5 hosting unavailable |
-| [`type Args`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#Args) / [`NewArgs()`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr#NewArgs) | Typed argv builder |
+Package: `runtime/clr` ([pkg.go.dev](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr))
+
+### `type Runtime`
+
+- godoc: active CLR host instance — wraps the COM `ICorRuntimeHost` (.NET 3.5) or `ICLRRuntimeHost` (.NET 4+) interface, the AppDomain, the redirected stdout pipe, and the cleanup chain.
+- Description: produced by `Load`. One Runtime corresponds to one CLR per process (the Windows ABI permits multiple CLRs in flight, but loading mscoree.dll is a per-process operation).
+- Side effects: holds COM references for the runtime's lifetime; releases them on `Close`.
+- OPSEC: `clr.dll` / `mscoree.dll` / `mscorlib.ni.dll` module-load events fire on `Load`. Behavioural EDRs flag the `clr.dll` load from a non-.NET parent process as suspicious.
+- Required privileges: medium-IL is enough for in-process hosting.
+- Platform: Windows. Stub build's `Runtime` returns `errUnsupported` from every method.
+
+### `Load(caller *wsyscall.Caller) (*Runtime, error)`
+
+- godoc: bring up the CLR — picks the preferred runtime (highest installed version), creates the AppDomain, redirects stdout / stderr into an in-memory pipe.
+- Description: prefers .NET 4 / 4.x over 3.5 when both are present. The `caller` parameter is reserved for future EDR-bypass syscall routing; pass `nil` to use the standard kernel32 path. Returns `ErrLegacyRuntimeUnavailable` when only .NET 3.5 is installed and `InstallRuntimeActivationPolicy` has not been called.
+- Parameters: `caller` — optional `*wsyscall.Caller` for syscall-method overrides. Pass `nil` for default WinAPI.
+- Returns: `*Runtime` ready for `ExecuteAssembly` / `ExecuteDLL`; `error` for COM failure / CLR-not-installed / legacy-hosting-policy-not-set.
+- Side effects: loads `mscoree.dll`, instantiates the CLR host, creates an AppDomain, opens a stdout-redirect pipe.
+- OPSEC: noisy on first call (module loads). Subsequent calls hit the warm cache.
+- Required privileges: medium-IL.
+- Platform: Windows. Returns `errUnsupported` on the stub build.
+
+### `(*Runtime).ExecuteAssembly(asm []byte, args []string) error`
+
+- godoc: load `asm` (a .NET PE bytes buffer) and invoke its `Main` entry point with `args`.
+- Description: the assembly never touches disk — bytes go straight into the AppDomain via `Load_3`. Stdout / stderr write through to the host's redirected pipe; the captured output is appended to the BOF's output buffer (TODO link).
+- Parameters: `asm` — .NET assembly bytes (e.g. Seatbelt.exe, Rubeus.exe); `args` — argv as Go strings.
+- Returns: `error` on Load_3 failure, missing entry point, or AppDomain-internal exception. The exception's stack trace is captured in the redirected stdout.
+- Side effects: invokes managed code under the calling process's token. Anything the assembly does (file I/O, registry, network) appears as the host process.
+- OPSEC: AMSI scans the assembly bytes when AntimalwareScanInterface is hooked. Pair with `evasion/amsi.PatchAll` before Load.
+- Required privileges: whatever the assembly itself requires.
+- Platform: Windows.
+
+### `(*Runtime).ExecuteDLL(dll []byte, typeName, methodName, arg string) error`
+
+- godoc: load `dll` (a .NET DLL bytes buffer) and invoke a specific static method via reflection.
+- Description: alternative to `ExecuteAssembly` for libraries that lack a `Main` entry point — load the DLL into the AppDomain, locate `<typeName>` via `Assembly.GetType`, locate `<methodName>` via `Type.GetMethod`, invoke with a single string `arg`. Useful for SharpHound-style toolsuites that ship multiple methods per DLL.
+- Parameters: `dll` — .NET DLL bytes; `typeName` — fully-qualified type (e.g. `"SharpHound.Program"`); `methodName` — static method name; `arg` — single-string argument the target method accepts.
+- Returns: `error` on Load_3 failure, missing type, missing method, or in-method exception.
+- Side effects: same as `ExecuteAssembly` (managed-code execution under the host token).
+- OPSEC: same AMSI exposure as `ExecuteAssembly`.
+- Required privileges: whatever the target method itself requires.
+- Platform: Windows.
+
+### `(*Runtime).Close()`
+
+- godoc: tear down the AppDomain + release the COM references.
+- Description: best-effort — every step runs even if earlier ones failed. Calling Close on a nil or already-closed Runtime is safe (no-op). After Close, further method calls return `errUnsupported`.
+- Parameters: receiver only.
+- Returns: nothing.
+- Side effects: unloads the AppDomain, drops the CLR host's COM references, closes the stdout-redirect pipe.
+- OPSEC: AppDomain unload is visible to ETW Microsoft-Windows-DotNETRuntime.
+- Required privileges: none.
+- Platform: Windows. No-op on the stub build.
+
+### `InstalledRuntimes() ([]string, error)`
+
+- godoc: enumerate installed .NET versions on the host.
+- Description: walks `HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP` for v2.0, v3.0, v3.5, v4 family. Returns version strings like `"v2.0.50727"`, `"v4.0.30319"`. Useful pre-flight for `Load` — operators decide whether a .NET 3.5-only assembly will run before they call.
+- Parameters: none.
+- Returns: list of version strings (sorted ascending); `error` for registry-read failures.
+- Side effects: reads the registry; no writes.
+- OPSEC: registry reads from `HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP` are made by every .NET-aware installer at first launch — the access doesn't stand out.
+- Required privileges: none.
+- Platform: Windows. Returns `errUnsupported` on the stub build.
+
+### `InstallRuntimeActivationPolicy() error`
+
+- godoc: register the legacy-CLR activation policy so .NET 3.5 hosting via `ICorRuntimeHost` works on a host where only .NET 4+ is set as the default activation target.
+- Description: sets `HKLM\SOFTWARE\Microsoft\.NETFramework\OnlyUseLatestCLR` to `0` so the CLR loader honours the legacy CLSID. Required when running .NET 2/3.5-targeted assemblies on a host that's been migrated to .NET 4 default.
+- Parameters: none.
+- Returns: `error` on registry write failure (typically when not running elevated).
+- Side effects: writes to `HKLM\SOFTWARE\Microsoft\.NETFramework`.
+- OPSEC: registry writes under HKLM are auditable. Defenders running registry-monitoring rules see the change.
+- Required privileges: admin (`HKLM` write).
+- Platform: Windows.
+
+### `RemoveRuntimeActivationPolicy() error`
+
+- godoc: reverse the registry change made by `InstallRuntimeActivationPolicy`.
+- Description: deletes the `OnlyUseLatestCLR` value so CLR activation returns to default behaviour. Pair with the install for clean operator hygiene; leaving the value set after the operation is an unforced observability win for defenders.
+- Parameters: none.
+- Returns: `error` on registry-delete failure.
+- Side effects: registry delete under HKLM.
+- OPSEC: same audit-trail as the install — both writes are visible.
+- Required privileges: admin.
+- Platform: Windows.
+
+### `var ErrLegacyRuntimeUnavailable`
+
+- godoc: returned by `Load` when only .NET 3.5 is installed and `InstallRuntimeActivationPolicy` has not been called.
+- Description: error sentinel used to gate caller logic — when the policy is missing, the caller can either abort or call `InstallRuntimeActivationPolicy` (admin required) and retry.
+- Required privileges: none for the sentinel itself.
+- Platform: Windows.
 
 ## Examples
 

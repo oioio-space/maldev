@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/runtime/bof
 last_reviewed: 2026-05-04
-reflects_commit: 3c3dcc2
+reflects_commit: 4d87569
 ---
 
 # BOF (Beacon Object File) loader
@@ -52,17 +52,133 @@ flowchart LR
 
 ## API Reference
 
-| Symbol | Description |
-|---|---|
-| [`type BOF`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof#BOF) | Loaded BOF instance |
-| [`Load(data []byte) (*BOF, error)`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof#Load) | Parse + relocate + ready to execute |
-| `(*BOF).Execute(args []byte) ([]byte, error)` | Run the entry point; return captured stdout |
-| `(*BOF).SetSpawnTo(path string)` | Configure the path returned by `BeaconGetSpawnTo` |
-| `(*BOF).Errors() []byte` | Snapshot of the per-BOF errors channel (`BeaconErrorD` / `DD` / `NA`) |
-| [`type Args`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof#Args) | CS-compatible argument packer (little-endian wire format) |
-| `NewArgs() *Args` | Allocate an empty argument packer |
-| `(*Args).AddInt(int32)` / `AddShort(int16)` / `AddString(string)` / `AddBytes([]byte)` | Append a length-prefixed value |
-| `(*Args).Pack() []byte` | Serialise for `BOF.Execute` |
+Package: `runtime/bof` ([pkg.go.dev](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof))
+
+### `type BOF`
+
+- godoc: loaded BOF instance — holds the parsed COFF, the RWX page, the resolved entry-point pointer, the per-call output and errors buffers, and the optional spawn-to path.
+- Description: produced by `Load`. Concurrency-safe through a package-wide mutex that serialises Beacon API callbacks; concurrent `Execute` calls block on each other.
+- Side effects: holds an RWX VirtualAlloc'd region for the lifetime of the value.
+- OPSEC: behavioural EDR sees the RWX allocation + execute-from-allocation pattern. Pair with sleep-mask + RW→RX flip for steady-state cover.
+- Required privileges: medium-IL is enough — RWX from VirtualAlloc works under any token.
+- Platform: Windows amd64.
+
+### `Load(data []byte) (*BOF, error)`
+
+- godoc: parse a COFF object file from bytes and ready it for execution.
+- Description: validates the COFF header (machine = `0x8664`), allocates a single contiguous RWX page covering every section with raw data plus a tail import-table region, applies relocations (ABSOLUTE / ADDR64 / ADDR32 / ADDR32NB / REL32 / REL32_1..5), resolves the entry-point symbol, and returns a ready `*BOF`.
+- Parameters: `data` — the raw `.o` bytes.
+- Returns: `*BOF` ready for `Execute`; `error` for invalid header, unsupported relocation, unresolved external symbol, or out-of-range REL32 target.
+- Side effects: one VirtualAlloc(RWX) per Load call; the allocation persists for the BOF's lifetime.
+- OPSEC: parse + load are silent (pure userland arithmetic). The RWX allocation itself is the visible IOC.
+- Required privileges: none.
+- Platform: Windows amd64. Returns an error on non-amd64 BOFs.
+
+### `(*BOF).Execute(args []byte) ([]byte, error)`
+
+- godoc: run the BOF's entry point with the packed argument buffer; return the captured `BeaconPrintf` / `BeaconOutput` stream.
+- Description: serialised package-wide via the `bofMu` mutex — concurrent Execute calls on any BOF block on each other so the `currentBOF` cursor the Beacon API stubs read remains coherent. Resets the output / errors buffers before invocation, calls into the entry-point pointer with `(args_ptr, len)` per the CS `go(char*, int)` signature, then returns whatever the BOF wrote.
+- Parameters: `args` — produced by `(*Args).Pack()` or hand-rolled in CS-compatible LE wire format. Pass `nil` for arg-less BOFs.
+- Returns: captured output bytes; `error` if the entry point itself faults or any Beacon API stub fails fatally.
+- Side effects: invokes native code in the calling process. Anything the BOF does (file I/O, registry, IOCTLs) happens under the calling process's token.
+- OPSEC: the BOF runs in-process, so its API trail looks like the host's. Behavioural EDR may correlate the unusual API mix with the prior RWX allocation.
+- Required privileges: whatever the BOF itself requires.
+- Platform: Windows amd64.
+
+### `(*BOF).SetSpawnTo(path string)`
+
+- godoc: configure the path the loader returns when the BOF calls `BeaconGetSpawnTo`.
+- Description: pinned for the BOF instance's lifetime — the address handed to the `BeaconGetSpawnTo` callback stays stable across re-Executes. Empty string (the default) means "no spawn target"; the BOF receives a NULL pointer and typically falls back to its own logic.
+- Parameters: `path` — fork-and-run target (e.g. `"C:\\Windows\\System32\\notepad.exe"`).
+- Returns: nothing.
+- Side effects: allocates a NUL-terminated copy in `BOF.spawnToCStr`.
+- OPSEC: value-only setter; no telemetry.
+- Required privileges: none.
+- Platform: Windows.
+
+### `(*BOF).Errors() []byte`
+
+- godoc: snapshot of whatever the BOF emitted via `BeaconErrorD` / `BeaconErrorDD` / `BeaconErrorNA` during the last `Execute`.
+- Description: the errors channel is separate from the output buffer — operators inspect them independently. Returns nil before the first Execute. The slice is a fresh copy: safe to retain across subsequent Execute calls (which clear the underlying buffer).
+- Parameters: receiver only.
+- Returns: a copy of the errors buffer.
+- Side effects: one allocation for the returned copy.
+- OPSEC: pure read.
+- Required privileges: none.
+- Platform: Windows.
+
+### `type Args`
+
+- godoc: CS-compatible argument packer — produces the little-endian wire format `BeaconDataParse` / `BeaconDataInt` / `BeaconDataExtract` consume.
+- Description: zero-value usable; build via `NewArgs` for clarity. The wire format matches TrustedSec COFFLoader / Outflank — public BOFs decode it natively.
+- Required privileges: none.
+- Platform: Windows (the type is defined under the `windows` build tag; Linux callers can still cross-compile BOFs but cannot run them).
+
+### `NewArgs() *Args`
+
+- godoc: allocate an empty argument packer.
+- Description: returns an `*Args` with an empty internal `bytes.Buffer`. Equivalent to `&Args{}`.
+- Parameters: none.
+- Returns: `*Args` ready for `Add*` calls.
+- Side effects: one struct allocation.
+- OPSEC: silent.
+- Required privileges: none.
+- Platform: Windows.
+
+### `(*Args).AddInt(v int32)`
+
+- godoc: append a 32-bit signed integer in little-endian byte order.
+- Description: 4 bytes, no length prefix (size is implicit in the type). LE matches the CS canonical native-int read on x64.
+- Parameters: `v` — value to append.
+- Returns: nothing.
+- Side effects: 4 bytes appended to the internal buffer.
+- OPSEC: silent.
+- Required privileges: none.
+- Platform: Windows.
+
+### `(*Args).AddShort(v int16)`
+
+- godoc: append a 16-bit signed integer in little-endian byte order.
+- Description: 2 bytes, no length prefix. Read via `BeaconDataShort` on the BOF side.
+- Parameters: `v` — value to append.
+- Returns: nothing.
+- Side effects: 2 bytes appended.
+- OPSEC: silent.
+- Required privileges: none.
+- Platform: Windows.
+
+### `(*Args).AddString(s string)`
+
+- godoc: append a NUL-terminated string with a 4-byte little-endian length prefix.
+- Description: layout: `[uint32 LE length] [bytes of s] [0x00]`. Length includes the NUL terminator. Read via `BeaconDataExtract` on the BOF side.
+- Parameters: `s` — UTF-8 string. Embedded NULs are accepted but truncate the BOF-side read at the first NUL.
+- Returns: nothing.
+- Side effects: 4 + len(s) + 1 bytes appended.
+- OPSEC: silent.
+- Required privileges: none.
+- Platform: Windows.
+
+### `(*Args).AddBytes(data []byte)`
+
+- godoc: append a byte slice with a 4-byte little-endian length prefix.
+- Description: layout: `[uint32 LE length] [data bytes]`. No NUL terminator. The BOF reads the pointer + length via `BeaconDataExtract`; the returned pointer points into the args buffer (no copy on read).
+- Parameters: `data` — raw bytes. Empty slice produces a 4-byte length-only prefix.
+- Returns: nothing.
+- Side effects: 4 + len(data) bytes appended.
+- OPSEC: silent.
+- Required privileges: none.
+- Platform: Windows.
+
+### `(*Args).Pack() []byte`
+
+- godoc: return a defensive copy of the packed buffer ready for `(*BOF).Execute`.
+- Description: copy semantics mean callers can mutate the returned slice without affecting subsequent `Pack()` calls or the internal buffer (validated by `TestArgsPackIsolated`).
+- Parameters: receiver only.
+- Returns: copy of the packed bytes.
+- Side effects: one allocation for the returned copy.
+- OPSEC: silent.
+- Required privileges: none.
+- Platform: Windows.
 
 ## Examples
 
