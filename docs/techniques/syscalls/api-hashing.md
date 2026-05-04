@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-29
-reflects_commit: b614f6c
+last_reviewed: 2026-05-04
+reflects_commit: 1f9e413
 ---
 
 # API Hashing (PEB Walk + ROR13)
@@ -372,38 +372,106 @@ func main() {
 
 ## API Reference
 
-### win/api
+Three packages collaborate on the hashing path: `win/api` owns the
+PEB-walk + PE-export-table resolver, `win/syscall` owns the Caller
+seam that consumes resolved hashes, and `hash` owns the hash
+families themselves. Per-export fielded coverage lives with the
+canonical owner — entries from `win/syscall` and `hash` are
+cross-referenced rather than duplicated.
+
+### Package `win/api` — PEB-walk resolver
+
+#### `ResolveByHash(moduleHash, funcHash uint32) (uintptr, error)`
+
+- godoc: locate a function by module-name hash + export-name hash. No plaintext strings.
+- Description: convenience composition — `ModuleByHash(moduleHash)` then `ExportByHash(base, funcHash)`. Use this when both hashes are known at build time (precomputed via `cmd/hashgen` or the `Hash*` constants below).
+- Parameters: `moduleHash` — `ROR13Module` of the BaseDllName (case-sensitive, with trailing null); `funcHash` — `ROR13` of the ASCII export name (no null).
+- Returns: absolute virtual address of the export; wrapped error from either lookup step.
+- Side effects: in-process PEB + PE-export read; no syscalls, no allocations.
+- OPSEC: completely silent — no LoadLibrary, no GetProcAddress, no string artifacts in the binary.
+- Required privileges: none.
+- Platform: Windows + amd64. The PEB and LDR_DATA_TABLE_ENTRY offsets are x64-specific.
+
+#### `ModuleByHash(hash uint32) (uintptr, error)`
+
+- godoc: walk the PEB's `InLoadOrderModuleList` and return the first module whose `BaseDllName` hashes to `hash`.
+- Description: `TEB[+0x60] → PEB → PEB[+0x18] → PEB_LDR_DATA → +0x10 → InLoadOrderModuleList`, then iterates the linked list checking each `LDR_DATA_TABLE_ENTRY`'s `BaseDllName` UNICODE_STRING. Hashes the UTF-16LE buffer with the package-internal `ror13Wide` (low-byte ASCII fast path, full uint16 fall-through for non-ASCII chars), with a null terminator appended — matches `hash.ROR13Module` for ASCII-compatible module names.
+- Parameters: `hash` precomputed `ROR13Module` of the module name.
+- Returns: module base address; `"module hash 0x%08X not found in PEB"` if no match.
+- Side effects: read-only PEB / LDR walk. Allocates nothing.
+- OPSEC: silent. The PEB walk is undetectable from a userland EDR — only kernel-side walkers can observe it.
+- Required privileges: none.
+- Platform: Windows + amd64.
+
+#### `ExportByHash(moduleBase uintptr, funcHash uint32) (uintptr, error)`
+
+- godoc: walk a loaded PE module's export directory and return the first export whose name hashes to `funcHash`.
+- Description: validates the `MZ` signature at `moduleBase`, follows `e_lfanew` to the PE header, reads the optional-header DataDirectory[0] (export directory) at offset `peHeader + 24 + 112` (x64 layout). Iterates `NumberOfNames` entries, hashes each ASCII export name with the package-internal `ror13Ascii` (no null terminator — matches `hash.ROR13`), and on match resolves through `AddressOfNameOrdinals[i]` → `AddressOfFunctions[ordinal]` → returns `moduleBase + funcRVA`.
+- Parameters: `moduleBase` resolved via `ModuleByHash` (or `windows.GetModuleHandle` for already-loaded modules); `funcHash` precomputed `ROR13` of the export name.
+- Returns: function address; `"invalid MZ header"`, `"no export directory"`, or `"export hash 0x%08X not found"` on miss.
+- Side effects: read-only PE-header walk. Allocates nothing.
+- OPSEC: silent.
+- Required privileges: none. Module must be loaded in the current process.
+- Platform: Windows + amd64. The DataDirectory offset (+112) is the PE32+ (x64) layout — PE32 (x86) would use +96.
+
+#### `Hash*` precomputed constants
 
 ```go
-// ResolveByHash resolves a function address by module + function ROR13 hashes.
-func ResolveByHash(moduleHash, funcHash uint32) (uintptr, error)
+// Modules (ROR13Module of BaseDllName as stored in PEB)
+HashKernel32 uint32 = 0x50BB715E // "KERNEL32.DLL"
+HashNtdll    uint32 = 0x411677B7 // "ntdll.dll"
+HashAdvapi32 uint32 = 0x9CB9105F // "ADVAPI32.dll"
+HashUser32   uint32 = 0x51319D6F // "USER32.dll"
+HashShell32  uint32 = 0x18D72CAC // "SHELL32.dll"
 
-// ModuleByHash finds a loaded module's base address via PEB walk.
-func ModuleByHash(hash uint32) (uintptr, error)
-
-// ExportByHash finds a function address in a loaded PE by export name hash.
-func ExportByHash(moduleBase uintptr, funcHash uint32) (uintptr, error)
+// Functions (ROR13 of ASCII export name)
+HashLoadLibraryA            uint32 = 0xEC0E4E8E
+HashGetProcAddress          uint32 = 0x7C0DFCAA
+HashVirtualAlloc            uint32 = 0x91AFCA54
+HashVirtualProtect          uint32 = 0x7946C61B
+HashCreateThread            uint32 = 0xCA2BD06B
+HashNtAllocateVirtualMemory uint32 = 0xD33BCABD
+HashNtProtectVirtualMemory  uint32 = 0x8C394D89
+HashNtCreateThreadEx        uint32 = 0x4D1DEB74
+HashNtWriteVirtualMemory    uint32 = 0xC5108CC2
 ```
 
-### win/syscall
+- Description: build-time-baked ROR13 hashes for the Win32 / Nt names commonly resolved at runtime. Module-name casing matches the PEB's `BaseDllName` exactly — `KERNEL32.DLL` is uppercase but `ntdll.dll` is lowercase, mirroring the loader's actual storage.
+- OPSEC caveat: these are the canonical ROR13 constants of well-known names. Public YARA / capa rule sets fingerprint them. For OPSEC-sensitive implants, generate per-build constants with a fresh `HashFunc` family from the [`hash`](#package-hash--hash-families-cross-reference) package and pass them through `Caller.WithHashFunc` / `NewHashGateWith` so the binary carries no canonical fingerprint.
 
-```go
-// CallByHash executes a syscall using a pre-computed ROR13 hash.
-func (c *Caller) CallByHash(funcHash uint32, args ...uintptr) (uintptr, error)
+### Package `win/syscall` — Caller integration (cross-reference)
 
-// NewHashGate creates a resolver that uses PEB walk + ROR13 hashing.
-func NewHashGate() *HashGateResolver
-```
+The string-free syscall path consumes the resolved hashes via the
+Caller seam:
 
-### hash
+#### `(*Caller).CallByHash(funcHash uint32, args ...uintptr) (uintptr, error)` ⇒ [direct-indirect.md § CallByHash](direct-indirect.md#callercallbyhashfunchash-uint32-args-uintptr-uintptr-error)
 
-```go
-// ROR13 computes the ROR13 hash of an ASCII string (no null terminator).
-func ROR13(name string) uint32
+- Stub note: full fielded coverage in `direct-indirect.md`. The relevant OPSEC bullet: pair with `Caller.WithHashFunc(myFn)` so the same `funcHash` is computed by both ends; pre-compute the constant via `cmd/hashgen` at build time so no hashing happens at runtime.
 
-// ROR13Module computes the ROR13 hash of a UTF-16LE module name (with null terminator).
-func ROR13Module(name string) uint32
-```
+#### `NewHashGate() *HashGateResolver` and `NewHashGateWith(fn HashFunc) *HashGateResolver` ⇒ [ssn-resolvers.md § HashGate](ssn-resolvers.md#hashgate-string-free-resolver)
+
+- Stub note: full fielded coverage in `ssn-resolvers.md`. HashGate is the SSN-extraction strategy that uses the same PEB+export hash chain as `ResolveByHash` but reads the SSN out of the export's prologue instead of returning the address.
+
+### Package `hash` — hash families (cross-reference)
+
+The `hash` package owns every hash function used by the API-hashing
+path. Pass any of these as `HashFunc` into `Caller.WithHashFunc` and
+`NewHashGateWith` to swap families. **Both ends of the lookup must
+agree on the family**; a single per-implant family applied
+consistently removes the canonical fingerprint.
+
+- `ROR13(name string) uint32` ⇒ [hash/cryptographic-hashes.md § ROR13](../hash/cryptographic-hashes.md#ror13name-string-uint32) — package default; null-terminator-free; canonical shellcode hash.
+- `ROR13Module(name string) uint32` ⇒ [hash/cryptographic-hashes.md § ROR13Module](../hash/cryptographic-hashes.md#ror13modulename-string-uint32) — wraps `ROR13(name + "\x00")` for module-name hashing.
+- `FNV1a32(name string) uint32` — alternative 32-bit family (FNV-1a). Used by [`cmd/hashgen --family fnv1a32`](../../../cmd/hashgen/) for fresh constants.
+- `FNV1a64(name string) uint64` — 64-bit FNV-1a. Note the wider return type; not directly compatible with `HashFunc` (uint32) — kept for callers building their own lookup tables.
+- `JenkinsOAAT(name string) uint32` — Bob Jenkins' one-at-a-time hash. Different bit-mixing constants from FNV/ROR13 — useful as a third decorrelated family.
+- `DJB2(name string) uint32` — Daniel J. Bernstein's `((h<<5) + h) + c` accumulator. Classic, well-distributed, distinct enough from ROR13 to defeat naive signature engines.
+- `CRC32(name string) uint32` — `crypto/hash/crc32` over the ASCII bytes; standard library implementation. Not cryptographic but ubiquitous in benign code (table lookups, file integrity), which is itself a form of cover.
+
+OPSEC summary: stick with `ROR13` only when binary-size and
+cross-tool compatibility outweigh signature concerns. For real
+operations, generate constants with a per-implant family and pin
+both ends with `WithHashFunc` + `NewHashGateWith`.
 
 ## See also
 
