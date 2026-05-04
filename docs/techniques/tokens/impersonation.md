@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-04-27
-reflects_commit: a705c32
+last_reviewed: 2026-05-04
+reflects_commit: 123bd90
 ---
 
 # Thread Impersonation
@@ -297,42 +297,152 @@ err := impersonate.GetTrustedInstaller(func() error {
 
 ## API Reference
 
-### Functions
+Package: `github.com/oioio-space/maldev/win/impersonate`. All callbacks
+run on a locked OS thread (`runtime.LockOSThread` + deferred
+`UnlockOSThread`); the thread reverts to self via
+`windows.RevertToSelf` when the callback returns. Errors from
+`callbackFunc` propagate verbatim.
+
+### `ImpersonateThread(isInDomain bool, domain, username, password string, callbackFunc func() error) error`
+
+- godoc: run `callbackFunc` under the credentials of the named user.
+- Description: calls `LogonUserW` with `LOGON32_LOGON_INTERACTIVE` + `LOGON32_PROVIDER_DEFAULT`, wraps the resulting handle in a `token.Token` (impersonation type), enables every available privilege on it, then runs `runImpersonated`. When `isInDomain == false` the local SAM is targeted (`domain` is forced to `"."`).
+- Parameters: `isInDomain` selects the SAM (`false` ⇒ local). `domain`/`username`/`password` are the cleartext credentials. `callbackFunc` runs under the impersonated identity.
+- Returns: error from `LogonUserW`, `EnableAllPrivileges`, or `callbackFunc`.
+- Side effects: spawns a goroutine pinned to one OS thread; closes the duplicated token after the callback. No persistent state.
+- OPSEC: `LogonUserW` produces a 4624 logon event (Type 2 — Interactive) on the local DC/SAM each call. Audit-Logon-success policies pick it up. Hot path on a locked-down host.
+- Required privileges: unprivileged for local accounts; matching credentials for domain accounts. Network reachability to a DC required when `isInDomain == true`.
+- Platform: Windows. Stub build returns "not implemented".
+
+### `ImpersonateToken(tok *token.Token, callbackFunc func() error) error`
+
+- godoc: run `callbackFunc` under an already-stolen or duplicated token.
+- Description: thin shim over `runImpersonated` taking the wrapped `token.Token` handle. Use when you already have a duplicated impersonation token from `token.Steal`, `token.StealByName`, or `token.Interactive` — sidesteps the cleartext-credential requirement of `ImpersonateThread`.
+- Parameters: `tok` must wrap a non-zero impersonation token (from the `token` package). `callbackFunc` runs under that identity.
+- Returns: error from `ImpersonateLoggedOnUser` or `callbackFunc`.
+- Side effects: same as `runImpersonated`; does not close `tok`.
+- OPSEC: silent — no LogonUserW, no logon event. The 4624 (or 4672 for SeDebug) was emitted earlier by whoever produced `tok`.
+- Required privileges: depends on the source token. Local impersonation generally requires `SeImpersonatePrivilege` (held by SYSTEM, services, and elevated admins).
+- Platform: Windows.
+
+### `ImpersonateByPID(pid uint32, fn func() error) error`
+
+- godoc: impersonate the named process and run `fn` under its identity.
+- Description: calls `token.Steal(pid)` to duplicate the target's primary token into an impersonation token, then `runImpersonated`. Closes the stolen handle on return.
+- Parameters: `pid` of the target (any session); `fn` runs under that identity.
+- Returns: wrapped error `steal token from PID %d: %w` on `token.Steal` failure; otherwise the callback's error.
+- Side effects: `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` against the target.
+- OPSEC: opening protected processes (PPL/PP) returns Access Denied; lsass/csrss/services with PPL set are off-limits without driver-side help. Non-PPL system services are fine.
+- Required privileges: `SeDebugPrivilege` for cross-session or elevated targets; otherwise unprivileged for same-user targets.
+- Platform: Windows.
+
+### `GetSystem(fn func() error) error`
+
+- godoc: run `fn` under `NT AUTHORITY\SYSTEM` by stealing winlogon.exe's token.
+- Description: locates the first `winlogon.exe` PID via `process/enum.FindByName`, then delegates to `ImpersonateByPID`. winlogon is unprotected and runs as SYSTEM — the canonical donor.
+- Parameters: `fn` runs as SYSTEM.
+- Returns: wrapped `find winlogon: %w` if the process can't be located; otherwise propagates `ImpersonateByPID`.
+- Side effects: enumerates the full process snapshot once.
+- OPSEC: `OpenProcess` against winlogon is a strong indicator on EDR baselines (Sysmon Event 10 with GrantedAccess containing token-related rights). Highly correlated with privilege-escalation playbooks.
+- Required privileges: admin + `SeDebugPrivilege`. Fails silently from medium-IL.
+- Platform: Windows.
+
+### `GetTrustedInstaller(fn func() error) error`
+
+- godoc: run `fn` under `NT SERVICE\TrustedInstaller` — strictly above SYSTEM in the ACL hierarchy.
+- Description: nests two impersonations — first elevates to SYSTEM via `GetSystem` (required to open the TI process), then starts the `TrustedInstaller` service via SCM, polls `QueryServiceStatusEx` for `SERVICE_RUNNING`, and finally `ImpersonateByPID` on the TI service PID. The service must already be installed (default on every Windows SKU).
+- Parameters: `fn` runs as TrustedInstaller (effective TokenUser remains S-1-5-18 SYSTEM, but the token Groups gain `S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464` — use `ThreadEffectiveTokenHasGroup` to verify).
+- Returns: nested wrapped errors from `GetSystem` / `startAndFindTI` / `ImpersonateByPID`. The polling loop waits up to 10 s and returns `"TrustedInstaller service did not start within 10s"` if the SCM never reports RUNNING.
+- Side effects: starts the service if stopped (it auto-stops after a few minutes idle) and leaves it running. SCM logon event on the start.
+- OPSEC: TI impersonation lets an attacker bypass file-system ACLs that even SYSTEM cannot (e.g., `Windows\System32\WindowsApps`). The pattern of `OpenProcess(winlogon)` → `StartService(TrustedInstaller)` → `OpenProcess(TI)` is heavily flagged.
+- Required privileges: admin + `SeDebugPrivilege`.
+- Platform: Windows.
+
+### `RunAsTrustedInstaller(cmd string, args ...string) (*exec.Cmd, error)`
+
+- godoc: spawn `cmd args...` as a child of the TrustedInstaller service process.
+- Description: calls `startAndFindTI` to ensure TI is running, then opens it with `PROCESS_CREATE_PROCESS` and uses `SysProcAttr.ParentProcess` to PPID-spoof the new process under the TI handle. Window is hidden (`HideWindow: true`). The returned `*exec.Cmd` is already started — caller must invoke `Wait`.
+- Parameters: `cmd` is the executable path; `args` are passed verbatim.
+- Returns: started `*exec.Cmd` (stdin/stdout/stderr unset by default); wrapped `start command: %w` or `open TrustedInstaller process: %w` on failure.
+- Side effects: starts the TI service if stopped; spawns a child process inheriting TI's privileges.
+- OPSEC: a child of `TrustedInstaller.exe` is anomalous — TI has a tiny canonical descendant set (mostly `WindowsUpdate`/`MoUsoCoreWorker`). Any other child process is a high-fidelity detection for this exact technique.
+- Required privileges: admin + `SeDebugPrivilege` (needed to `OpenProcess(TI, PROCESS_CREATE_PROCESS)`).
+- Platform: Windows.
+
+### `LogonUserW(username, domain, password string, logonType LogonType, logonProvider LogonProvider) (windows.Token, error)`
+
+- godoc: thin wrapper over `advapi32!LogonUserW`. Returns the resulting Windows token.
+- Description: validates a credential pair against the local SAM or a DC and issues a primary token of the requested logon type. Underlies `ImpersonateThread` but is exported for callers who want to keep the token for later (e.g., `CreateProcessAsUserW`).
+- Parameters: `username`/`domain`/`password` cleartext (UTF-8, internally widened); `logonType` selects the logon kind (see constants below); `logonProvider` is normally `LOGON32_PROVIDER_DEFAULT`.
+- Returns: a `windows.Token` (caller closes via `windows.Token.Close`); on failure `windows.Token(windows.InvalidHandle)` plus a `*os.SyscallError` wrapping the `LastError`.
+- Side effects: emits a 4624 (success) or 4625 (failure) logon event with the chosen type.
+- OPSEC: `LOGON32_LOGON_NEW_CREDENTIALS` (9) is the stealthiest — credentials are not validated locally, only used outbound for network auth, so 4624 fires with TargetUserName == caller. Use it for over-the-wire credential injection without a noisy local logon. `LOGON32_LOGON_INTERACTIVE` (2) is the loudest.
+- Required privileges: unprivileged for any account whose credentials are valid; `SeTcbPrivilege` (TCB) historically required pre-Vista, no longer needed for cleartext logons.
+- Platform: Windows.
+
+### `ImpersonateLoggedOnUser(t windows.Token) error`
+
+- godoc: thin wrapper over `advapi32!ImpersonateLoggedOnUser`.
+- Description: attaches the token to the current thread's impersonation slot. The thread inherits `t`'s identity until `windows.RevertToSelf` runs. Building block under all the higher-level helpers — exported so callers can compose their own thread-pinning policy.
+- Parameters: `t` an impersonation-grade token (primary tokens are auto-promoted on impersonation level lookup).
+- Returns: `*os.SyscallError("ImpersonateLoggedOnUser", lastErr)` on failure; nil on success.
+- Side effects: mutates the calling thread's impersonation token. Caller is responsible for `runtime.LockOSThread` + `windows.RevertToSelf`.
+- OPSEC: silent in event logs (no 4624). `SeImpersonatePrivilege` lookup is invisible.
+- Required privileges: `SeImpersonatePrivilege` for tokens above the caller's IL/group set.
+- Platform: Windows.
+
+### `ThreadEffectiveTokenOwner() (user, domain string, err error)`
+
+- godoc: returns the user/domain of the current thread's effective token.
+- Description: reads `GetCurrentThreadEffectiveToken` then `GetTokenUser` then `LookupAccountSidW`. The "effective" token is the impersonation token if one is attached, otherwise the process token. Used to verify an impersonation actually took effect.
+- Parameters: none.
+- Returns: localised `user`/`domain` strings (e.g. `"Système"` / `"AUTORITE NT"` on fr-FR). Empty strings + non-nil error on failure.
+- Side effects: one LSA RPC for the SID-to-name lookup.
+- OPSEC: `LookupAccountSidW` round-trips to LSA; not stealthy on systems with LSA telemetry.
+- Required privileges: unprivileged (reads own thread).
+- Platform: Windows.
+
+### `ThreadEffectiveTokenSID() (string, error)`
+
+- godoc: returns the SID string of the current thread's effective token.
+- Description: same path as `ThreadEffectiveTokenOwner` but stops at `Sid.String()` — no LSA lookup. Locale-independent. Use this in tests asserting "we got SYSTEM" (compare against `"S-1-5-18"`) instead of comparing localized strings.
+- Parameters: none.
+- Returns: SID string (e.g. `"S-1-5-18"` for SYSTEM, `"S-1-5-19"` for LocalService).
+- Side effects: none.
+- OPSEC: silent — no LSA traffic.
+- Required privileges: unprivileged.
+- Platform: Windows.
+
+### `ThreadEffectiveTokenHasGroup(sid string) (bool, error)`
+
+- godoc: reports whether the effective token's Groups list contains `sid`.
+- Description: needed to distinguish service-impersonation contexts where `TokenUser` stays `S-1-5-18` (SYSTEM) but the token has picked up an additional service SID. Concrete case: after `GetTrustedInstaller`, `ThreadEffectiveTokenSID` still returns `"S-1-5-18"` — the only way to confirm TI elevation is to check for the TI service SID in Groups.
+- Parameters: `sid` — string SID to search for (e.g. `"S-1-5-80-956008885-..."` for TrustedInstaller).
+- Returns: `true` if the group is present; `false` otherwise; non-nil error if `sid` fails to parse or the token's Groups can't be read.
+- Side effects: parses `sid` via `windows.StringToSid`. No explicit `LocalFree` — see in-source comment: explicit free has been observed to crash on Win10/11 builds (likely double-free with x/sys/windows finalizer); the trivial leak is acceptable for short-lived processes.
+- OPSEC: silent.
+- Required privileges: unprivileged.
+- Platform: Windows.
+
+### Logon type and provider constants
 
 ```go
-// ImpersonateThread runs callbackFunc under alternate credentials on a locked OS thread.
-func ImpersonateThread(isInDomain bool, domain, username, password string, callbackFunc func() error) error
-
-// ImpersonateByPID impersonates the given process and runs fn under its identity.
-func ImpersonateByPID(pid uint32, fn func() error) error
-
-// GetSystem runs fn under NT AUTHORITY\SYSTEM context (via winlogon.exe token).
-func GetSystem(fn func() error) error
-
-// GetTrustedInstaller runs fn under NT SERVICE\TrustedInstaller context.
-func GetTrustedInstaller(fn func() error) error
-
-// LogonUserW logs in a user and returns a token handle.
-func LogonUserW(username, domain, password string, logonType LogonType, logonProvider LogonProvider) (windows.Token, error)
-
-// ImpersonateLoggedOnUser impersonates a token on the current thread.
-func ImpersonateLoggedOnUser(t windows.Token) error
-
-// ThreadEffectiveTokenOwner returns the user/domain of the current thread's effective token.
-func ThreadEffectiveTokenOwner() (user string, domain string, err error)
-```
-
-### Logon Types
-
-```go
+type LogonType uint32
 const (
-    LOGON32_LOGON_INTERACTIVE     LogonType = 2
-    LOGON32_LOGON_NETWORK         LogonType = 3
-    LOGON32_LOGON_BATCH           LogonType = 4
-    LOGON32_LOGON_SERVICE         LogonType = 5
-    LOGON32_LOGON_NEW_CREDENTIALS LogonType = 9
+    LOGON32_LOGON_INTERACTIVE     LogonType = 2  // local desktop logon — emits noisy 4624 type 2
+    LOGON32_LOGON_NETWORK         LogonType = 3  // SMB/RPC-style credential check, no token cached
+    LOGON32_LOGON_BATCH           LogonType = 4  // scheduled-task style
+    LOGON32_LOGON_SERVICE         LogonType = 5  // service-account style
+    LOGON32_LOGON_NEW_CREDENTIALS LogonType = 9  // stealthiest: cred only used outbound, no local validation
+)
+
+type LogonProvider uint32
+const (
+    LOGON32_PROVIDER_DEFAULT LogonProvider = 0  // NTLM/Negotiate as appropriate
 )
 ```
+
+OPSEC summary: prefer `LOGON32_LOGON_NEW_CREDENTIALS` for outbound-credential scenarios (it doesn't validate against the local SAM and keeps the local 4624 footprint to a no-op type-9). For genuine impersonation of a local user, type 2 is the only choice and accept the audit footprint.
 
 ## See also
 
