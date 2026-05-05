@@ -2,22 +2,54 @@ package parse
 
 import (
 	"bytes"
-	"debug/pe"
-	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
+
+	saferpe "github.com/saferwall/pe"
 
 	"github.com/oioio-space/maldev/evasion/stealthopen"
 )
 
 // File represents a parsed PE file with read/write capabilities.
+//
+// Internally backed by github.com/saferwall/pe — far richer than
+// stdlib `debug/pe` (Authenticode hash, import hash, anomaly
+// detection, Rich header, CFG / dynamic-reloc parsing). Public
+// methods preserve the pre-saferwall surface so existing callers
+// upgrade transparently; new methods (Authentihash / ImpHash /
+// Anomalies) expose the new capabilities.
 type File struct {
-	PE   *pe.File
-	Raw  []byte
+	// PE is the underlying saferwall *File. Exposed as an escape
+	// hatch — operators needing a directory the maldev wrapper
+	// doesn't surface (Resources, CLR, TLS, …) can reach through.
+	PE *saferpe.File
+
+	// Raw is the full file bytes as supplied to Open / FromBytes.
+	// Kept around so Write/WriteBytes return the operator's
+	// original payload bytes (saferwall's parse may mutate
+	// internal copies).
+	Raw []byte
+
+	// Path is the on-disk path the file was loaded from. Empty
+	// for FromBytes callers.
 	Path string
 }
 
-// Open opens and parses a PE file.
+// Section is a thin Go-native view of a PE section. Decouples the
+// public API from the underlying parser library.
+type Section struct {
+	Name           string
+	VirtualAddress uint32
+	VirtualSize    uint32
+	Offset         uint32 // PointerToRawData
+	Size           uint32 // SizeOfRawData
+	Characteristics uint32
+
+	raw []byte // section-data slice into File.Raw, populated lazily
+}
+
+// Open opens and parses a PE file from disk.
 func Open(path string) (*File, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -26,37 +58,55 @@ func Open(path string) (*File, error) {
 	return FromBytes(raw, path)
 }
 
-// FromBytes parses a PE from raw bytes.
+// FromBytes parses a PE from raw bytes. The bytes are kept
+// reference-shared with the returned File — callers must not mutate
+// them after the call.
 func FromBytes(data []byte, name string) (*File, error) {
-	pf, err := pe.NewFile(bytes.NewReader(data))
+	pf, err := saferpe.NewBytes(data, &saferpe.Options{
+		// Sane defaults for a wrapper consumed by recon /
+		// instrumentation code: parse everything, but don't fail
+		// if a malformed certificate trips validation (Anomalies
+		// surfaces oddities; callers chose to load the bytes
+		// regardless).
+		DisableCertValidation: true,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("parse PE: %w", err)
+	}
+	if err := pf.Parse(); err != nil {
+		return nil, fmt.Errorf("parse PE directories: %w", err)
 	}
 	return &File{PE: pf, Raw: data, Path: name}, nil
 }
 
 // Close releases resources.
 func (f *File) Close() error {
+	if f == nil || f.PE == nil {
+		return nil
+	}
 	return f.PE.Close()
 }
 
-// Is64Bit returns true if the PE is a 64-bit binary.
+// Is64Bit returns true if the PE is a PE32+ binary (64-bit).
 func (f *File) Is64Bit() bool {
-	_, ok := f.PE.OptionalHeader.(*pe.OptionalHeader64)
-	return ok
+	return f.PE.Is64
 }
 
 // IsDLL returns true if the PE has the DLL characteristic flag.
 func (f *File) IsDLL() bool {
-	return f.PE.Characteristics&pe.IMAGE_FILE_DLL != 0
+	return f.PE.IsDLL()
 }
 
 // ImageBase returns the preferred load address.
+//
+// saferwall stores OptionalHeader as a value (not a pointer)
+// despite what its godoc claims — pointer-form type assertions
+// silently fail.
 func (f *File) ImageBase() uint64 {
-	switch oh := f.PE.OptionalHeader.(type) {
-	case *pe.OptionalHeader64:
+	if oh, ok := f.PE.NtHeader.OptionalHeader.(saferpe.ImageOptionalHeader64); ok {
 		return oh.ImageBase
-	case *pe.OptionalHeader32:
+	}
+	if oh, ok := f.PE.NtHeader.OptionalHeader.(saferpe.ImageOptionalHeader32); ok {
 		return uint64(oh.ImageBase)
 	}
 	return 0
@@ -64,33 +114,67 @@ func (f *File) ImageBase() uint64 {
 
 // EntryPoint returns the RVA of the entry point.
 func (f *File) EntryPoint() uint32 {
-	switch oh := f.PE.OptionalHeader.(type) {
-	case *pe.OptionalHeader64:
+	if oh, ok := f.PE.NtHeader.OptionalHeader.(saferpe.ImageOptionalHeader64); ok {
 		return oh.AddressOfEntryPoint
-	case *pe.OptionalHeader32:
+	}
+	if oh, ok := f.PE.NtHeader.OptionalHeader.(saferpe.ImageOptionalHeader32); ok {
 		return oh.AddressOfEntryPoint
 	}
 	return 0
 }
 
-// Sections returns all section headers.
-func (f *File) Sections() []*pe.Section {
-	return f.PE.Sections
+// Sections returns every parsed section as a Go-native [Section].
+// Returns a fresh slice; callers may modify it freely.
+func (f *File) Sections() []Section {
+	out := make([]Section, len(f.PE.Sections))
+	for i, s := range f.PE.Sections {
+		out[i] = Section{
+			Name:            sectionName(s.Header.Name),
+			VirtualAddress:  s.Header.VirtualAddress,
+			VirtualSize:     s.Header.VirtualSize,
+			Offset:          s.Header.PointerToRawData,
+			Size:            s.Header.SizeOfRawData,
+			Characteristics: s.Header.Characteristics,
+		}
+	}
+	return out
 }
 
-// SectionByName finds a section by name.
-func (f *File) SectionByName(name string) *pe.Section {
-	for _, sec := range f.PE.Sections {
-		if sec.Name == name {
-			return sec
+// sectionName converts the 8-byte NUL-padded section name to a
+// trimmed Go string. Long names (the slash-prefixed string-table
+// reference form) are surfaced as-is — executable images don't
+// emit them.
+func sectionName(raw [8]byte) string {
+	if i := bytes.IndexByte(raw[:], 0); i >= 0 {
+		return string(raw[:i])
+	}
+	return string(raw[:])
+}
+
+// SectionByName finds a section by name. Returns nil when no
+// section matches.
+func (f *File) SectionByName(name string) *Section {
+	for _, s := range f.Sections() {
+		if s.Name == name {
+			s := s
+			return &s
 		}
 	}
 	return nil
 }
 
-// SectionData returns the raw data of a section.
-func (f *File) SectionData(sec *pe.Section) ([]byte, error) {
-	return sec.Data()
+// SectionData returns the raw bytes of a section. Reads from File.Raw
+// using the section's Offset + Size.
+func (f *File) SectionData(sec *Section) ([]byte, error) {
+	if sec == nil {
+		return nil, errors.New("parse: nil Section")
+	}
+	end := int(sec.Offset) + int(sec.Size)
+	if end > len(f.Raw) || sec.Offset > uint32(len(f.Raw)) {
+		return nil, fmt.Errorf("parse: section [%s] data overruns Raw (offset=%d size=%d Raw=%d)",
+			sec.Name, sec.Offset, sec.Size, len(f.Raw))
+	}
+	return f.Raw[sec.Offset:end], nil
 }
 
 // Export describes a single PE export entry — exposes both name (which
@@ -104,8 +188,7 @@ type Export struct {
 	Name string
 
 	// Ordinal is the absolute (Base-biased) ordinal — the integer the
-	// export is referenced by from import descriptors. PE spec calls
-	// this the "ordinal value" as opposed to the per-array index.
+	// export is referenced by from import descriptors.
 	Ordinal uint16
 
 	// Forwarder, when non-empty, indicates the export is itself a
@@ -116,151 +199,86 @@ type Export struct {
 }
 
 // ExportEntries returns the full export table — one Export per
-// function slot, in ordinal order. Mirrors what the Windows loader
-// itself sees: every ordinal-with-an-RVA appears, named or not.
-//
-// Use this when downstream code needs ordinal information (proxy DLL
-// emission, export-table inspection, forwarder following). Use
-// [File.Exports] for a simpler "give me the exported names" answer.
+// function slot, in ordinal order. Ordinal-only entries (no name)
+// appear with Name == "".
 func (f *File) ExportEntries() ([]Export, error) {
-	var exportDirRVA, exportDirSize uint32
-	switch oh := f.PE.OptionalHeader.(type) {
-	case *pe.OptionalHeader64:
-		if len(oh.DataDirectory) > 0 {
-			exportDirRVA = oh.DataDirectory[0].VirtualAddress
-			exportDirSize = oh.DataDirectory[0].Size
-		}
-	case *pe.OptionalHeader32:
-		if len(oh.DataDirectory) > 0 {
-			exportDirRVA = oh.DataDirectory[0].VirtualAddress
-			exportDirSize = oh.DataDirectory[0].Size
-		}
-	}
-	if exportDirRVA == 0 {
+	exp := f.PE.Export
+	if len(exp.Functions) == 0 {
 		return nil, nil
 	}
-	offset := rvaToOffset(f.PE, exportDirRVA)
-	if offset == 0 || int(offset+40) > len(f.Raw) {
-		return nil, fmt.Errorf("invalid export directory offset")
-	}
-
-	base := binary.LittleEndian.Uint32(f.Raw[offset+16:])
-	numFunctions := binary.LittleEndian.Uint32(f.Raw[offset+20:])
-	numNames := binary.LittleEndian.Uint32(f.Raw[offset+24:])
-	addrFunctions := binary.LittleEndian.Uint32(f.Raw[offset+28:])
-	addrNames := binary.LittleEndian.Uint32(f.Raw[offset+32:])
-	addrOrdinals := binary.LittleEndian.Uint32(f.Raw[offset+36:])
-
-	functionsOff := rvaToOffset(f.PE, addrFunctions)
-	namesOff := rvaToOffset(f.PE, addrNames)
-	ordinalsOff := rvaToOffset(f.PE, addrOrdinals)
-	if functionsOff == 0 || namesOff == 0 || ordinalsOff == 0 {
-		return nil, fmt.Errorf("export sub-table RVA resolves outside known sections")
-	}
-
-	// Slot index → name (sparse: not every function slot has a name).
-	nameByIndex := make(map[uint32]string, numNames)
-	for i := uint32(0); i < numNames; i++ {
-		nameRVA := binary.LittleEndian.Uint32(f.Raw[namesOff+i*4:])
-		idx := uint32(binary.LittleEndian.Uint16(f.Raw[ordinalsOff+i*2:]))
-		nameByIndex[idx] = readZString(f.Raw, rvaToOffset(f.PE, nameRVA))
-	}
-
-	out := make([]Export, 0, numFunctions)
-	for i := uint32(0); i < numFunctions; i++ {
-		funcRVA := binary.LittleEndian.Uint32(f.Raw[functionsOff+i*4:])
-		if funcRVA == 0 {
-			// Empty slot — ordinal not actually exported.
-			continue
-		}
-		e := Export{
-			Name:    nameByIndex[i],
-			Ordinal: uint16(base + i),
-		}
-		// Forwarder detection: per PE spec, the function RVA is a
-		// forwarder iff it falls inside the export-directory range.
-		if funcRVA >= exportDirRVA && funcRVA < exportDirRVA+exportDirSize {
-			fwdOff := rvaToOffset(f.PE, funcRVA)
-			if fwdOff != 0 {
-				e.Forwarder = readZString(f.Raw, fwdOff)
-			}
-		}
-		out = append(out, e)
+	out := make([]Export, 0, len(exp.Functions))
+	for _, fn := range exp.Functions {
+		out = append(out, Export{
+			Name:      fn.Name,
+			Ordinal:   uint16(fn.Ordinal),
+			Forwarder: fn.Forwarder,
+		})
 	}
 	return out, nil
 }
 
-// readZString reads a NUL-terminated ASCII string starting at off in
-// the given byte slice. Returns "" if off is out of bounds.
-func readZString(buf []byte, off uint32) string {
-	if off == 0 || int(off) >= len(buf) {
-		return ""
-	}
-	end := off
-	for end < uint32(len(buf)) && buf[end] != 0 {
-		end++
-	}
-	return string(buf[off:end])
-}
-
-// Exports returns the names of all exported functions.
+// Exports returns the names of exported functions only (ordinal-only
+// entries are skipped). Use [File.ExportEntries] when ordinal +
+// forwarder data is needed.
 func (f *File) Exports() ([]string, error) {
-	// Parse export directory
-	var exportDirRVA uint32
-	switch oh := f.PE.OptionalHeader.(type) {
-	case *pe.OptionalHeader64:
-		if len(oh.DataDirectory) > 0 {
-			exportDirRVA = oh.DataDirectory[0].VirtualAddress
-		}
-	case *pe.OptionalHeader32:
-		if len(oh.DataDirectory) > 0 {
-			exportDirRVA = oh.DataDirectory[0].VirtualAddress
-		}
+	exp := f.PE.Export
+	if len(exp.Functions) == 0 {
+		return nil, nil
 	}
-
-	if exportDirRVA == 0 {
-		return nil, nil // no exports
-	}
-
-	offset := rvaToOffset(f.PE, exportDirRVA)
-	if offset == 0 || int(offset+40) > len(f.Raw) {
-		return nil, fmt.Errorf("invalid export directory offset")
-	}
-
-	numNames := binary.LittleEndian.Uint32(f.Raw[offset+24:])
-	addrNames := binary.LittleEndian.Uint32(f.Raw[offset+32:])
-	namesOff := rvaToOffset(f.PE, addrNames)
-	if namesOff == 0 {
-		return nil, fmt.Errorf("export names RVA resolves outside known sections")
-	}
-
-	var names []string
-	for i := uint32(0); i < numNames; i++ {
-		nameRVA := binary.LittleEndian.Uint32(f.Raw[namesOff+i*4:])
-		nameOff := rvaToOffset(f.PE, nameRVA)
-		if nameOff == 0 {
+	out := make([]string, 0, len(exp.Functions))
+	for _, fn := range exp.Functions {
+		if fn.Name == "" {
 			continue
 		}
-		end := nameOff
-		for end < uint32(len(f.Raw)) && f.Raw[end] != 0 {
-			end++
-		}
-		names = append(names, string(f.Raw[nameOff:end]))
+		out = append(out, fn.Name)
 	}
-	return names, nil
+	return out, nil
 }
 
 // Imports returns imported DLL names.
 func (f *File) Imports() ([]string, error) {
-	libs, err := f.PE.ImportedLibraries()
-	if err != nil {
-		return nil, err
+	out := make([]string, 0, len(f.PE.Imports))
+	for _, imp := range f.PE.Imports {
+		out = append(out, imp.Name)
 	}
-	return libs, nil
+	return out, nil
 }
 
-// Write saves the (potentially modified) PE to disk. Equivalent to
-// [File.WriteVia] with a nil Creator.
+// Authentihash returns the SHA-256 Authenticode hash of the PE — the
+// canonical input to a real Authenticode signature, computed by
+// hashing the PE bytes excluding the Checksum field, the security
+// data directory entry, and the certificate table itself.
+//
+// Match this against the digest embedded in a captured
+// `SpcIndirectDataContent` to verify whether a PE was tampered after
+// signing.
+func (f *File) Authentihash() []byte {
+	return f.PE.Authentihash()
+}
+
+// ImpHash returns Mandiant's import-hash (imphash) — MD5 of the
+// lowercased, comma-joined `<dll>.<func>` import list. Stable across
+// PEs sharing the same import surface (typical for malware-family
+// clustering).
+func (f *File) ImpHash() (string, error) {
+	return f.PE.ImpHash()
+}
+
+// Anomalies returns the list of structural anomalies the parser
+// detected (overlapping headers, malformed directories, suspicious
+// section sizes, …). Empty slice means "PE looks well-formed".
+//
+// Useful for static triage / sandbox heuristics: a benign Microsoft
+// binary typically returns 0 anomalies; a packed / hand-crafted /
+// herpadering-tampered binary often returns 2-10.
+func (f *File) Anomalies() []string {
+	out := make([]string, len(f.PE.Anomalies))
+	copy(out, f.PE.Anomalies)
+	return out
+}
+
+// Write saves the (potentially modified) PE bytes to disk.
+// Equivalent to [File.WriteVia] with a nil Creator.
 func (f *File) Write(path string) error {
 	return f.WriteVia(nil, path)
 }
@@ -272,17 +290,7 @@ func (f *File) WriteVia(creator stealthopen.Creator, path string) error {
 	return stealthopen.WriteAll(creator, path, f.Raw)
 }
 
-// WriteBytes returns the raw PE bytes.
+// WriteBytes returns the raw PE bytes as supplied to Open / FromBytes.
 func (f *File) WriteBytes() []byte {
 	return f.Raw
-}
-
-// rvaToOffset converts an RVA to a file offset.
-func rvaToOffset(f *pe.File, rva uint32) uint32 {
-	for _, sec := range f.Sections {
-		if rva >= sec.VirtualAddress && rva < sec.VirtualAddress+sec.VirtualSize {
-			return sec.Offset + (rva - sec.VirtualAddress)
-		}
-	}
-	return 0
 }

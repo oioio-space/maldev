@@ -248,6 +248,59 @@ func TestImports(t *testing.T) {
 	assert.NoError(t, err, "Imports must not error for a valid PE")
 }
 
+// TestAuthentihash_NtdllNon32Zero verifies the saferwall-backed
+// Authentihash returns the SHA-256 size (32 bytes) and a non-zero
+// digest for a real Microsoft-signed binary.
+func TestAuthentihash_NtdllNon32Zero(t *testing.T) {
+	path := useSystemDLL(t)
+	f, err := Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	h := f.Authentihash()
+	require.Len(t, h, 32, "Authenticode SHA-256 hash must be 32 bytes")
+
+	var zero [32]byte
+	assert.NotEqual(t, zero[:], h, "ntdll Authentihash must not be all-zero")
+}
+
+// TestImpHash_KernelBaseReturnsHex verifies ImpHash returns an
+// MD5 hex string for kernelbase.dll, which DOES import functions
+// (ntdll exports). ntdll itself has zero imports and saferwall
+// returns "no imports found" — that's the documented contract;
+// we test the happy path here.
+func TestImpHash_KernelBaseReturnsHex(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only")
+	}
+	path := `C:\Windows\System32\kernelbase.dll`
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("kernelbase.dll not found: %v", err)
+	}
+	f, err := Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	h, err := f.ImpHash()
+	require.NoError(t, err)
+	require.Len(t, h, 32, "imphash must be 32-char MD5 hex")
+	t.Logf("kernelbase.dll ImpHash: %s", h)
+}
+
+// TestAnomalies_NtdllReturnsSlice exercises the Anomalies surface.
+// A clean Microsoft binary typically returns 0 anomalies; the test
+// only asserts the call returns without panicking.
+func TestAnomalies_NtdllReturnsSlice(t *testing.T) {
+	path := useSystemDLL(t)
+	f, err := Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	a := f.Anomalies()
+	t.Logf("ntdll anomalies: %v", a)
+	// No assertion on length — depends on Windows build.
+}
+
 func TestWriteBytes(t *testing.T) {
 	path := useSystemDLL(t)
 	data, err := os.ReadFile(path)

@@ -1,11 +1,16 @@
 // Package parse provides PE file parsing and modification utilities.
 //
-// Wraps the standard library `debug/pe` package with helpers
-// tailored to maldev workflows: section enumeration, export
-// resolution, header manipulation, and raw byte access for PE
-// morphing and sRDI pipelines. The package operates on bytes
-// only — every entry point accepts an `io.ReaderAt` or a `[]byte`,
-// so analysts can inspect Windows PEs from any host.
+// Wraps `github.com/saferwall/pe` with helpers tailored to maldev
+// workflows: section enumeration, export resolution, header
+// manipulation, and raw byte access for PE morphing and sRDI
+// pipelines. The saferwall backend brings native support for the
+// Authenticode hash ([File.Authentihash]), Mandiant's import hash
+// ([File.ImpHash]), structural anomaly detection
+// ([File.Anomalies]), Rich header parsing, CFG / dynamic-reloc
+// directories, .NET CLR metadata — none of which the stdlib
+// `debug/pe` exposes. The package operates on bytes only; every
+// entry point accepts a path or a `[]byte`, so analysts can
+// inspect Windows PEs from any host.
 //
 // # MITRE ATT&CK
 //
