@@ -248,6 +248,53 @@ func TestImports(t *testing.T) {
 	assert.NoError(t, err, "Imports must not error for a valid PE")
 }
 
+// TestExportRVA_NtClose verifies the export RVA lookup against a
+// known function in ntdll. NtClose is the simplest syscall stub —
+// every Windows ntdll exports it.
+func TestExportRVA_NtClose(t *testing.T) {
+	path := useSystemDLL(t)
+	f, err := Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	rva, err := f.ExportRVA("NtClose")
+	require.NoError(t, err)
+	assert.NotZero(t, rva, "NtClose RVA must be non-zero")
+	t.Logf("ntdll NtClose RVA: 0x%X", rva)
+}
+
+func TestExportRVA_Missing(t *testing.T) {
+	path := useSystemDLL(t)
+	f, err := Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	_, err = f.ExportRVA("ZzzNotARealExport")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+// TestDataAtRVA_NtClosePrologue reads the first 5 bytes at
+// NtClose's RVA — every Windows x64 syscall stub starts with
+// `4C 8B D1 B8` (mov r10, rcx; mov eax, …) followed by the SSN
+// byte. The first 4 bytes are stable across builds.
+func TestDataAtRVA_NtClosePrologue(t *testing.T) {
+	path := useSystemDLL(t)
+	if runtime.GOARCH != "amd64" {
+		t.Skip("syscall stub layout is amd64-specific")
+	}
+	f, err := Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	rva, err := f.ExportRVA("NtClose")
+	require.NoError(t, err)
+	prologue, err := f.DataAtRVA(rva, 4)
+	require.NoError(t, err)
+	assert.Equal(t, []byte{0x4C, 0x8B, 0xD1, 0xB8}, prologue,
+		"NtClose stub prologue must be `mov r10, rcx; mov eax, ssn`")
+}
+
 // TestAuthentihash_NtdllNon32Zero verifies the saferwall-backed
 // Authentihash returns the SHA-256 size (32 bytes) and a non-zero
 // digest for a real Microsoft-signed binary.

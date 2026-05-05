@@ -13,9 +13,6 @@
 package unhook
 
 import (
-	"bytes"
-	"debug/pe"
-	"encoding/binary"
 	"fmt"
 	"path/filepath"
 	"unsafe"
@@ -23,6 +20,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/oioio-space/maldev/evasion/stealthopen"
+	"github.com/oioio-space/maldev/pe/parse"
 	"github.com/oioio-space/maldev/win/api"
 	wsyscall "github.com/oioio-space/maldev/win/syscall"
 )
@@ -81,24 +79,25 @@ func ClassicUnhook(funcName string, caller *wsyscall.Caller, opener stealthopen.
 		return err
 	}
 
-	freshDLL, err := pe.NewFile(bytes.NewReader(rawBytes))
+	freshDLL, err := parse.FromBytes(rawBytes, "ntdll.dll")
 	if err != nil {
 		return fmt.Errorf("parse ntdll.dll: %w", err)
 	}
+	defer freshDLL.Close()
 
-	// Find the export RVA and read first 5 bytes from .text section
-	freshBytes, err := readExportBytes(freshDLL, rawBytes, funcName, 5)
+	rva, err := freshDLL.ExportRVA(funcName)
 	if err != nil {
-		return fmt.Errorf("read export: %w", err)
+		return fmt.Errorf("locate %s: %w", funcName, err)
+	}
+	freshBytes, err := freshDLL.DataAtRVA(rva, 5)
+	if err != nil {
+		return fmt.Errorf("read %s prologue: %w", funcName, err)
 	}
 
-	// Get the address of the function in the loaded (hooked) ntdll
 	proc := api.Ntdll.NewProc(funcName)
 	if err := proc.Find(); err != nil {
 		return fmt.Errorf("find loaded function: %w", err)
 	}
-
-	// Overwrite the hooked bytes with the clean ones
 	return api.PatchMemoryWithCaller(proc.Addr(), freshBytes, caller)
 }
 
@@ -115,23 +114,17 @@ func FullUnhook(caller *wsyscall.Caller, opener stealthopen.Opener) error {
 		return err
 	}
 
-	freshDLL, err := pe.NewFile(bytes.NewReader(rawBytes))
+	freshDLL, err := parse.FromBytes(rawBytes, "ntdll.dll")
 	if err != nil {
 		return fmt.Errorf("parse ntdll.dll: %w", err)
 	}
+	defer freshDLL.Close()
 
-	var textSection *pe.Section
-	for _, sec := range freshDLL.Sections {
-		if sec.Name == ".text" {
-			textSection = sec
-			break
-		}
-	}
+	textSection := freshDLL.SectionByName(".text")
 	if textSection == nil {
 		return fmt.Errorf(".text section not found in ntdll.dll")
 	}
-
-	freshText, err := textSection.Data()
+	freshText, err := freshDLL.SectionData(textSection)
 	if err != nil {
 		return fmt.Errorf("read .text data: %w", err)
 	}
@@ -348,88 +341,7 @@ func PerunUnhookTarget(target string, caller *wsyscall.Caller) error {
 	return nil
 }
 
-// readExportBytes finds a named export in a PE file and returns the first n bytes
-// of the function body by parsing the export directory table.
-func readExportBytes(f *pe.File, raw []byte, name string, n int) ([]byte, error) {
-	// Get optional header to find export directory RVA
-	var exportDirRVA, exportDirSize uint32
-	switch oh := f.OptionalHeader.(type) {
-	case *pe.OptionalHeader64:
-		if len(oh.DataDirectory) > 0 {
-			exportDirRVA = oh.DataDirectory[0].VirtualAddress
-			exportDirSize = oh.DataDirectory[0].Size
-		}
-	case *pe.OptionalHeader32:
-		if len(oh.DataDirectory) > 0 {
-			exportDirRVA = oh.DataDirectory[0].VirtualAddress
-			exportDirSize = oh.DataDirectory[0].Size
-		}
-	}
-	if exportDirRVA == 0 {
-		return nil, fmt.Errorf("no export directory")
-	}
-	_ = exportDirSize
-
-	// Convert RVA to file offset
-	exportOffset := rvaToOffset(f, exportDirRVA)
-	if exportOffset == 0 {
-		return nil, fmt.Errorf("cannot resolve export directory offset")
-	}
-
-	// Parse IMAGE_EXPORT_DIRECTORY
-	// NumberOfNames at offset +24, AddressOfFunctions at +28,
-	// AddressOfNames at +32, AddressOfNameOrdinals at +36
-	numNames := binary.LittleEndian.Uint32(raw[exportOffset+24:])
-	addrFunctions := binary.LittleEndian.Uint32(raw[exportOffset+28:])
-	addrNames := binary.LittleEndian.Uint32(raw[exportOffset+32:])
-	addrOrdinals := binary.LittleEndian.Uint32(raw[exportOffset+36:])
-
-	namesOff := rvaToOffset(f, addrNames)
-	ordinalsOff := rvaToOffset(f, addrOrdinals)
-	functionsOff := rvaToOffset(f, addrFunctions)
-
-	for i := uint32(0); i < numNames; i++ {
-		// Read name RVA
-		nameRVA := binary.LittleEndian.Uint32(raw[namesOff+i*4:])
-		nameOff := rvaToOffset(f, nameRVA)
-		if nameOff == 0 {
-			continue
-		}
-
-		// Read null-terminated name
-		end := nameOff
-		for end < uint32(len(raw)) && raw[end] != 0 {
-			end++
-		}
-		exportName := string(raw[nameOff:end])
-
-		if exportName == name {
-			// Get ordinal index
-			ordinal := binary.LittleEndian.Uint16(raw[ordinalsOff+i*2:])
-			// Get function RVA
-			funcRVA := binary.LittleEndian.Uint32(raw[functionsOff+uint32(ordinal)*4:])
-			funcOff := rvaToOffset(f, funcRVA)
-			if funcOff == 0 {
-				return nil, fmt.Errorf("cannot resolve function offset")
-			}
-			if funcOff+uint32(n) > uint32(len(raw)) {
-				return nil, fmt.Errorf("function offset exceeds file size")
-			}
-			result := make([]byte, n)
-			copy(result, raw[funcOff:funcOff+uint32(n)])
-			return result, nil
-		}
-	}
-
-	return nil, fmt.Errorf("export not found in PE")
-}
-
-// rvaToOffset converts an RVA to a file offset using section headers.
-func rvaToOffset(f *pe.File, rva uint32) uint32 {
-	for _, sec := range f.Sections {
-		if rva >= sec.VirtualAddress && rva < sec.VirtualAddress+sec.VirtualSize {
-			return sec.Offset + (rva - sec.VirtualAddress)
-		}
-	}
-	return 0
-}
+// readExportBytes + rvaToOffset were inlined hand-rolled walks of
+// the IMAGE_EXPORT_DIRECTORY and section table. Both are now
+// covered by `pe/parse` (`(*File).ExportRVA` + `(*File).DataAtRVA`),
+// so the 90-line scaffolding is gone.

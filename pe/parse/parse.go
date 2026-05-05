@@ -244,6 +244,52 @@ func (f *File) Imports() ([]string, error) {
 	return out, nil
 }
 
+// DataAtRVA returns `length` bytes from the PE starting at the
+// file offset that corresponds to `rva`. Walks the section headers
+// to convert RVA → file offset, then slices File.Raw. Returns an
+// error when the RVA does not fall inside any section, or when
+// offset+length overruns the file.
+//
+// Useful when callers know an export's function-body RVA and want
+// to read the prologue bytes without re-implementing the
+// section-walk themselves.
+func (f *File) DataAtRVA(rva, length uint32) ([]byte, error) {
+	for _, s := range f.PE.Sections {
+		va := s.Header.VirtualAddress
+		vs := s.Header.VirtualSize
+		if rva < va || rva >= va+vs {
+			continue
+		}
+		offset := s.Header.PointerToRawData + (rva - va)
+		end := offset + length
+		if end > uint32(len(f.Raw)) {
+			return nil, fmt.Errorf("parse: DataAtRVA(0x%X, %d) overruns Raw (offset=%d Raw=%d)",
+				rva, length, offset, len(f.Raw))
+		}
+		out := make([]byte, length)
+		copy(out, f.Raw[offset:end])
+		return out, nil
+	}
+	return nil, fmt.Errorf("parse: DataAtRVA(0x%X): RVA falls outside every section", rva)
+}
+
+// ExportRVA returns the function-body RVA of the named export
+// (case-sensitive). Returns 0 + error when the export is missing
+// or is a forwarder (forwarders have no body — their target is in
+// [Export.Forwarder]).
+func (f *File) ExportRVA(name string) (uint32, error) {
+	for _, fn := range f.PE.Export.Functions {
+		if fn.Name != name {
+			continue
+		}
+		if fn.Forwarder != "" {
+			return 0, fmt.Errorf("parse: %q is a forwarder to %q", name, fn.Forwarder)
+		}
+		return fn.FunctionRVA, nil
+	}
+	return 0, fmt.Errorf("parse: export %q not found", name)
+}
+
 // Authentihash returns the SHA-256 Authenticode hash of the PE — the
 // canonical input to a real Authenticode signature, computed by
 // hashing the PE bytes excluding the Checksum field, the security
