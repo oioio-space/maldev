@@ -69,7 +69,14 @@ func DiscoverProtectionOffset(path string, opener stealthopen.Opener) (uint32, e
 		return 0, err
 	}
 	defer pf.Close()
+	return discoverProtectionOffsetFromFile(pf)
+}
 
+// discoverProtectionOffsetFromFile is the body of DiscoverProtectionOffset
+// re-entrant with a caller-provided *parse.File. FindLsassEProcess
+// uses this to share one ntoskrnl read+parse across the three
+// Discover* calls — drops 2× redundant 12 MB I/O + parse per call.
+func discoverProtectionOffsetFromFile(pf *parse.File) (uint32, error) {
 	offA, err := extractProtectionOffset(pf, "PsIsProtectedProcess")
 	if err != nil {
 		return 0, fmt.Errorf("PsIsProtectedProcess: %w", err)
@@ -82,7 +89,6 @@ func DiscoverProtectionOffset(path string, opener stealthopen.Opener) (uint32, e
 		return 0, fmt.Errorf("%w: PsIsProtectedProcess=%d != PsIsProtectedProcessLight=%d",
 			ErrProtectionOffsetNotFound, offA, offB)
 	}
-	// Sanity bound — every documented build keeps the field under 0x1000.
 	if offA == 0 || offA > 0x1500 {
 		return 0, fmt.Errorf("%w: extracted offset 0x%X out of plausible range",
 			ErrProtectionOffsetNotFound, offA)
@@ -117,7 +123,13 @@ func DiscoverUniqueProcessIdOffset(path string, opener stealthopen.Opener) (uint
 		return 0, err
 	}
 	defer pf.Close()
+	return discoverUniqueProcessIdOffsetFromFile(pf)
+}
 
+// discoverUniqueProcessIdOffsetFromFile is the body re-entrant
+// with a caller-provided *parse.File. See
+// [discoverProtectionOffsetFromFile] for the rationale.
+func discoverUniqueProcessIdOffsetFromFile(pf *parse.File) (uint32, error) {
 	rva, err := pf.ExportRVA("PsGetProcessId")
 	if err != nil {
 		return 0, fmt.Errorf("PsGetProcessId: %w", err)
@@ -173,18 +185,22 @@ func DiscoverInitialSystemProcessRVA(path string, opener stealthopen.Opener) (ui
 // %SystemRoot%\System32\ntoskrnl.exe when empty), reads the bytes
 // through `opener`, and returns a *parse.File ready for export /
 // RVA queries. Callers must Close.
+//
+// Uses parse.OpenStealthFast — exports + sections only, the
+// minimum viable parse for the EPROCESS-offset Discover* family.
+// Skips parsing the resource / exception / CLR / TLS /
+// load-config / debug / IAT / delay-import / bound-import / reloc
+// directories that ntoskrnl carries in abundance (kernel binary
+// has thousands of RUNTIME_FUNCTION entries; full parse is ~80ms,
+// fast parse is ~5ms).
 func openNtoskrnl(path string, opener stealthopen.Opener, fnName string) (*parse.File, error) {
 	path, err := defaultNtoskrnlPath(path, fnName)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := stealthopen.OpenRead(opener, path)
+	pf, err := parse.OpenStealthFast(opener, path)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	pf, err := parse.FromBytes(raw, path)
-	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return pf, nil
 }

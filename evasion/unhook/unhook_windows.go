@@ -79,7 +79,7 @@ func ClassicUnhook(funcName string, caller *wsyscall.Caller, opener stealthopen.
 		return err
 	}
 
-	freshDLL, err := parse.FromBytes(rawBytes, "ntdll.dll")
+	freshDLL, err := parse.FromBytesFast(rawBytes, "ntdll.dll")
 	if err != nil {
 		return fmt.Errorf("parse ntdll.dll: %w", err)
 	}
@@ -114,7 +114,7 @@ func FullUnhook(caller *wsyscall.Caller, opener stealthopen.Opener) error {
 		return err
 	}
 
-	freshDLL, err := parse.FromBytes(rawBytes, "ntdll.dll")
+	freshDLL, err := parse.FromBytesFast(rawBytes, "ntdll.dll")
 	if err != nil {
 		return fmt.Errorf("parse ntdll.dll: %w", err)
 	}

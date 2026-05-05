@@ -61,11 +61,20 @@ func FindLsassEProcess(rw driver.ReadWriter, lsassPID uint32, opener stealthopen
 		return 0, fmt.Errorf("FindLsassEProcess: %w", err)
 	}
 
-	initialRVA, err := DiscoverInitialSystemProcessRVA("", opener)
+	// Open ntoskrnl ONCE and share the parsed *parse.File between
+	// the two discovery calls — saves a 12 MB read + parse pass per
+	// FindLsassEProcess call vs. the public Discover* entry points
+	// that each open + parse from scratch.
+	pf, err := openNtoskrnl("", opener, "FindLsassEProcess")
 	if err != nil {
 		return 0, fmt.Errorf("FindLsassEProcess: %w", err)
 	}
-	upidOff, err := DiscoverUniqueProcessIdOffset("", opener)
+	defer pf.Close()
+	initialRVA, err := pf.ExportRVA("PsInitialSystemProcess")
+	if err != nil {
+		return 0, fmt.Errorf("FindLsassEProcess: PsInitialSystemProcess: %w", err)
+	}
+	upidOff, err := discoverUniqueProcessIdOffsetFromFile(pf)
 	if err != nil {
 		return 0, fmt.Errorf("FindLsassEProcess: %w", err)
 	}
