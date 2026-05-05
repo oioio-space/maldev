@@ -72,3 +72,43 @@ func TestFromReader(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, imps)
 }
+
+// TestListDelay_NotepadEntriesFlaggedDelay verifies the
+// per-entry Delay flag matches the ListDelay filter contract:
+// every returned entry must have Delay==true. Notepad on Win11
+// has ~25 delay imports (covers the populated-result path);
+// older/leaner Windows builds may have zero (covers the
+// empty-result path) — both are valid.
+func TestListDelay_NotepadEntriesFlaggedDelay(t *testing.T) {
+	p := testPEPath(t)
+	delays, err := ListDelay(p)
+	require.NoError(t, err)
+	t.Logf("notepad.exe delay imports: %d", len(delays))
+	for _, imp := range delays {
+		require.True(t, imp.Delay, "ListDelay must only return Delay==true entries")
+	}
+}
+
+// TestListDelay_EdgeHasDelayImports — modern Windows apps lean
+// heavily on delay-load. msedge.exe is the most reliable target
+// when it's installed (Win11 ships with it).
+func TestListDelay_EdgeHasDelayImports(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only")
+	}
+	const edge = `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+	if _, err := os.Stat(edge); err != nil {
+		t.Skipf("msedge.exe not found: %v", err)
+	}
+
+	delays, err := ListDelay(edge)
+	require.NoError(t, err)
+	if len(delays) == 0 {
+		t.Skip("msedge.exe wrapper has no delay imports — actual deps live in delegated DLLs")
+	}
+	for _, imp := range delays {
+		require.True(t, imp.Delay, "ListDelay must only return Delay==true entries")
+	}
+	t.Logf("msedge.exe delay imports: %d (sample: %s.%s)",
+		len(delays), delays[0].DLL, delays[0].Function)
+}

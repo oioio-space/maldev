@@ -14,12 +14,25 @@ import (
 // function it resolves. ByOrdinal + Ordinal expose the
 // ordinal-only import case that the previous debug/pe-backed
 // implementation silently dropped (saferwall surfaces both halves).
+//
+// Delay distinguishes the two import flavours present in modern
+// PEs:
+//   - false: classic import — the loader resolves the function
+//     before any user code runs (entry sits in
+//     IMAGE_IMPORT_DESCRIPTOR).
+//   - true:  delay-load import — the loader installs a stub that
+//     defers resolution until the first call (entry sits in
+//     IMAGE_DELAY_IMPORT_DESCRIPTOR). Every modern Windows app
+//     (Edge, Office, OneDrive, Teams) routes the bulk of its
+//     dependencies through delay-load to defer DLL load cost +
+//     enable optional-feature dependency hiding.
 type Import struct {
-	DLL      string
-	Function string // empty when ByOrdinal == true
-	Ordinal  uint32 // valid when ByOrdinal == true
+	DLL       string
+	Function  string // empty when ByOrdinal == true
+	Ordinal   uint32 // valid when ByOrdinal == true
 	ByOrdinal bool
-	Hint     uint16 // index hint into the target's export name pointer table
+	Hint      uint16 // index hint into the target's export name pointer table
+	Delay     bool   // true when sourced from the delay-import descriptor
 }
 
 // List returns every import resolved by the PE at pePath.
@@ -80,7 +93,10 @@ func FromBytes(data []byte) ([]Import, error) {
 		OmitLoadConfigDirectory:  true,
 		OmitBoundImportDirectory: true,
 		OmitIATDirectory:         true,
-		OmitDelayImportDirectory: true,
+		// DelayImportDirectory stays ON — modern PEs (Edge, Office,
+		// OneDrive) route the bulk of their dependencies through
+		// delay-load. Skipping it would silently drop most of the
+		// import surface.
 		OmitCLRHeaderDirectory:   true,
 		OmitCLRMetadata:          true,
 	})
@@ -101,6 +117,35 @@ func FromBytes(data []byte) ([]Import, error) {
 				ByOrdinal: fn.ByOrdinal,
 				Hint:      fn.Hint,
 			})
+		}
+	}
+	for _, dll := range pf.DelayImports {
+		for _, fn := range dll.Functions {
+			out = append(out, Import{
+				DLL:       dll.Name,
+				Function:  fn.Name,
+				Ordinal:   fn.Ordinal,
+				ByOrdinal: fn.ByOrdinal,
+				Hint:      fn.Hint,
+				Delay:     true,
+			})
+		}
+	}
+	return out, nil
+}
+
+// ListDelay returns only the delay-load imports — convenience
+// wrapper over [List] for the typical "show me deferred-resolution
+// dependencies" operator question.
+func ListDelay(pePath string) ([]Import, error) {
+	all, err := List(pePath)
+	if err != nil {
+		return nil, err
+	}
+	var out []Import
+	for _, imp := range all {
+		if imp.Delay {
+			out = append(out, imp)
 		}
 	}
 	return out, nil
