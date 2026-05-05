@@ -295,6 +295,49 @@ func TestDataAtRVA_NtClosePrologue(t *testing.T) {
 		"NtClose stub prologue must be `mov r10, rcx; mov eax, ssn`")
 }
 
+// TestRichHeader_NtdllPopulated verifies the Rich header is
+// surfaced for an MSVC-linked PE. ntdll.dll is always emitted by
+// MSVC; the Rich header carries the toolchain bill of materials.
+func TestRichHeader_NtdllPopulated(t *testing.T) {
+	path := useSystemDLL(t)
+	f, err := Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	rh := f.RichHeader()
+	require.NotNil(t, rh, "ntdll.dll must carry a Rich header (MSVC-linked)")
+	assert.NotZero(t, rh.XORKey, "XORKey is the linker-computed checksum, never zero in practice")
+	assert.NotEmpty(t, rh.Tools, "Rich header must list at least one toolchain entry")
+	assert.NotEmpty(t, rh.Raw, "Raw bytes must be preserved for clone-style use")
+
+	// Every Microsoft binary surfaces at least one entry with a
+	// known ProductName (mapped via saferwall.ProdIDtoStr).
+	var named bool
+	for _, tool := range rh.Tools {
+		if tool.ProductName != "" {
+			named = true
+			t.Logf("ntdll Rich tool: %s (VS %s, count=%d)",
+				tool.ProductName, tool.VSVersion, tool.Count)
+			break
+		}
+	}
+	assert.True(t, named, "at least one Rich entry must resolve to a known MSVC product")
+}
+
+// TestRichHeader_NilWhenAbsent — Go-built PEs (this test binary
+// itself is the cleanest example) have no Rich header.
+func TestRichHeader_NilWhenAbsent(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only: needs a real PE on disk")
+	}
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	f, err := Open(exe)
+	require.NoError(t, err)
+	defer f.Close()
+	assert.Nil(t, f.RichHeader(), "Go-built PE must have no Rich header")
+}
+
 // TestAuthentihash_NtdllNon32Zero verifies the saferwall-backed
 // Authentihash returns the SHA-256 size (32 bytes) and a non-zero
 // digest for a real Microsoft-signed binary.

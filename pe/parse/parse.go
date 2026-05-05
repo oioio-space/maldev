@@ -310,6 +310,59 @@ func (f *File) ImpHash() (string, error) {
 	return f.PE.ImpHash()
 }
 
+// RichHeader returns the parsed Rich header (the encrypted "bill
+// of materials" Microsoft's linker plants between the DOS stub and
+// the PE signature). Returns nil when the PE has no Rich header
+// (Go-built binaries don't, MSVC-linked ones do).
+//
+// The Rich header is the strongest single fingerprint of the
+// MSVC toolchain that built a PE — defenders use it for
+// attribution clustering, operators use it to evade naive
+// "this binary lacks a Rich header" detectors by cloning a
+// donor's Rich-header bytes onto a Go-built implant.
+func (f *File) RichHeader() *RichHeader {
+	if f.PE == nil || !f.PE.HasRichHdr {
+		return nil
+	}
+	rh := f.PE.RichHeader
+	out := &RichHeader{
+		XORKey: rh.XORKey,
+		Raw:    append([]byte(nil), rh.Raw...),
+		Tools:  make([]RichTool, 0, len(rh.CompIDs)),
+	}
+	for _, c := range rh.CompIDs {
+		out.Tools = append(out.Tools, RichTool{
+			ProductID:   c.ProdID,
+			MinorCV:     c.MinorCV,
+			Count:       c.Count,
+			ProductName: saferpe.ProdIDtoStr(c.ProdID),
+			VSVersion:   saferpe.ProdIDtoVSversion(c.ProdID),
+		})
+	}
+	return out
+}
+
+// RichHeader is the maldev-native view of Microsoft's Rich header.
+// XORKey is the 32-bit checksum the linker XORs every CompID with;
+// Tools is the per-toolchain breakdown (one entry per distinct
+// linker / compiler product that contributed object code).
+type RichHeader struct {
+	XORKey uint32
+	Tools  []RichTool
+	Raw    []byte
+}
+
+// RichTool is one entry in the Rich header's bill of materials —
+// "this PE was built using product P version V, and contains N
+// object files emitted by it".
+type RichTool struct {
+	ProductID   uint16
+	MinorCV     uint16
+	Count       uint32
+	ProductName string // friendly name via saferwall's ProdIDtoStr (empty for unknown product)
+	VSVersion   string // Visual Studio version label, when ProductID maps to a VS release
+}
+
 // Anomalies returns the list of structural anomalies the parser
 // detected (overlapping headers, malformed directories, suspicious
 // section sizes, …). Empty slice means "PE looks well-formed".
