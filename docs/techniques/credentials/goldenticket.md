@@ -157,11 +157,16 @@ numbers in `Params.Groups`.
 #### Sentinel errors
 
 ```go
-ErrInvalidParams       // pre-flight validation failure (missing Domain/DomainSID, zero-length Hash.Bytes, hash size != EType.keyLen)
-ErrPACBuild            // PAC marshaler failed (NDR encoding, struct alignment, signature placeholder)
-ErrTicketBuild         // EncTicketPart / KRB-CRED marshaler failed
-ErrSubmit              // LsaCallAuthenticationPackage returned non-success or kirbi unparseable into KERB_SUBMIT_TKT_REQUEST
-ErrPlatformUnsupported // returned by Submit on non-Windows
+ErrInvalidParams              // pre-flight validation failure (missing Domain/DomainSID, zero-length Hash.Bytes, hash size != EType.keyLen)
+ErrPACBuild                   // PAC marshaler failed (NDR encoding, struct alignment, signature placeholder)
+ErrTicketBuild                // EncTicketPart / KRB-CRED marshaler failed
+ErrSubmit                     // LsaCallAuthenticationPackage returned non-success or kirbi unparseable into KERB_SUBMIT_TKT_REQUEST
+ErrPlatformUnsupported        // returned by Submit on non-Windows
+
+ErrPACMissingServerSignature  // ValidatePAC: parsed PAC has no server-checksum buffer
+ErrPACMissingKDCSignature     // ValidatePAC: parsed PAC has no KDC-checksum buffer
+ErrInvalidServerSignature     // ValidatePAC: server signature does not match the supplied krbtgt key
+ErrInvalidKDCSignature        // ValidatePAC: KDC signature does not match the server-signature bytes
 ```
 
 `errors.Is(err, ErrInvalidParams)` lets callers branch on
@@ -179,6 +184,18 @@ validation vs marshalling failures without parsing the wrapped
 - Side effects: none — pure compute, no I/O, no syscalls.
 - OPSEC: the forged ticket is detectable post-hoc by any of: anomalous etype (RC4 in an AES domain), Lifetime > MaxTicketAge, missing pre-auth on the originating logon (Event 4768 not present before the 4769 service-ticket request). The bytes themselves are indistinguishable from a legitimate kirbi.
 - Required privileges: none — Forge is offline.
+- Platform: cross-platform.
+
+#### `ValidatePAC(pacBytes []byte, h Hash) error`
+
+- godoc: verify the server + KDC signatures embedded in `pacBytes` against the supplied krbtgt key.
+- Description: parses the PAC, locates the server (type 0x06) + KDC (type 0x07) signature buffers, saves their current values, zeroes them in a working copy, recomputes the server checksum over the zeroed bytes, then recomputes the KDC checksum over the saved server-signature bytes. Returns `nil` when both match. The dance mirrors MS-PAC §2.8 in reverse, using the same `pacChecksum` helper that `Forge` uses, so a forged-then-validated round-trip is bit-identical.
+- Parameters: `pacBytes` raw PAC blob (typically obtained via the unexported `buildPAC` from a forge round-trip, or extracted from a captured-from-DC ticket); `h` krbtgt secret + etype.
+- Returns: `nil` on success; one of the four sentinels above on signature mismatch / missing-buffer; wrapped parse / FSCTL error otherwise.
+- Side effects: none — pure compute, no I/O, no syscalls. Constant-time comparison via `hmac.Equal`.
+- OPSEC: invisible. Use cases: round-trip self-test (forge → validate → confirm before submission), operator pre-flight (validate a captured-from-DC PAC against a stolen krbtgt to confirm the key works), defensive sanity check (assert the blue team's verification path would accept the forged PAC).
+- Limitations: does NOT validate `TicketChecksum` (type 0x10) or `ExtendedKDCChecksum` (type 0x13). Most golden tickets don't carry them; their inclusion is a 2022+ Kerberos hardening concern out of scope for the current `Forge` path. Logical PAC validity (well-formed UNICODE_STRING fields, plausible RIDs, group-membership coherence) is the consumer's concern; ValidatePAC only verifies the cryptographic signatures.
+- Required privileges: none — pure offline compute over caller-supplied bytes.
 - Platform: cross-platform.
 
 #### `Submit(kirbi []byte) error`
@@ -230,6 +247,37 @@ if err := goldenticket.Submit(kirbi); err != nil {
 }
 // any subsequent Kerberos call (SMB, LDAP, RDP) from this process
 // authenticates as p.User with the forged group memberships.
+```
+
+### Composed — pre-flight validation (operator sanity check)
+
+```go
+import (
+    "errors"
+    "log"
+
+    "github.com/oioio-space/maldev/credentials/goldenticket"
+)
+
+// Use case: I just stole a krbtgt key from a DC LSASS dump. Did
+// the dump survive the round-trip cleanly? Does my key actually
+// produce a PAC that re-validates? Run a self-test before risking
+// detection by submitting the kirbi.
+//
+// `pacBytes` here is the raw PAC blob from a captured ticket or a
+// round-tripped Forge → extract-PAC sequence. ValidatePAC is the
+// reverse of buildPAC's signature dance.
+err := goldenticket.ValidatePAC(pacBytes, krbtgtHash)
+switch {
+case err == nil:
+    log.Println("PAC signatures valid — krbtgt key works")
+case errors.Is(err, goldenticket.ErrInvalidServerSignature):
+    log.Println("server signature mismatch — wrong key or tampered PAC body")
+case errors.Is(err, goldenticket.ErrInvalidKDCSignature):
+    log.Println("KDC signature mismatch — server sig was tampered after forge")
+default:
+    log.Printf("PAC validation failed: %v", err)
+}
 ```
 
 ### Advanced — chained off the sekurlsa extractor
@@ -324,10 +372,19 @@ for the runnable variants.
 - **Submit is per-process, per-LUID.** The injected ticket only
   helps Kerberos calls from *this* process; child processes
   inherit the cache but unrelated processes do not.
-- **PAC validation gap.** `Forge` does not validate the produced
-  PAC against MS-PAC §2 except by checksumming. Hand-crafted
-  group RIDs that don't exist won't be rejected by the package
-  itself — defenders can.
+- **PAC structural validation gap (logical only).** `Forge` does
+  not validate the produced PAC against MS-PAC §2 except by
+  checksumming. Hand-crafted group RIDs that don't exist won't be
+  rejected by the package itself — defenders can. The new
+  `ValidatePAC` covers cryptographic signature integrity (server +
+  KDC) but NOT logical field validity (RID plausibility,
+  UNICODE_STRING shape, group-membership coherence).
+- **`ValidatePAC` does not check `TicketChecksum` (type 0x10) or
+  `ExtendedKDCChecksum` (type 0x13).** Most golden tickets don't
+  carry them; their inclusion is a 2022+ Kerberos hardening
+  concern out of scope for the current `Forge` path. When/if Forge
+  starts emitting them, ValidatePAC must be extended in the same
+  commit.
 
 ## See also
 
