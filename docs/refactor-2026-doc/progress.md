@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-05-04
-reflects_commit: 3ccb443
+last_reviewed: 2026-05-05
+reflects_commit: d44957b
 ---
 
 # Documentation refactor — progress tracker
@@ -17,11 +17,16 @@ reflects_commit: 3ccb443
 > per-package code improvements, and new-package ideas. **Pick up
 > from there.**
 >
-> **Cross-machine handoff:** the 2026-05-03/04 Linux session ended at
-> commit `9809f0d`. Resume on a different machine via
-> [`HANDOFF-2026-05-04.md`](HANDOFF-2026-05-04.md) — that file lists
-> what closed, the priority order of remaining backlog rows, and the
-> tools to install on the target box.
+> **Cross-machine handoff:** the 2026-05-05 Windows session ended at
+> commit `d44957b`. Resume on a different machine via
+> [`HANDOFF-2026-05-05.md`](HANDOFF-2026-05-05.md) — that file lists
+> the 24+ commits across two themes (P3.5 closure + P2.5/P2.13/P3.3
+> backlog grinding, then a `debug/pe → saferwall/pe` migration
+> across 5 sites), the remaining open backlog rows in priority
+> order, and the recommended next moves.
+>
+> Previous session: [`HANDOFF-2026-05-04.md`](HANDOFF-2026-05-04.md)
+> (2026-05-03/04 Linux, ended at `9809f0d`).
 
 ## Source of truth
 
