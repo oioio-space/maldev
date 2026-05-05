@@ -39,14 +39,12 @@ type File struct {
 // Section is a thin Go-native view of a PE section. Decouples the
 // public API from the underlying parser library.
 type Section struct {
-	Name           string
-	VirtualAddress uint32
-	VirtualSize    uint32
-	Offset         uint32 // PointerToRawData
-	Size           uint32 // SizeOfRawData
+	Name            string
+	VirtualAddress  uint32
+	VirtualSize     uint32
+	Offset          uint32 // PointerToRawData
+	Size            uint32 // SizeOfRawData
 	Characteristics uint32
-
-	raw []byte // section-data slice into File.Raw, populated lazily
 }
 
 // Open opens and parses a PE file from disk.
@@ -62,7 +60,7 @@ func Open(path string) (*File, error) {
 // reference-shared with the returned File — callers must not mutate
 // them after the call.
 func FromBytes(data []byte, name string) (*File, error) {
-	pf, err := saferpe.NewBytes(data, &saferpe.Options{
+	return fromBytesWithOpts(data, name, &saferpe.Options{
 		// Sane defaults for a wrapper consumed by recon /
 		// instrumentation code: parse everything, but don't fail
 		// if a malformed certificate trips validation (Anomalies
@@ -70,6 +68,65 @@ func FromBytes(data []byte, name string) (*File, error) {
 		// regardless).
 		DisableCertValidation: true,
 	})
+}
+
+// FromBytesFast parses only the export directory + section table —
+// the minimum viable PE walk for callers that just want
+// [File.ExportRVA] / [File.DataAtRVA] / [File.SectionByName] /
+// [File.SectionBytes]. Skips resource / exception / CLR / TLS /
+// load-config / debug / IAT / delay-import / bound-import / reloc
+// directories.
+//
+// Use case: hot-path callers like `evasion/unhook.ClassicUnhook`
+// (10× per `preset.Stealth()`) and `credentials/lsassdump`
+// EPROCESS-offset discovery (3× per `FindLsassEProcess`) — the
+// directories that FromBytes parses by default cost tens of ms
+// per call on a typical Microsoft DLL and are not consulted by
+// these flows.
+func FromBytesFast(data []byte, name string) (*File, error) {
+	return fromBytesWithOpts(data, name, &saferpe.Options{
+		DisableCertValidation:     true,
+		OmitResourceDirectory:     true,
+		OmitExceptionDirectory:    true,
+		OmitSecurityDirectory:     true,
+		OmitRelocDirectory:        true,
+		OmitDebugDirectory:        true,
+		OmitArchitectureDirectory: true,
+		OmitGlobalPtrDirectory:    true,
+		OmitTLSDirectory:          true,
+		OmitLoadConfigDirectory:   true,
+		OmitBoundImportDirectory:  true,
+		OmitIATDirectory:          true,
+		OmitDelayImportDirectory:  true,
+		OmitCLRHeaderDirectory:    true,
+		OmitCLRMetadata:           true,
+	})
+}
+
+// OpenStealth reads `path` through opener (nil → plain os.Open) and
+// parses the result. Eliminates the OpenRead+FromBytes boilerplate
+// shared by callers that wrap stealthopen + parse.
+func OpenStealth(opener stealthopen.Opener, path string) (*File, error) {
+	raw, err := stealthopen.OpenRead(opener, path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	return FromBytes(raw, path)
+}
+
+// OpenStealthFast is to [OpenStealth] what [FromBytesFast] is to
+// [FromBytes] — exports + sections only.
+func OpenStealthFast(opener stealthopen.Opener, path string) (*File, error) {
+	raw, err := stealthopen.OpenRead(opener, path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	return FromBytesFast(raw, path)
+}
+
+// fromBytesWithOpts is the shared core for FromBytes / FromBytesFast.
+func fromBytesWithOpts(data []byte, name string, opts *saferpe.Options) (*File, error) {
+	pf, err := saferpe.NewBytes(data, opts)
 	if err != nil {
 		return nil, fmt.Errorf("parse PE: %w", err)
 	}
@@ -153,11 +210,21 @@ func sectionName(raw [8]byte) string {
 
 // SectionByName finds a section by name. Returns nil when no
 // section matches.
+//
+// Iterates `f.PE.Sections` directly to avoid the per-call slice
+// alloc that `Sections()` would do.
 func (f *File) SectionByName(name string) *Section {
-	for _, s := range f.Sections() {
-		if s.Name == name {
-			s := s
-			return &s
+	for _, s := range f.PE.Sections {
+		if sectionName(s.Header.Name) != name {
+			continue
+		}
+		return &Section{
+			Name:            name,
+			VirtualAddress:  s.Header.VirtualAddress,
+			VirtualSize:     s.Header.VirtualSize,
+			Offset:          s.Header.PointerToRawData,
+			Size:            s.Header.SizeOfRawData,
+			Characteristics: s.Header.Characteristics,
 		}
 	}
 	return nil
@@ -175,6 +242,18 @@ func (f *File) SectionData(sec *Section) ([]byte, error) {
 			sec.Name, sec.Offset, sec.Size, len(f.Raw))
 	}
 	return f.Raw[sec.Offset:end], nil
+}
+
+// SectionBytes is a convenience wrapper: locate `name` via
+// [SectionByName] then return its bytes via [SectionData] in one
+// call. Returns an error when the section is missing or its raw
+// range overruns File.Raw.
+func (f *File) SectionBytes(name string) ([]byte, error) {
+	sec := f.SectionByName(name)
+	if sec == nil {
+		return nil, fmt.Errorf("parse: section %q not found", name)
+	}
+	return f.SectionData(sec)
 }
 
 // Export describes a single PE export entry — exposes both name (which

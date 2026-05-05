@@ -213,6 +213,72 @@ func TestSectionData(t *testing.T) {
 	assert.NotEmpty(t, data, ".text section data must not be empty")
 }
 
+func TestSectionBytes_TextRoundtrip(t *testing.T) {
+	path := useSystemDLL(t)
+	f, err := Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	bytes, err := f.SectionBytes(".text")
+	require.NoError(t, err)
+	assert.NotEmpty(t, bytes)
+
+	// Equivalent to SectionByName + SectionData.
+	sec := f.SectionByName(".text")
+	want, err := f.SectionData(sec)
+	require.NoError(t, err)
+	assert.Equal(t, want, bytes, "SectionBytes must equal SectionByName+SectionData")
+}
+
+func TestSectionBytes_MissingSectionErrors(t *testing.T) {
+	path := useSystemDLL(t)
+	f, err := Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	_, err = f.SectionBytes(".zzz_nonexistent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestFromBytesFast_ParsesExportsAndSections(t *testing.T) {
+	path := useSystemDLL(t)
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	f, err := FromBytesFast(raw, "ntdll.dll")
+	require.NoError(t, err)
+	defer f.Close()
+
+	// Exports must be populated.
+	rva, err := f.ExportRVA("NtClose")
+	require.NoError(t, err)
+	assert.NotZero(t, rva)
+
+	// .text section must be reachable.
+	bytes, err := f.SectionBytes(".text")
+	require.NoError(t, err)
+	assert.NotEmpty(t, bytes)
+}
+
+func TestOpenStealth_NilOpener(t *testing.T) {
+	path := useSystemDLL(t)
+	f, err := OpenStealth(nil, path)
+	require.NoError(t, err)
+	defer f.Close()
+	assert.NotEmpty(t, f.Raw)
+}
+
+func TestOpenStealthFast_NilOpener(t *testing.T) {
+	path := useSystemDLL(t)
+	f, err := OpenStealthFast(nil, path)
+	require.NoError(t, err)
+	defer f.Close()
+	rva, err := f.ExportRVA("NtClose")
+	require.NoError(t, err)
+	assert.NotZero(t, rva)
+}
+
 func TestImageBase(t *testing.T) {
 	path := useSystemDLL(t)
 	f, err := Open(path)

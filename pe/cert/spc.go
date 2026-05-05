@@ -33,22 +33,9 @@ var (
 var ErrUnsupportedHash = errors.New("cert: hash algorithm has no known Authenticode OID (SHA1 / SHA256 / SHA384 / SHA512 only)")
 
 // BuildSpcIndirectDataContent returns the ASN.1 DER encoding of
-// the canonical Authenticode signed-content blob:
-//
-//	SpcIndirectDataContent ::= SEQUENCE {
-//	    data           SpcAttributeTypeAndOptionalValue,
-//	    messageDigest  DigestInfo
-//	}
-//
-//	SpcAttributeTypeAndOptionalValue ::= SEQUENCE {
-//	    type     OBJECT IDENTIFIER,    -- SPC_PE_IMAGE_DATAOBJ_OBJID
-//	    value    [0] EXPLICIT ANY      -- SpcPEImageData (zero-length placeholder OK for Forge)
-//	}
-//
-//	DigestInfo ::= SEQUENCE {
-//	    digestAlgorithm  AlgorithmIdentifier,
-//	    digest           OCTET STRING    -- the PE Authenticode hash
-//	}
+// the canonical Authenticode signed-content blob (the Go types
+// declared inside the function mirror Microsoft's
+// SpcIndirectDataContent ASN.1 spec verbatim).
 //
 // `digest` MUST be the PE's Authenticode hash (typically obtained
 // via [github.com/oioio-space/maldev/pe/parse.File.Authentihash]).

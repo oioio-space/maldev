@@ -120,7 +120,11 @@ func (c *Certificate) Parse() (*ParsedAuthenticode, error) {
 		return nil, fmt.Errorf("cert: parse PKCS#7: %w", err)
 	}
 
-	out := &ParsedAuthenticode{Header: hdr, Certs: p7.Certificates}
+	// Defensive copy: pkcs7.Parse hands back its own internal
+	// slice; callers mutating Certs would otherwise leak into the
+	// parser's state. Anomalies / Raw already follow this pattern.
+	certs := append([]*x509.Certificate(nil), p7.Certificates...)
+	out := &ParsedAuthenticode{Header: hdr, Certs: certs}
 
 	signer := p7.GetOnlySigner()
 	if signer == nil {
