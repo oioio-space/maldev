@@ -2,7 +2,10 @@
 
 package antivm
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"slices"
+)
 
 // cpuidRaw issues the CPUID instruction with EAX=leaf, ECX=subleaf
 // and returns the four register outputs. Implemented in
@@ -62,3 +65,79 @@ func HypervisorVendor() string {
 // HypervisorVendorName lives in hypervisor.go (no build tag) so the
 // friendly-name table is shared between amd64 and the non-amd64 stub
 // build.
+
+// rdtsc returns the current value of the CPU's 64-bit time-stamp
+// counter. Implemented in rdtsc_amd64.s. Not serialised.
+func rdtsc() uint64
+
+// rdtscCpuidDelta returns the cycle delta around a single CPUID
+// instruction (which forces a VMEXIT under HVM). Implemented in
+// rdtsc_amd64.s.
+func rdtscCpuidDelta() uint64
+
+// DefaultRDTSCThreshold is the cycle threshold separating bare-metal
+// CPUID latency (~30-50 cycles) from VMEXIT-augmented CPUID latency
+// (500-3000+ cycles). Picked conservatively at 1000 — well above any
+// observed bare-metal upper bound, well below any observed VM lower
+// bound. Override via [LikelyVirtualizedByTiming]'s argument.
+const DefaultRDTSCThreshold uint64 = 1000
+
+// RDTSCDelta returns the median cycle delta of `samples` repeated
+// CPUID-bracketed RDTSC reads. The median (rather than mean) filters
+// out scheduler-induced outliers — Windows context switches between
+// the two RDTSC reads can spike a single sample into the millions.
+// Use 9 samples for a stable read; 1 is fine when the hot path
+// matters more than absolute precision.
+//
+// Returns 0 if samples <= 0. On non-amd64 the stub returns 0.
+//
+// Cost: ~`samples * 50 cycles` on bare metal, ~`samples * 1500
+// cycles` under HVM. Either way, sub-microsecond at any reasonable
+// sample count.
+func RDTSCDelta(samples int) uint64 {
+	if samples <= 0 {
+		return 0
+	}
+	deltas := make([]uint64, samples)
+	for i := 0; i < samples; i++ {
+		deltas[i] = rdtscCpuidDelta()
+	}
+	slices.Sort(deltas)
+	return deltas[samples/2]
+}
+
+// cpuidHypervisorReport issues the present-bit + vendor-string
+// CPUID pair in one shot and is consumed by [Hypervisor]. Avoids
+// the redundant `CPUID.1` that would happen if the aggregator
+// called [HypervisorPresent] then [HypervisorVendor] (the latter
+// internally re-checks the present bit). Bare metal pays 1 CPUID;
+// HVM pays 2.
+func cpuidHypervisorReport() (present bool, sig string) {
+	_, _, ecx, _ := cpuidRaw(1, 0)
+	if ecx&(1<<31) == 0 {
+		return false, ""
+	}
+	_, ebx, ecx, edx := cpuidRaw(0x40000000, 0)
+	var b [12]byte
+	binary.LittleEndian.PutUint32(b[0:4], ebx)
+	binary.LittleEndian.PutUint32(b[4:8], ecx)
+	binary.LittleEndian.PutUint32(b[8:12], edx)
+	return true, string(b[:])
+}
+
+// LikelyVirtualizedByTiming returns true if the median CPUID-bracketed
+// RDTSC delta exceeds threshold. Pass [DefaultRDTSCThreshold] for the
+// canonical 1000-cycle cut-off; lower values catch lighter
+// virtualisation (e.g. nested KVM with PV-CPUID hints) at the cost of
+// more false positives on noisy hosts.
+//
+// This is the strongest signal CPUID-evading hypervisors leave behind
+// — even when the VMM clears the `CPUID.1:ECX[31]` hypervisor bit
+// (some custom builds do), it cannot hide the VMEXIT cost without
+// trapping RDTSC itself, which most production hypervisors don't do
+// because of the per-call overhead it would impose on every guest.
+//
+// Returns false on non-amd64 (the stub).
+func LikelyVirtualizedByTiming(threshold uint64) bool {
+	return RDTSCDelta(hypervisorTimingSamples) > threshold
+}

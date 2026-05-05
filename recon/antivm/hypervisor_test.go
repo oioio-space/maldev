@@ -59,6 +59,72 @@ func TestHypervisorPresent_ReturnsBool(t *testing.T) {
 	// No assertion — the value depends on whether we're in a VM.
 }
 
+// TestRDTSCDelta_NonPositiveSamplesReturnZero locks the input
+// validation contract so a caller passing 0 or -1 doesn't panic
+// or burn cycles.
+func TestRDTSCDelta_NonPositiveSamplesReturnZero(t *testing.T) {
+	assert.Zero(t, RDTSCDelta(0))
+	assert.Zero(t, RDTSCDelta(-1))
+}
+
+// TestRDTSCDelta_ReturnsPositiveOnAmd64 smoke-tests the asm wrapper
+// — every CPU returns a non-zero delta around CPUID. On non-amd64
+// the stub returns 0 and we skip.
+func TestRDTSCDelta_ReturnsPositiveOnAmd64(t *testing.T) {
+	d := RDTSCDelta(5)
+	if d == 0 {
+		t.Skip("RDTSCDelta returned 0 — likely non-amd64 stub")
+	}
+	t.Logf("median CPUID-bracketed RDTSC delta: %d cycles", d)
+}
+
+// TestLikelyVirtualizedByTiming_ThresholdHonoured guards the
+// threshold semantics. A threshold of math.MaxUint64 must always
+// return false (no signal exceeds it); a threshold of 0 must
+// always return true on hosts where RDTSCDelta is non-zero.
+func TestLikelyVirtualizedByTiming_ThresholdHonoured(t *testing.T) {
+	assert.False(t, LikelyVirtualizedByTiming(^uint64(0)),
+		"max threshold must never trip")
+
+	if RDTSCDelta(1) == 0 {
+		t.Skip("non-amd64 stub — zero-threshold check is meaningless")
+	}
+	assert.True(t, LikelyVirtualizedByTiming(0),
+		"zero threshold must trip whenever the cycle counter advances")
+}
+
+// TestHypervisor_ReportShape verifies the aggregator wires every
+// signal through. Behavioural assertions (LikelyVM == true on a
+// VM) live in the VM matrix harness; here we only check the
+// report's invariants:
+//
+//   - VendorName is empty when VendorSig is empty
+//   - LikelyVM is the OR of every positive signal
+func TestHypervisor_ReportShape(t *testing.T) {
+	r := Hypervisor()
+	t.Logf("HypervisorReport = %+v", r)
+
+	if r.VendorSig == "" {
+		assert.Equal(t, "", r.VendorName,
+			"VendorName must be empty when VendorSig is empty")
+	}
+	want := r.Present || r.VendorSig != "" || r.TimingDelta > DefaultRDTSCThreshold
+	assert.Equal(t, want, r.LikelyVM,
+		"LikelyVM must be the OR of all positive signals")
+}
+
+// TestHypervisor_StableAcrossCalls — repeated calls must return the
+// same Present + VendorSig (TimingDelta jitters; we don't assert
+// equality on it). Catches regressions where a future "improvement"
+// caches state mutably.
+func TestHypervisor_StableAcrossCalls(t *testing.T) {
+	r1 := Hypervisor()
+	r2 := Hypervisor()
+	assert.Equal(t, r1.Present, r2.Present)
+	assert.Equal(t, r1.VendorSig, r2.VendorSig)
+	assert.Equal(t, r1.VendorName, r2.VendorName)
+}
+
 // TestHypervisorVendor_ConsistentWithPresent enforces the documented
 // contract: HypervisorVendor returns "" iff HypervisorPresent is
 // false. When present, the returned string is exactly 12 bytes (one

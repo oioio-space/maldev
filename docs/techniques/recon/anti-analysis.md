@@ -343,6 +343,95 @@ or not on the recognised list.
 **Platform:** cross-platform — the same table is shared between
 the amd64 build and the stub.
 
+#### `func RDTSCDelta(samples int) uint64`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#RDTSCDelta)
+
+Returns the median cycle delta of `samples` repeated CPUID-bracketed
+RDTSC reads. CPUID forces a VMEXIT under every modern HVM
+(VMware, KVM, Xen, Hyper-V, VirtualBox HVM); the VMEXIT + VMM
+emulation + VMENTER round-trip costs 500-3000+ cycles, vs. ~30-50
+cycles on bare metal. The median (rather than mean) filters
+scheduler-induced spikes from context switches between the two
+RDTSC reads.
+
+**Parameters:** `samples` — number of CPUID-bracketed RDTSC reads
+(use 9 for stability; 1 for hot-path use).
+
+**Returns:** median cycle delta. `0` if samples ≤ 0 or on
+non-amd64 (the stub returns 0).
+
+**OPSEC:** invisible — RDTSC is unprivileged and CPUID is
+ubiquitous. Both run billions of times per second in ordinary
+userland. No kernel transition.
+
+**Required privileges:** unprivileged.
+
+**Platform:** amd64 (Windows + Linux + macOS). Stub returns 0
+on other arches.
+
+#### `func LikelyVirtualizedByTiming(threshold uint64) bool`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#LikelyVirtualizedByTiming)
+
+Returns `true` if `RDTSCDelta(9) > threshold`. Pass
+`DefaultRDTSCThreshold` (1000) for the canonical cut-off; lower
+values catch lighter virtualisation (nested KVM with PV-CPUID
+hints) at the cost of more false positives on noisy hosts.
+
+The strongest signal CPUID-evading hypervisors leave behind —
+even when the VMM clears `CPUID.1:ECX[31]`, it cannot hide the
+VMEXIT cost without trapping RDTSC itself, which most production
+hypervisors don't do because of the per-call overhead it would
+impose on every guest.
+
+**Returns:** `true` when virtualised by timing signal; `false`
+otherwise (and always `false` on non-amd64).
+
+**OPSEC / Required privileges / Platform:** as `RDTSCDelta`.
+
+#### `const DefaultRDTSCThreshold uint64 = 1000`
+
+The cycle threshold separating bare-metal CPUID latency
+(~30-50 cycles) from VMEXIT-augmented CPUID latency
+(500-3000+ cycles). Picked conservatively at 1000 — well above
+any observed bare-metal upper bound, well below any observed VM
+lower bound. Cross-platform constant; identical across builds.
+
+#### `type HypervisorReport struct { ... }` + `func Hypervisor() HypervisorReport`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#Hypervisor)
+
+`Hypervisor()` runs all CPUID/timing-based probes (3 CPUID +
+9 RDTSC-bracketed CPUIDs) and returns the aggregated report.
+Sub-microsecond on bare metal, sub-100µs under HVM. Safe from
+any goroutine.
+
+```go
+type HypervisorReport struct {
+    Present     bool   // CPUID.1:ECX[31]
+    VendorSig   string // raw 12-byte signature, "" when not present
+    VendorName  string // friendly name, "" when sig is unknown
+    TimingDelta uint64 // median CPUID-bracketed RDTSC cycles
+    LikelyVM    bool   // OR of all positive signals
+}
+
+```
+
+**Returns:** populated struct. On non-amd64, every numeric/string
+field is zero/empty and `LikelyVM` is `false`.
+
+**OPSEC:** invisible — composes at most 11 unprivileged
+CPUID/RDTSC instructions over <100µs (1 CPUID for the present bit
++ 1 conditional CPUID for the vendor + 9 RDTSC-bracketed CPUIDs
+for the timing). No syscall, no kernel transition.
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform with degraded coverage on non-amd64
+(zero report, falls back to `Detect`/`DetectAll` for the
+registry/file/NIC dimensions).
+
 ## Examples
 
 ### Simple — bail on detection
@@ -382,19 +471,23 @@ if name, _ := antivm.Detect(cfg); name != "" {
 ```go
 import "github.com/oioio-space/maldev/recon/antivm"
 
-// Single CPUID instruction — the strongest "am I in a VM" signal
-// userland can produce. Cannot be evaded by registry / file
-// rewrites; the bit is set by the hypervisor itself.
-if antivm.HypervisorPresent() {
-    if vendor := antivm.HypervisorVendor(); vendor != "" {
-        if name := antivm.HypervisorVendorName(vendor); name != "" {
-            // Recognised: VMware / Hyper-V / KVM / Xen / VirtualBox / …
-            log.Printf("guest of %s", name)
-        } else {
-            // Unknown vendor signature — surface raw bytes for forensics.
-            log.Printf("unknown hypervisor signature: %q", vendor)
-        }
-    }
+// One call covers all three CPUID/timing signals.
+// Strongest "am I in a VM" detection userland can produce;
+// the timing dimension catches even hypervisors that mask the
+// CPUID.1:ECX[31] bit because they cannot hide the VMEXIT cost.
+if r := antivm.Hypervisor(); r.LikelyVM {
+    log.Printf("VM detected: vendor=%q name=%q timing=%d cycles",
+        r.VendorSig, r.VendorName, r.TimingDelta)
+    os.Exit(0)
+}
+```
+
+If you want finer control over which signals contribute, build
+the report by hand:
+
+```go
+if antivm.HypervisorPresent() ||
+    antivm.LikelyVirtualizedByTiming(antivm.DefaultRDTSCThreshold) {
     os.Exit(0)
 }
 ```
@@ -447,6 +540,27 @@ VM detection are two of the seven dimensions it composes.
   custom `Vendor` lists for hostile environments.
 - **WSL detection is loose.** WSL2 looks very VM-like; expect
   false positives if WSL is a legitimate target.
+- **CPUID timing — `DefaultRDTSCThreshold = 1000`.** Picked above
+  any observed bare-metal CPUID baseline (~30-50 cycles) and
+  below any observed HVM lower bound (~500-3000+). Hyper-V on
+  modern Windows guests sits ~1000-1500 cycles, so the cut-off
+  is tight at the bottom of the VM band — operators on KVM /
+  VMware / Xen comfortably cross 1500. Lower the threshold for
+  paranoid bail-on-any-signal flows; raise it on noisy bare-
+  metal hosts (older CPUs, SMI storms) that occasionally spike
+  past 1000.
+- **CPUID timing — RDTSC traps defeat it.** A hypervisor that
+  sets the VMCS "RDTSC exiting" control traps every RDTSC into
+  a VMEXIT, hiding the CPUID-bracketed delta. Production HVMs
+  rarely enable this (per-call cost imposed on every guest is
+  prohibitive) but custom defensive hypervisors targeting
+  malware analysis sometimes do — combine with
+  [HypervisorPresent] / [HypervisorVendor] which reach the
+  hypervisor through a different surface.
+- **CPUID timing — non-amd64.** ARM64 / s390x have no RDTSC
+  analogue exposed to userland; the stub returns 0 so
+  `LikelyVirtualizedByTiming` always returns false. The
+  CPUID-bit and vendor-string probes are likewise amd64-only.
 
 ## See also
 

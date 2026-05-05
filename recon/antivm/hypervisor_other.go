@@ -15,3 +15,22 @@ func HypervisorVendor() string { return "" }
 
 // HypervisorVendorName lives in hypervisor.go (no build tag) so the
 // friendly-name table is shared with the amd64 build.
+
+// DefaultRDTSCThreshold mirrors the amd64 declaration so cross-
+// platform code can reference the constant unconditionally. On
+// non-amd64 builds it has no behavioural effect — RDTSCDelta
+// always returns 0 and LikelyVirtualizedByTiming always returns
+// false.
+const DefaultRDTSCThreshold uint64 = 1000
+
+// RDTSCDelta returns 0 on non-amd64 — there is no portable cycle
+// counter analogue to RDTSC.
+func RDTSCDelta(_ int) uint64 { return 0 }
+
+// LikelyVirtualizedByTiming returns false on non-amd64 — no RDTSC
+// means no timing signal.
+func LikelyVirtualizedByTiming(_ uint64) bool { return false }
+
+// cpuidHypervisorReport returns false / "" on non-amd64. Consumed
+// by the cross-platform [Hypervisor] aggregator.
+func cpuidHypervisorReport() (present bool, sig string) { return false, "" }
