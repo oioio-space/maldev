@@ -363,6 +363,29 @@ type RichTool struct {
 	VSVersion   string // Visual Studio version label, when ProductID maps to a VS release
 }
 
+// Overlay returns the bytes appended to the PE past the end of
+// the last section (the "overlay"). Common droppers / installers
+// stage encrypted payloads here; some packers + self-extracting
+// archives do too. Returns (nil, nil) when no overlay is present.
+//
+// Cheap — saferwall computes OverlayOffset during Parse so this
+// is just a slice copy + bounds check.
+func (f *File) Overlay() ([]byte, error) {
+	off := f.PE.OverlayOffset
+	if off <= 0 || int64(len(f.Raw)) <= off {
+		return nil, nil
+	}
+	out := make([]byte, int64(len(f.Raw))-off)
+	copy(out, f.Raw[off:])
+	return out, nil
+}
+
+// OverlayOffset returns the file offset where the PE overlay
+// begins, or 0 when the PE has no overlay. Useful for callers
+// that want to surgically patch / strip the overlay without
+// allocating its bytes via [Overlay].
+func (f *File) OverlayOffset() int64 { return f.PE.OverlayOffset }
+
 // Anomalies returns the list of structural anomalies the parser
 // detected (overlapping headers, malformed directories, suspicious
 // section sizes, …). Empty slice means "PE looks well-formed".

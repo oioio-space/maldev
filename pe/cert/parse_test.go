@@ -72,6 +72,13 @@ func TestCertificateParse_RoundTripForge(t *testing.T) {
 	assert.Len(t, parsed.Certs, 2, "2-tier chain should embed leaf + root")
 }
 
+// TestInspect_PropagatesReadErrors covers the wrapper's
+// error-propagation contract via a missing-file path.
+func TestInspect_PropagatesReadErrors(t *testing.T) {
+	_, err := Inspect("/path/that/does/not/exist.exe")
+	require.Error(t, err)
+}
+
 func TestCertificateParse_NoSignersReturnsSentinel(t *testing.T) {
 	// pkcs7.Parse round-trip on a degenerate certs-only blob would
 	// trigger ErrCertificateNoSigners. Constructing such a blob

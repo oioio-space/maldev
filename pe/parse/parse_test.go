@@ -295,6 +295,27 @@ func TestDataAtRVA_NtClosePrologue(t *testing.T) {
 		"NtClose stub prologue must be `mov r10, rcx; mov eax, ssn`")
 }
 
+// TestOverlay_SignedNtdllSurfacesSignatureBlob — Microsoft-signed
+// PEs carry their Authenticode certificate blob past the last
+// section, which saferwall surfaces as the overlay. Confirms
+// Overlay + OverlayOffset wire correctly.
+func TestOverlay_SignedNtdllSurfacesSignatureBlob(t *testing.T) {
+	path := useSystemDLL(t)
+	f, err := Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	off := f.OverlayOffset()
+	require.Greater(t, off, int64(0), "ntdll.dll is signed; overlay must be present")
+
+	data, err := f.Overlay()
+	require.NoError(t, err)
+	require.NotEmpty(t, data)
+	assert.EqualValues(t, int64(len(f.Raw))-off, len(data),
+		"Overlay length must equal Raw length minus OverlayOffset")
+	t.Logf("ntdll overlay: offset=0x%X size=%d", off, len(data))
+}
+
 // TestRichHeader_NtdllPopulated verifies the Rich header is
 // surfaced for an MSVC-linked PE. ntdll.dll is always emitted by
 // MSVC; the Rich header carries the toolchain bill of materials.

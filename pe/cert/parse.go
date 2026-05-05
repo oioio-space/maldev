@@ -80,6 +80,19 @@ var ErrCertificateTooSmall = errors.New("cert: WIN_CERTIFICATE blob is shorter t
 // real Authenticode signature.
 var ErrCertificateNoSigners = errors.New("cert: PKCS#7 SignedData carries no signer info")
 
+// Inspect is the one-call operator wrapper: read the PE at
+// `pePath` via [Read], then [Certificate.Parse] the embedded
+// signature blob. Returns [ErrNoCertificate] for unsigned PEs
+// (matches [Read]'s contract) and the same parse-side sentinels
+// as [Certificate.Parse].
+func Inspect(pePath string) (*ParsedAuthenticode, error) {
+	c, err := Read(pePath)
+	if err != nil {
+		return nil, err
+	}
+	return c.Parse()
+}
+
 // Parse decodes the WIN_CERTIFICATE-wrapped PKCS#7 SignedData in
 // `c.Raw` into a [ParsedAuthenticode]. Returns
 // [ErrCertificateTooSmall] for blobs shorter than the 8-byte header,
