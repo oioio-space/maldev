@@ -234,6 +234,57 @@ detail).
 - Required privileges: none.
 - Platform: any.
 
+### Streaming AEAD — `NewAESGCMWriter` / `NewAESGCMReader` / `NewChaCha20Writer` / `NewChaCha20Reader`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/crypto#NewAESGCMWriter)
+
+For multi-MB / multi-GB payloads where loading the whole plaintext
+into memory is impractical (large PE drops, dump-and-encrypt
+pipelines, C2 transport with backpressure), the streaming variants
+wrap any `io.Writer` / `io.Reader` and frame the AEAD output into
+64 KiB plaintext chunks.
+
+```go
+w, _ := crypto.NewAESGCMWriter(key, sink)         // io.WriteCloser
+defer w.Close()                                    // MUST — emits final frame
+io.Copy(w, payloadReader)                          // streams in 64 KiB frames
+
+r, _ := crypto.NewAESGCMReader(key, sink)         // io.Reader
+plaintext, _ := io.ReadAll(r)                      // streams out
+```
+
+**Frame format (on the wire):**
+
+```
+[4-byte BE header][sealed bytes (ciphertext + 16-byte tag)]
+  bit 31     = final flag (1 on the last frame)
+  bits 0-30  = sealed length (bounded to chunk + Overhead)
+```
+
+**AAD per frame:** `8-byte BE counter || 1-byte final flag`. The
+AEAD authenticates both — flipping the final bit, reordering frames,
+or omitting a frame all surface as `Open` failures (or, for the
+truncation case, as `ErrStreamTruncated`).
+
+- Parameters: `key` — 32 bytes (both AES-GCM and XChaCha20-Poly1305);
+  `w` / `r` — any `io.Writer` / `io.Reader`.
+- Returns: `io.WriteCloser` / `io.Reader`; constructor error for
+  invalid key length.
+- Side effects: peak memory bounded by 64 KiB plaintext + AEAD
+  Overhead; per-frame allocations eliminated (nonce / AAD / Seal /
+  Open buffers all reused on the struct).
+- OPSEC: same as the one-shot variants — pure cryptographic ops.
+  The framing is observable to a network sniffer (4-byte headers
+  + sealed chunks at regular intervals) but the chunks are
+  ciphertext-indistinguishable from random.
+- Required privileges: none.
+- Platform: cross-platform.
+
+> [!IMPORTANT]
+> Caller MUST `Close()` the writer. Close emits the final-marked
+> frame; without it, a reader returns [`ErrStreamTruncated`] on
+> the last `Read`. Idempotent — duplicate `Close` calls are no-ops.
+
 ### `EncryptRC4(key, data []byte) ([]byte, error)`
 
 - godoc: RC4 stream cipher. Symmetric — call again with the same key to decrypt.
@@ -579,10 +630,21 @@ sit in RWX longer than a few microseconds; pair with sleep-masking
   buffer via defer (so the wipe still runs when fn errors or
   panics). Or call `crypto.Wipe(plaintext)` manually for cases that
   don't fit the closure shape.
-- **No streaming API.** Every function takes the whole buffer. For
-  multi-MB payloads, allocate carefully — `EncryptAESGCM` allocates
-  exactly once, but `MatrixTransform` allocates intermediate row
-  vectors.
+- **Streaming AEAD only for AES-GCM and XChaCha20-Poly1305.** The
+  `NewAESGCMWriter` / `NewChaCha20Writer` family handles
+  multi-MB / multi-GB payloads with bounded memory (64 KiB peak)
+  and per-frame tampering detection. The other primitives
+  (`EncryptRC4`, `XOR`, `TEA`, `XTEA`, `MatrixTransform`,
+  `SubstituteBytes`, `ArithShift`) still take the whole buffer in
+  one call — for multi-MB use, layer a streaming AEAD on top
+  (`AES-GCM stream → XOR/MatrixTransform inside the chunk` is the
+  canonical hardening pattern).
+- **Streaming framing is on the wire.** Both the chunk size
+  (64 KiB) and the framing layout (4-byte header + sealed bytes)
+  are deterministic and not key-derived — a defender who knows the
+  package can recognise the framing on a captured stream. The
+  framing carries no plaintext metadata, but its presence may
+  fingerprint maldev itself.
 - **RC4 broken.** Compatibility-only; do not use as the outer envelope.
 - **TEA equivalent keys.** Three keys decrypt to the same plaintext;
   prefer XTEA.
