@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-05-05
-reflects_commit: d44957b
+reflects_commit: 0a6b52e
 ---
 
 # Documentation refactor — progress tracker
@@ -18,12 +18,16 @@ reflects_commit: d44957b
 > from there.**
 >
 > **Cross-machine handoff:** the 2026-05-05 Windows session ended at
-> commit `d44957b`. Resume on a different machine via
-> [`HANDOFF-2026-05-05.md`](HANDOFF-2026-05-05.md) — that file lists
-> the 24+ commits across two themes (P3.5 closure + P2.5/P2.13/P3.3
-> backlog grinding, then a `debug/pe → saferwall/pe` migration
-> across 5 sites), the remaining open backlog rows in priority
-> order, and the recommended next moves.
+> commit `0a6b52e` (22 tags shipped, v0.32.1 → v0.42.2). Resume
+> on a different machine via
+> [`HANDOFF-2026-05-05.md`](HANDOFF-2026-05-05.md) — that file
+> lists three themes (P3.5 closure + P2.5/P2.13/P3.3 backlog
+> grinding; `debug/pe → saferwall/pe` migration across 5 sites;
+> saferwall capability exposure — RichHeader, Authenticode parse,
+> delay imports, Inspect, Overlay), the remaining open backlog
+> rows in priority order, and the recommended next moves
+> (P2.6 SpoofCallHWBP, real-Authenticode upgrade for cert.Forge,
+> P2.12 masquerade presets).
 >
 > Previous session: [`HANDOFF-2026-05-04.md`](HANDOFF-2026-05-04.md)
 > (2026-05-03/04 Linux, ended at `9809f0d`).
