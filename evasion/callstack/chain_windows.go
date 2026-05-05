@@ -3,14 +3,14 @@
 package callstack
 
 import (
-	"bytes"
-	"debug/pe"
 	"errors"
 	"fmt"
 	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/oioio-space/maldev/pe/parse"
 )
 
 // ErrGadgetNotFound is returned when FindReturnGadget scans ntdll's .text
@@ -117,31 +117,26 @@ func initReturnGadget() {
 // peTextRange parses the PE headers at base and returns the .text
 // section's RVA + size.
 func peTextRange(base uintptr) (rva uint32, size uint32, err error) {
-	// Copy the first 4 KiB of the module so debug/pe can work on a
-	// Reader without touching process memory pages through the Go
-	// reflection paths.
-	header := unsafe.Slice((*byte)(unsafe.Pointer(base)), 0x1000)
-	cp := make([]byte, len(header))
-	copy(cp, header)
+	// Copy the first 4 KiB of the module so the parser works on a
+	// detached buffer rather than touching process memory pages
+	// through Go reflection paths.
+	cp := make([]byte, 0x1000)
+	copy(cp, unsafe.Slice((*byte)(unsafe.Pointer(base)), 0x1000))
 
-	// Peek e_lfanew + NT headers + section table.
-	f, perr := pe.NewFile(bytes.NewReader(cp))
+	f, perr := parse.FromBytes(cp, "ntdll")
 	if perr != nil {
-		// Fallback: the 4 KiB prefix might be too small if the section
-		// headers spill past it. Grow and retry once.
-		header = unsafe.Slice((*byte)(unsafe.Pointer(base)), 0x4000)
-		cp = make([]byte, len(header))
-		copy(cp, header)
-		f, perr = pe.NewFile(bytes.NewReader(cp))
+		// 4 KiB prefix may be too small if the section headers spill
+		// past it. Grow and retry once.
+		cp = make([]byte, 0x4000)
+		copy(cp, unsafe.Slice((*byte)(unsafe.Pointer(base)), 0x4000))
+		f, perr = parse.FromBytes(cp, "ntdll")
 		if perr != nil {
 			return 0, 0, fmt.Errorf("parse ntdll PE: %w", perr)
 		}
 	}
 	defer f.Close()
-	for _, s := range f.Sections {
-		if s.Name == ".text" {
-			return s.VirtualAddress, s.VirtualSize, nil
-		}
+	if s := f.SectionByName(".text"); s != nil {
+		return s.VirtualAddress, s.VirtualSize, nil
 	}
 	return 0, 0, errors.New("callstack: .text section not found in ntdll")
 }
