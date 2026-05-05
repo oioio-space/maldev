@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-05-05
-reflects_commit: 0a6b52e
+reflects_commit: e233875
 ---
 
 # Documentation refactor — progress tracker
@@ -18,7 +18,7 @@ reflects_commit: 0a6b52e
 > from there.**
 >
 > **Cross-machine handoff:** the 2026-05-05 Windows session ended at
-> commit `0a6b52e` (22 tags shipped, v0.32.1 → v0.42.2). Resume
+> commit `e233875` (25 tags shipped, v0.32.1 → v0.44.0). Resume
 > on a different machine via
 > [`HANDOFF-2026-05-05.md`](HANDOFF-2026-05-05.md) — that file
 > lists three themes (P3.5 closure + P2.5/P2.13/P3.3 backlog
