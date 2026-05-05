@@ -277,6 +277,72 @@ want to read or surgically patch it without a full recompute.
 
 **Platform:** cross-platform.
 
+### `Forge(opts ForgeOptions) (*ForgedChain, error)` + `type ForgeOptions struct` + `type ForgedChain struct`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#Forge)
+
+Generate a self-signed cert chain (Leaf → optional Intermediate
+→ self-signed Root) entirely in pure Go and wrap the leaf
+signature into a PKCS#7 SignedData blob inside a
+WIN_CERTIFICATE structure ready for [`Write`](#writepepath-string-c-certificate-error).
+
+```go
+type ForgeOptions struct {
+    LeafSubject         pkix.Name // required — publisher name shown in file properties
+    IntermediateSubject pkix.Name // empty → 2-tier (leaf + root)
+    RootSubject         pkix.Name // required — self-signed root
+    KeyBits             int       // default 2048
+    ValidFrom, ValidTo  time.Time // default [now-1y, now+5y]
+    Content             []byte    // signed content; empty is fine for the cosmetic case
+}
+
+type ForgedChain struct {
+    Certificate                   *Certificate    // ready for cert.Write
+    Leaf, Intermediate, Root      *x509.Certificate
+    LeafKey, IntermediateKey, RootKey *rsa.PrivateKey
+}
+```
+
+**What it gives:**
+- File-properties Details tab shows `LeafSubject.CommonName` as
+  "Publisher" — fools naive UI-based assessment.
+- Static scanners that check "does this PE have a SignedData
+  directory entry" without validating it accept the file.
+- `signtool dumpcerts` output surfaces the chain — useful for
+  false-flag attribution research in red-team exercises.
+
+**What it does NOT give:**
+- Real Authenticode validity. `signtool verify` rejects the
+  output, SmartScreen flags it, and any defender that hashes
+  the PE bytes and re-checks against the signed `SpcIndirectDataContent`
+  fails. The forged SignedData here doesn't carry a
+  Microsoft-OID `SpcIndirectDataContent` over the PE hash —
+  out of scope for the current minimum-viable forge.
+- Trust-store insertion. The root cert is self-signed and not
+  installed in any trust store; offline scanners that walk to
+  the root see an unknown CA.
+
+**Returns:** `*ForgedChain` (Certificate ready for Write +
+all per-cert + per-key artefacts) or `ErrInvalidForgeOptions`
+when LeafSubject or RootSubject is missing; wrapped errors for
+keygen / cert-build / SignedData failures.
+
+**Side effects:** none — pure compute.
+
+**OPSEC:** zero runtime cost (call from build pipeline). The
+written PE carries the forged chain forever — defenders with
+post-hoc Authenticode validation catch it.
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform — pure Go.
+
+### `var ErrInvalidForgeOptions`
+
+Sentinel returned by [`Forge`](#forgeopts-forgeoptions-forgedchain-error)
+when LeafSubject or RootSubject CommonName is empty. Use
+`errors.Is` to route on the validation failure.
+
 ## Examples
 
 ### Simple — copy a Microsoft cert onto an implant
@@ -290,6 +356,41 @@ if err := cert.Copy(
 ); err != nil {
     panic(err)
 }
+```
+
+### Composed — pure-Go forge + write
+
+```go
+import (
+    "crypto/x509/pkix"
+
+    "github.com/oioio-space/maldev/pe/cert"
+)
+
+// One-shot forge: 3-tier chain (leaf → intermediate → self-signed
+// root) with Microsoft-style subject names so the file-properties
+// dialog reads as legitimate.
+chain, err := cert.Forge(cert.ForgeOptions{
+    LeafSubject: pkix.Name{
+        CommonName:   "Microsoft Corporation",
+        Organization: []string{"Microsoft Corporation"},
+        Country:      []string{"US"},
+    },
+    IntermediateSubject: pkix.Name{
+        CommonName: "Microsoft Code Signing PCA 2024",
+    },
+    RootSubject: pkix.Name{
+        CommonName: "Microsoft Root Certificate Authority 2024",
+    },
+})
+if err != nil { panic(err) }
+
+if err := cert.Write(`C:\loader.exe`, chain.Certificate); err != nil {
+    panic(err)
+}
+// loader.exe now reports "Publisher: Microsoft Corporation" in
+// the Properties dialog. signtool verify rejects it; SmartScreen
+// flags it. See API Reference > Forge > "What it does NOT give".
 ```
 
 ### Composed — morph + cert + presence check
@@ -389,8 +490,15 @@ See [`ExampleRead`](../../../pe/cert/cert_example_test.go) and
   verifiers that check it (rare in user-mode, mandatory for kernel
   drivers) see a self-consistent value. Independent callers can
   invoke `PatchPECheckSum(data)` directly after their own splices.
-- **No certificate-chain emulation.** This is blob copy, not
-  cert forging — for that, look at separate signing pipelines.
+- **`Forge` produces a chain that fails validation.** Pure-Go
+  `Forge` builds a 2- or 3-tier self-signed chain wrapped in
+  PKCS#7 SignedData — sufficient to populate the file-properties
+  Publisher field and pass "is signed" presence checks, but the
+  signed content is not a real `SpcIndirectDataContent` over the
+  PE hash. `signtool verify` rejects, SmartScreen flags, any
+  defender that walks to the trust store sees an unknown root.
+  Real Authenticode validity needs a CA-trusted leaf key + a
+  proper Microsoft-OID signed-content blob — both out of scope.
 - **Validity-window mismatch.** Donor certs have NotBefore /
   NotAfter; an implant deployed outside that window flags as
   expired even before the chain is checked.

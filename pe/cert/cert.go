@@ -183,8 +183,8 @@ func WriteVia(creator stealthopen.Creator, pePath string, c *Certificate) error 
 	}
 
 	// WIN_CERTIFICATE structures must be 8-byte aligned per PE spec.
-	if pad := uint32(len(data)) % 8; pad != 0 {
-		data = append(data, make([]byte, 8-pad)...)
+	if pad := align8(uint32(len(data))) - uint32(len(data)); pad != 0 {
+		data = append(data, make([]byte, pad)...)
 	}
 
 	// Append certificate at end of file.
