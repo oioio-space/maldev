@@ -47,7 +47,7 @@ flowchart LR
 
 | Package | Tech page | Detection | One-liner |
 |---|---|---|---|
-| [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) | (covered here + doc.go) | very-quiet | Read-only `debug/pe` wrapper for section / export / raw-byte access |
+| [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) | (covered here + doc.go) | very-quiet | Read-only saferwall wrapper: section / export / raw-byte access + Authentihash + ImpHash + Anomalies + RichHeader + Overlay |
 | [`pe/imports`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports) | [imports.md](imports.md) | very-quiet | Cross-platform import-table enumeration |
 | [`pe/strip`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip) | [strip-sanitize.md](strip-sanitize.md) | quiet | Go pclntab wipe + section rename + timestamp scrub |
 | [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) | [morph.md](morph.md) | moderate | UPX header signature mutation |

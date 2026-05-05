@@ -52,13 +52,35 @@ flowchart LR
 
 ## API Reference
 
-### `type Import struct { DLL, Function string }`
+### `type Import struct { DLL, Function, Ordinal, ByOrdinal, Hint, Delay }`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports#Import)
 
-One row of the import table. `DLL` is the descriptor name
-verbatim; `Function` is the imported symbol name, or
-`#<ordinal>` for ordinal-only entries.
+One row of the import surface. Fields beyond DLL/Function are
+new since the saferwall migration (v0.40.1+) — the previous
+`debug/pe`-backed implementation silently dropped them:
+
+```go
+type Import struct {
+    DLL       string  // import descriptor name
+    Function  string  // empty when ByOrdinal is true
+    Ordinal   uint32  // valid when ByOrdinal is true
+    ByOrdinal bool    // true for ordinal-only entries (msvcrt etc.)
+    Hint     uint16   // export-name-pointer-table index hint
+    Delay    bool     // true when sourced from delay-import descriptor
+}
+```
+
+`Delay` distinguishes the two import flavours present in modern
+PEs:
+
+  - `false`: classic import (IMAGE_IMPORT_DESCRIPTOR — loader
+    resolves before user code runs).
+  - `true`: delay-load import (IMAGE_DELAY_IMPORT_DESCRIPTOR —
+    loader installs a stub, defers resolution until the first
+    call). Modern Windows binaries (Edge, Office, OneDrive,
+    Teams) route the bulk of their dependencies through
+    delay-load.
 
 **Side effects:** pure data.
 
@@ -110,19 +132,57 @@ to match (e.g. `"ntdll.dll"`).
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports#FromReader)
 
 Parse a PE buffer already in memory — useful when the bytes are
-decrypted in-process and never touch disk.
+decrypted in-process and never touch disk. Requires an
+`io.ReadSeeker` under the hood (saferwall expects the full
+buffer); plain `io.ReaderAt` callers drain into bytes via
+[FromBytes] instead.
 
-**Parameters:** `r` — `io.ReaderAt` over the full PE image
-(`bytes.Reader` is the typical choice).
+**Parameters:** `r` — `io.ReadSeeker` (`bytes.Reader` is the
+typical choice).
 
-**Returns:** import slice; error from `debug/pe.NewFile` or the
-import-directory walk.
+**Returns:** import slice; error from saferwall parse or
+non-Seeker readers.
 
 **Side effects:** none.
 
 **OPSEC:** silent — no file system access.
 
 **Required privileges:** unprivileged (in-memory parse).
+
+**Platform:** cross-platform.
+
+### `FromBytes(data []byte) ([]Import, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports#FromBytes)
+
+Parse a PE byte slice. Sets every saferwall `Omit*` flag except
+the import + delay-import directories — the parse stays sub-ms
+even on large PEs.
+
+**Parameters:** `data` — full PE image.
+
+**Returns:** flat slice covering both classic + delay imports.
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform.
+
+### `ListDelay(pePath string) ([]Import, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports#ListDelay)
+
+Convenience filter — returns only entries with `Delay == true`.
+Operator question this answers: *"what dependencies does this
+binary defer until first use?"* On Edge that's 153 entries; on
+notepad ~25; on a Go-built binary 0.
+
+**Parameters:** `pePath` — PE file.
+
+**Returns:** filtered slice; error as `List`.
+
+**Side effects:** reads `pePath`.
+
+**Required privileges:** unprivileged (read access on `pePath`).
 
 **Platform:** cross-platform.
 

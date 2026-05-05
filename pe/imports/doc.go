@@ -1,12 +1,21 @@
-// Package imports enumerates a PE's import directory — every DLL
-// dependency and every imported function name — without invoking
-// any Windows API. The package is pure Go and runs on any host.
+// Package imports enumerates a PE's import surface — both the
+// classic IMAGE_IMPORT_DESCRIPTOR table AND the
+// IMAGE_DELAY_IMPORT_DESCRIPTOR table — without invoking any
+// Windows API. Pure Go via saferwall/pe under the hood; runs on
+// any host.
 //
-// Use it to power dynamic API-resolution payloads, build
-// per-binary IAT maps for masquerading, or feed downstream
-// syscall-discovery tooling. The output is a flat `[]Import`
-// slice (DLL, Function, Ordinal) keyed neither by hash nor by
-// load order — callers reshape as needed.
+// Use it to power dynamic API-resolution payloads, build per-
+// binary IAT maps for masquerading, or feed downstream syscall-
+// discovery tooling. The output is a flat `[]Import` slice
+// (DLL, Function, Ordinal, ByOrdinal, Hint, Delay) keyed neither
+// by hash nor by load order — callers reshape as needed.
+//
+// Modern Windows binaries (Edge: 153 delay imports, Office,
+// OneDrive, Teams) route the bulk of their dependencies through
+// delay-load. [List] walks both axes; [ListDelay] surfaces only
+// the delay-load entries when that's the operator's question.
+// The `Import.Delay` flag distinguishes the two flavours per
+// entry.
 //
 // # MITRE ATT&CK
 //
@@ -26,8 +35,8 @@
 //
 // # Platform
 //
-// Cross-platform. Pure-Go `debug/pe` walker — runs on any
-// host the Go toolchain supports.
+// Cross-platform. Pure-Go saferwall walker — runs on any host
+// the Go toolchain supports.
 //
 // # Example
 //
