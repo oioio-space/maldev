@@ -343,6 +343,65 @@ Sentinel returned by [`Forge`](#forgeopts-forgeoptions-forgedchain-error)
 when LeafSubject or RootSubject CommonName is empty. Use
 `errors.Is` to route on the validation failure.
 
+### `BuildSpcIndirectDataContent(digest []byte, hashAlg crypto.Hash) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#BuildSpcIndirectDataContent)
+
+Phase 1 of the path to real Authenticode signatures. Returns the
+ASN.1 DER encoding of the canonical Microsoft signed-content blob:
+
+```
+SpcIndirectDataContent ::= SEQUENCE {
+    data           SpcAttributeTypeAndOptionalValue,
+    messageDigest  DigestInfo
+}
+```
+
+`digest` is the PE Authenticode hash (typically obtained via
+`pe/parse.File.Authentihash`); `hashAlg` selects the algorithm
+OID. Returns `ErrUnsupportedHash` for anything outside the four
+supported variants (SHA-1 / SHA-256 / SHA-384 / SHA-512).
+
+The output is the SECOND argument to a PKCS#7 SignedData
+`EncapsulatedContentInfo` whose `eContentType` is
+`OIDSpcIndirectDataContent`. Wrapping the bytes into a complete
+PKCS#7 SignedData with the correct outer ContentType is **Phase 2
+(not yet shipped)** — the bundled `secDre4mer/pkcs7` always sets
+`ContentType = OIDData`, so a future `ForgeForPE(pePath, opts)`
+entry point will need a sibling ASN.1 marshaller.
+
+Even without Phase 2, the bytes returned here are useful as a
+verifier-input fixture: feed them to a captured cert's
+`messageDigest` signed attribute via openssl / signtool to
+reproduce the canonical signing input — handy for
+detection-engineering test corpora.
+
+**Returns:** ASN.1 DER bytes; `ErrUnsupportedHash` for
+unsupported `hashAlg`; wrapped asn1-marshal errors otherwise.
+
+**Side effects:** none — pure compute.
+
+**OPSEC:** N/A — pure-byte producer.
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform — pure Go.
+
+### Authenticode OID constants
+
+`OIDSpcIndirectDataContent` (`1.3.6.1.4.1.311.2.1.4`),
+`OIDSpcPEImageDataObj` (`1.3.6.1.4.1.311.2.1.15`),
+`OIDSHA1` / `OIDSHA256` / `OIDSHA384` / `OIDSHA512` exposed
+verbatim from the Microsoft / RFC 5754 catalogues. Use these
+when hand-rolling SignedData wrappers around the
+`BuildSpcIndirectDataContent` output.
+
+### `var ErrUnsupportedHash`
+
+Sentinel returned by `BuildSpcIndirectDataContent` when the
+supplied `crypto.Hash` has no Authenticode OID. Use `errors.Is`
+to route on the validation failure.
+
 ## Examples
 
 ### Simple — copy a Microsoft cert onto an implant
@@ -391,6 +450,41 @@ if err := cert.Write(`C:\loader.exe`, chain.Certificate); err != nil {
 // loader.exe now reports "Publisher: Microsoft Corporation" in
 // the Properties dialog. signtool verify rejects it; SmartScreen
 // flags it. See API Reference > Forge > "What it does NOT give".
+```
+
+### Composed — Authenticode-shaped signing input (Phase 1 building block)
+
+```go
+import (
+    "crypto"
+
+    "github.com/oioio-space/maldev/pe/cert"
+    "github.com/oioio-space/maldev/pe/parse"
+)
+
+// Step 1: Compute the PE's canonical Authenticode hash.
+pf, err := parse.Open(`C:\loader.exe`)
+if err != nil { panic(err) }
+defer pf.Close()
+hash := pf.Authentihash() // SHA-256 by default
+
+// Step 2: Wrap the hash in the Microsoft signed-content blob.
+//         This is the byte string a real Authenticode signer
+//         signs (over the messageDigest signed attribute).
+spc, err := cert.BuildSpcIndirectDataContent(hash, crypto.SHA256)
+if err != nil { panic(err) }
+
+// `spc` now holds the canonical SpcIndirectDataContent ASN.1.
+// Phase 2 (not yet shipped): hand-roll a SignedData with
+// ContentType = OIDSpcIndirectDataContent + EncapContent = spc,
+// then sign the messageDigest signed attribute with a leaf key
+// (Forge's chain.LeafKey works syntactically; signtool verify
+// fails because the chain isn't trusted).
+//
+// Today, `spc` is useful as a verifier-input fixture: feed it to
+// openssl / signtool's signing pipeline to reproduce what a
+// signing host would compute against this PE.
+_ = spc
 ```
 
 ### Composed — morph + cert + presence check
@@ -493,12 +587,23 @@ See [`ExampleRead`](../../../pe/cert/cert_example_test.go) and
 - **`Forge` produces a chain that fails validation.** Pure-Go
   `Forge` builds a 2- or 3-tier self-signed chain wrapped in
   PKCS#7 SignedData — sufficient to populate the file-properties
-  Publisher field and pass "is signed" presence checks, but the
-  signed content is not a real `SpcIndirectDataContent` over the
-  PE hash. `signtool verify` rejects, SmartScreen flags, any
-  defender that walks to the trust store sees an unknown root.
-  Real Authenticode validity needs a CA-trusted leaf key + a
-  proper Microsoft-OID signed-content blob — both out of scope.
+  Publisher field and pass "is signed" presence checks, but
+  signtool verify rejects + SmartScreen flags + trust-store walk
+  sees an unknown root. Two independent gaps separate Forge from
+  real Authenticode:
+   1. The signed content is not a real `SpcIndirectDataContent`
+      over the PE hash. **Phase 1 of the fix shipped at v0.43.0**:
+      `BuildSpcIndirectDataContent(digest, hashAlg)` produces the
+      canonical ASN.1 blob; pair with
+      `pe/parse.File.Authentihash` for the digest. **Phase 2 (not
+      yet shipped)**: a `ForgeForPE(pePath, opts)` entry point
+      that hand-rolls the outer SignedData with
+      `ContentInfo.contentType = OIDSpcIndirectDataContent` —
+      `secDre4mer/pkcs7` doesn't expose an OID-override surface,
+      so this needs a sibling ASN.1 marshaller.
+   2. The leaf key + chain are self-signed. Real validity needs
+      a CA-trusted leaf key (stolen private key, purchased EV
+      cert) — entirely out of scope; no library substitute.
 - **Validity-window mismatch.** Donor certs have NotBefore /
   NotAfter; an implant deployed outside that window flags as
   expired even before the chain is checked.
