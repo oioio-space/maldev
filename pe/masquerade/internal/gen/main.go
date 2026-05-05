@@ -51,19 +51,33 @@ func (v variant) desc() string {
 	return s
 }
 
-// identities lists every System32 reference binary we masquerade as.
-var identities = []string{
-	"cmd",
-	"svchost",
-	"taskmgr",
-	"explorer", // lives at %SystemRoot%\explorer.exe, handled as special case
-	"notepad",
+// identity associates a Go-package name with the donor PE on disk.
+// Path is OS-expanded ($SystemRoot, $LOCALAPPDATA, $ProgramFiles)
+// before the Stat — operators can override per-identity at the
+// command line via -path-<id>=… flags.
+type identity struct {
+	ID   string
+	Path string
+}
+
+// identities lists every reference binary we masquerade as. New
+// non-System32 entries (msedge / OneDrive / WindowsTerminal /
+// future Office) join the System32 originals here. SKIP-on-stat
+// is per-identity so the generator runs cleanly on hosts where
+// some donors aren't installed.
+var identities = []identity{
+	{"cmd", `${SystemRoot}\System32\cmd.exe`},
+	{"svchost", `${SystemRoot}\System32\svchost.exe`},
+	{"taskmgr", `${SystemRoot}\System32\taskmgr.exe`},
+	{"explorer", `${SystemRoot}\explorer.exe`},
+	{"notepad", `${SystemRoot}\System32\notepad.exe`},
+	{"msedge", `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`},
+	{"onedrive", `${LOCALAPPDATA}\Microsoft\OneDrive\OneDrive.exe`},
+	{"wt", `${LOCALAPPDATA}\Microsoft\WindowsApps\wt.exe`},
 }
 
 func main() {
 	outRoot := flag.String("out", filepath.Join("pe", "masquerade"), "output root (should end with pe/masquerade)")
-	sys32 := flag.String("sys32", os.ExpandEnv(`${SystemRoot}\System32`), "System32 path")
-	winroot := flag.String("winroot", os.ExpandEnv(`${SystemRoot}`), "Windows root (for explorer.exe)")
 	flag.Parse()
 
 	if *outRoot == "" {
@@ -71,17 +85,15 @@ func main() {
 	}
 
 	for _, id := range identities {
-		exePath := filepath.Join(*sys32, id+".exe")
-		if id == "explorer" {
-			exePath = filepath.Join(*winroot, "explorer.exe")
-		}
+		exePath := os.ExpandEnv(id.Path)
 		if _, err := os.Stat(exePath); err != nil {
-			log.Printf("SKIP %s: %v", id, err)
+			log.Printf("SKIP %s: %v", id.ID, err)
 			continue
 		}
-		log.Printf("processing %s <- %s", id, exePath)
-		if err := generateIdentity(*outRoot, id, exePath); err != nil {
-			log.Fatalf("%s: %v", id, err)
+		log.Printf("processing %s <- %s", id.ID, exePath)
+		if err := generateIdentity(*outRoot, id.ID, exePath); err != nil {
+			log.Printf("SKIP %s: %v", id.ID, err)
+			continue
 		}
 	}
 	log.Println("done")
