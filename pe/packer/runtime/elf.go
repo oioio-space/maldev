@@ -104,6 +104,11 @@ type elfHeaders struct {
 	// Run() error messages so operators can correlate runtime
 	// crashes to toolchain skew.
 	goVersion string
+
+	// hasDTNeeded is true when PT_DYNAMIC carries at least one DT_NEEDED
+	// entry. Surfaced via gateRejectionReason for accurate diagnostics
+	// so CGO / dynamically-linked Go binaries get the right message.
+	hasDTNeeded bool
 }
 
 // elfProgramHeader is one Elf64_Phdr entry. Field names match
@@ -212,12 +217,19 @@ func parseELFHeaders(in []byte) (*elfHeaders, error) {
 // Returns (isGo, goVersion). When isGo is false, goVersion is
 // always empty.
 func detectGoStaticPIE(input []byte, h *elfHeaders) (bool, string) {
+	// Compute hasDTNeeded unconditionally so gateRejectionReason can
+	// surface the right message even when an earlier gate fires first.
+	h.hasDTNeeded = !dynamicHasNoNeeded(input, h)
+
+	if h.elfType != etDyn {
+		return false, ""
+	}
 	for _, p := range h.programs {
 		if p.Type == ptInterp {
 			return false, ""
 		}
 	}
-	if !dynamicHasNoNeeded(input, h) {
+	if h.hasDTNeeded {
 		return false, ""
 	}
 	bi, err := buildinfo.Read(bytes.NewReader(input))
@@ -268,6 +280,9 @@ func (h *elfHeaders) gateRejectionReason() string {
 	}
 	if h.elfType != etDyn {
 		return "not ET_DYN (need PIE)"
+	}
+	if h.hasDTNeeded {
+		return "has DT_NEEDED entries (not a static binary)"
 	}
 	return "not a Go binary (no .go.buildinfo section)"
 }

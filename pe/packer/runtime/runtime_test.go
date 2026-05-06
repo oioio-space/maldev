@@ -3,6 +3,7 @@ package runtime_test
 import (
 	"errors"
 	goruntime "runtime"
+	"strings"
 	"testing"
 
 	"github.com/oioio-space/maldev/pe/packer/runtime"
@@ -219,6 +220,30 @@ func TestPrepare_ELF_RejectsETExecOnLinux(t *testing.T) {
 	_, err := runtime.Prepare(elf)
 	if !errors.Is(err, runtime.ErrNotImplemented) {
 		t.Errorf("Prepare(ET_EXEC) on linux: got %v, want ErrNotImplemented", err)
+	}
+}
+
+// TestPrepare_ELF_ETExecGateIsFirst confirms that detectGoStaticPIE
+// rejects ET_EXEC before even checking DT_NEEDED or .go.buildinfo.
+// A Go ET_EXEC binary (built without -buildmode=pie) has no
+// PT_INTERP and no DT_NEEDED, so without the ET_DYN check it would
+// be falsely classified as static-PIE.
+func TestPrepare_ELF_ETExecGateIsFirst(t *testing.T) {
+	if goruntime.GOOS != "linux" {
+		t.Skip("Stage B is Linux-only")
+	}
+	// ET_EXEC with no PT_INTERP and no DT_NEEDED — the three
+	// conditions that previously defined "static-PIE" before the
+	// ET_DYN gate was added.
+	elf := buildMinimalELF(t, elfHeaderOpts{Type: 2}) // ET_EXEC, no dynamic
+	_, err := runtime.Prepare(elf)
+	if !errors.Is(err, runtime.ErrNotImplemented) {
+		t.Errorf("Prepare(ET_EXEC no-interp no-needed): got %v, want ErrNotImplemented", err)
+	}
+	// The rejection reason must identify ET_DYN as the blocker, not
+	// PT_INTERP or .go.buildinfo — those gates were never reached.
+	if err != nil && !strings.Contains(err.Error(), "ET_DYN") {
+		t.Errorf("rejection reason should mention ET_DYN; got: %v", err)
 	}
 }
 

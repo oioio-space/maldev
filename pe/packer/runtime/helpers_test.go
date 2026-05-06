@@ -43,6 +43,12 @@ type elfHeaderOpts struct {
 	// possible mappable PIE — no relocations, no symbols. Used
 	// for the Stage B happy-path test.
 	WithDynamic bool
+
+	// WithNeeded emits a PT_DYNAMIC segment that contains one
+	// DT_NEEDED entry followed by a DT_NULL terminator. Used to
+	// exercise the DT_NEEDED rejection path in detectGoStaticPIE /
+	// gateRejectionReason. Mutually exclusive with WithDynamic.
+	WithNeeded bool
 }
 
 // buildMinimalELF writes a 64-byte Elf64_Ehdr followed by one
@@ -76,10 +82,16 @@ func buildMinimalELF(t *testing.T, o elfHeaderOpts) []byte {
 	if o.WithDynamic {
 		phnum++
 	}
+	if o.WithNeeded {
+		phnum++
+	}
 	totalSize := ehdrSize + int(phnum)*phdrSize
-	dynOff := totalSize // where the DT_NULL terminator lives
+	dynOff := totalSize // where the dynamic section body lives
 	if o.WithDynamic {
 		totalSize += 16 // 16-byte DT_NULL entry
+	}
+	if o.WithNeeded {
+		totalSize += 32 // DT_NEEDED(8+8) + DT_NULL(8+8)
 	}
 	out := make([]byte, totalSize)
 
@@ -107,9 +119,10 @@ func buildMinimalELF(t *testing.T, o elfHeaderOpts) []byte {
 	}
 	binary.LittleEndian.PutUint32(out[off:off+4], pType)
 	binary.LittleEndian.PutUint32(out[off+4:off+8], 5) // PF_R | PF_X
-	if o.WithDynamic {
+	if o.WithDynamic || o.WithNeeded {
 		// PT_LOAD: offset=0, vaddr=0, filesz=memsz=totalSize.
-		// Headers + DT_NULL all sit inside one mapped segment.
+		// Headers + dynamic section body all sit inside one mapped
+		// segment so the mapper's span check never fires.
 		binary.LittleEndian.PutUint64(out[off+8:off+16], 0)                  // p_offset
 		binary.LittleEndian.PutUint64(out[off+16:off+24], 0)                 // p_vaddr
 		binary.LittleEndian.PutUint64(out[off+24:off+32], 0)                 // p_paddr
@@ -130,7 +143,7 @@ func buildMinimalELF(t *testing.T, o elfHeaderOpts) []byte {
 		off += phdrSize
 	}
 	if o.WithDynamic {
-		binary.LittleEndian.PutUint32(out[off:off+4], 2) // PT_DYNAMIC
+		binary.LittleEndian.PutUint32(out[off:off+4], 2)   // PT_DYNAMIC
 		binary.LittleEndian.PutUint32(out[off+4:off+8], 6) // PF_R | PF_W
 		binary.LittleEndian.PutUint64(out[off+8:off+16], uint64(dynOff))   // p_offset
 		binary.LittleEndian.PutUint64(out[off+16:off+24], uint64(dynOff))  // p_vaddr
@@ -140,6 +153,22 @@ func buildMinimalELF(t *testing.T, o elfHeaderOpts) []byte {
 		binary.LittleEndian.PutUint64(out[off+48:off+56], 8)               // p_align
 		// out[dynOff..dynOff+16] stays zero — that's exactly DT_NULL,
 		// which terminates the dynamic walk before any DT_RELA.
+	}
+	if o.WithNeeded {
+		// PT_DYNAMIC phdr pointing at the 32-byte body: DT_NEEDED + DT_NULL.
+		binary.LittleEndian.PutUint32(out[off:off+4], 2)   // PT_DYNAMIC
+		binary.LittleEndian.PutUint32(out[off+4:off+8], 6) // PF_R | PF_W
+		binary.LittleEndian.PutUint64(out[off+8:off+16], uint64(dynOff))  // p_offset
+		binary.LittleEndian.PutUint64(out[off+16:off+24], uint64(dynOff)) // p_vaddr
+		binary.LittleEndian.PutUint64(out[off+24:off+32], uint64(dynOff)) // p_paddr
+		binary.LittleEndian.PutUint64(out[off+32:off+40], 32)             // p_filesz
+		binary.LittleEndian.PutUint64(out[off+40:off+48], 32)             // p_memsz
+		binary.LittleEndian.PutUint64(out[off+48:off+56], 8)              // p_align
+		// Dynamic section body: one DT_NEEDED(tag=1, val=0) then DT_NULL.
+		// dynamicHasNoNeeded walks this and returns false, setting hasDTNeeded.
+		binary.LittleEndian.PutUint64(out[dynOff:dynOff+8], 1)   // DT_NEEDED tag
+		binary.LittleEndian.PutUint64(out[dynOff+8:dynOff+16], 0) // d_val (name offset; irrelevant)
+		// out[dynOff+16..dynOff+32] stays zero — DT_NULL sentinel.
 	}
 
 	return out
