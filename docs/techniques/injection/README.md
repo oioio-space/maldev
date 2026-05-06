@@ -30,6 +30,48 @@ flowchart LR
     S -->|via SelfInjector| WM[cleanup/memory.WipeAndFree]
 ```
 
+## Primer — vocabulary
+
+Seven terms recur across this page and the per-method docs:
+
+> **Self / Local / Remote / Child** — the four "target" classes
+> any injection method falls into. Driven entirely by where the
+> shellcode ends up running. See the table below for the
+> per-class API surface.
+>
+> **`Injector`** — interface every method implements:
+> `Inject(shellcode []byte) error`. The constructor
+> (`NewWindowsInjector(cfg)` or `NewLinuxInjector(cfg)`) wires
+> the right method based on `Config.Method`.
+>
+> **`SelfInjector`** — extension interface for self-process
+> methods: `Region() (addr, size uintptr)`. Lets downstream
+> consumers (sleepmask, WipeAndFree) recover the allocation
+> without re-deriving it.
+>
+> **`*wsyscall.Caller`** — optional knob (`SyscallMethod`)
+> selecting how every NTAPI call resolves: WinAPI proc table
+> (default) / direct syscall (asm stub) / indirect syscall
+> (resolve SSN at runtime). `nil` = WinAPI fallback. See
+> [`win/syscall`](../syscalls/README.md).
+>
+> **APC (Asynchronous Procedure Call)** — Windows queue every
+> thread carries; functions enqueued fire when the thread next
+> enters an alertable wait. Several methods (Early Bird,
+> NtQueueApcThreadEx) use the APC delivery path to avoid
+> creating a new thread.
+>
+> **`CREATE_SUSPENDED`** — `CreateProcess` flag that spawns
+> the child in the suspended state. Threads are created but
+> never resumed until the implant finishes mutating memory.
+> Used by Early Bird, Thread Hijack, and Process Arg Spoofing.
+>
+> **Stealth tier** — qualitative ranking column in the index
+> below. Combines target class + thread creation + WPM use:
+> low (loud, easy to detect), medium (loses one of the three
+> tells), high (avoids cross-process or thread creation
+> entirely). Not a guarantee against any specific EDR.
+
 ## Target categories
 
 The **target** column drives the OPSEC trade-off and the API surface
