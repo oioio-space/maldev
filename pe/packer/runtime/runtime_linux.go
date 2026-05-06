@@ -115,9 +115,11 @@ func mapAndRelocateELF(elf []byte, h *elfHeaders) (*PreparedImage, error) {
 		// Reachable only if isGoStaticPIE detection has a bug; defensive.
 		return nil, fmt.Errorf("%w: PT_INTERP requires ld.so resolution (Stage C)", ErrNotImplemented)
 	}
-	if !dynPresent {
-		return nil, fmt.Errorf("%w: ET_DYN missing PT_DYNAMIC", ErrBadELF)
-	}
+	// No PT_DYNAMIC is valid for Go static-PIE binaries built with
+	// -ldflags='-d' (Go internal linker omits the dynamic segment when
+	// no interpreter is requested). The gate already accepted the binary
+	// via dynamicHasNoNeeded, so no DT_NEEDED was present either.
+	// Skip reloc processing in this case — there is nothing to relocate.
 
 	pageSize := uint64(os.Getpagesize())
 	mapSize := alignUp(spanEnd, pageSize)
@@ -154,11 +156,15 @@ func mapAndRelocateELF(elf []byte, h *elfHeaders) (*PreparedImage, error) {
 		copy(region[p.VAddr:p.VAddr+p.FileSz], elf[p.Offset:fileEnd])
 	}
 
-	// Apply R_X86_64_RELATIVE relocations and refuse any other
-	// type (Stage C will resolve them via ld.so).
-	if err := applyRelativeRelocs(region, base, dynVAddr, dynFileSz); err != nil {
-		_ = unix.Munmap(region)
-		return nil, err
+	// Apply R_X86_64_RELATIVE relocations; refuse any other type
+	// (Stage C will resolve them via ld.so). When no PT_DYNAMIC is
+	// present the binary carries no relocation table by construction
+	// (Go internal linker, -d flag, no ld.so), so skip the pass.
+	if dynPresent {
+		if reErr := applyRelativeRelocs(region, base, dynVAddr, dynFileSz); reErr != nil {
+			_ = unix.Munmap(region)
+			return nil, reErr
+		}
 	}
 
 	// mprotect each PT_LOAD to its declared flags. Two adjacent

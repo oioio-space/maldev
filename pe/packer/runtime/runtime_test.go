@@ -2,6 +2,7 @@ package runtime_test
 
 import (
 	"errors"
+	"os"
 	goruntime "runtime"
 	"strings"
 	"testing"
@@ -273,23 +274,28 @@ func TestPrepare_ELF_RejectsTLSOnLinux(t *testing.T) {
 	}
 }
 
-// TestPrepare_ELF_RejectsMissingDynamicOnLinux confirms ET_DYN
-// without PT_DYNAMIC trips the malformed-ELF guard. (Real PIE
-// binaries always carry PT_DYNAMIC; this is a defensive check
-// against forged or truncated inputs.)
-//
-// WithGoBuildInfo passes the Z-scope gate so the test reaches
-// the PT_DYNAMIC check — the gate correctly rejects non-Go
-// inputs, so we need a Go-looking binary here.
-func TestPrepare_ELF_RejectsMissingDynamicOnLinux(t *testing.T) {
+// TestPrepare_ELF_AcceptsNoDynamicGoStaticPIE confirms ET_DYN +
+// .go.buildinfo + no PT_DYNAMIC is accepted by the Stage B mapper.
+// Go binaries built with -ldflags='-d' (internal linker, no ld.so)
+// omit the dynamic segment entirely — the real hello_static_pie
+// fixture is this shape. No PT_DYNAMIC means no relocation table,
+// so the loader skips the reloc pass and proceeds to mprotect.
+func TestPrepare_ELF_AcceptsNoDynamicGoStaticPIE(t *testing.T) {
 	if goruntime.GOOS != "linux" {
-		t.Skip("Stage B is Linux-only")
+		t.Skip("Stage B mapper is Linux-only")
 	}
-	// ET_DYN + buildinfo present, but no PT_DYNAMIC → ErrBadELF.
 	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithGoBuildInfo: true})
-	_, err := runtime.Prepare(elf)
-	if !errors.Is(err, runtime.ErrBadELF) {
-		t.Errorf("Prepare(ET_DYN no DYNAMIC) on linux: got %v, want ErrBadELF", err)
+	img, err := runtime.Prepare(elf)
+	if err != nil {
+		t.Fatalf("Prepare(ET_DYN no DYNAMIC + buildinfo): %v", err)
+	}
+	defer func() {
+		if err := img.Free(); err != nil {
+			t.Errorf("Free: %v", err)
+		}
+	}()
+	if img.Base == 0 {
+		t.Error("Base = 0 — mapper did not allocate")
 	}
 }
 
@@ -347,6 +353,39 @@ func TestPreparedImage_FreeIdempotent(t *testing.T) {
 	}
 	if err := img.Free(); err != nil {
 		t.Errorf("second Free: %v (expected no-op)", err)
+	}
+}
+
+// TestPrepare_ELF_AcceptsRealGoStaticPIE loads the fixture binary
+// from testdata, runs Prepare, and confirms the mapper succeeds
+// without errors. Does NOT call Run() — that's gated behind the
+// E2E test in runtime_e2e_linux_test.go.
+func TestPrepare_ELF_AcceptsRealGoStaticPIE(t *testing.T) {
+	if goruntime.GOOS != "linux" {
+		t.Skip("Stage B mapper is Linux-only")
+	}
+	elf, err := os.ReadFile("testdata/hello_static_pie")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	img, err := runtime.Prepare(elf)
+	if err != nil {
+		t.Fatalf("Prepare(hello_static_pie): %v", err)
+	}
+	defer func() {
+		if err := img.Free(); err != nil {
+			t.Errorf("Free: %v", err)
+		}
+	}()
+	if img.Base == 0 {
+		t.Error("Base = 0 — mapper did not allocate")
+	}
+	if img.SizeOfImage == 0 {
+		t.Error("SizeOfImage = 0")
+	}
+	if img.EntryPoint <= img.Base {
+		t.Errorf("EntryPoint %#x not within mapped region (base %#x, size %d)",
+			img.EntryPoint, img.Base, img.SizeOfImage)
 	}
 }
 
