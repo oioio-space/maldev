@@ -9,36 +9,84 @@ reflects_commit: b81bd80
 
 ## TL;DR
 
-EDRs walk the stack of a suspicious thread and ask "who called
-`VirtualAllocEx`?". `evasion/callstack` builds the synthetic
-return-frame metadata (RUNTIME_FUNCTION + ImageBase + ReturnAddress)
-required to fake a benign thread-init lineage
-(`RtlUserThreadStart → BaseThreadInitThunk → …`). The asm pivot that
-*executes* a call through the chain (`SpoofCall`) ships as an
-experimental scaffold; the metadata helpers (`StandardChain`,
-`FindReturnGadget`, `LookupFunctionEntry`, `Validate`) are
-production-ready.
+When EDR sees `VirtualAllocEx` called, it walks the calling
+thread's stack and asks "who got us here?". A real Win32 program
+shows `RtlUserThreadStart → BaseThreadInitThunk → main → ...
+→ VirtualAllocEx`. A Go injector shows `runtime.goexit → ...
+→ syscall.Syscall6 → VirtualAllocEx` — instantly suspicious.
 
-## Primer
+Spoofing the call stack rewrites the stack so the walker sees
+the benign Win32 lineage instead.
 
-Modern EDR and DFIR tooling routinely walks the stack of a suspicious
-thread to see *who called that VirtualAllocEx / CreateRemoteThread /
-NtUnmapViewOfSection*. The walker uses `RtlVirtualUnwind` (or its
-kernel-mode sibling), which reads the PE `.pdata` table to locate the
-`RUNTIME_FUNCTION` for the current `RIP`, then follows the stored
-unwind info to climb up one frame at a time.
+The package splits into two halves with very different maturity:
 
-A **spoofed call stack** replaces the top frames of that walk with
-addresses that look like a vanilla thread-init sequence. The walker
-cannot distinguish the injected frames from a genuine execution path
-unless it cross-validates `RIP` against ETW Threat-Intelligence or
-performs its own control-flow reconstruction.
+| Layer | What you get | Status |
+|---|---|---|
+| **Metadata helpers** ([`StandardChain`](#standardchain-frame-error), [`FindReturnGadget`](#findreturngadget-uintptr-error), [`LookupFunctionEntry`](#lookupfunctionentry), [`Validate`](#validate)) | Build the synthetic Frame chain (`RtlUserThreadStart → BaseThreadInitThunk → …`) with valid RUNTIME_FUNCTION rows pulled from ntdll/kernel32 `.pdata`. Use independently of any pivot. | **Production-ready.** Used today by `evasion/preset` for stack metadata. |
+| **Asm pivot** (`SpoofCall`) | Plants the chain on the thread's stack and JMPs into the target so the unwinder walks the synthetic frames | **Experimental scaffold** — gated behind `MALDEV_SPOOFCALL_E2E=1`, documented crash path. Use the metadata helpers + your own pivot for production. |
 
-This package ships the **metadata primitives** required to build such
-a chain. Every helper returns either a `Frame` (return-address +
-ImageBase + RUNTIME_FUNCTION row, copied by value) or a `[]Frame`,
-and `Validate` performs structural sanity checks before the chain
-hits a stack walker.
+What the metadata helpers DO:
+
+- Resolve `kernel32!BaseThreadInitThunk` + `ntdll!RtlUserThreadStart`
+  via `RtlLookupFunctionEntry` so each Frame carries a *valid*
+  RUNTIME_FUNCTION the unwinder will follow.
+- Find a `RET` gadget in ntdll's `.text` so the CPU "lands"
+  inside ntdll after the target returns — the unwinder then
+  walks ntdll's full `.pdata` coverage.
+- `Validate` catches structural mistakes (wrong unwind info,
+  RIP out of `[Begin, End)`) before the chain hits a walker.
+
+What this DOES NOT do:
+
+- **Doesn't bypass ETW Threat-Intelligence cross-validation** —
+  ETW's `Microsoft-Windows-Threat-Intelligence` provider can
+  cross-check the walked RIPs against actual control flow. EDRs
+  paying for ETW-TI subscriptions still see you.
+- **Doesn't change WHAT the spoofed thread does** — only WHO it
+  appears to call from. The actual `VirtualAllocEx` still
+  happens; it just looks like it came from `BaseThreadInitThunk`.
+- **`SpoofCall` is not safe** — the asm pivot is research
+  scaffold. For production, use the metadata helpers
+  (`StandardChain` returns a usable `[]Frame` chain) and write
+  your own asm pivot tuned to your target's calling convention.
+
+## Primer — vocabulary
+
+Six terms recur on this page:
+
+> **Stack walking** — the process of following return addresses
+> on a thread's stack to reconstruct the chain of callers (the
+> "back trace"). EDRs do this on suspicious API calls; debuggers
+> do it for crash analysis.
+>
+> **`RtlVirtualUnwind`** — the user-mode function (and its
+> kernel-mode sibling) that performs the actual stack-walk step.
+> Given a current RIP, it looks up the matching RUNTIME_FUNCTION
+> in the module's `.pdata` and follows the unwind info to compute
+> the previous frame.
+>
+> **RUNTIME_FUNCTION** — a 12-byte record in a PE's `.pdata`
+> section describing one function's start RVA, end RVA, and a
+> pointer to its `UNWIND_INFO`. Without a RUNTIME_FUNCTION
+> covering the current RIP, the unwinder can't proceed — which
+> is why the spoof needs the fake "return address" to land
+> INSIDE ntdll (full `.pdata` coverage).
+>
+> **`.pdata`** — the PE section holding all RUNTIME_FUNCTION
+> entries for the module. Sorted by start RVA; binary-searched
+> by `RtlLookupFunctionEntry`.
+>
+> **Thread-init lineage** — the canonical Win32 thread startup
+> chain: `RtlUserThreadStart → BaseThreadInitThunk → main`.
+> Every legitimate thread on Windows has these two frames at
+> the bottom. Spoofing aims to make the walker SEE this lineage
+> even when the actual code path didn't go through it.
+>
+> **RET gadget** — a single `RET` instruction (`0xC3`) somewhere
+> in ntdll's `.text`. Used as the "land here after the target
+> returns" address in the spoof. After the gadget RETs, the CPU
+> pops the next address (the next frame in the chain) and
+> continues.
 
 ## How It Works
 
