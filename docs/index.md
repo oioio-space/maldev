@@ -206,7 +206,7 @@ _Each area is collapsed by default — click to expand. Detection level is the c
 
 </details>
 
-<details><summary><strong>PE manipulation — `pe/*`</strong> — 10 packages</summary>
+<details><summary><strong>PE manipulation — `pe/*`</strong> — 11 packages</summary>
 
 | Package | Detection | Summary |
 |---|---|---|
@@ -215,6 +215,7 @@ _Each area is collapsed by default — click to expand. Detection level is the c
 | [`pe/dllproxy`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy) | very-quiet | emits a valid Windows DLL — as raw bytes, no external toolchain — that forwards every named export back to a legitimate target DLL |
 | [`pe/imports`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/imports) | very-quiet | enumerates a PE's import surface — both the classic IMAGE_IMPORT_DESCRIPTOR table AND the IMAGE_DELAY_IMPORT_DESCRIPTOR table — without invoking any Windows API |
 | [`pe/masquerade`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade) | quiet | clones a Windows PE's identity — manifest, icons, VERSIONINFO, optional Authenticode certificate — into a linkable `.syso` COFF object so a Go binary picks them up at compile time |
+| [`pe/masquerade/donors`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/donors) | — | lists the reference (donor) PE files the pe/masquerade preset generator and the cmd/cert-snapshot tool share |
 | [`pe/masquerade/preset`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/preset) | — | _(no doc.go summary)_ |
 | [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) | moderate | mutates UPX-packed PE headers so automatic unpackers fail to recognise the input |
 | [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) | very-quiet | provides PE file parsing and modification utilities |

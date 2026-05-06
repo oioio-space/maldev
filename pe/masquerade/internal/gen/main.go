@@ -30,6 +30,7 @@ import (
 	"strings"
 
 	"github.com/oioio-space/maldev/pe/masquerade"
+	"github.com/oioio-space/maldev/pe/masquerade/donors"
 )
 
 type variant struct {
@@ -51,36 +52,9 @@ func (v variant) desc() string {
 	return s
 }
 
-// identity associates a Go-package name with the donor PE on disk.
-// Path is OS-expanded ($SystemRoot, $LOCALAPPDATA, $ProgramFiles)
-// before the Stat — operators can override per-identity at the
-// command line via -path-<id>=… flags.
-type identity struct {
-	ID   string
-	Path string
-}
-
-// identities lists every reference binary we masquerade as. New
-// non-System32 entries (msedge / OneDrive / WindowsTerminal /
-// future Office) join the System32 originals here. SKIP-on-stat
-// is per-identity so the generator runs cleanly on hosts where
-// some donors aren't installed.
-var identities = []identity{
-	{"cmd", `${SystemRoot}\System32\cmd.exe`},
-	{"svchost", `${SystemRoot}\System32\svchost.exe`},
-	{"taskmgr", `${SystemRoot}\System32\taskmgr.exe`},
-	{"explorer", `${SystemRoot}\explorer.exe`},
-	{"notepad", `${SystemRoot}\System32\notepad.exe`},
-	{"msedge", `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`},
-	{"onedrive", `${LOCALAPPDATA}\Microsoft\OneDrive\OneDrive.exe`},
-	{"wt", `${LOCALAPPDATA}\Microsoft\WindowsApps\wt.exe`},
-	{"acrobat", `${ProgramFiles}\Adobe\Acrobat DC\Acrobat\Acrobat.exe`},
-	{"firefox", `${ProgramFiles}\Mozilla Firefox\firefox.exe`},
-	{"excel", `${ProgramFiles}\Microsoft Office\root\Office16\EXCEL.EXE`},
-	{"sevenzip", `${ProgramFiles}\7-Zip\7zFM.exe`},
-	{"vscode", `${LOCALAPPDATA}\Programs\Microsoft VS Code\Code.exe`},
-	{"claude", `${LOCALAPPDATA}\AnthropicClaude\claude.exe`},
-}
+// Donor list now lives in pe/masquerade/internal/donors so the
+// cmd/cert-snapshot tool can iterate the same identities without
+// duplicating the slice. Add a new identity there.
 
 func main() {
 	outRoot := flag.String("out", filepath.Join("pe", "masquerade"), "output root (should end with pe/masquerade)")
@@ -90,7 +64,7 @@ func main() {
 		log.Fatal("-out required")
 	}
 
-	for _, id := range identities {
+	for _, id := range donors.All {
 		exePath := os.ExpandEnv(id.Path)
 		if _, err := os.Stat(exePath); err != nil {
 			log.Printf("SKIP %s: %v", id.ID, err)

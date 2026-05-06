@@ -540,6 +540,61 @@ _ = cert.Write(target, &cert.Certificate{Raw: saved})
 See [`ExampleRead`](../../../pe/cert/cert_example_test.go) and
 [`ExampleCopy`](../../../pe/cert/cert_example_test.go).
 
+### Operational — `cmd/cert-snapshot` (offline donor cache)
+
+Operators rarely build implants on the same host that has every
+donor PE installed (Adobe Reader, OneDrive, VS Code, etc.). The
+`cmd/cert-snapshot` tool walks the canonical donor list
+([`pe/masquerade/donors.All`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/donors))
+and dumps each donor's WIN_CERTIFICATE blob to a directory once,
+so the build host can graft offline:
+
+```bash
+# On a fully-equipped workstation:
+go run ./cmd/cert-snapshot -out ./ignore/certs
+# wrote ignore/certs/svchost.bin (10408 bytes) <- C:\WINDOWS\System32\svchost.exe
+# wrote ignore/certs/msedge.bin (10056 bytes) <- ...msedge.exe
+# wrote ignore/certs/onedrive.bin (10600 bytes) <- ...OneDrive.exe
+# wrote ignore/certs/acrobat.bin (10712 bytes) <- ...Acrobat.exe
+# wrote ignore/certs/firefox.bin (11904 bytes) <- ...firefox.exe
+# wrote ignore/certs/excel.bin  (21312 bytes) <- ...EXCEL.EXE
+# wrote ignore/certs/vscode.bin (10272 bytes) <- ...Code.exe
+# wrote ignore/certs/claude.bin (10400 bytes) <- ...claude.exe
+# SKIP cmd: PE file has no Authenticode certificate     # signed via system catalog (.cat)
+# SKIP notepad: PE file has no Authenticode certificate # signed via system catalog (.cat)
+# SKIP sevenzip: PE file has no Authenticode certificate # 7-Zip ships unsigned
+```
+
+`-out` defaults to `./ignore/certs` (gitignored — these blobs
+are large binaries that don't belong in version control).
+
+On the build host, graft from cache without needing the donor:
+
+```go
+import (
+    "os"
+
+    "github.com/oioio-space/maldev/pe/cert"
+)
+
+raw, _ := os.ReadFile(`./ignore/certs/claude.bin`)
+_ = cert.Write(`implant.exe`, &cert.Certificate{Raw: raw})
+```
+
+The grafted blob is **not cryptographically valid** (the implant's
+PE hash differs from the donor's) — same caveats as direct
+[`cert.Copy`](#copysrcpe-dstpe-string-error). Useful only for
+the cosmetic + naive-static-scanner cases described in OPSEC.
+
+**System32 binaries that ship without an embedded signature**
+(cmd, notepad, calc on most Win10/11 builds) are signed via the
+system *security catalog* (`C:\Windows\System32\CatRoot\*.cat`) —
+the embedded WIN_CERTIFICATE is absent because `signtool verify`
+resolves the signature against the catalog. cert-snapshot's
+SKIP for these donors is expected, not a bug. To clone a System32
+identity's catalog signature you need a different attack — out of
+scope for `pe/cert`.
+
 ## OPSEC & Detection
 
 | Artefact | Where defenders look |
