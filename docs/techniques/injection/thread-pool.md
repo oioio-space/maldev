@@ -8,6 +8,9 @@ reflects_commit: 4798780
 
 [← injection index](README.md) · [docs/index](../../index.md)
 
+> **New to maldev injection?** Read the [injection/README.md
+> vocabulary callout](README.md#primer--vocabulary) first.
+
 ## TL;DR
 
 Drop a work item onto the process's default thread pool via the
@@ -15,6 +18,20 @@ undocumented `TpAllocWork` / `TpPostWork` / `TpReleaseWork` triplet in
 `ntdll`. An idle worker thread that already exists picks the item up
 and runs the shellcode as a normal callback. No `CreateThread`, no
 `NtCreateThreadEx`, no APC. Local-only.
+
+| Trait | Value |
+|---|---|
+| **Target class** | Local (current process) |
+| **Creates a new thread?** | No — reuses one of the always-running pool workers |
+| **Uses `WriteProcessMemory`?** | No — caller pre-allocates RX in their own process |
+| **Stealth tier** | High — no Create*Thread / Queue*APC / SetContext call enters EDR's view |
+| **CET-affected?** | Pool dispatcher may enforce ENDBR64 on Win11 24H2+. Use [`inject.ThreadPoolExecCET`](#threadpoolexeccet) for auto-wrapping. |
+
+When to pick a different method:
+
+- Want callback-via-existing-API rather than work-queue? → [Callback execution](callback-execution.md).
+- Need Self but want explicit thread (not pool)? → [EtwpCreateEtwThread](etwp-create-etw-thread.md).
+- Need to inject into a different process? → ThreadPool is Local-only. See [CreateRemoteThread](create-remote-thread.md) / [Section Mapping](section-mapping.md).
 
 ## Primer
 
