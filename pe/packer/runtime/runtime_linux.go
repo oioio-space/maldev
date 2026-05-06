@@ -25,11 +25,10 @@ const (
 	rX8664Relative = 8
 )
 
-// Dynamic-section tag values used by Stage B. Walked from the
-// PT_DYNAMIC segment to locate the RELA table without a full
-// dynamic-section parser.
+// Dynamic-section tag values used by the Linux loader. dtNull and
+// dtNeeded are defined in elf.go (cross-platform); only the RELA
+// tags are Linux-loader-specific.
 const (
-	dtNull    = 0
 	dtRela    = 7
 	dtRelaSz  = 8
 	dtRelaEnt = 9

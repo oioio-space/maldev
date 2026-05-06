@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"bytes"
+	"debug/buildinfo"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -66,6 +68,13 @@ const (
 	pfW = 2 // PF_W — write
 	pfR = 4 // PF_R — read
 
+	// Dynamic-section tag values used in cross-platform detection
+	// (elf.go) and in the Linux loader (runtime_linux.go). Names
+	// track /usr/include/elf.h so future contributors can grep the
+	// standard.
+	dtNull   = 0 // DT_NULL   — end-of-table sentinel
+	dtNeeded = 1 // DT_NEEDED — shared-library dependency name
+
 	elfHeaderSize  = 64 // sizeof(Elf64_Ehdr)
 	elfProgHdrSize = 56 // sizeof(Elf64_Phdr)
 )
@@ -84,6 +93,17 @@ type elfHeaders struct {
 	// preserved so the mapper can iterate in declaration order
 	// (ld.so does the same; some segments depend on adjacent ones).
 	programs []elfProgramHeader
+
+	// isGoStaticPIE is true when the ELF satisfies the Z-scope
+	// contract: ET_DYN + .go.buildinfo present + no DT_NEEDED +
+	// no PT_INTERP. Computed once in parseELFHeaders.
+	isGoStaticPIE bool
+
+	// goVersion is the Go toolchain version string (e.g. "go1.21.5")
+	// when isGoStaticPIE is true; empty otherwise. Surfaced in
+	// Run() error messages so operators can correlate runtime
+	// crashes to toolchain skew.
+	goVersion string
 }
 
 // elfProgramHeader is one Elf64_Phdr entry. Field names match
@@ -179,5 +199,75 @@ func parseELFHeaders(in []byte) (*elfHeaders, error) {
 		return nil, fmt.Errorf("%w: no PT_LOAD program headers", ErrBadELF)
 	}
 
+	h.isGoStaticPIE, h.goVersion = detectGoStaticPIE(in, h)
+
 	return h, nil
+}
+
+// detectGoStaticPIE runs the four-condition Z-scope gate after
+// the program-header walk completes. Uses debug/buildinfo from
+// stdlib (stable since Go 1.18) to find the .go.buildinfo
+// section without re-implementing ELF section parsing.
+//
+// Returns (isGo, goVersion). When isGo is false, goVersion is
+// always empty.
+func detectGoStaticPIE(input []byte, h *elfHeaders) (bool, string) {
+	for _, p := range h.programs {
+		if p.Type == ptInterp {
+			return false, ""
+		}
+	}
+	if !dynamicHasNoNeeded(input, h) {
+		return false, ""
+	}
+	bi, err := buildinfo.Read(bytes.NewReader(input))
+	if err != nil {
+		return false, ""
+	}
+	return true, bi.GoVersion
+}
+
+// dynamicHasNoNeeded returns true when the PT_DYNAMIC segment
+// (if any) carries zero DT_NEEDED entries, or when there is no
+// PT_DYNAMIC at all (truly static binary).
+func dynamicHasNoNeeded(input []byte, h *elfHeaders) bool {
+	for _, p := range h.programs {
+		if p.Type != ptDynamic {
+			continue
+		}
+		end := p.Offset + p.FileSz
+		if end > uint64(len(input)) || end < p.Offset {
+			return false // malformed; conservative reject
+		}
+		dyn := input[p.Offset:end]
+		for off := 0; off+16 <= len(dyn); off += 16 {
+			tag := int64(binary.LittleEndian.Uint64(dyn[off : off+8]))
+			if tag == dtNull {
+				break
+			}
+			if tag == dtNeeded {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// gateRejectionReason returns the specific Z-scope condition that
+// failed, suitable for embedding in an ErrNotImplemented message.
+// Returns "" when isGoStaticPIE is true, so callers can use a
+// non-empty return as the "needs rejection" signal.
+func (h *elfHeaders) gateRejectionReason() string {
+	if h.isGoStaticPIE {
+		return ""
+	}
+	for _, p := range h.programs {
+		if p.Type == ptInterp {
+			return "has PT_INTERP (binary requires ld.so resolution)"
+		}
+	}
+	if h.elfType != etDyn {
+		return "not ET_DYN (need PIE)"
+	}
+	return "not a Go binary (no .go.buildinfo section)"
 }
