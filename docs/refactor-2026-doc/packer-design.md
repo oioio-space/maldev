@@ -334,7 +334,7 @@ ratio. Stack with HexAlphabet (or accept the 50% size cost of
 | 1c.5 | Compression in pipeline — flate + gzip (stdlib) ship first; aPLib / LZMA / zstd / LZ4 reserved | ✅ v0.53.0 |
 | **1d** | **Anti-entropy** — `OpEntropyCover` step with three algorithms: `EntropyCoverInterleave` (low-entropy padding spliced between ciphertext chunks; default 33% padding lands at ~7.4 bits/byte; stack with HexAlphabet for <5), `EntropyCoverCarrier` (PNG-shaped 32-byte prefix), `EntropyCoverHexAlphabet` (byte → 2-byte code-like alphabet pair; apparent entropy ≤ 4 bits/byte). | ✅ this commit |
 | 1e | Polymorphic stub generation (compile-time templating) + multi-format output (exe / reflective-dll / service-exe / dotnet / bof) | ⏳ |
-| 1f | Linux ELF reflective loader (mirror Phase 1b) + remaining opt-ins (anti-debug / AMSI silence / cert graft / multi-target / env keying — host fingerprint / domain join / date range). **Stage A** ✅: ELF64 parser + magic dispatch in [Prepare]. **Stage B** ✅ this commit: PT_LOAD mmap + R_X86_64_RELATIVE relocs from PT_DYNAMIC RELA + per-segment mprotect; ET_EXEC / PT_INTERP / PT_TLS / symbol relocs surface [ErrNotImplemented]. Stage C: ld.so resolution (DT_NEEDED + dlsym). Stage D: TLS + jump-to-entry. | 🟡 Stages A+B |
+| 1f | Linux ELF reflective loader for Go static-PIE binaries (Stage A: parser + dispatch; Stage B: mmap + RELATIVE; Stage C+D: gate + Run() jump-to-entry). Other ELFs out of scope (Stage E for non-Go, Stage F for full ld.so). | ✅ Stages A+B+C+D |
 | 2 | Section shuffle + IAT scramble (host PE) | deferred |
 | 3 | Junk sections + stub control-flow obfuscation | deferred |
 

@@ -9,12 +9,19 @@
 //   - Phase 1f Stage A — ELF64 LE x86_64 parser + format
 //     dispatch from [Prepare].
 //   - Phase 1f Stage B — Linux mmap of PT_LOAD segments,
-//     R_X86_64_RELATIVE relocations applied from the RELA
-//     table walked via PT_DYNAMIC. Per-segment mprotect to
-//     declared PF_R/W/X flags. ET_EXEC and PT_INTERP / PT_TLS
-//     paths surface [ErrNotImplemented] (Stage C/D will own
-//     them); symbol-bound relocations (GLOB_DAT / JUMP_SLOT /
-//     64) likewise defer to Stage C's ld.so resolution.
+//     R_X86_64_RELATIVE relocations, per-segment mprotect.
+//   - Phase 1f Stage C+D — Go static-PIE end-to-end on Linux:
+//     four-condition Z-scope gate via debug/buildinfo;
+//     PT_TLS lift conditional on the gate; Run() builds a
+//     kernel-style stack frame (argc/argv/envp/auxv from
+//     /proc/self/auxv with AT_RANDOM canary) and JMPs to the
+//     binary's entry point via Plan 9 asm. Symmetric with the
+//     Windows side's "JMP OEP, never returns" contract.
+//
+// Other ELFs (C-built, libc-using, IFUNC, versioned symbols,
+// ET_EXEC) continue to surface [ErrNotImplemented] with a clear
+// rebuild hint. Stage E will broaden to non-Go static-PIE; Stage
+// F to full ld.so emulation.
 //
 // Out of scope (rejected at parse time or surfaced as resolution
 // failures): DLLs (calling DllMain), TLS callbacks, x86,
@@ -51,15 +58,16 @@
 //
 // # Required privileges
 //
-// unprivileged. Self-process memory only —
-// VirtualAlloc / VirtualProtect / LoadLibrary / GetProcAddress
-// against the implant's own address space. No SeDebugPrivilege,
-// no kernel surface.
+// unprivileged. Self-process memory only — VirtualAlloc /
+// VirtualProtect / LoadLibrary / GetProcAddress on Windows;
+// mmap / mprotect on Linux. No SeDebugPrivilege, no kernel
+// surface.
 //
 // # Platform
 //
-// Windows x64 only. Linux ELF reflective loader lands in
-// Phase 1c.
+// Windows x64 (PE EXEs) + Linux x86_64 (Go static-PIE ELFs).
+// Other ELF types (C-built, libc-using, non-x86_64) return
+// [ErrNotImplemented] — Stage E broadens to non-Go static-PIE.
 //
 // # Example
 //

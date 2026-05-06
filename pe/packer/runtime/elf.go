@@ -9,7 +9,8 @@ import (
 // ELF sentinels surfaced by [Prepare] when the input is an ELF
 // binary. Aliased from elfgate so callers that imported
 // packer/runtime can still errors.Is against them — the var
-// identity is preserved via errors.Is wrapping.
+// identity is preserved by pointer identity (var alias,
+// not a fresh errors.New).
 var (
 	// ErrBadELF fires on header-walk inconsistencies (truncated,
 	// bad magic, impossible field values).
