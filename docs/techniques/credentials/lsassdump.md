@@ -10,12 +10,87 @@ reflects_commit: 90d9c49
 
 ## TL;DR
 
-Produce a Windows MINIDUMP of `lsass.exe`'s memory in-process —
-without calling `MiniDumpWriteDump` (the heavily-hooked DbgHelp
-export). Walks regions + modules with `NtReadVirtualMemory`,
-emits the canonical 6-stream MINIDUMP layout, and ships a
-RTCore64-driven kernel path to flip lsass out of PPL when
-`RunAsPPL=1`. The dump is consumed by [`credentials/sekurlsa`](sekurlsa.md).
+You want LSASS's in-memory secrets (cleartext passwords, NTLM
+hashes, Kerberos tickets, DPAPI master keys). LSASS is a
+process; you dump its memory and parse the credential
+structures out. This package handles the dump side; the parse
+side lives in [`credentials/sekurlsa`](sekurlsa.md).
+
+The "heavily-hooked" path is `MiniDumpWriteDump` from `dbghelp.dll`
+— every EDR watches it. This package skips it entirely.
+
+| You're targeting… | Use | Constraint |
+|---|---|---|
+| LSASS without PPL (default on workstations) | [`Dump`](#func-dumpcaller-wsyscallcaller-byte-error) | Needs `SeDebugPrivilege` (admin) |
+| LSASS with `RunAsPPL=1` (servers, hardened) | [`DumpPPL`](#func-dumpppl) | Needs admin + BYOVD driver (rtcore64 default) for kernel R/W to flip protection level |
+
+What this DOES achieve:
+
+- Custom in-process MINIDUMP emitter — no `dbghelp.dll`, no
+  `MiniDumpWriteDump` call. EDR `DbgHelp.dll!*` hooks see
+  nothing.
+- `NtGetNextProcess` for lsass discovery — no `OpenProcess`
+  / `EnumProcesses` (both monitored).
+- VAD walk via `NtQueryVirtualMemory` — output identical to
+  `MiniDumpWriteDump`'s `MemoryListStream` so the dump parses
+  cleanly in WinDbg / mimikatz / sekurlsa.
+- 6-stream MINIDUMP layout (SystemInfo / ModuleList / MemoryList /
+  ThreadList / Memory64List / Misc) — the canonical subset
+  sekurlsa needs.
+
+What this does NOT achieve:
+
+- **Doesn't bypass kernel callbacks** — `PsSetCreateProcessNotify`
+  family still fires when YOU spawn (don't matter here, but
+  callbacks watching cross-process opens DO see your
+  `NtGetNextProcess`+memory reads). Pair with
+  [`evasion/kernel-callback-removal`](../evasion/kernel-callback-removal.md)
+  for that surface.
+- **Doesn't parse the dump** — that's `credentials/sekurlsa`.
+  The dump byte buffer is the hand-off interface.
+- **No SAM / NTDS** — separate techniques. See
+  [`credentials/samdump`](samdump.md) for SAM,
+  [`credentials/goldenticket.md`](goldenticket.md) for AD
+  Kerberos forging.
+
+## Primer — vocabulary
+
+Six terms recur on this page:
+
+> **LSASS (Local Security Authority Subsystem Service)** —
+> Windows process responsible for authentication, session
+> management, and credential caching. Holds NTLM hashes,
+> Kerberos tickets, DPAPI master keys, and (when the user
+> chose to type a password) cleartext credentials in memory.
+>
+> **MINIDUMP** — Microsoft's compact crash-dump format. A
+> binary file with named "streams" describing the dumped
+> process's modules, memory regions, threads, and metadata.
+> Tools like WinDbg and mimikatz read this format to extract
+> credentials.
+>
+> **PPL (Protected Process Light)** — Windows protection level
+> applied to LSASS when `HKLM\SYSTEM\CurrentControlSet\Control\Lsa\RunAsPPL=1`.
+> Even SYSTEM cannot `OpenProcess(PROCESS_VM_READ)` against
+> a PPL process from user mode. Default-on for Windows 11
+> 22H2+; common on hardened servers.
+>
+> **VAD (Virtual Address Descriptors)** — kernel structure
+> describing every committed memory region of a process.
+> Walking the VAD via `NtQueryVirtualMemory` lets the dumper
+> enumerate exactly the same regions `MiniDumpWriteDump`
+> would walk, without the API hook.
+>
+> **`SeDebugPrivilege`** — Windows privilege required to
+> open arbitrary processes for reading. Granted to admins by
+> default but disabled in the token; must be enabled before
+> use (`process/session.EnableSeDebugPrivilege`).
+>
+> **BYOVD (Bring Your Own Vulnerable Driver)** — load a
+> legitimately-signed-but-vulnerable driver (RTCore64 from
+> MSI Afterburner) that exposes an IOCTL for arbitrary kernel
+> R/W. The PPL flip path uses this to clear the EPROCESS
+> protection bits.
 
 ## Primer
 
