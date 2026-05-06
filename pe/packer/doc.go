@@ -1,16 +1,28 @@
 // Package packer is maldev's custom PE/ELF packer.
 //
-// Today (Phase 1a) the package ships only the encrypt + embed
-// pipeline: [Pack] takes any byte buffer, runs it through an
-// AEAD cipher (AES-GCM by default), and emits a self-describing
-// maldev-format blob (magic + version + cipher + compressor +
-// sizes + nonce + ciphertext). [Unpack] reverses the pipeline
-// given the original key.
+// Phases shipped:
 //
-// The Phase 1a output is NOT a runnable PE — it's an opaque blob.
-// The reflective loader stub that wraps the blob into a runnable
-// PE/ELF lands in Phase 1b. The full design (3 phases, capability
-// matrix, threat model, hard constraints) is at
+//   - 1a — [Pack] / [Unpack] pipeline: AEAD cipher (AES-GCM default)
+//     + self-describing maldev-format blob (magic + version + cipher
+//     + compressor + sizes + nonce + ciphertext).
+//   - 1b — Windows x64 reflective loader stub
+//     ([github.com/oioio-space/maldev/pe/packer/runtime]).
+//   - 1c — Composability via [PackPipeline] / [UnpackPipeline]:
+//     stack [PipelineOp] steps ([OpCipher] / [OpPermute] /
+//     [OpCompress] / [OpEntropyCover]) in any order; each step's
+//     algorithm is wire-recorded but its key never is.
+//   - 1c.5 — Compression in pipeline ([CompressorFlate],
+//     [CompressorGzip] via stdlib).
+//   - 1d — Anti-entropy under [OpEntropyCover]:
+//     [EntropyCoverInterleave] (low-entropy padding spliced
+//     between ciphertext chunks — drops real Shannon entropy
+//     proportional to padding ratio), [EntropyCoverCarrier]
+//     (PNG-shaped 32-byte header so first-bytes scanners don't
+//     fire), [EntropyCoverHexAlphabet] (each byte → 2 alphabet
+//     bytes, apparent entropy ≤ 4 bits/byte).
+//
+// The full design (capability matrix, threat model, hard
+// constraints, phase plan) is at
 // docs/refactor-2026-doc/packer-design.md.
 //
 // # MITRE ATT&CK
@@ -21,13 +33,17 @@
 //
 // # Detection level
 //
-// very-quiet (Phase 1a)
+// very-quiet (Phase 1a–1d)
 //
 // Pure pack-time pipeline — no syscalls, no network, no runtime
-// artefacts. The blob bytes themselves carry an [Magic] prefix
+// artefacts. The blob bytes themselves carry a [Magic] prefix
 // that defenders fingerprint trivially today; this is acceptable
-// because the Phase 1a blob is never deployed alone (it's wrapped
-// in a runnable PE host by Phase 1b which obscures the magic).
+// because the blob is never deployed alone (it's wrapped in a
+// runnable PE host by Phase 1b which obscures the magic).
+//
+// Stack [EntropyCoverInterleave] + [EntropyCoverHexAlphabet] as
+// the last pipeline steps to drop apparent histogram entropy
+// below 4 bits/byte — defeats Shannon-based AV scanners.
 //
 // # Required privileges
 //

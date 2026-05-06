@@ -27,6 +27,8 @@ func (o PipelineOp) String() string {
 		return "permute"
 	case OpCompress:
 		return "compress"
+	case OpEntropyCover:
+		return "entropy-cover"
 	default:
 		return fmt.Sprintf("op(%d)", uint8(o))
 	}
@@ -199,6 +201,8 @@ func applyStep(op PipelineOp, algo uint8, key, data []byte) (out []byte, usedKey
 		return applyPermutation(Permutation(algo), key, data)
 	case OpCompress:
 		return applyCompression(Compressor(algo), data)
+	case OpEntropyCover:
+		return applyEntropyCover(EntropyCover(algo), key, data)
 	default:
 		return nil, nil, fmt.Errorf("unknown op %d", op)
 	}
@@ -213,6 +217,8 @@ func reverseStep(op PipelineOp, algo uint8, key, data []byte) ([]byte, error) {
 		return reversePermutation(Permutation(algo), key, data)
 	case OpCompress:
 		return reverseCompression(Compressor(algo), data)
+	case OpEntropyCover:
+		return reverseEntropyCover(EntropyCover(algo), key, data)
 	default:
 		return nil, fmt.Errorf("unknown op %d", op)
 	}

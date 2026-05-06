@@ -307,7 +307,22 @@ signals. Five industrial techniques surveyed:
 | 4 | **Interleaved low-entropy padding** (insert runs of zeros / ASCII / fake-strings between ciphertext chunks) | sectional alternation | +20-50% | minimal | 1d |
 | 5 | ASCII-output encoding (Base64 + dictionary) | ~5 bits/byte | +33% (Base64) | low | NOT shipped — Base64 trips other heuristics |
 
-Ship #1 + #2 + #4 in Phase 1d as `Options.EntropyCover`.
+Ship #1 + #2 + #4 in Phase 1d as `OpEntropyCover` pipeline op.
+
+**Reality check on entropy bounds (measured on uniform random
+input, see `pe/packer/entropy_test.go`):**
+
+| Step | Apparent entropy | Size cost |
+|---|---|---|
+| `EntropyCoverInterleave` (default 33% pad) | ~7.4 bits/byte | +50% |
+| `EntropyCoverCarrier` | unchanged bulk; first 32 bytes match PNG | +32 bytes |
+| `EntropyCoverHexAlphabet` | ≤4 bits/byte | ×2 |
+| `EntropyCoverInterleave` → `EntropyCoverHexAlphabet` (stacked) | ≤4 bits/byte | ×3 |
+
+A single Interleave step does NOT reach ~5 bits/byte on uniform
+random data — Shannon math caps it at ~7.4 with the default pad
+ratio. Stack with HexAlphabet (or accept the 50% size cost of
+75%+ padding) to land in the operationally-useful range.
 
 ## Revised phase plan
 
@@ -316,8 +331,8 @@ Ship #1 + #2 + #4 in Phase 1d as `Options.EntropyCover`.
 | 1a | encrypt + embed pipeline (AES-GCM + blob format) | ✅ v0.50.0 |
 | 1b | Windows reflective loader stub | ✅ v0.51.0 |
 | **1c** | **Composability pipeline** — `Options.Pipeline []PipelineStep` + integration with `crypto/*` (cipher, permutation). | ⏳ next |
-| 1c.5 | Compression in pipeline — aPLib (smallest decoder, ~500 bytes) ships first, then LZMA / zstd / LZ4 as opt-in | ⏳ |
-| 1d | Anti-entropy — XOR mask + carrier resource + interleaved padding, all opt-in via `Options.EntropyCover` | ⏳ |
+| 1c.5 | Compression in pipeline — flate + gzip (stdlib) ship first; aPLib / LZMA / zstd / LZ4 reserved | ✅ v0.53.0 |
+| **1d** | **Anti-entropy** — `OpEntropyCover` step with three algorithms: `EntropyCoverInterleave` (low-entropy padding spliced between ciphertext chunks; default 33% padding lands at ~7.4 bits/byte; stack with HexAlphabet for <5), `EntropyCoverCarrier` (PNG-shaped 32-byte prefix), `EntropyCoverHexAlphabet` (byte → 2-byte code-like alphabet pair; apparent entropy ≤ 4 bits/byte). | ✅ this commit |
 | 1e | Polymorphic stub generation (compile-time templating) + multi-format output (exe / reflective-dll / service-exe / dotnet / bof) | ⏳ |
 | 1f | Linux ELF reflective loader (mirror Phase 1b) + remaining opt-ins (anti-debug / AMSI silence / cert graft / multi-target / env keying — host fingerprint / domain join / date range) | ⏳ |
 | 2 | Section shuffle + IAT scramble (host PE) | deferred |
