@@ -8,6 +8,9 @@ reflects_commit: f7d57a4
 
 [← injection index](README.md) · [docs/index](../../index.md)
 
+> **New to maldev injection?** Read the [injection/README.md
+> vocabulary callout](README.md#primer--vocabulary) first.
+
 ## TL;DR
 
 Spawn a sacrificial child in `CREATE_SUSPENDED` state, allocate +
@@ -15,6 +18,20 @@ write + protect the shellcode in its address space, queue an APC on
 its main thread, then `ResumeThread`. The APC fires before the
 process entry point — no `CreateRemoteThread` event, no extra
 thread, predictable timing. Stealth tier: medium.
+
+| Trait | Value |
+|---|---|
+| **Target class** | Child (suspended) |
+| **Creates a new thread?** | No — uses the suspended child's main thread + APC |
+| **Uses `WriteProcessMemory`?** | Yes (`NtWriteVirtualMemory`) |
+| **Stealth tier** | Medium — no `Create*Thread` event; `QueueUserAPC` itself is observable |
+| **Bypasses CreateThread callbacks?** | Yes — `PsSetCreateThreadNotifyRoutine` doesn't fire (the thread already existed in suspended state) |
+
+When to pick a different method:
+
+- Want to redirect the suspended thread without APC? → [Thread Hijack](thread-hijack.md) — same setup, mutates `RIP` via `NtSetContextThread` instead.
+- Need to inject into a process you can't spawn? → [CreateRemoteThread](create-remote-thread.md), [Section Mapping](section-mapping.md), [Kernel Callback Table](kernel-callback-table.md).
+- Want the spawn itself to look like another process? → Pair with [Process Arg Spoofing](process-arg-spoofing.md) on the `CREATE_SUSPENDED` step.
 
 ## Primer
 

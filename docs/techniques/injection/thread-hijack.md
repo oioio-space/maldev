@@ -8,6 +8,9 @@ reflects_commit: f7d57a4
 
 [← injection index](README.md) · [docs/index](../../index.md)
 
+> **New to maldev injection?** Read the [injection/README.md
+> vocabulary callout](README.md#primer--vocabulary) first.
+
 ## TL;DR
 
 Spawn a `CREATE_SUSPENDED` child, allocate + write + protect shellcode
@@ -16,6 +19,20 @@ state so `RIP` points at the shellcode before resuming. No new thread,
 no APC — the existing thread is **redirected** at the CPU-context
 level. Stealth tier: medium; the trade-off is a `NtSetContextThread`
 on a non-debugger flow, which EDR specifically watches.
+
+| Trait | Value |
+|---|---|
+| **Target class** | Child (suspended) |
+| **Creates a new thread?** | No — redirects the existing main thread via `NtSetContextThread` |
+| **Uses `WriteProcessMemory`?** | Yes (`NtWriteVirtualMemory`) |
+| **Stealth tier** | Medium — no `Create*Thread`, no APC; `NtSetContextThread` outside debug context is the EDR signal |
+| **Bypasses CreateThread callbacks?** | Yes — same reasoning as Early Bird APC |
+
+When to pick a different method:
+
+- Want APC delivery instead of register mutation? → [Early Bird APC](early-bird-apc.md) — sister technique, same setup, different trigger.
+- Want to inject into an existing PID? → Thread Hijack works on any thread you can `OpenProcess(PROCESS_VM_*)` — but the existing thread interrupt is louder than APC.
+- Want the spawn itself to look like another process? → Pair with [Process Arg Spoofing](process-arg-spoofing.md).
 
 ## Primer
 
