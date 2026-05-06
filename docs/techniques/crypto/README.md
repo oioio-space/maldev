@@ -33,6 +33,15 @@ Build-time: encrypt with AES-256-GCM (or XChaCha20-Poly1305), optionally
 wrap in 1–2 lightweight obfuscation layers, embed in the implant. Runtime:
 decrypt → wipe key → inject → wipe plaintext.
 
+> **Where to start (novice path):**
+> 1. [`payload-encryption`](payload-encryption.md) — the only
+>    page in this area. Read the "Pick the primitive" 9-row
+>    matrix at the top to choose your cipher; read the
+>    recommended 3-layer stack diagram for the standard
+>    permutation→cipher→AEAD ordering.
+> 2. After encrypting, pair with [`cleanup/memory-wipe`](../cleanup/memory-wipe.md)
+>    to scrub the key + plaintext from memory after use.
+
 ## Packages
 
 | Package | Tech page | Detection | One-liner |

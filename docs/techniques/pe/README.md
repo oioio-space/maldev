@@ -43,6 +43,25 @@ flowchart LR
     PARSE -. drives unhook scoping .-> RUNT[runtime evasion]
 ```
 
+> **Where to start (novice path):**
+> 1. [`masquerade`](masquerade.md) — make your implant LOOK like
+>    a known Microsoft binary. Easiest visible win.
+> 2. [`certificate-theft`](certificate-theft.md) — graft a real
+>    Authenticode signature from the same donor. Pair with #1.
+> 3. [`strip-sanitize`](strip-sanitize.md) — scrub the "Made in
+>    Go" markers (pclntab + section names) so static analysers
+>    don't flag the language.
+> 4. [`pe-to-shellcode`](pe-to-shellcode.md) — convert your EXE
+>    to position-independent shellcode for any `inject/*` flow.
+> 5. [`dll-proxy`](dll-proxy.md), [`morph`](morph.md) — specialised;
+>    pick when DLL hijack / UPX cover is the engagement context.
+> 6. [`imports`](imports.md), [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse)
+>    — read-only walkers; pair with the [`recon/`](../recon/) discovery side.
+>
+> See also [`catalog-signing`](catalog-signing.md) — research note
+> explaining why some Microsoft binaries can't be cloned via
+> `cert.Copy` (catalog signing instead of embedded WIN_CERTIFICATE).
+
 ## Packages
 
 | Package | Tech page | Detection | One-liner |
