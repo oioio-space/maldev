@@ -130,6 +130,76 @@ func unmarshalHeader(data []byte) (*header, error) {
 	return h, nil
 }
 
+// FormatVersionPipeline is the wire-format version emitted by
+// [PackPipeline]. Distinct from [FormatVersion] (used by [Pack])
+// so old single-cipher blobs continue to unpack via the v1 path
+// and new multi-step blobs route through [UnpackPipeline].
+const FormatVersionPipeline uint16 = 2
+
+// headerSizeV2 is the on-wire size of the v2 header. Same 32
+// bytes as v1; the Cipher + Compressor fields are repurposed
+// as NumSteps + reserved.
+const headerSizeV2 = 32
+
+// headerV2 is the v2 wire layout. Same total size as [header]
+// (32 bytes) so callers don't need to track size variants.
+//
+//	+0x00  Magic        [4]byte "MLDV"
+//	+0x04  Version      u16 = 2
+//	+0x06  NumSteps     u8 (1..255)
+//	+0x07  reserved     u8
+//	+0x08  OrigSize     u64
+//	+0x10  PayloadSize  u64
+//	+0x18  reserved     [8]byte
+type headerV2 struct {
+	Magic       [4]byte
+	Version     uint16
+	NumSteps    uint8
+	OrigSize    uint64
+	PayloadSize uint64
+}
+
+// marshalInto writes the v2 header into dst[:headerSizeV2].
+func (h *headerV2) marshalInto(dst []byte) {
+	_ = dst[headerSizeV2-1]
+	copy(dst[0:4], h.Magic[:])
+	binary.LittleEndian.PutUint16(dst[4:6], h.Version)
+	dst[6] = h.NumSteps
+	dst[7] = 0
+	binary.LittleEndian.PutUint64(dst[8:16], h.OrigSize)
+	binary.LittleEndian.PutUint64(dst[16:24], h.PayloadSize)
+	for i := 24; i < headerSizeV2; i++ {
+		dst[i] = 0
+	}
+}
+
+// unmarshalHeaderV2 parses the first headerSizeV2 bytes of `data`
+// into a v2 header. Rejects v1 blobs with [ErrUnsupportedVersion]
+// so callers can route v1 inputs to the legacy [Unpack] path.
+func unmarshalHeaderV2(data []byte) (*headerV2, error) {
+	if len(data) < headerSizeV2 {
+		return nil, fmt.Errorf("%w: have %d bytes, need %d", ErrShortBlob, len(data), headerSizeV2)
+	}
+	h := &headerV2{
+		Version:     binary.LittleEndian.Uint16(data[4:6]),
+		NumSteps:    data[6],
+		OrigSize:    binary.LittleEndian.Uint64(data[8:16]),
+		PayloadSize: binary.LittleEndian.Uint64(data[16:24]),
+	}
+	copy(h.Magic[:], data[0:4])
+	if h.Magic != Magic {
+		return nil, fmt.Errorf("%w: got %q, want %q", ErrBadMagic, h.Magic, Magic)
+	}
+	if h.Version != FormatVersionPipeline {
+		return nil, fmt.Errorf("%w: got %d, want %d (pipeline)",
+			ErrUnsupportedVersion, h.Version, FormatVersionPipeline)
+	}
+	if h.NumSteps == 0 {
+		return nil, fmt.Errorf("%w: pipeline has zero steps", ErrBadMagic)
+	}
+	return h, nil
+}
+
 // Sentinel errors surfaced by the format / Unpack layer.
 var (
 	// ErrShortBlob fires when the input bytes are too small to

@@ -17,11 +17,36 @@ sub-packages compose the full pipeline:
 
 | You want to… | Use | Notes |
 |---|---|---|
-| Encrypt a payload + carry it as a blob | [`packer.Pack`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#Pack) | Phase 1a; returns blob + AEAD key |
+| Encrypt a payload + carry it as a blob (single AES-GCM) | [`packer.Pack`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#Pack) | Phase 1a; returns blob + AEAD key |
 | Recover the original bytes from a blob | [`packer.Unpack`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#Unpack) | Phase 1a; needs the key Pack returned |
+| **Stack multiple ciphers + permutations** (composability) | [`packer.PackPipeline`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#PackPipeline) | Phase 1c; returns blob + per-step keys |
+| Reverse a pipeline-packed blob | [`packer.UnpackPipeline`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#UnpackPipeline) | Phase 1c; needs the per-step keys |
 | Reflectively load a packed PE in-process (Windows x64) | [`runtime.LoadPE`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/runtime#LoadPE) | Phase 1b; Unpack + map + relocate + resolve imports + set protections |
 | Inspect the loaded image without running it | [`runtime.Prepare`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/runtime#Prepare) | Tests + diagnostics |
-| Pack/unpack from the shell | `cmd/packer pack` / `cmd/packer unpack` | Thin wrapper |
+| Pack/unpack from the shell | `cmd/packer pack` / `cmd/packer unpack` | Thin wrapper (single-AES-GCM only — pipeline CLI lands later) |
+
+### Pipeline composability example (Phase 1c)
+
+Stack a permutation + cipher to lower entropy on disk:
+
+```go
+import "github.com/oioio-space/maldev/pe/packer"
+
+blob, keys, err := packer.PackPipeline(payload, []packer.PipelineStep{
+    {Op: packer.OpPermute, Algo: uint8(packer.PermutationXOR)},
+    {Op: packer.OpPermute, Algo: uint8(packer.PermutationSBox)},
+    {Op: packer.OpCipher,  Algo: uint8(packer.CipherAESGCM)},
+})
+// keys[0] / keys[1] / keys[2] are the per-step keys; transport
+// them to the implant.
+
+// At unpack time:
+recovered, err := packer.UnpackPipeline(blob, keys)
+```
+
+Pack runs the steps in order; Unpack reverses. The wire format
+records each step's Op + Algo so the implant knows what to
+reverse, but keys travel separately.
 
 ⚠ **`runtime.PreparedImage.Run` is gated by `MALDEV_PACKER_RUN_E2E=1`**
 so `go test` against unmodified binaries doesn't hand control
