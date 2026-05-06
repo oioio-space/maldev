@@ -12,6 +12,11 @@ reflects_commit: b6e0e63
 
 ---
 
+> **New to maldev syscalls?** Read the [syscalls/README.md
+> vocabulary callout](README.md#primer--vocabulary) first
+> (syscall, NTAPI, SSN, userland hook, direct/indirect,
+> API hashing, gate-family resolvers).
+
 ## What SSN resolvers are NOT
 
 > [!IMPORTANT]
