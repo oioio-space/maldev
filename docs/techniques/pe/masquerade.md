@@ -10,31 +10,65 @@ reflects_commit: c1f35d0
 
 ## TL;DR
 
-Embed the manifest, icon set, and VERSIONINFO of a legitimate
-Windows binary into a Go implant at compile time. Two modes:
-**preset** (zero-effort blank-import) for the canonical svchost /
-cmd / explorer / taskmgr / notepad identities, or **programmatic**
-([Extract] / [Clone] / [Build] + `With*` options) to clone any
-PE on demand. Process Explorer, Task Manager, and naive
-allowlists render the implant as the cloned identity; signature
-checks and behavioural EDRs see through it.
+You want your implant to LOOK like a known Microsoft / Adobe /
+Mozilla binary in Task Manager, Process Explorer, and the
+Properties → Details dialog. This package lets you embed a
+donor's icon, manifest, and version info into your build.
 
-## Primer
+Pick the right mode based on how much customisation you need:
 
-Task Manager and Process Explorer trust the icon, company name,
-and description embedded in a PE's resource section. Mature
-allowlists key on `OriginalFilename` + `CompanyName`; AppLocker
-publisher rules trust the embedded manifest. Masquerading those
-fields with a known-Microsoft value clears casual triage and
-opens up a host of "is this svchost?" trust assumptions.
+| You want… | Use | Effort | When |
+|---|---|---|---|
+| Implant to look like one of 13 pre-baked donors (svchost, cmd, msedge, claude, …) | **Preset** — blank-import the right sub-package | One `import _` line | You're fine with stock identities; build is on a host without the donors installed |
+| Implant to look like ANY donor PE you have on disk | **`Clone`** | ~5 lines + extracted .syso | You need a specific donor (in-house signed binary, region-specific app) |
+| Pick fields field-by-field (CompanyName from one source, icon from another) | **`Extract` + `Build`** + `With*` options | ~15 lines | You're hand-tuning to evade a specific allowlist rule |
+| Override a field on top of a preset (e.g., svchost identity but custom Description) | **Preset blank-import + `Build` + `With*`** | One import + ~5 lines | Hybrid case |
 
-The clone is shallow. `.rdata` strings (`runtime.`, `main.`),
-imports (Go's ntdll-heavy IAT), and the Authenticode signature
-state still betray the implant to anyone who looks past the icon.
-Pair with [pe/strip](strip-sanitize.md) (Go-toolchain scrub),
-[pe/cert](certificate-theft.md) (signature graft), and
-[cleanup/timestomp](../cleanup/) (MFT alignment) for layered
-cover.
+⚠ **Limit one preset per binary**: Windows PEs carry exactly one
+`RT_MANIFEST` resource. Two blank-imports → duplicate-symbol
+linker error. The same constraint applies to `Build` (which
+emits a `.syso` that the linker treats identically).
+
+What this DOES achieve:
+- Process Explorer / Task Manager show the cloned identity.
+- Properties → Details renders donor's CompanyName / Description /
+  ProductName / OriginalFilename.
+- Naive allowlists keyed on those fields pass.
+
+What this does NOT achieve (need extra layers):
+- Authenticode signature is unchanged → `signtool verify` fails.
+  Pair with [`pe/cert`](certificate-theft.md).
+- `.rdata` strings (`runtime.`, `main.`) + Go-shaped imports
+  still betray a Go binary. Pair with [`pe/strip`](strip-sanitize.md).
+- File timestamps still scream "just built". Pair with
+  [`cleanup/timestomp`](../cleanup/).
+
+## Primer — vocabulary
+
+Four terms recur on this page:
+
+> **`.syso`** — Microsoft-style COFF object file the Go linker
+> automatically merges into a binary's `.rsrc` section. `go build`
+> looks for `*_windows_amd64.syso` (or `_arm64.syso`, etc.) in
+> the imported package directories — no extra build step needed.
+> The preset packages and `GenerateSyso` both produce these.
+>
+> **VERSIONINFO** — the structured binary blob in a PE's resource
+> section that drives the Properties → Details dialog: file
+> version, product version, CompanyName, FileDescription,
+> OriginalFilename, ProductName. Standard Windows tools and
+> allowlists read these fields; Process Explorer surfaces them
+> in its UI.
+>
+> **Manifest** — embedded XML declaring the binary's UAC
+> requirements (`asInvoker` vs `requireAdministrator`), DPI
+> awareness, and supported OS versions. AppLocker publisher
+> rules trust this. The preset packages ship two variants per
+> identity to cover the two UAC modes.
+>
+> **Icon set** — `.ico`-style group of icons at multiple sizes
+> (16×16, 32×32, 48×48, 256×256). What File Explorer renders
+> in the file browser and what shows up in alt-tab.
 
 ## How It Works
 
@@ -315,26 +349,68 @@ In-memory counterpart to `IconFromFile`.
 
 ## Examples
 
-### Simple — preset blank-import
+### Quick start — make your implant look like svchost.exe
+
+The shortest path: blank-import a preset package. The Go linker
+finds the `.syso` it ships, merges svchost's manifest + icons +
+VERSIONINFO into your binary at link time. No code change beyond
+the import line; no donor PE needs to exist on the build host.
 
 ```go
 package main
 
 import (
+    // The blank import (`_ "..."`) compiles the package for its
+    // side effect — in this case, exposing the bundled .syso to
+    // the linker. There is no symbol to call.
     _ "github.com/oioio-space/maldev/pe/masquerade/preset/svchost"
 )
 
 func main() {
-    // Process Explorer renders this as svchost.exe
+    // Your normal implant logic. Identity is set at link time.
 }
 ```
 
+After `go build -o mybin.exe`, inspect what changed:
+
 ```text
 PS> (Get-Item .\mybin.exe).VersionInfo | Format-List
+
 CompanyName      : Microsoft Corporation
 FileDescription  : Host Process for Windows Services
 OriginalFilename : svchost.exe
 ProductName      : Microsoft® Windows® Operating System
+FileVersion      : 10.0.22621.3007
+```
+
+What just happened:
+
+1. Go's linker scanned the imported `preset/svchost` package's
+   directory and found `resource_windows_amd64.syso`.
+2. It merged that COFF object's `.rsrc` section into `mybin.exe`.
+3. Windows now reads svchost's resources from your binary's PE.
+
+What still betrays you:
+
+- Authenticode signature is missing. `signtool verify` fails.
+  Add [`pe/cert.Copy`](certificate-theft.md) for the cosmetic
+  signature graft.
+- Strings in `.rdata` (`runtime.`, `main.`, your import paths)
+  scream "Go binary". Add [`pe/strip`](strip-sanitize.md) to
+  scrub them.
+- File mtime is "now". Add [`cleanup/timestomp`](../cleanup/)
+  to align MFT timestamps with svchost's actual install date.
+
+For the UAC-elevated variant, swap to `preset/svchost/admin`.
+For an entirely different identity, see the
+[Available presets](#available-presets) table.
+
+### Simple — preset blank-import (one-liner)
+
+For when you don't need the explanation:
+
+```go
+import _ "github.com/oioio-space/maldev/pe/masquerade/preset/svchost"
 ```
 
 ### Composed — Clone in a generate step
