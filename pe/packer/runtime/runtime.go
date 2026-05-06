@@ -260,9 +260,10 @@ func parseHeaders(pe []byte) (*peHeaders, error) {
 //
 // Cross-platform — runs the same gate regardless of host GOOS.
 // Operators packing on macOS get the same answer the target
-// Linux loader would. Pure parse + boolean checks; no syscalls,
-// no mmap or OS allocations (heap use is bounded to the phdr
-// slice and a bytes.Reader for buildinfo detection).
+// Linux loader would. Pure parse: no syscalls, no mmap, no OS
+// allocations. Heap use is proportional to input size — a phdr
+// slice (56 × phnum bytes) plus debug/buildinfo's parse overhead
+// when the binary clears the DT_NEEDED and PT_INTERP gates.
 func CheckELFLoadable(input []byte) error {
 	if len(input) < 4 {
 		return fmt.Errorf("%w: input shorter than ELF magic", ErrBadELF)
