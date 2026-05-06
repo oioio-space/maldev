@@ -55,8 +55,8 @@ into the final binary. No external tool is invoked during build.
 
 ## Available presets
 
-5 identities × 2 UAC variants = 10 packages, each ~34 KB. Pick
-one and blank-import:
+13 identities × 2 UAC variants = 26 packages. Pick one and
+blank-import:
 
 | Identity | Source EXE | Base (asInvoker) | Admin (requireAdministrator) |
 |---|---|---|---|
@@ -65,6 +65,14 @@ one and blank-import:
 | taskmgr | `System32\taskmgr.exe` | `…/preset/taskmgr` | `…/preset/taskmgr/admin` |
 | explorer | `Windows\explorer.exe` | `…/preset/explorer` | `…/preset/explorer/admin` |
 | notepad | `System32\notepad.exe` | `…/preset/notepad` | `…/preset/notepad/admin` |
+| msedge | `Program Files (x86)\Microsoft\Edge\Application\msedge.exe` | `…/preset/msedge` | `…/preset/msedge/admin` |
+| onedrive | `LOCALAPPDATA\Microsoft\OneDrive\OneDrive.exe` | `…/preset/onedrive` | `…/preset/onedrive/admin` |
+| acrobat | `Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe` | `…/preset/acrobat` | `…/preset/acrobat/admin` |
+| firefox | `Program Files\Mozilla Firefox\firefox.exe` | `…/preset/firefox` | `…/preset/firefox/admin` |
+| excel | `Program Files\Microsoft Office\root\Office16\EXCEL.EXE` | `…/preset/excel` | `…/preset/excel/admin` |
+| sevenzip | `Program Files\7-Zip\7zFM.exe` | `…/preset/sevenzip` | `…/preset/sevenzip/admin` |
+| vscode | `LOCALAPPDATA\Programs\Microsoft VS Code\Code.exe` | `…/preset/vscode` | `…/preset/vscode/admin` |
+| claude | `LOCALAPPDATA\AnthropicClaude\claude.exe` | `…/preset/claude` | `…/preset/claude/admin` |
 
 **Rules:**
 

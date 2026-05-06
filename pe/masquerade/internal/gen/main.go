@@ -74,6 +74,12 @@ var identities = []identity{
 	{"msedge", `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`},
 	{"onedrive", `${LOCALAPPDATA}\Microsoft\OneDrive\OneDrive.exe`},
 	{"wt", `${LOCALAPPDATA}\Microsoft\WindowsApps\wt.exe`},
+	{"acrobat", `${ProgramFiles}\Adobe\Acrobat DC\Acrobat\Acrobat.exe`},
+	{"firefox", `${ProgramFiles}\Mozilla Firefox\firefox.exe`},
+	{"excel", `${ProgramFiles}\Microsoft Office\root\Office16\EXCEL.EXE`},
+	{"sevenzip", `${ProgramFiles}\7-Zip\7zFM.exe`},
+	{"vscode", `${LOCALAPPDATA}\Programs\Microsoft VS Code\Code.exe`},
+	{"claude", `${LOCALAPPDATA}\AnthropicClaude\claude.exe`},
 }
 
 func main() {
