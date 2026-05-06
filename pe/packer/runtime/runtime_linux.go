@@ -55,6 +55,10 @@ func mapAndRelocate(pe []byte, h *peHeaders) (*PreparedImage, error) {
 // mapAndRelocateELF is the Linux backend for ELF inputs.
 //
 // Stage B coverage:
+//   - Z-scope gate: only Go static-PIE binaries (ET_DYN, no
+//     PT_INTERP, no DT_NEEDED, .go.buildinfo present) are
+//     accepted. All others return ErrNotImplemented with the
+//     reason from [elfHeaders.gateRejectionReason].
 //   - PT_LOAD segments mmap'd into a single anonymous private
 //     region (PROT_READ|PROT_WRITE during load, mprotect to
 //     declared flags after relocations).
@@ -68,20 +72,25 @@ func mapAndRelocate(pe []byte, h *peHeaders) (*PreparedImage, error) {
 //     R_X86_64_RELATIVE relocs applied as `*(u64*)(base+offset) =
 //     base + addend`. Symbol-bound relocs surface
 //     ErrNotImplemented (Stage C territory).
-//   - PT_INTERP / PT_TLS detected and rejected — they need ld.so
-//     and TLS init that Stage C/D will own.
+//   - PT_INTERP rejected as a defensive guard (the Z-scope gate
+//     already excludes it; this is a belt-and-suspenders check).
+//   - PT_TLS: Go static-PIE binaries self-amorce TLS via
+//     arch_prctl(ARCH_SET_FS) in their own _rt0, so no TLS init
+//     is needed from the loader. No rejection needed here.
 //
 // Returns a [PreparedImage] with Base set to the mmap address
 // (free via PreparedImage.Free → munmap). Run() still stubs to
 // ErrNotImplemented; Stage D wires the jump-to-entry path.
 func mapAndRelocateELF(elf []byte, h *elfHeaders) (*PreparedImage, error) {
+	if !h.isGoStaticPIE {
+		return nil, fmt.Errorf("%w: %s", ErrNotImplemented, h.gateRejectionReason())
+	}
 	if h.elfType != etDyn {
 		return nil, fmt.Errorf("%w: ET_EXEC not supported (need PIE / ET_DYN)", ErrNotImplemented)
 	}
 
 	var (
 		hasInterp  bool
-		hasTLS     bool
 		dynVAddr   uint64
 		dynFileSz  uint64
 		dynPresent bool
@@ -100,15 +109,11 @@ func mapAndRelocateELF(elf []byte, h *elfHeaders) (*PreparedImage, error) {
 			dynPresent = true
 		case ptInterp:
 			hasInterp = true
-		case ptTLS:
-			hasTLS = true
 		}
 	}
 	if hasInterp {
+		// Reachable only if isGoStaticPIE detection has a bug; defensive.
 		return nil, fmt.Errorf("%w: PT_INTERP requires ld.so resolution (Stage C)", ErrNotImplemented)
-	}
-	if hasTLS {
-		return nil, fmt.Errorf("%w: PT_TLS requires TLS init (Stage D)", ErrNotImplemented)
 	}
 	if !dynPresent {
 		return nil, fmt.Errorf("%w: ET_DYN missing PT_DYNAMIC", ErrBadELF)

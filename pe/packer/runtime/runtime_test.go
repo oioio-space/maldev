@@ -277,11 +277,16 @@ func TestPrepare_ELF_RejectsTLSOnLinux(t *testing.T) {
 // without PT_DYNAMIC trips the malformed-ELF guard. (Real PIE
 // binaries always carry PT_DYNAMIC; this is a defensive check
 // against forged or truncated inputs.)
+//
+// WithGoBuildInfo passes the Z-scope gate so the test reaches
+// the PT_DYNAMIC check — the gate correctly rejects non-Go
+// inputs, so we need a Go-looking binary here.
 func TestPrepare_ELF_RejectsMissingDynamicOnLinux(t *testing.T) {
 	if goruntime.GOOS != "linux" {
 		t.Skip("Stage B is Linux-only")
 	}
-	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3}) // ET_DYN, no PT_DYNAMIC
+	// ET_DYN + buildinfo present, but no PT_DYNAMIC → ErrBadELF.
+	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithGoBuildInfo: true})
 	_, err := runtime.Prepare(elf)
 	if !errors.Is(err, runtime.ErrBadELF) {
 		t.Errorf("Prepare(ET_DYN no DYNAMIC) on linux: got %v, want ErrBadELF", err)
@@ -300,9 +305,10 @@ func TestPrepare_ELF_HappyPath_MinimalPIE_NoRelocs(t *testing.T) {
 		t.Skip("Stage B mapper is Linux-only")
 	}
 	elf := buildMinimalELF(t, elfHeaderOpts{
-		Type:        3, // ET_DYN
-		Entry:       0x40,
-		WithDynamic: true,
+		Type:            3, // ET_DYN
+		Entry:           0x40,
+		WithDynamic:     true,
+		WithGoBuildInfo: true, // satisfy the Z-scope gate
 	})
 	img, err := runtime.Prepare(elf)
 	if err != nil {
@@ -331,7 +337,7 @@ func TestPreparedImage_FreeIdempotent(t *testing.T) {
 	if goruntime.GOOS != "linux" {
 		t.Skip("Stage B mapper is Linux-only")
 	}
-	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithDynamic: true})
+	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithDynamic: true, WithGoBuildInfo: true})
 	img, err := runtime.Prepare(elf)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
@@ -341,6 +347,20 @@ func TestPreparedImage_FreeIdempotent(t *testing.T) {
 	}
 	if err := img.Free(); err != nil {
 		t.Errorf("second Free: %v (expected no-op)", err)
+	}
+}
+
+// TestPrepare_ELF_LinuxRejectsNonGoStaticPIE confirms the Linux
+// backend rejects non-Go ET_DYN inputs at Stage B with
+// ErrNotImplemented (same surface as CheckELFLoadable).
+func TestPrepare_ELF_LinuxRejectsNonGoStaticPIE(t *testing.T) {
+	if goruntime.GOOS != "linux" {
+		t.Skip("Stage B gate is Linux-only; CheckELFLoadable covers cross-platform")
+	}
+	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithDynamic: true})
+	_, err := runtime.Prepare(elf)
+	if !errors.Is(err, runtime.ErrNotImplemented) {
+		t.Errorf("got %v, want ErrNotImplemented", err)
 	}
 }
 
