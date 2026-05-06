@@ -31,6 +31,18 @@ type elfHeaderOpts struct {
 	Machine uint16 // e_machine — 62 = EM_X86_64 (default)
 	Entry   uint64
 	NoLoad  bool // emit zero PT_LOAD segments to trip the no-load check
+
+	// Stage B knobs — append extra Phdrs after the default PT_LOAD
+	// to exercise the rejection paths in mapAndRelocateELF.
+	WithInterp bool // emit a PT_INTERP segment (Stage B rejects)
+	WithTLS    bool // emit a PT_TLS segment    (Stage B rejects)
+
+	// WithDynamic emits a PT_DYNAMIC segment whose body is a
+	// 16-byte DT_NULL terminator and tunes the PT_LOAD to cover
+	// the whole file. With Type=ET_DYN this produces the smallest
+	// possible mappable PIE — no relocations, no symbols. Used
+	// for the Stage B happy-path test.
+	WithDynamic bool
 }
 
 // buildMinimalELF writes a 64-byte Elf64_Ehdr followed by one
@@ -54,8 +66,22 @@ func buildMinimalELF(t *testing.T, o elfHeaderOpts) []byte {
 
 	const ehdrSize = 64
 	const phdrSize = 56
-	const phnum = 1
-	out := make([]byte, ehdrSize+phnum*phdrSize)
+	phnum := uint16(1)
+	if o.WithInterp {
+		phnum++
+	}
+	if o.WithTLS {
+		phnum++
+	}
+	if o.WithDynamic {
+		phnum++
+	}
+	totalSize := ehdrSize + int(phnum)*phdrSize
+	dynOff := totalSize // where the DT_NULL terminator lives
+	if o.WithDynamic {
+		totalSize += 16 // 16-byte DT_NULL entry
+	}
+	out := make([]byte, totalSize)
 
 	// e_ident
 	out[0], out[1], out[2], out[3] = 0x7F, 'E', 'L', 'F'
@@ -71,15 +97,50 @@ func buildMinimalELF(t *testing.T, o elfHeaderOpts) []byte {
 	binary.LittleEndian.PutUint16(out[54:56], phdrSize) // e_phentsize
 	binary.LittleEndian.PutUint16(out[56:58], phnum)    // e_phnum
 
-	// One Phdr at off=ehdrSize. Type = PT_LOAD (1) unless NoLoad.
+	// First Phdr is always PT_LOAD (or PT_NOTE for the NoLoad
+	// rejection path). When WithDynamic is set, this PT_LOAD
+	// covers the entire file so the dynamic section is mapped.
 	off := ehdrSize
 	pType := uint32(1)
 	if o.NoLoad {
-		pType = 4 // PT_NOTE — not PT_LOAD, trips the "no PT_LOAD" guard
+		pType = 4 // PT_NOTE — trips the "no PT_LOAD" guard
 	}
 	binary.LittleEndian.PutUint32(out[off:off+4], pType)
 	binary.LittleEndian.PutUint32(out[off+4:off+8], 5) // PF_R | PF_X
-	// Other fields stay zero — fine for parse, mapper would reject later.
+	if o.WithDynamic {
+		// PT_LOAD: offset=0, vaddr=0, filesz=memsz=totalSize.
+		// Headers + DT_NULL all sit inside one mapped segment.
+		binary.LittleEndian.PutUint64(out[off+8:off+16], 0)                  // p_offset
+		binary.LittleEndian.PutUint64(out[off+16:off+24], 0)                 // p_vaddr
+		binary.LittleEndian.PutUint64(out[off+24:off+32], 0)                 // p_paddr
+		binary.LittleEndian.PutUint64(out[off+32:off+40], uint64(totalSize)) // p_filesz
+		binary.LittleEndian.PutUint64(out[off+40:off+48], uint64(totalSize)) // p_memsz
+		binary.LittleEndian.PutUint64(out[off+48:off+56], 0x1000)            // p_align
+	}
+	off += phdrSize
+
+	if o.WithInterp {
+		binary.LittleEndian.PutUint32(out[off:off+4], 3) // PT_INTERP
+		binary.LittleEndian.PutUint32(out[off+4:off+8], 4)
+		off += phdrSize
+	}
+	if o.WithTLS {
+		binary.LittleEndian.PutUint32(out[off:off+4], 7) // PT_TLS
+		binary.LittleEndian.PutUint32(out[off+4:off+8], 4)
+		off += phdrSize
+	}
+	if o.WithDynamic {
+		binary.LittleEndian.PutUint32(out[off:off+4], 2) // PT_DYNAMIC
+		binary.LittleEndian.PutUint32(out[off+4:off+8], 6) // PF_R | PF_W
+		binary.LittleEndian.PutUint64(out[off+8:off+16], uint64(dynOff))   // p_offset
+		binary.LittleEndian.PutUint64(out[off+16:off+24], uint64(dynOff))  // p_vaddr
+		binary.LittleEndian.PutUint64(out[off+24:off+32], uint64(dynOff))  // p_paddr
+		binary.LittleEndian.PutUint64(out[off+32:off+40], 16)              // p_filesz (just DT_NULL)
+		binary.LittleEndian.PutUint64(out[off+40:off+48], 16)              // p_memsz
+		binary.LittleEndian.PutUint64(out[off+48:off+56], 8)               // p_align
+		// out[dynOff..dynOff+16] stays zero — that's exactly DT_NULL,
+		// which terminates the dynamic walk before any DT_RELA.
+	}
 
 	return out
 }

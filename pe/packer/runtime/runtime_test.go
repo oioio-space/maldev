@@ -165,27 +165,22 @@ func TestPrepare_ELF_RejectsTruncated(t *testing.T) {
 // platform-appropriate backend after a clean parse. Outcome varies
 // by GOOS:
 //
-//   - linux   → ErrNotImplemented (Stage A) plus a non-nil
-//     PreparedImage carrying the parsed entry / size.
+//   - linux   → ErrNotImplemented (Stage B refuses ET_EXEC; only
+//     PIE / ET_DYN is mappable until Stage C lands ld.so).
 //   - windows → ErrFormatPlatformMismatch (ELF on Windows is a
 //     host mismatch).
 //   - other   → ErrNotWindows (long-tail stub).
 //
-// This test pins the contract so Stage B can flip the linux arm
-// to "no error, real Base" without regressing the other arms.
+// Pins the contract so Stage C can extend the linux arm
+// (ET_EXEC stays rejected; ET_DYN + symbols resolves) without
+// regressing the other arms.
 func TestPrepare_ELF_BackendSurface(t *testing.T) {
 	elf := buildMinimalELF(t, elfHeaderOpts{Entry: 0x401000})
-	img, err := runtime.Prepare(elf)
+	_, err := runtime.Prepare(elf)
 	switch goruntime.GOOS {
 	case "linux":
 		if !errors.Is(err, runtime.ErrNotImplemented) {
 			t.Errorf("Prepare(elf) on linux: got %v, want ErrNotImplemented", err)
-		}
-		if img == nil {
-			t.Fatal("Prepare(elf) on linux: got nil image, want parsed-but-not-mapped")
-		}
-		if img.EntryPoint != 0x401000 {
-			t.Errorf("EntryPoint: got %#x, want 0x401000", img.EntryPoint)
 		}
 	case "windows":
 		if !errors.Is(err, runtime.ErrFormatPlatformMismatch) {
@@ -209,5 +204,117 @@ func TestPrepare_PE_OnLinux(t *testing.T) {
 	_, err := runtime.Prepare(pe)
 	if !errors.Is(err, runtime.ErrFormatPlatformMismatch) {
 		t.Errorf("Prepare(pe) on linux: got %v, want ErrFormatPlatformMismatch", err)
+	}
+}
+
+// TestPrepare_ELF_RejectsETExecOnLinux pins Stage B's choice to
+// only support PIE (ET_DYN). Modern toolchains default to PIE so
+// this is rarely a real obstacle; the rejection surfaces clearly
+// rather than failing later in the mmap path.
+func TestPrepare_ELF_RejectsETExecOnLinux(t *testing.T) {
+	if goruntime.GOOS != "linux" {
+		t.Skip("Stage B is Linux-only; other GOOS arms covered by BackendSurface")
+	}
+	elf := buildMinimalELF(t, elfHeaderOpts{Type: 2}) // ET_EXEC
+	_, err := runtime.Prepare(elf)
+	if !errors.Is(err, runtime.ErrNotImplemented) {
+		t.Errorf("Prepare(ET_EXEC) on linux: got %v, want ErrNotImplemented", err)
+	}
+}
+
+// TestPrepare_ELF_RejectsInterpOnLinux confirms PT_INTERP triggers
+// the ld.so-required path that Stage C will own.
+func TestPrepare_ELF_RejectsInterpOnLinux(t *testing.T) {
+	if goruntime.GOOS != "linux" {
+		t.Skip("Stage B is Linux-only")
+	}
+	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithInterp: true}) // ET_DYN + PT_INTERP
+	_, err := runtime.Prepare(elf)
+	if !errors.Is(err, runtime.ErrNotImplemented) {
+		t.Errorf("Prepare(PT_INTERP) on linux: got %v, want ErrNotImplemented", err)
+	}
+}
+
+// TestPrepare_ELF_RejectsTLSOnLinux confirms PT_TLS triggers the
+// TLS-init path that Stage D will own.
+func TestPrepare_ELF_RejectsTLSOnLinux(t *testing.T) {
+	if goruntime.GOOS != "linux" {
+		t.Skip("Stage B is Linux-only")
+	}
+	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithTLS: true}) // ET_DYN + PT_TLS
+	_, err := runtime.Prepare(elf)
+	if !errors.Is(err, runtime.ErrNotImplemented) {
+		t.Errorf("Prepare(PT_TLS) on linux: got %v, want ErrNotImplemented", err)
+	}
+}
+
+// TestPrepare_ELF_RejectsMissingDynamicOnLinux confirms ET_DYN
+// without PT_DYNAMIC trips the malformed-ELF guard. (Real PIE
+// binaries always carry PT_DYNAMIC; this is a defensive check
+// against forged or truncated inputs.)
+func TestPrepare_ELF_RejectsMissingDynamicOnLinux(t *testing.T) {
+	if goruntime.GOOS != "linux" {
+		t.Skip("Stage B is Linux-only")
+	}
+	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3}) // ET_DYN, no PT_DYNAMIC
+	_, err := runtime.Prepare(elf)
+	if !errors.Is(err, runtime.ErrBadELF) {
+		t.Errorf("Prepare(ET_DYN no DYNAMIC) on linux: got %v, want ErrBadELF", err)
+	}
+}
+
+// TestPrepare_ELF_HappyPath_MinimalPIE_NoRelocs is the Stage B
+// mapper smoke test: build the smallest valid PIE (ET_DYN +
+// one PT_LOAD covering everything + one PT_DYNAMIC whose body
+// is a 16-byte DT_NULL terminator), feed it through Prepare,
+// and confirm the loader maps it cleanly. No relocations, no
+// symbols — just exercises the mmap → copy → mprotect → return
+// path. Run() is never called (still gated, still stub).
+func TestPrepare_ELF_HappyPath_MinimalPIE_NoRelocs(t *testing.T) {
+	if goruntime.GOOS != "linux" {
+		t.Skip("Stage B mapper is Linux-only")
+	}
+	elf := buildMinimalELF(t, elfHeaderOpts{
+		Type:        3, // ET_DYN
+		Entry:       0x40,
+		WithDynamic: true,
+	})
+	img, err := runtime.Prepare(elf)
+	if err != nil {
+		t.Fatalf("Prepare(minimal PIE): %v", err)
+	}
+	defer func() {
+		if err := img.Free(); err != nil {
+			t.Errorf("Free(): %v", err)
+		}
+	}()
+	if img.Base == 0 {
+		t.Error("Base = 0; mapper did not allocate")
+	}
+	if img.SizeOfImage == 0 {
+		t.Error("SizeOfImage = 0; mapper did not size the region")
+	}
+	if img.EntryPoint != img.Base+0x40 {
+		t.Errorf("EntryPoint = %#x, want Base(%#x) + 0x40", img.EntryPoint, img.Base)
+	}
+}
+
+// TestPreparedImage_FreeIdempotent confirms Free can be called
+// twice without surfacing an error — operators may defer it
+// even after an explicit cleanup path.
+func TestPreparedImage_FreeIdempotent(t *testing.T) {
+	if goruntime.GOOS != "linux" {
+		t.Skip("Stage B mapper is Linux-only")
+	}
+	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithDynamic: true})
+	img, err := runtime.Prepare(elf)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := img.Free(); err != nil {
+		t.Fatalf("first Free: %v", err)
+	}
+	if err := img.Free(); err != nil {
+		t.Errorf("second Free: %v (expected no-op)", err)
 	}
 }

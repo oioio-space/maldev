@@ -7,11 +7,14 @@
 //   - Phase 1b — Windows x64 PE EXEs: full mmap + relocations
 //     + LoadLibrary/GetProcAddress imports + section protect.
 //   - Phase 1f Stage A — ELF64 LE x86_64 parser + format
-//     dispatch from [Prepare]. The Linux mmap + RELA + ld.so
-//     resolution path lands in Stage B; today the Linux
-//     backend returns [ErrNotImplemented] with a parsed-but-
-//     not-mapped [PreparedImage] so callers can inspect what
-//     would load.
+//     dispatch from [Prepare].
+//   - Phase 1f Stage B — Linux mmap of PT_LOAD segments,
+//     R_X86_64_RELATIVE relocations applied from the RELA
+//     table walked via PT_DYNAMIC. Per-segment mprotect to
+//     declared PF_R/W/X flags. ET_EXEC and PT_INTERP / PT_TLS
+//     paths surface [ErrNotImplemented] (Stage C/D will own
+//     them); symbol-bound relocations (GLOB_DAT / JUMP_SLOT /
+//     64) likewise defer to Stage C's ld.so resolution.
 //
 // Out of scope (rejected at parse time or surfaced as resolution
 // failures): DLLs (calling DllMain), TLS callbacks, x86,
