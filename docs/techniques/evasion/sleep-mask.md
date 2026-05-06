@@ -9,13 +9,76 @@ reflects_commit: 0dc2bb2
 > **D3FEND:** D3-SMRA — System Memory Range Analysis
 > **Detection:** Low · **Platform:** Windows
 
-## Primer
+## TL;DR
 
-An in-memory implant that stays executable 24/7 is easy to spot. Every EDR that scans process memory at intervals — walking committed pages with `VirtualQueryEx`, filtering for `PAGE_EXECUTE_READ` / `PAGE_EXECUTE_READWRITE`, hashing or YARA-matching the contents — has unlimited attempts to find your shellcode between beacon cycles.
+A long-running implant sits in executable memory 24/7. Every EDR
+worth its name scans those pages on a timer, looking for known
+shellcode patterns — and the implant is idle most of the time
+(waiting for tasks). Sleep masking flips the implant's pages from
+executable to read-write + scrambles the bytes during sleep, so
+the scanner sees random noise in non-executable memory instead.
 
-Sleep masking cuts their window to nearly zero. Right before going idle, the implant **flips its own pages off the executable list** (dropping the `X` bit to `PAGE_READWRITE`) and **XOR-scrambles** the bytes under a fresh random key. Anything that scans executable memory during that idle period will not even see the region, let alone match a signature. When the sleep ends, the mask XORs back and restores the original protection, and the implant is ready to run.
+This package gives you two orthogonal knobs to tune the trade-off:
 
-This package's `Mask` type composes a **`Cipher`** (XOR / RC4 / AES-CTR) with a **`Strategy`** (inline / timerqueue / ekko / foliage) and accepts a `context.Context` so sleep cycles can be cancelled. It also ships a **`RemoteMask`** for masking memory in another process. The e2e tests in [`sleepmask_e2e_windows_test.go`](../../../evasion/sleepmask/sleepmask_e2e_windows_test.go) run a real concurrent memory scanner during `Sleep()` across the available strategies and assert it finds nothing.
+| **Cipher** (how to scramble) | When to pick it |
+|---|---|
+| `NewXORCipher()` (default) | Smallest footprint. Periodic key visible to a determined analyst, doesn't matter if they only see one cycle. |
+| `NewRC4Cipher()` | Stream cipher (no period). Required by Ekko/Foliage strategies. |
+| `NewAESCTRCipher()` | Modern audited primitive. Slightly heavier code + CPU. |
+
+| **Strategy** (where the wait happens) | When to pick it |
+|---|---|
+| `InlineStrategy{}` (default — L1) | Caller goroutine waits via `time.Sleep`. Simplest. |
+| `InlineStrategy{UseBusyTrig: true}` (L1) | Defeats sandboxes that warp `time.Sleep` and EDRs hooking every kernel wait. Burns one core. |
+| `TimerQueueStrategy{}` (L2-light) | Wait runs on a thread-pool worker — caller thread isn't sitting in `Sleep`. |
+| `EkkoStrategy{}` (L2-full) | Beacon RIP hides inside a `WaitForSingleObjectEx` ROP chain. Single region, RC4 only, windows+amd64. |
+| `FoliageStrategy{}` (L3) | Ekko + thread-stack scrubbing mid-wait. Strongest sleep evasion shipped. |
+
+Default to **`InlineStrategy{}` + XOR**. Upgrade only when a
+specific defender forces you to.
+
+## Primer — vocabulary
+
+Five terms recur on this page:
+
+> **EDR memory scan** — the routine job an Endpoint Detection &
+> Response agent does to find in-memory threats: walks all
+> committed pages of the target process via `VirtualQueryEx`,
+> filters for those marked executable (`PAGE_EXECUTE_READ` /
+> `PAGE_EXECUTE_READWRITE`), then hashes or YARA-matches the
+> bytes. Sleep masking exists to blind this exact scan.
+>
+> **VirtualProtect** — the Win32 API that changes a region's
+> protection flags. Used twice per sleep cycle: once to drop
+> `X` so the scanner skips the region, once to restore it
+> before the implant runs again.
+>
+> **NtContinue ROP chain (Ekko)** — a sequence of return
+> addresses written to a thread's stack so that as the thread
+> "returns", it actually executes a chain of pre-chosen
+> functions: VirtualProtect → SystemFunction032 (RC4) → wait →
+> SystemFunction032 → VirtualProtect. Result: from any debugger
+> snapshot during the wait, the beacon thread looks like it's
+> doing legitimate Win32 work, not sleeping.
+>
+> **Stack scrubbing (Foliage)** — extends Ekko by adding an
+> extra `memset` gadget that zeroes the used shadow frames
+> mid-chain. Without it, a thread-stack walker mid-wait can
+> still see the addresses of VirtualProtect / SystemFunction032 /
+> the implant's return point. With it, the stack above Rsp is
+> zeros — no clue what the thread did before reaching the wait.
+>
+> **`Region`** — a contiguous range of memory the mask should
+> protect, given as `{Addr, Size}`. A `Mask` can hold multiple
+> regions (for non-contiguous payloads — e.g., shellcode + a
+> separately-allocated config block).
+
+This package's `Mask` type composes a `Cipher` with a `Strategy`
+and accepts a `context.Context` so sleep cycles can be cancelled.
+It also ships a `RemoteMask` for masking memory in another process.
+The e2e tests in [`sleepmask_e2e_windows_test.go`](../../../evasion/sleepmask/sleepmask_e2e_windows_test.go)
+run a real concurrent memory scanner during `Sleep()` across the
+available strategies and assert it finds nothing.
 
 ## How It Works
 
@@ -75,23 +138,65 @@ See the design spec in `docs/superpowers/specs/2026-04-23-sleepmask-variants-des
 
 ## Usage
 
-### Minimal: mask a single region
+### Quick start — mask one region during a 30-second sleep
+
+You allocated executable memory for shellcode (via
+`VirtualAlloc` + `VirtualProtect` to `PAGE_EXECUTE_READ`).
+The implant just finished a beacon cycle and wants to sleep
+for 30 seconds before the next check-in. The shortest path:
 
 ```go
+package main
+
 import (
     "context"
     "time"
+
     "github.com/oioio-space/maldev/evasion/sleepmask"
 )
 
-// shellcodeAddr points at a PAGE_EXECUTE_READ region holding your payload.
-mask := sleepmask.New(sleepmask.Region{
-    Addr: shellcodeAddr,
-    Size: shellcodeLen,
-})
-// region is RW + scrambled during these 30s
-_ = mask.Sleep(context.Background(), 30*time.Second)
+func sleepProtected(shellcodeAddr uintptr, shellcodeLen uintptr) {
+    // Step 1: tell the mask which region to protect.
+    //         shellcodeAddr points at PAGE_EXECUTE_READ memory
+    //         holding your payload — typically what inject.* just
+    //         allocated.
+    mask := sleepmask.New(sleepmask.Region{
+        Addr: shellcodeAddr,
+        Size: shellcodeLen,
+    })
+
+    // Step 2: sleep. Behind the scenes:
+    //   - VirtualProtect → PAGE_READWRITE (region drops 'X' bit)
+    //   - XOR-scramble bytes with a fresh 32-byte random key
+    //   - time.Sleep(30s)
+    //   - XOR-decrypt (XOR is self-inverse)
+    //   - VirtualProtect → PAGE_EXECUTE_READ (restored)
+    //   - SecureZero the key off the stack
+    _ = mask.Sleep(context.Background(), 30*time.Second)
+
+    // After this returns, the region is back to PAGE_EXECUTE_READ
+    // and contains the original payload, ready to execute.
+}
 ```
+
+What an EDR scanner sees during those 30 seconds:
+
+- The region is `PAGE_READWRITE`, not executable. A scan filtered
+  on executable pages skips it entirely.
+- Even if the scanner sweeps RW pages too, the bytes are random
+  noise — no YARA / hash signature matches.
+
+What the scanner DOES still see:
+
+- The region exists. A scanner that flags "any RW region of size
+  ~150 KB on top of the heap" can still notice it (rare —
+  most EDRs don't classify by size alone, false-positive rate
+  is too high).
+- The implant's beacon thread, if running on the inline strategy,
+  is still parked in `time.Sleep` → `NtWaitForSingleObject`. A
+  thread-stack walker sees that wait. Switch to `EkkoStrategy`
+  to disguise the wait as `WaitForSingleObjectEx` inside a ROP
+  chain.
 
 ### Multi-region: protect non-contiguous memory
 
