@@ -8,6 +8,9 @@ reflects_commit: 3de532d
 
 [← injection index](README.md) · [docs/index](../../index.md)
 
+> **New to maldev injection?** Read the [injection/README.md
+> vocabulary callout](README.md#primer--vocabulary) first.
+
 ## TL;DR
 
 Spawn a child in `CREATE_SUSPENDED` with **fake** command-line arguments
@@ -17,6 +20,20 @@ arguments before resuming. The process executes with the real args; the
 audit trail shows the cover args. Not a shellcode injection on its own
 — a creation-time disguise that pairs with the suspended-child injection
 techniques.
+
+| Trait | Value |
+|---|---|
+| **Target class** | Child (suspended) — disguise only, not execution |
+| **Creates a new thread?** | n/a — disguise wrapper |
+| **Uses `WriteProcessMemory`?** | Yes (~30 bytes — `UNICODE_STRING` header + new args) |
+| **Stealth tier** | Medium — fools Sysmon/EDR process-creation logs; ETW `Microsoft-Windows-Kernel-Process` carries the original creation args separately |
+| **Composes with** | [Early Bird APC](early-bird-apc.md), [Thread Hijack](thread-hijack.md) — the actual injection techniques on the same suspended child |
+
+When to pick a different method:
+
+- Want PPID disguise instead of arg disguise? → [PPID Spoofing](../evasion/ppid-spoofing.md) — sister technique, different field.
+- Don't need a child process at all? → Self / Local / Remote methods (see [injection index](README.md)).
+- Want BOTH disguises stacked? → Apply this + PPID Spoofing on the same `CREATE_SUSPENDED` call before any injection.
 
 ## Primer
 

@@ -8,6 +8,9 @@ reflects_commit: 3de532d
 
 [← injection index](README.md) · [docs/index](../../index.md)
 
+> **New to maldev injection?** Read the [injection/README.md
+> vocabulary callout](README.md#primer--vocabulary) first.
+
 ## TL;DR
 
 Load a legitimate System32 DLL with `DONT_RESOLVE_DLL_REFERENCES`,
@@ -16,6 +19,20 @@ with shellcode, flip back to RX. The resulting RX page is **image-backed**
 — memory scanners that trust file-backed regions see a legitimate
 `msftedit.dll` mapping. Local-only; pair with a callback or thread-pool
 trigger to actually run the bytes.
+
+| Trait | Value |
+|---|---|
+| **Target class** | Local (current process) |
+| **Creates a new thread?** | Caller's choice — pair with [Callback execution](callback-execution.md) or [Thread Pool](thread-pool.md) for the trigger |
+| **Uses `WriteProcessMemory`?** | No (current-process write only) |
+| **Stealth tier** | High — `VirtualQueryEx` reports `MEM_IMAGE` + a real DLL path; only deep `.text` byte-hash checks catch the swap |
+| **Sacrifice** | The stomped DLL's exports are gone — load only DLLs the implant doesn't need (e.g., `msftedit.dll` if no rich-edit calls) |
+
+When to pick a different method:
+
+- Need cross-process? → [Phantom DLL](phantom-dll.md) is the same trick remoted.
+- Don't need image-backed mask? → [Thread Pool](thread-pool.md), [Callback execution](callback-execution.md), [EtwpCreateEtwThread](etwp-create-etw-thread.md) — simpler when scanners aren't the threat.
+- Want both image mask AND remote target? → [Phantom DLL](phantom-dll.md) chained with [Kernel Callback Table](kernel-callback-table.md).
 
 ## Primer
 

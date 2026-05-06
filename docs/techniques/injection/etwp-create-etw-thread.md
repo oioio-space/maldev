@@ -8,6 +8,9 @@ reflects_commit: f7d57a4
 
 [← injection index](README.md) · [docs/index](../../index.md)
 
+> **New to maldev injection?** Read the [injection/README.md
+> vocabulary callout](README.md#primer--vocabulary) first.
+
 ## TL;DR
 
 Self-injection via the **internal** `ntdll!EtwpCreateEtwThread` —
@@ -16,6 +19,20 @@ process, writes shellcode, calls the routine with the shellcode
 address as the start point. Same end result as `NtCreateThreadEx`,
 but the underlying call is unexported and rarely hooked. Self-process
 only.
+
+| Trait | Value |
+|---|---|
+| **Target class** | Self (current process) |
+| **Creates a new thread?** | Yes — but via an unexported, rarely-hooked routine |
+| **Uses `WriteProcessMemory`?** | No (current-process write only) |
+| **Stealth tier** | High — the unexported routine sits below most EDRs' inline-hook surface |
+| **Dependency** | Resolves via PEB walk — robust to EDR API enumeration but breaks if Microsoft renames the symbol |
+
+When to pick a different method:
+
+- Want zero thread creation? → [Callback execution](callback-execution.md), [Thread Pool](thread-pool.md).
+- Need cross-process? → Self-only by definition. See [CreateRemoteThread](create-remote-thread.md), [Section Mapping](section-mapping.md).
+- Want a file-backed image-mask for the shellcode? → [Module Stomping](module-stomping.md).
 
 ## Primer
 
