@@ -343,3 +343,32 @@ func TestPreparedImage_FreeIdempotent(t *testing.T) {
 		t.Errorf("second Free: %v (expected no-op)", err)
 	}
 }
+
+// TestCheckELFLoadable_NonGo confirms a synthetic non-Go ET_DYN
+// binary is rejected with ErrNotImplemented + a clear reason.
+func TestCheckELFLoadable_NonGo(t *testing.T) {
+	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithDynamic: true})
+	err := runtime.CheckELFLoadable(elf)
+	if err == nil {
+		t.Fatal("got nil, want non-nil error")
+	}
+	if !errors.Is(err, runtime.ErrNotImplemented) {
+		t.Errorf("got %v, want ErrNotImplemented", err)
+	}
+}
+
+// TestCheckELFLoadable_NotELF confirms PE / garbage inputs return
+// the right sentinel.
+func TestCheckELFLoadable_NotELF(t *testing.T) {
+	err := runtime.CheckELFLoadable([]byte{'M', 'Z', 0, 0})
+	if err == nil {
+		t.Fatal("got nil, want non-nil error")
+	}
+	if !errors.Is(err, runtime.ErrBadELF) {
+		t.Errorf("got %v, want ErrBadELF", err)
+	}
+	err = runtime.CheckELFLoadable(nil)
+	if !errors.Is(err, runtime.ErrBadELF) {
+		t.Errorf("nil input: got %v, want ErrBadELF", err)
+	}
+}

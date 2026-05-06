@@ -253,6 +253,37 @@ func parseHeaders(pe []byte) (*peHeaders, error) {
 	return h, nil
 }
 
+// CheckELFLoadable returns nil when `input` is an ELF that the
+// Linux runtime would accept (ET_DYN + Go static-PIE marker +
+// no DT_NEEDED + no PT_INTERP), or an error wrapping the same
+// sentinels Prepare would emit on Linux.
+//
+// Cross-platform — runs the same gate regardless of host GOOS.
+// Operators packing on macOS get the same answer the target
+// Linux loader would. Pure parse + boolean checks; no syscalls,
+// no mmap or OS allocations (heap use is bounded to the phdr
+// slice and a bytes.Reader for buildinfo detection).
+func CheckELFLoadable(input []byte) error {
+	if len(input) < 4 {
+		return fmt.Errorf("%w: input shorter than ELF magic", ErrBadELF)
+	}
+	if input[0] != elfMagic0 || input[1] != elfMagic1 ||
+		input[2] != elfMagic2 || input[3] != elfMagic3 {
+		return fmt.Errorf("%w: not an ELF (magic % x)", ErrBadELF, input[:4])
+	}
+	h, err := parseELFHeaders(input)
+	if err != nil {
+		return err
+	}
+	if h.elfType != etDyn {
+		return fmt.Errorf("%w: ET_EXEC not supported (need PIE / ET_DYN)", ErrNotImplemented)
+	}
+	if !h.isGoStaticPIE {
+		return fmt.Errorf("%w: %s", ErrNotImplemented, h.gateRejectionReason())
+	}
+	return nil
+}
+
 // readSection returns the i-th IMAGE_SECTION_HEADER from the
 // section table. Bounds-checked by parseHeaders.
 func readSection(pe []byte, h *peHeaders, i int) sectionEntry {
