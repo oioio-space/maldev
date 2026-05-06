@@ -10,30 +10,73 @@ reflects_commit: 3de532d
 
 ## TL;DR
 
-Multi-factor sandbox / VM / analysis-environment detector.
-Aggregates 7 check dimensions
-([antidebug](anti-analysis.md), [antivm](anti-analysis.md),
-hardware thresholds, suspicious user/host names, analysis-tool
-processes, fake-domain DNS interception, time-based) into a
-single [`Checker.IsSandboxed`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox) result.
-Returns `(true, reason, err)` so callers can bail and log
-why.
+You want to bail out before doing anything risky if the host
+looks like a sandbox or analyst's machine. No single signal is
+conclusive (a low-end laptop has 2 cores too, an admin's
+hostname might just be "DESKTOP-X1") — so this orchestrator
+stacks 7 orthogonal dimensions and fires when ANY of them flags.
 
-## Primer
+Each dimension catches a different sandbox class:
 
-No single signal is conclusive. CPU core count alone won't tell
-you Cuckoo from a low-end laptop; VM detection alone misses
-bare-metal forensic workstations. The orchestrator stacks
-indicators across orthogonal dimensions so high-confidence
-sandboxes (Cuckoo, Joe Sandbox, ANY.RUN, hybrid-analysis) light
-up across multiple checks while real targets light up across
-zero or one.
+| Dimension | Catches | False positive on |
+|---|---|---|
+| **Debugger** | Live analyst with attached debugger | nothing in practice |
+| **VM/Hypervisor** | Cuckoo, Joe Sandbox, most public sandboxes | Hyper-V on a real Win11 laptop |
+| **Hardware** (cores / RAM / disk) | Underprovisioned VMs (2 CPU / 4 GB RAM / 60 GB disk baseline) | Low-end real machines |
+| **User/host name** | Generic analyst defaults (admin / user / sandbox / malware / `WORKSTATION-1`) | Lazy real-user provisioning |
+| **Analysis tool processes** | procmon / wireshark / fiddler / x64dbg actively running | Reverse engineers on real machines |
+| **Fake-domain DNS** | Sandbox internet simulation (every domain resolves) | Captive-portal hotspots |
+| **Time-based** | Sandboxes that fast-forward `time.Sleep` | Real machines under heavy load |
 
-The default configuration is calibrated against the canonical
-public sandbox baselines: 2 cores, 4 GB RAM, 60 GB disk,
-generic usernames (`admin`, `user`, `sandbox`, `malware`),
-analysis tools (`procmon`, `wireshark`, `fiddler`,
-`x32dbg`/`x64dbg`).
+Quick-pick:
+
+| You want to… | Use | Cost |
+|---|---|---|
+| Apply the canonical defender-baseline check | [`DefaultConfig`](#func-defaultconfig-config) + [`Checker.IsSandboxed`](#func-checker-issandboxed) | <100ms total (most checks are syscalls/file reads) |
+| Tighten/relax a specific dimension | Mutate `Config` fields then `NewChecker(cfg)` | same |
+| Stop on first hit (default) vs collect all reasons | `Config.StopOnFirst` (true/false) | StopOnFirst=false sums all check times |
+
+What this DOES NOT do:
+
+- **Doesn't bypass anything** — orchestrator only DECIDES.
+  Pair with `os.Exit(0)` or a "play dead" branch in your
+  implant.
+- **No HVCI / hardware-virt-aware probes** — that's
+  [`recon/antivm.HypervisorPresent`](anti-analysis.md). Add
+  manually if you want it scoring.
+- **Time-based check on goroutine dispatch** — high-CPU real
+  hosts can trip the timing dimension. Tune `EvasionTimeout`
+  generously or disable when targeting under-resourced
+  Windows servers.
+
+## Primer — vocabulary
+
+Five terms recur on this page:
+
+> **Sandbox** — automated analysis environment (Cuckoo,
+> JoeSandbox, ANY.RUN, hybrid-analysis, AV vendor labs) that
+> runs your sample in a VM and traces every syscall + network
+> packet. The implant's job is to bail before producing trace
+> data the analyst can use.
+>
+> **Hardware threshold** — a sandbox is usually a VM provisioned
+> with the bare minimum to boot Windows: 2 cores, 4 GB RAM,
+> 60 GB disk. Real user machines have more. Setting min thresholds
+> catches under-provisioned VMs without lying about real laptop
+> baselines (which exceed these by 4-8×).
+>
+> **Fake-domain DNS** — most sandboxes simulate internet to keep
+> the sample doing things. Side effect: `nonexistent-deadbeef.invalid`
+> resolves with a real-looking IP. A real machine returns NXDOMAIN.
+>
+> **Time-based detection** — some sandboxes accelerate
+> `Sleep`/`time.Sleep` so the sample doesn't waste analysis
+> budget on long sleep loops. The orchestrator measures wall-clock
+> elapsed during a known-duration sleep; mismatch → sandbox.
+>
+> **Indicator dimension** — a category of fingerprint signal
+> (debugger / hardware / username / etc.). Each runs
+> independently; the orchestrator combines verdicts.
 
 ## How It Works
 
