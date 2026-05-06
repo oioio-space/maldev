@@ -46,10 +46,12 @@ type Compressor uint8
 
 const (
 	CompressorNone  Compressor = 0
-	CompressorAPLib Compressor = 1
-	CompressorLZMA  Compressor = 2
-	CompressorZstd  Compressor = 3
-	CompressorLZ4   Compressor = 4
+	CompressorAPLib Compressor = 1 // reserved; not yet implemented
+	CompressorLZMA  Compressor = 2 // reserved; not yet implemented
+	CompressorZstd  Compressor = 3 // reserved; not yet implemented
+	CompressorLZ4   Compressor = 4 // reserved; not yet implemented
+	CompressorFlate Compressor = 5 // raw DEFLATE (compress/flate)
+	CompressorGzip  Compressor = 6 // gzip-framed DEFLATE (compress/gzip)
 )
 
 // String returns the canonical lowercase compressor name.
@@ -65,6 +67,10 @@ func (c Compressor) String() string {
 		return "zstd"
 	case CompressorLZ4:
 		return "lz4"
+	case CompressorFlate:
+		return "flate"
+	case CompressorGzip:
+		return "gzip"
 	default:
 		return fmt.Sprintf("compressor(%d)", uint8(c))
 	}

@@ -25,19 +25,21 @@ sub-packages compose the full pipeline:
 | Inspect the loaded image without running it | [`runtime.Prepare`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/runtime#Prepare) | Tests + diagnostics |
 | Pack/unpack from the shell | `cmd/packer pack` / `cmd/packer unpack` | Thin wrapper (single-AES-GCM only — pipeline CLI lands later) |
 
-### Pipeline composability example (Phase 1c)
+### Pipeline composability example (Phase 1c + 1c.5)
 
-Stack a permutation + cipher to lower entropy on disk:
+Stack compression + permutation + cipher — canonical
+"compress-then-encrypt" order:
 
 ```go
 import "github.com/oioio-space/maldev/pe/packer"
 
 blob, keys, err := packer.PackPipeline(payload, []packer.PipelineStep{
-    {Op: packer.OpPermute, Algo: uint8(packer.PermutationXOR)},
-    {Op: packer.OpPermute, Algo: uint8(packer.PermutationSBox)},
-    {Op: packer.OpCipher,  Algo: uint8(packer.CipherAESGCM)},
+    {Op: packer.OpCompress, Algo: uint8(packer.CompressorFlate)},
+    {Op: packer.OpPermute,  Algo: uint8(packer.PermutationSBox)},
+    {Op: packer.OpCipher,   Algo: uint8(packer.CipherAESGCM)},
 })
-// keys[0] / keys[1] / keys[2] are the per-step keys; transport
+// keys[0] is nil (compression has no secret); keys[1] / keys[2]
+// are the per-step keys for the SBox + AES-GCM stages. Transport
 // them to the implant.
 
 // At unpack time:
@@ -47,6 +49,14 @@ recovered, err := packer.UnpackPipeline(blob, keys)
 Pack runs the steps in order; Unpack reverses. The wire format
 records each step's Op + Algo so the implant knows what to
 reverse, but keys travel separately.
+
+**Compression caveat**: always compress BEFORE encryption.
+Encrypted bytes are near-uniform entropy and don't compress.
+Phase 1c.5 ships `CompressorFlate` (raw DEFLATE — smallest
+output overhead, ~98% reduction observed on highly-repetitive
+input) and `CompressorGzip` (DEFLATE + framing). aPLib / LZMA
+/ zstd / LZ4 are reserved constants and return
+`ErrUnsupportedCompressor` until implemented.
 
 ⚠ **`runtime.PreparedImage.Run` is gated by `MALDEV_PACKER_RUN_E2E=1`**
 so `go test` against unmodified binaries doesn't hand control

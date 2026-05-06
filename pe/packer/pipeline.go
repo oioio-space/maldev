@@ -25,6 +25,8 @@ func (o PipelineOp) String() string {
 		return "cipher"
 	case OpPermute:
 		return "permute"
+	case OpCompress:
+		return "compress"
 	default:
 		return fmt.Sprintf("op(%d)", uint8(o))
 	}
@@ -187,13 +189,16 @@ func UnpackPipeline(packed []byte, keys PipelineKeys) ([]byte, error) {
 
 // applyStep runs ONE pipeline step forward. Returns the
 // transformed bytes + the key used (callers passing key=nil
-// get the generated key back).
+// get the generated key back). Compression steps return a nil
+// key (no secret needed).
 func applyStep(op PipelineOp, algo uint8, key, data []byte) (out []byte, usedKey []byte, err error) {
 	switch op {
 	case OpCipher:
 		return applyCipher(Cipher(algo), key, data)
 	case OpPermute:
 		return applyPermutation(Permutation(algo), key, data)
+	case OpCompress:
+		return applyCompression(Compressor(algo), data)
 	default:
 		return nil, nil, fmt.Errorf("unknown op %d", op)
 	}
@@ -206,6 +211,8 @@ func reverseStep(op PipelineOp, algo uint8, key, data []byte) ([]byte, error) {
 		return reverseCipher(Cipher(algo), key, data)
 	case OpPermute:
 		return reversePermutation(Permutation(algo), key, data)
+	case OpCompress:
+		return reverseCompression(Compressor(algo), data)
 	default:
 		return nil, fmt.Errorf("unknown op %d", op)
 	}
