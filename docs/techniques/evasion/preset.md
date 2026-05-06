@@ -11,15 +11,86 @@ reflects_commit: 0dc2bb2
 **Platform:** Windows only
 **Detection:** Varies by preset (Low for Minimal, Medium for Stealth, High for Aggressive)
 
-Preset bundles the most common evasion techniques into three opinionated
+Preset bundles the most common evasion techniques into four opinionated
 configurations keyed on risk tolerance. Each preset returns
 `[]evasion.Technique` for use with `evasion.ApplyAll()`.
 
 ---
 
-## Primer
+## TL;DR
 
-Evasion rarely works in isolation — AMSI alone misses ETW, ETW alone misses userland hooks. Presets are pre-composed bundles (`Minimal`, `Stealth`, `Aggressive`) that apply a coherent set of techniques in one call. Pick one, ship it, don't micromanage the pieces.
+You're about to do something noisy (load shellcode, run a script,
+inject into another process). Defenders watch for that activity
+through AMSI, ETW, userland API hooks, and process mitigation
+policies. Presets bundle pre-composed evasion stacks so you don't
+have to compose them yourself.
+
+Pick the right preset based on what you're staging:
+
+| You're running… | Use | What it disables | Reversible | When to pick |
+|---|---|---|---|---|
+| A dropper / stager / first-stage | [`Minimal()`](#minimal) | AMSI + ETW | Yes (process restart) | Smallest footprint. No disk reads, no process changes — just three memory writes. |
+| Post-ex tooling that needs to inject | [`Stealth()`](#stealth) | Minimal + classic unhook of 10 NTAPI functions | Yes | Sweet spot for most injectors. Handles the EDR userland-hook layer. |
+| Modern Win11 24H2+ with CET enforcement | [`Hardened()`](#hardened) | Stealth + CET opt-out | Yes | Same as Stealth but APC-delivered shellcode survives ENDBR64 enforcement. |
+| Long-dwell implant where stealth > flexibility | [`Aggressive()`](#aggressive) | Hardened + ACG + BlockDLLs | **No** (process-wide, irreversible) | After all RWX allocation + injection is done. ACG forbids future RWX writes; BlockDLLs forbids unsigned DLL loads. |
+
+⚠ **Aggressive is irreversible at the process level**: ACG and
+BlockDLLs are mitigation policies the kernel enforces process-wide
+until the process exits. Apply LAST in your chain — anything
+needing RWX afterwards will fail.
+
+⚠ **One preset per process**: presets stack functionally
+(`Stealth` ⊃ `Minimal`), but applying two of them double-patches
+AMSI/ETW (idempotent — second patch is a no-op write of the
+same bytes, but wastes integrity-check budget if EDR re-hashes).
+
+Standalone helper:
+[`CETOptOut()`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/preset#CETOptOut)
+returns a single Technique callers can pull into a custom stack
+without committing to a full preset. No-op when CET isn't enforced.
+
+---
+
+## Primer — vocabulary
+
+Five terms recur on this page:
+
+> **Technique** — a value satisfying `evasion.Technique`
+> interface (`Apply(caller) error`). Presets return slices of
+> these; `evasion.ApplyAll` runs them in order and collects
+> per-Technique failures into a map.
+>
+> **AMSI (Anti-Malware Scan Interface)** — Microsoft's hook
+> point inside script hosts (PowerShell, JScript, VBScript) and
+> the .NET runtime. Asks the registered AV provider "is this
+> string / buffer / assembly malicious?" before execution.
+> Patching `AmsiScanBuffer` to return clean blinds it.
+>
+> **ETW (Event Tracing for Windows)** — kernel telemetry
+> framework. The `Microsoft-Windows-Threat-Intelligence`
+> provider in particular flags suspicious memory operations.
+> Patching `EtwEventWrite*` + `NtTraceEvent` silences events
+> from this process.
+>
+> **Userland hook** — an inline patch (typically JMP rel32) an
+> EDR installs at the start of an NTAPI function so it can
+> inspect arguments before the syscall fires. Classic unhooking
+> restores the original prologue bytes from a fresh ntdll image
+> on disk.
+>
+> **CET (Control-flow Enforcement Technology)** — Intel
+> hardware feature Microsoft enforces on Win11 24H2+ pool
+> dispatchers. Requires every indirect-jump target (including
+> APC-delivered shellcode) to start with an ENDBR64 instruction.
+> `CETOptOut` opts the process out so APC-delivered shellcode
+> doesn't need the prefix. Most current shellcode generators
+> don't emit ENDBR64.
+>
+> **ACG (Arbitrary Code Guard) / BlockDLLs** — process
+> mitigation policies. ACG forbids new RWX allocations + RX
+> writes after enable. BlockDLLs forbids loading unsigned DLLs.
+> Both irreversible — applied LAST in Aggressive for that
+> reason.
 
 ---
 
@@ -154,22 +225,69 @@ is long enough that EDR will attempt active response.
 
 ## Usage Examples
 
-### Basic usage
+### Quick start — apply a preset at startup
+
+The shortest "blind the EDR before doing anything risky" pattern.
+Pick a preset, hand it to `evasion.ApplyAll`, log per-technique
+failures (the map is empty when everything succeeds).
 
 ```go
+package main
+
 import (
     "log"
+
     "github.com/oioio-space/maldev/evasion"
     "github.com/oioio-space/maldev/evasion/preset"
 )
 
 func main() {
-    // Apply Stealth preset (returns nil map on full success)
+    // Apply Stealth (= AMSI + ETW + 10x classic ntdll unhook).
+    // Each technique runs in order; failures don't abort the
+    // chain — they're collected per name in the returned map.
     errs := evasion.ApplyAll(preset.Stealth(), nil)
     for name, err := range errs {
-        log.Printf("evasion technique %s failed: %v", name, err)
+        log.Printf("technique %q failed: %v (continuing)", name, err)
     }
+
+    // ... your injector / loader runs here, with AMSI silent,
+    //     ETW dropping events, and ntdll prologues clean.
 }
+```
+
+What just happened, in order:
+
+1. `amsi.ScanBufferPatch()` overwrote the entry of
+   `AmsiScanBuffer` with `xor eax, eax; ret` → every AMSI scan
+   from this process now returns "clean".
+2. `etw.All()` did the same to `EtwEventWrite*` and
+   `NtTraceEvent` → ETW providers receive no events from us.
+3. `unhook.CommonClassic()` ran 10 small reads of the on-disk
+   `ntdll.dll` to get clean prologue bytes for the typical
+   EDR-hooked syscalls (NtAllocateVirtualMemory,
+   NtProtectVirtualMemory, NtCreateThreadEx, …) and patched
+   the in-memory copies back to those bytes.
+
+What this DOES NOT do:
+
+- Hide the process. Process Hacker / Task Manager still see you.
+  Combine with [`pe/masquerade`](../pe/masquerade.md) for that.
+- Defeat kernel-level callbacks. EDR drivers like
+  `PsSetCreateProcessNotify` see your process spawn regardless
+  of userland patches. Layer with
+  [`evasion/kernel-callback-removal`](kernel-callback-removal.md)
+  if you have admin and a BYOVD path.
+- Survive process restart. AMSI/ETW patches are per-process —
+  every new process you spawn needs its own preset application.
+
+For the irreversible "hardened" stack (ACG + BlockDLLs on top),
+see [Aggressive](#aggressive) below — apply it LAST after all
+RWX work is done, or your subsequent injection calls will fail.
+
+### Basic usage (one-liner)
+
+```go
+errs := evasion.ApplyAll(preset.Stealth(), nil)
 ```
 
 ### Hardened — Win11 24H2+ with CET shadow stacks
