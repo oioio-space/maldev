@@ -12,6 +12,53 @@ behind a single `*Caller`. Operators tune each axis independently;
 downstream packages (`inject/*`, `evasion/*`, `c2/shell`) accept a
 `*Caller` and inherit the chosen posture without recompiling.
 
+## Primer — vocabulary
+
+Eight terms recur throughout the syscalls/* pages:
+
+> **Syscall** — direct kernel transition (`syscall` instruction
+> on x64). The actual mechanism Windows uses to call into the
+> kernel; everything else (Win32, NTAPI) is a wrapper that
+> eventually issues a syscall.
+>
+> **NTAPI** — `ntdll.dll`'s Nt* functions
+> (`NtAllocateVirtualMemory`, `NtCreateThreadEx`, …). Thin
+> userland wrappers around the syscall instruction. Every
+> Win32 API call (`VirtualAlloc`, `CreateThread`) eventually
+> bottoms out in an NTAPI call.
+>
+> **SSN (System Service Number)** — the integer index of a
+> syscall in the kernel's service table. Hardcoded in each
+> ntdll prologue. Rotates between Windows builds — `NtAllocateVirtualMemory`
+> is SSN 0x18 on one build, 0x19 on the next.
+>
+> **Userland hook** — inline patch (typically `JMP rel32`)
+> an EDR installs at the start of an NTAPI prologue so it
+> can inspect arguments before the syscall fires. "Bypassing
+> hooks" means issuing the syscall without going through the
+> patched bytes.
+>
+> **Direct syscall** — issuing the `syscall` instruction
+> from your own code with the SSN you obtained somehow.
+> Skips the (possibly hooked) ntdll prologue entirely.
+>
+> **Indirect syscall** — calling INTO ntdll's `syscall`
+> instruction (which lives at a fixed offset past the
+> prologue). Trades direct-syscall's "RIP outside ntdll"
+> tell for "uses the canonical syscall site". EDRs scanning
+> for syscall instructions in non-ntdll memory miss this.
+>
+> **API hashing** — replacing string lookups (`"NtAllocateVirtualMemory"`)
+> with constant integer hashes (`0xE0762FEA`) so the implant's
+> `.rdata` doesn't carry plaintext API names. ROR13 is the
+> classical algorithm; Hellgate / HashGate use this internally
+> to find Nt* exports.
+>
+> **Hellsgate / Halosgate / Tartarus / HashGate / Chain** —
+> SSN-resolution strategies. Each has different fallbacks for
+> when the canonical source (a clean ntdll prologue) is
+> compromised. See [ssn-resolvers.md](ssn-resolvers.md).
+
 ## Three concerns (read this first)
 
 ```mermaid
