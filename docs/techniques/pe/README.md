@@ -112,3 +112,6 @@ For payload delivery (separate from build):
 - [`inject`](../injection/README.md) — execution surface for `pe/srdi` shellcode.
 - [`crypto`](../crypto/README.md) — payload encryption pre-conversion.
 - [`hash`](../hash/README.md) — measure SHA-256 vs fuzzy-hash deltas after morph.
+- [Catalog signing (research note)](catalog-signing.md) — why
+  cmd / notepad / System32 binaries return `ErrNoCertificate`
+  from `cert.Read` and how WinTrust resolves their signatures.
