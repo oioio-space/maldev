@@ -10,14 +10,37 @@ reflects_commit: 4d87569
 
 ## TL;DR
 
-Load + execute a Cobalt Strike-style Beacon Object File (BOF) —
-a compiled COFF object — entirely in process memory. Parses
-COFF, applies relocations, resolves entry-point, jumps into
-RWX memory. x64-only. The Beacon API (`BeaconPrintf` /
-`BeaconOutput` / `BeaconData*` / `BeaconFormat*` / `BeaconError*`
-/ `BeaconGetSpawnTo`) is implemented in pure Go; dynamic-link
-imports resolve through the PEB walk + ROR13 hash route, so
-public TrustedSec / Outflank / FortyNorth BOFs run unmodified.
+You have a `.o` file (compiled C object) — typically a public
+BOF from TrustedSec / Outflank / FortyNorth (whoami, situational
+awareness, file ops). You want to run it inside your implant
+without spawning a child process. This package loads + executes
+the COFF in memory.
+
+| You want to… | Use | Notes |
+|---|---|---|
+| Run a BOF from disk | [`Run`](#run) | Loads `.o`, parses COFF, resolves Beacon API, executes |
+| Run a BOF from memory | [`RunBytes`](#runbytes) | When the BOF was decrypted in-process and never landed on disk |
+| Pass arguments to the BOF (parsed via `BeaconData*`) | `Config.Args` | Variadic — the BOF's `BeaconDataInt` / `BeaconDataPtr` etc. consume them |
+
+What this DOES achieve:
+
+- Public BOFs (TrustedSec/CS-Situational-Awareness-BOF,
+  TrustedSec/CS-Remote-OPs-BOF, Outflank/C2-Tool-Collection)
+  run unmodified.
+- Beacon API stubs implemented in Go — no Cobalt Strike needed
+  on the operator side.
+- Dynamic imports (`KERNEL32`, `ADVAPI32`, …) resolve through
+  PEB + ROR13 hash, so the BOF's import table doesn't appear
+  as plaintext strings.
+
+What this does NOT achieve:
+
+- **x64 only** — no x86, no ARM64.
+- **Doesn't sandbox** — BOF runs in your process address space.
+  Crash in the BOF = crash in your implant.
+- **AMSI / ETW telemetry from the BOF still fires** — pair
+  with [`evasion/preset.Stealth`](../evasion/preset.md) before
+  `Run`.
 
 ## Primer
 

@@ -18,6 +18,61 @@ detection_level: very-noisy
 
 ---
 
+## TL;DR
+
+You need arbitrary kernel read/write from user mode (typically
+to bypass LSASS PPL or zero a kernel callback). This package
+loads MSI Afterburner's signed RTCore64.sys driver, exploits
+its CVE-2019-16098 read/write IOCTL, and exposes
+[`kernel/driver.ReadWriter`](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver#ReadWriter)
+to the consumer.
+
+| You want to… | Use | Constraint |
+|---|---|---|
+| Get a kernel R/W primitive | [`Install`](#install) | Admin + `SeLoadDriverPrivilege` + driver bytes shipped |
+| Read kernel memory | [`ReadKernel`](#readkernel) | After `Install` succeeded |
+| Write kernel memory | [`WriteKernel`](#writekernel) | Same |
+| Clean up after the op | [`Uninstall`](#uninstall) | Best-effort — deletes service + unregisters driver |
+
+⚠ **HVCI block-list cutoff**: as of 2021-09 Microsoft ships
+a driver block-list that includes RTCore64. On HVCI-on hosts
+**newer than the block-list update**, the driver load is
+refused. Verify via [`Loaded`](#loaded) / catch
+`ErrPrivilegeRequired` / probe with a non-destructive read
+before relying on this primitive.
+
+⚠ **Driver bytes not bundled** — ship `RTCore64.sys` via
+`//go:embed` behind the `byovd_rtcore64` build tag, OR via
+`Config.Bytes`. Default builds return `ErrDriverBytesMissing`
+to keep the maldev repo free of the signed driver itself.
+
+What this DOES achieve:
+
+- Pre-block-list HVCI hosts: full kernel R/W from user mode
+  with one signed driver load.
+- LSASS PPL bypass via [`credentials/lsassdump`](../credentials/lsassdump.md)'s
+  PPL-flip path (consumes this driver).
+- Kernel-callback removal via
+  [`evasion/kernel-callback-removal`](../evasion/kernel-callback-removal.md)
+  (consumes this driver).
+
+What this does NOT achieve:
+
+- **Stealth driver load** — `NtLoadDriver` + SCM CreateService
+  fire kernel callbacks, ETW Microsoft-Windows-Kernel-Process,
+  and Defender's "Microsoft-attested driver" detection. Driver
+  install IS the loud event; once loaded, IOCTLs are quieter.
+- **PatchGuard immunity** — RTCore64's slow-IOCTL pattern
+  generally stays below PG's scan thresholds, but kernel
+  writes to certain critical structures (KPP-protected
+  pages) trigger BSOD on next scan. Tested-safe targets
+  documented in the consumer pages.
+- **Doesn't survive reboot** — service registration cleaned
+  by `Uninstall`. For persistence of kernel R/W, you need a
+  different primitive.
+
+---
+
 ## Primer
 
 EDR vendors register kernel-mode callbacks (`PsSetCreateProcessNotifyRoutineEx`,

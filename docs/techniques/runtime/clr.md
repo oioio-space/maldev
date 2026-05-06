@@ -10,12 +10,44 @@ reflects_commit: 4d87569
 
 ## TL;DR
 
-Host the .NET CLR in process via `ICLRMetaHost` /
-`ICorRuntimeHost` COM and execute .NET assemblies from memory —
-no `.exe` / `.dll` on disk. Equivalent to Cobalt Strike's
-`execute-assembly`. Pair with `evasion/amsi.PatchAll` upstream —
-AMSI v2 scans every assembly passed to `AppDomain.Load_3` and
-will block flagged bytes (SharpHound, Rubeus, Seatbelt).
+You want to run a .NET assembly (Mimikatz / SharpHound /
+Rubeus / Seatbelt) inside your implant without dropping `.exe`
+to disk and without spawning `powershell.exe -enc ...`. This
+package hosts the CLR in your process and runs the assembly
+from memory.
+
+| You want to… | Use | Notes |
+|---|---|---|
+| Run an assembly from disk | [`Run`](#run) | Loads file, hosts CLR, calls EntryPoint |
+| Run an assembly from memory bytes | [`RunBytes`](#runbytes) | Pre-decrypted assembly never lands on disk |
+| Pass `Main(string[] args)` arguments | `Config.Args` | Forwarded to the assembly's entry point |
+| Capture stdout/stderr from the assembly | `Config.Stdout` / `Config.Stderr` | `io.Writer` interface; default = `os.Stdout` / `os.Stderr` |
+
+⚠ **AMSI v2 scans every `AppDomain.Load_3` payload** —
+SharpHound, Rubeus, Seatbelt will be blocked unless you patch
+AMSI first. Apply [`evasion/amsi.PatchAll`](../evasion/preset.md)
+or [`preset.Stealth`](../evasion/preset.md) BEFORE calling Run.
+
+What this DOES achieve:
+
+- Equivalent to Cobalt Strike's `execute-assembly` — same
+  capability, native Go.
+- No `.exe` on disk; no child-process creation; no
+  `powershell.exe -enc` (which is the textbook EDR trigger).
+- COM-based hosting via `ICLRMetaHost` / `ICorRuntimeHost` —
+  works against .NET 4.x runtimes (most Windows installs).
+
+What this does NOT achieve:
+
+- **Doesn't bypass AMSI** — must be done upstream.
+- **Doesn't bypass ETW DotNETRuntime provider** — JIT events
+  (assembly load, method compile) fire to that provider
+  regardless. Defenders subscribed see the assembly load.
+- **CLR loads only once per process** — first call wins. Can't
+  swap runtimes between `Run` calls.
+- **Pre-.NET 4.0 / .NET Core / .NET 5+ unsupported** — those
+  use a different hosting API. Most operator tools target
+  4.x because Windows ships it.
 
 ## Primer
 
