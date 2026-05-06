@@ -7,7 +7,71 @@ reflects_commit: 0dc2bb2
 
 > **MITRE ATT&CK:** T1562.001 -- Impair Defenses: Disable or Modify Tools | **D3FEND:** D3-HBPI -- Hook-Based Process Instrumentation | **Detection:** High
 
-## Primer
+## TL;DR
+
+EDR products patch the first bytes of NTAPI functions in
+`ntdll.dll` so they can intercept your syscalls. Unhooking
+restores the original bytes from a clean source so your calls
+go straight to the kernel without EDR interception.
+
+Three methods, increasing footprint and stealth:
+
+| Method | What it does | Cost | When to pick |
+|---|---|---|---|
+| [`ClassicUnhook`](#classicunhookname-string-opener-stealthopenopener-caller-wsyscallcaller-error) | Restores 5 bytes of ONE named function from on-disk `ntdll.dll` | Smallest. ~3 reads + 1 write per function. | You know exactly which API the EDR hooked (e.g., `NtAllocateVirtualMemory`). Good with [`unhook.CommonClassic`](#commonclassic-technique) (10 known-hooked functions). |
+| [`FullUnhook`](#fullunhookopener-stealthopenopener-caller-wsyscallcaller-error) | Replaces the entire `.text` section of `ntdll.dll` from disk | Larger. One big write. | You don't know which functions are hooked, or you want all of them clean at once. |
+| [`PerunUnhook`](#perununhookcaller-wsyscallcaller-error) | Reads a clean `.text` from a freshly-spawned suspended process | Largest. Spawns a child process. | You can't read `ntdll.dll` from disk (path-blocking minifilter, EDR catches the open). |
+
+What this DOES achieve:
+
+- Your subsequent NTAPI calls go straight to `syscall` without
+  EDR's hook code running.
+- For Classic / Full, paired with a `stealthopen.Opener`,
+  even the on-disk read of `ntdll.dll` bypasses path-keyed
+  filters.
+
+What this does NOT achieve:
+
+- **Doesn't unhook every defender** — kernel-mode callbacks
+  (`PsSetCreateProcessNotifyRoutine` family) still fire. See
+  [`evasion/kernel-callback-removal`](kernel-callback-removal.md).
+- **Doesn't survive re-hooking** — some EDRs install a periodic
+  re-hook timer. Unhook then act fast; don't expect persistence.
+- **Detectable**: the unhook write itself is observable. EDR
+  agents that hash their own hooks alert when the bytes change.
+
+## Primer — vocabulary
+
+Five terms recur on this page:
+
+> **Hook** — an inline patch (typically a `JMP rel32`) the EDR
+> writes at the start of a target function so that calls to it
+> divert into the EDR's monitoring code first. The original
+> bytes are saved in a "trampoline" the EDR uses to call through
+> after logging.
+>
+> **Prologue** — the first few bytes of a function's machine
+> code. EDR hooks rewrite these bytes; unhooking restores them.
+> Typical hook patch is 5 bytes (one `JMP rel32`); some advanced
+> EDRs use 14-byte absolute jumps.
+>
+> **`.text` section** — the executable code section of a PE.
+> Contains the bytes for every function in the module. Full
+> unhooking replaces this entire section in the in-memory image.
+>
+> **`stealthopen.Opener`** — interface from
+> [`evasion/stealthopen`](stealthopen.md) that opens a file by
+> NTFS Object ID instead of by path. Pass to Classic/Full
+> unhook to make the on-disk read of `ntdll.dll` invisible to
+> path-keyed minifilters.
+>
+> **ASLR** — Address Space Layout Randomization. Most modules
+> get randomised base addresses, but `ntdll.dll`'s base is set
+> ONCE per boot and shared across all processes. That's why
+> Perun works: the suspended child's `ntdll` lives at the same
+> address as your own, byte-for-byte clean.
+
+## Primer — the analogy
 
 When a security guard is worried about a specific door, they install a tripwire across it. Anyone who walks through triggers an alarm, and the guard knows exactly who passed and when. The door still works normally -- it just has an invisible wire that reports activity.
 
