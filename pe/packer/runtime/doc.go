@@ -2,11 +2,21 @@
 // packed blob + key and reflectively loads the original PE into
 // the current process's memory.
 //
-// Today (Phase 1b) only Windows x64 EXEs are supported. DLLs
-// (calling DllMain), TLS callbacks, x86, and SxS-redirected
-// ordinal imports (e.g., COMCTL32 v6) are out of scope and
-// either rejected at parse time or surfaced as resolution
-// failures. Linux ELF support lands in Phase 1c.
+// Coverage so far:
+//
+//   - Phase 1b — Windows x64 PE EXEs: full mmap + relocations
+//     + LoadLibrary/GetProcAddress imports + section protect.
+//   - Phase 1f Stage A — ELF64 LE x86_64 parser + format
+//     dispatch from [Prepare]. The Linux mmap + RELA + ld.so
+//     resolution path lands in Stage B; today the Linux
+//     backend returns [ErrNotImplemented] with a parsed-but-
+//     not-mapped [PreparedImage] so callers can inspect what
+//     would load.
+//
+// Out of scope (rejected at parse time or surfaced as resolution
+// failures): DLLs (calling DllMain), TLS callbacks, x86,
+// SxS-redirected ordinal imports (e.g., COMCTL32 v6), big-endian
+// ELF, ET_REL object files, ARM64.
 //
 // The loader's public surface splits into two:
 //

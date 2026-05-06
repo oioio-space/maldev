@@ -116,16 +116,38 @@ func LoadPE(packed, key []byte) (*PreparedImage, error) {
 
 // Prepare runs every step of the reflective load except the
 // jump to OEP. Splits out from [LoadPE] so callers that already
-// have a decrypted PE buffer (test fixtures, alternate decrypt
-// paths) can use the same loader.
+// have a decrypted PE / ELF buffer (test fixtures, alternate
+// decrypt paths) can use the same loader.
 //
-// Same sentinels as [LoadPE].
-func Prepare(pe []byte) (*PreparedImage, error) {
-	hdr, err := parseHeaders(pe)
-	if err != nil {
-		return nil, err
+// Format dispatch is by magic byte: "MZ" routes to the PE
+// backend ([ErrBadPE] / [ErrUnsupportedArch] / [ErrNotEXE] /
+// [ErrTLSCallbacks]); "\x7fELF" routes to the ELF backend
+// ([ErrBadELF] / [ErrUnsupportedELFArch] / [ErrNotELFExec]).
+// On a host platform that doesn't match the input format the
+// backend returns [ErrFormatPlatformMismatch]; on a platform
+// where the backend exists but isn't fully implemented yet
+// (Linux ELF in Phase 1f Stage A) it returns [ErrNotImplemented].
+func Prepare(input []byte) (*PreparedImage, error) {
+	if len(input) < 4 {
+		return nil, fmt.Errorf("%w: input < 4 bytes", ErrBadPE)
 	}
-	return mapAndRelocate(pe, hdr)
+	switch {
+	case input[0] == 'M' && input[1] == 'Z':
+		hdr, err := parseHeaders(input)
+		if err != nil {
+			return nil, err
+		}
+		return mapAndRelocate(input, hdr)
+	case input[0] == elfMagic0 && input[1] == elfMagic1 &&
+		input[2] == elfMagic2 && input[3] == elfMagic3:
+		hdr, err := parseELFHeaders(input)
+		if err != nil {
+			return nil, err
+		}
+		return mapAndRelocateELF(input, hdr)
+	default:
+		return nil, fmt.Errorf("%w: unrecognised magic % x", ErrBadPE, input[:4])
+	}
 }
 
 // peHeaders is everything we read out of the PE before mapping.

@@ -255,6 +255,13 @@ func protectSections(base uintptr, mapped, pe []byte, h *peHeaders) error {
 	return nil
 }
 
+// mapAndRelocateELF is the Windows backend for ELF inputs. ELF
+// on Windows is a format/host mismatch — operators must pack a
+// PE when targeting Windows.
+func mapAndRelocateELF(elf []byte, h *elfHeaders) (*PreparedImage, error) {
+	return nil, fmt.Errorf("%w: ELF on Windows", ErrFormatPlatformMismatch)
+}
+
 // Run jumps to the loaded image's entry point. ALWAYS gated by
 // MALDEV_PACKER_RUN_E2E=1 — production callers must opt in
 // explicitly. Returns once the entry point returns (most EXEs
