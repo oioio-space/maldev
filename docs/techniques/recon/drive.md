@@ -10,29 +10,66 @@ reflects_commit: 7a8c466
 
 ## TL;DR
 
-Enumerate Windows logical drives ([`New`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive)
-+ [`LogicalDriveLetters`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive)) and watch for
-new drives ([`NewWatcher`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive) + `Watch`). Each
-[`Info`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/drive) carries letter, type
-(`TypeFixed` / `TypeRemovable` / `TypeNetwork` / …), and volume
-metadata (label, serial, filesystem). Used for USB-insertion
-triggers, SMB-share discovery, and removable-media data
-staging.
+You want to know what drives are mounted on the host (USB keys,
+SMB shares, fixed disks) and react when new ones appear. Two
+operations:
 
-## Primer
+| You want… | Use | Returns |
+|---|---|---|
+| List every mounted drive right now | [`LogicalDriveLetters`](#func-logicaldriveletters-string) + [`New`](#func-newletter-string-info-error) | `[]string` letters, then per-letter `*Info` (type + label + serial + GUID) |
+| React when a new drive mounts (USB insert, share map) | [`NewWatcher`](#func-newwatcheropts-watcheropts-watcher) + `Watch` | Channel of `Event{Type: EventAdded/EventRemoved, Info: *Info}` |
 
-The Windows storage model exposes drives via single-letter
-roots (`A:`-`Z:`). `GetLogicalDrives` returns a bitmask of
-present letters; `GetDriveTypeW` classifies each (fixed /
-removable / network / CD-ROM / RAM-disk); `GetVolumeInformationW`
-returns label + serial + filesystem.
+Common operational uses:
 
-Operationally:
+- **Initial recon** at startup — log every mounted drive's
+  type + label so the operator picks staging targets.
+- **USB-insert trigger** — long-running implant watches for
+  `TypeRemovable` add events, exfiltrates payload to
+  air-gapped media.
+- **SMB-share discovery** — `TypeRemote` drives indicate the
+  host is mapped to a network resource (lateral-movement hint).
 
-- **Initial discovery** — at startup, identify mounted shares,
-  network drives, removable media for staging targets.
-- **Watch loop** — long-running implants poll for new drives;
-  USB key insert is a common data-staging trigger.
+What this DOES NOT do:
+
+- **Doesn't read drive contents** — list/watch only. Use
+  `os.ReadDir` or [`evasion/stealthopen`](../evasion/stealthopen.md)
+  for the path-free file access.
+- **Doesn't enumerate UNC paths or unmounted shares** — only
+  letters that have a `DRIVE_*` mapping. Use `WNetEnumResource`
+  upstream (not in this package) to find shares before they're
+  mapped.
+- **Polling-based watch** — `Watcher` snapshots every
+  `Interval` (default 200 ms) and diffs. No `WM_DEVICECHANGE`
+  notification path; trade-off: works without a hidden window,
+  costs a thread.
+
+## Primer — vocabulary
+
+Five terms recur on this page:
+
+> **Drive letter** — single-letter root (`A:`-`Z:`) the Win32
+> API uses to address mounted volumes. Not stable across reboots
+> (especially USB keys); use `GUID` for cross-reboot identity.
+>
+> **Drive type** — Windows's classification: `Fixed` (HDD/SSD
+> on-machine), `Removable` (USB / floppy), `Remote` (SMB share),
+> `CDROM`, `RAMDisk`, `NoRootDir` (mount point with no media),
+> `Unknown`. Returned by `GetDriveTypeW`.
+>
+> **Volume GUID** — `\\?\Volume{...}\` form. Stable identifier
+> across reboots, mount-point changes, and letter reassignments.
+> Use this when you need to recognise the same USB key across
+> sessions; the letter alone changes.
+>
+> **Device path** — kernel-level name like
+> `\Device\HarddiskVolumeN`. Used by drivers and minifilters,
+> rarely directly by user-mode code. Surfaced for
+> completeness — most callers want `Letter` or `GUID`.
+>
+> **Snapshot polling** — the watcher's mechanism: every
+> `Interval` it calls `LogicalDriveLetters`, builds a fresh
+> snapshot, diffs against the previous, emits add/remove
+> events. No system event subscription required.
 
 ## How It Works
 
