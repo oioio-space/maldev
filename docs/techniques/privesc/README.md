@@ -29,6 +29,19 @@ flowchart TB
     CVE --> SYSTEM
 ```
 
+> **Where to start (novice path):**
+> 1. Are you Medium-IL admin user? → [`uac`](uac.md). UAC bypass
+>    methods (FODHelper / SLUI / SilentCleanup / EventVwr) silently
+>    elevate to High-IL without a prompt. Pick by build window.
+> 2. Need full SYSTEM, not just High-IL? → check the host build
+>    via [`win/version`](../win/version.md); if pre-June-2024
+>    Windows 10/11, [`cve202430088`](cve202430088.md). Otherwise
+>    you need a different exploit (out of scope here).
+> 3. Already SYSTEM, want TrustedInstaller? →
+>    [`win/impersonate.RunAsTrustedInstaller`](../tokens/impersonation.md).
+> 4. The decision tree below covers every common state /
+>    target permutation.
+
 ## Decision tree
 
 | State / question | Path |

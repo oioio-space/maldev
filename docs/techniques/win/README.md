@@ -35,6 +35,20 @@ flowchart TB
     DOM --> GATE
 ```
 
+> **Where to start (novice path):**
+>
+> The `win/*` packages are foundations — most operators land
+> here from a higher-layer technique that needs to resolve an
+> API, steal a token, or fingerprint the host. There is no
+> "first thing to read" — pick the row in the decision tree
+> below that answers your current question.
+>
+> If you're new to maldev altogether and want a guided tour:
+> start at the [maldev README's Packages table](../../../README.md),
+> pick a TECHNIQUE area (Evasion / Injection / Credentials /
+> Persistence), and let it pull you into the specific `win/*`
+> primitive it depends on.
+
 ## Decision tree
 
 | Operator question | Package | Pages |
