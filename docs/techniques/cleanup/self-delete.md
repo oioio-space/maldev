@@ -10,11 +10,41 @@ reflects_commit: 3de532d
 
 ## TL;DR
 
-Delete the running executable from disk while the process keeps
-executing from its in-memory mapped image. The trick: rename the file's
-default `:$DATA` stream, then mark for deletion. Windows considers the
-file "empty" and tolerates deletion of the running EXE. Four entry
-points trade stealth for portability.
+You ran your implant from disk; it's now in memory. You want
+the disk artefact gone — but Windows holds a handle on the
+running EXE's image and `os.Remove` returns "file in use".
+This package exploits an NTFS quirk to delete-while-running.
+
+| You want… | Use | Compatibility |
+|---|---|---|
+| Modern path (NTFS rename + mark-for-delete) | [`Delete`](#delete) | Win10+ |
+| Maximum compat (older Windows) | [`DeleteCompat`](#deletecompat) | Win7+ |
+| In-memory implant should keep running | Both work — process keeps executing the mapped image | All |
+| Want the file to vanish from `dir` listing immediately | `Delete` returns once the rename succeeds | n/a |
+
+What this DOES achieve:
+
+- File disappears from disk before the process exits — forensic
+  triage that finds the implant in memory still has nothing
+  on-disk to image.
+- Process keeps running (mapped image stays valid until exit).
+  Implant can finish its work before going down.
+- No external tools, no bat-file delete-on-reboot trick.
+
+What this does NOT achieve:
+
+- **Doesn't wipe filesystem journal entries** — `$LogFile`,
+  `$UsnJrnl` still record the create + delete events. Forensic
+  recovery from these journals can recover the path + first
+  4 KB of content.
+- **Doesn't wipe `Prefetch`** — `C:\Windows\Prefetch\<exe>-XXXX.pf`
+  records every executable run. Pair with [`cleanup/wipe`](wipe.md)
+  for prefetch cleanup.
+- **NTFS only** — the `:$DATA` rename trick doesn't work on
+  FAT / exFAT / network shares.
+- **Doesn't survive reboot of a forensic image** — if the
+  attacker takes a disk image BEFORE delete, the file is in
+  unallocated clusters until overwritten.
 
 ## Primer
 

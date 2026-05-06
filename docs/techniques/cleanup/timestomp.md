@@ -10,10 +10,39 @@ reflects_commit: 3de532d
 
 ## TL;DR
 
-Reset a file's `$STANDARD_INFORMATION` timestamps (creation, access,
-modification) so a dropped artefact blends with system files. Forensic-
-grade tooling defeats this by comparing against `$FILE_NAME` timestamps —
-that disparity is the canonical timestomping tell.
+You dropped a file in a system directory and want it to blend
+in with the OS install timestamps. This package rewrites the
+file's user-visible timestamps to match a "donor" system file.
+
+| You want to… | Use | Notes |
+|---|---|---|
+| Set timestamps to specific values | [`SetTimes`](#settimes) | Three explicit timestamps in one call |
+| Copy timestamps from another file | [`CopyFromFull`](#copyfromfull) | All four `$SI` timestamps from donor |
+| Match a chosen System32 binary's timestamps | `CopyFromFull(donor, target)` | E.g. `\Windows\System32\notepad.exe` for "looks installed by Windows" |
+
+What this DOES achieve:
+
+- `dir`, `Get-ChildItem`, Explorer, `os.Stat` all see the
+  spoofed timestamps. Casual triage doesn't notice.
+- Quick alignment — drop a file at 14:32:11, copy notepad's
+  install timestamps, the file appears to be from
+  Windows-install date.
+
+What this does NOT achieve:
+
+- **Forensic-grade tooling defeats this trivially** — Sleuth
+  Kit's `fls`, Plaso's `psort`, Velociraptor all read the
+  immutable `$FILE_NAME` (`$FN`) timestamps too, which user-mode
+  APIs cannot modify. The `$SI` vs `$FN` mismatch IS the
+  signature of timestomping.
+- **NTFS only** — `$SI`/`$FN` are NTFS concepts. FAT / exFAT
+  / network shares have one set of timestamps, no duality
+  signature.
+- **Doesn't hide the create event** — `$LogFile`, `$UsnJrnl`
+  recorded the original create+modify timestamps before the
+  stomp. Forensic recovery from journals catches you.
+- **Doesn't help on memory-only artefacts** — by definition
+  no on-disk timestamps. This is for dropped files only.
 
 ## Primer
 

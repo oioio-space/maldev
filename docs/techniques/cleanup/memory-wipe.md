@@ -10,10 +10,41 @@ reflects_commit: 3de532d
 
 ## TL;DR
 
-Three primitives to erase sensitive data from process memory before it
-shows up in a crash dump, a debugger inspection, or a kernel-level
-process scan: `SecureZero` (slice), `WipeAndFree` (VirtualAlloc'd
-region), `DoSecret` (function-call scope).
+You decrypted your shellcode, used your encryption key,
+fetched a C2 address. All three are still sitting in process
+memory until the GC eventually overwrites them — minutes to
+never. A memory dump in that window exposes everything.
+
+| You want to wipe… | Use | Cost |
+|---|---|---|
+| A `[]byte` slice (key, plaintext, decrypted blob) | [`SecureZero`](#securezero) | One pass; compiler-resistant (volatile) |
+| A `VirtualAlloc`-backed region (shellcode RWX after exec) | [`WipeAndFree`](#wipeandfree) | Zero + `VirtualFree(MEM_RELEASE)` |
+| Everything created inside a function scope | [`DoSecret`](#dosecret) | Defer-style: returned secrets get zeroed automatically when callback exits |
+
+What this DOES achieve:
+
+- Sensitive bytes are zeroed BEFORE control returns to the
+  caller — no GC race, no compiler dead-store-elimination
+  cleverness.
+- For VirtualAlloc'd shellcode regions: zeroed THEN unmapped,
+  so even a kernel-level scanner sees no commit.
+- `DoSecret` makes the wipe defer-safe — caller can't forget.
+
+What this does NOT achieve:
+
+- **Doesn't wipe the Go heap copy** — `string` <-> `[]byte`
+  conversions allocate. If the secret ever lived as a string,
+  some pre-conversion copy may still be on the heap until
+  GC. Avoid string conversions for secrets.
+- **Doesn't wipe register / stack residue** — values that
+  spilled to the stack during arithmetic stay until the
+  stack frame is overwritten by something else. Acceptable
+  for most threat models; not for nation-state forensic.
+- **Crash-dump still wins if it happens BETWEEN secret
+  creation and wipe** — keep the window short.
+- **Linux: doesn't unmap if you didn't `VirtualAlloc`** —
+  `WipeAndFree` is Windows-shaped. Use `SecureZero` then
+  `mmap.Munmap` manually for the Linux equivalent.
 
 ## Primer
 
