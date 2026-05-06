@@ -10,11 +10,41 @@ reflects_commit: c48aaab
 
 ## TL;DR
 
-Decrypt local NT hashes from a Windows `SAM` hive (with `SYSTEM`
-supplying the boot key). Pure-Go REGF parser + AES/RC4/DES crypto;
-runs cross-platform once the operator has the hive bytes in hand.
-LiveDump shells out to `reg save` for live acquisition (Windows-only,
-loud on EDR).
+You want the local Windows account hashes (NT/LM) for the
+machine — Administrator's hash for pass-the-hash, local
+service accounts, etc. The hashes live in the `SAM` registry
+hive, encrypted with a key derived from the `SYSTEM` hive's
+"syskey".
+
+Two paths depending on what you have on disk:
+
+| You have… | Use | Constraint |
+|---|---|---|
+| Both `SAM` + `SYSTEM` hive bytes (offline analysis or pre-dumped) | [`Decrypt`](#decryptsam-system-byte-account-error) | Pure-Go, cross-platform |
+| Live target — need to acquire the hives first | [`LiveDump`](#livedump) (calls `reg save`) | Windows + admin; **loud** — `reg save HKLM\SAM` is a textbook EDR signal |
+
+What this DOES achieve:
+
+- Pure-Go REGF (registry hive) parser — no Win32 dependency
+  for the decryption side.
+- Full crypto chain: syskey reassembly from `Lsa\{JD,Skew1,GBG,Data}`
+  class strings, AES-128-CBC unwrap of hashed bootkey,
+  per-user RID-keyed RC4 + DES to recover the NT hash.
+
+What this does NOT achieve:
+
+- **NTDS.dit (domain controller's AD database) is OUT OF SCOPE** —
+  separate format, separate code path. SAM is local accounts only.
+- **No DPAPI / SECURITY hive parsing** — those carry per-user
+  credential blobs (browser passwords, scheduled task creds).
+  This package does NT hashes only.
+- **No cleartext** — NT hashes are one-way. For cleartext
+  credentials, dump LSASS instead ([`credentials/lsassdump`](lsassdump.md)
+  + [`credentials/sekurlsa`](sekurlsa.md)).
+- **`LiveDump` is observable** — `reg save HKLM\SAM` requires
+  `SeBackupPrivilege` and shows up in EDR command-line and
+  registry-access telemetry. Prefer offline parse from
+  pre-acquired hives when possible.
 
 ## Primer
 

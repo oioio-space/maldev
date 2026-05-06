@@ -10,12 +10,45 @@ reflects_commit: 0dfad37
 
 ## TL;DR
 
-Forge a long-lived Kerberos TGT off a stolen `krbtgt` hash. `Forge`
-marshals a `KRB-CRED` blob with a custom PAC (Domain Admins,
-arbitrary lifetime) and signs it with the krbtgt's RC4-HMAC /
-AES128-CTS / AES256-CTS key. `Submit` injects the kirbi into the
-calling user's LSA cache so subsequent Kerberos auth uses the
-forged TGT.
+You stole the domain controller's `krbtgt` account hash (via
+`credentials/lsassdump` on a DC, NTDS.dit extraction, etc.).
+With that hash you can forge an arbitrary Kerberos TGT — any
+user, any group membership, any lifetime — that the entire
+domain trusts until krbtgt is rotated (in practice: often
+never).
+
+| You want to… | Use | Constraint |
+|---|---|---|
+| Forge a TGT for a chosen principal + group memberships | [`Forge`](#forge) | Need krbtgt key (RC4-HMAC / AES128-CTS / AES256-CTS) |
+| Inject the forged TGT into your current logon session's cache | [`Submit`](#submit) | Windows-only; uses `LsaCallAuthenticationPackage(KerbSubmitTicketMessage)` |
+| Verify a forged PAC roundtrips correctly (research / detection) | [`ValidatePAC`](#validatepac) | Same krbtgt key — re-runs MS-PAC §2.8 server+KDC signature dance in reverse |
+
+What this DOES achieve:
+
+- Long-dwell domain admin: forged TGT works for any principal
+  (typically `Administrator`) with any group membership
+  (typically `Domain Admins SID + Enterprise Admins SID`).
+- Survives password rotation of the impersonated user — only
+  krbtgt rotation kills it.
+- Pure-Go ASN.1 marshaling — no `kerberos` external dep, no
+  Java/Python tooling required.
+
+What this does NOT achieve:
+
+- **Doesn't steal the krbtgt hash** — pre-requisite. Get from
+  [`credentials/lsassdump`](lsassdump.md) on a DC, NTDS.dit
+  extraction (impacket-style), or DCSync (out of scope here).
+- **Detectable**: forged TGTs have telltale anomalies (PAC
+  signature using only one key when DC normally uses two,
+  `LogonTime` mismatch with `KerbValidationInfo.LogonTime`,
+  abnormal `EncTicketPart.Renew-till` > 7 days). Mature SIEMs
+  + Microsoft Defender for Identity look for these.
+- **Not for cross-realm trust** — forged TGT works inside the
+  realm krbtgt belongs to. Cross-forest needs a different
+  attack class.
+- **PAC signature breaks if the realm enables PAC validation
+  to the KDC** (rare but increasing) — the KDC can reject
+  forged tickets it didn't issue. Default is no validation.
 
 ## Primer
 

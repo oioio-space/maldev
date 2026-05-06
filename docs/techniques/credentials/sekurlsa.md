@@ -14,6 +14,47 @@ reflects_commit: 0dfad37
 
 ---
 
+## TL;DR
+
+You have the LSASS minidump bytes (from
+[`credentials/lsassdump`](lsassdump.md)) and want to extract
+the credentials inside without round-tripping to mimikatz on
+a different host. This package parses the dump in-process and
+returns structured creds.
+
+| You want… | Use | Returns |
+|---|---|---|
+| Everything the dump contains | [`Parse`](#parsedump-byte-result-error) | `Result{Logons, MasterKeys, Tickets, Warnings}` — full inventory |
+| Just NTLM hashes for replay | `Result.Logons` filtered by `Provider == "msv1_0"` | NT hash + LM hash + DPAPI seed per logon |
+| Kerberos tickets (TGT cache for golden-ticket research) | `Result.Tickets` | Per-session TGT/TGS with raw asn1 + decoded principal |
+| DPAPI master keys (for offline blob decryption) | `Result.MasterKeys` | Per-user GUID + raw 64-byte key |
+
+What this DOES achieve:
+
+- Pure-Go MINIDUMP parser — no `dbghelp.dll`, no Win32 calls
+  inside the implant address space.
+- Cross-platform — runs on the analyst's Linux box if they
+  exfil the dump.
+- Structured `Result` with `Warnings []string` for partial
+  parses (Credential Guard / LSAISO / unknown lsasrv build).
+
+What this does NOT achieve:
+
+- **Doesn't acquire the dump** — that's [`credentials/lsassdump`](lsassdump.md).
+- **Doesn't bypass Credential Guard / LSAISO** — when `IsoUserMode`
+  is enabled, the secrets-bearing region of LSASS is encrypted
+  to the secure-world VTL1; the dump bytes for that region are
+  zeros. `Result.Warnings` flags this.
+- **No live-process attach** — input is a MINIDUMP byte buffer,
+  not a live PID. To go live, dump first then parse.
+- **lsasrv.dll structure offsets are version-keyed** — every
+  LSASS build can shift the SECPKG_FUNCTION_TABLE / Logon /
+  KIWI_BCRYPT_KEY layouts. Parser is best-effort + falls back
+  to known-good signatures; very old or very new builds may
+  partially miss.
+
+---
+
 ## Primer
 
 `credentials/lsassdump` (the **producer**, see
