@@ -4,33 +4,15 @@ import (
 	"bytes"
 	"crypto/rand"
 	"errors"
-	"math"
 	"testing"
+
+	"github.com/oioio-space/maldev/crypto"
 )
 
-// shannon returns the byte-histogram Shannon entropy of `data`
-// in bits/byte. Range [0, 8]. Uniform random data sits at ~8;
-// real .text sections sit around 5.5-6; runs of identical bytes
-// drop to 0.
-func shannon(data []byte) float64 {
-	if len(data) == 0 {
-		return 0
-	}
-	var hist [256]int
-	for _, b := range data {
-		hist[b]++
-	}
-	total := float64(len(data))
-	var h float64
-	for _, c := range hist {
-		if c == 0 {
-			continue
-		}
-		p := float64(c) / total
-		h -= p * math.Log2(p)
-	}
-	return h
-}
+// shannon is a thin alias for [crypto.ShannonEntropy] kept so the
+// in-test call sites stay terse; the helper itself was promoted
+// to the crypto package post-review.
+func shannon(data []byte) float64 { return crypto.ShannonEntropy(data) }
 
 func TestEntropyCover_String(t *testing.T) {
 	cases := []struct {
