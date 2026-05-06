@@ -12,6 +12,18 @@ without spawning child processes. The implant becomes its own
 post-exploitation runtime — useful when child-process creation is
 heavily monitored.
 
+> **Where to start (novice path):**
+> 1. [`bof`](bof-loader.md) — load a Cobalt-Strike-style BOF
+>    (small custom C-compiled gadget) in-process. Cheapest
+>    in-process post-ex runtime.
+> 2. [`clr`](clr.md) — host the .NET CLR in-process to run
+>    Mimikatz / Seatbelt / SharpHound assemblies without
+>    spawning `powershell.exe` or dropping `.exe` to disk.
+>
+> Both avoid child-process creation. Pair with
+> [`evasion/preset`](../evasion/preset.md) so the BOF / CLR
+> calls don't tip AMSI / ETW.
+
 ## Packages
 
 | Package | Tech page | Detection | One-liner |

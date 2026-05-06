@@ -23,6 +23,21 @@ flowchart LR
     Kernel -->|consumed by| LSASS["credentials/lsassdump"]
 ```
 
+> **Where to start (novice path):**
+>
+> The `kernel/*` packages are foundations consumed by higher-layer
+> techniques (LSASS PPL bypass, kernel-callback removal). Most
+> operators land here from one of those.
+>
+> 1. Read [`byovd-rtcore64`](byovd-rtcore64.md) once to understand
+>    the BYOVD pattern (load RTCore64.sys, IOCTL for kernel R/W,
+>    HVCI block-list cutoff).
+> 2. Then go back to your higher-layer use case:
+>    - LSASS PPL bypass → [`credentials/lsassdump.Unprotect`](../credentials/lsassdump.md)
+>    - Kernel-callback removal → [`evasion/kernel-callback-removal`](../evasion/kernel-callback-removal.md)
+> 3. The decision tree below maps every common need to the
+>    higher-layer entry point.
+
 ## Decision tree
 
 | Operator question | Package / page |

@@ -22,6 +22,18 @@ flowchart TD
     Q -->|find variants of a known sample| F[ssdeep / TLSH]
 ```
 
+> **Where to start (novice path):**
+> 1. Need to fingerprint a buffer? → [`SHA256`](cryptographic-hashes.md)
+>    (cryptographic-hashes.md). Standard integrity hash.
+> 2. Need to resolve Win32 APIs by hash (no plaintext name in
+>    the binary)? → [`ROR13`](cryptographic-hashes.md) +
+>    [`ROR13Module`](cryptographic-hashes.md). Pair with
+>    [`syscalls/api-hashing`](../syscalls/api-hashing.md) for
+>    the runtime resolution side.
+> 3. Need to score similarity between samples (variant
+>    detection, morph verification)? → [`fuzzy-hashing`](fuzzy-hashing.md)
+>    — ssdeep + TLSH.
+
 ## Packages
 
 | Package | Tech page | Detection | One-liner |

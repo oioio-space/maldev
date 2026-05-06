@@ -27,6 +27,13 @@ flowchart LR
 
 Encrypt first, then encode. Decode last, then decrypt.
 
+> **Where to start (novice path):**
+>
+> Single-page area. Read [`encode`](encode.md) end-to-end
+> (~5 min) and consult the Quick decision tree below to pick the
+> right encoder per channel. Pair with [`crypto`](../crypto/README.md)
+> for the encrypt-then-encode pattern shown in the mermaid above.
+
 ## Packages
 
 | Package | Tech page | Detection | One-liner |
