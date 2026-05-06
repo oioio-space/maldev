@@ -13,6 +13,8 @@
 
 # Test fixtures that must ship with the repo (force-include overrides above).
 !testutil/clrhost/maldev_clr_test.dll
+# Bundled donor cert blobs — research artefacts, intentionally shipped.
+!pe/masquerade/donors/blobs/*.bin
 *.iml
 *.key
 *.out

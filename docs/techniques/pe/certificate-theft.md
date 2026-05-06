@@ -540,60 +540,73 @@ _ = cert.Write(target, &cert.Certificate{Raw: saved})
 See [`ExampleRead`](../../../pe/cert/cert_example_test.go) and
 [`ExampleCopy`](../../../pe/cert/cert_example_test.go).
 
-### Operational — `cmd/cert-snapshot` (offline donor cache)
+### Operational — bundled donor cert blobs
 
-Operators rarely build implants on the same host that has every
-donor PE installed (Adobe Reader, OneDrive, VS Code, etc.). The
-`cmd/cert-snapshot` tool walks the canonical donor list
-([`pe/masquerade/donors.All`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/donors))
-and dumps each donor's WIN_CERTIFICATE blob to a directory once,
-so the build host can graft offline:
-
-```bash
-# On a fully-equipped workstation:
-go run ./cmd/cert-snapshot -out ./ignore/certs
-# wrote ignore/certs/svchost.bin (10408 bytes) <- C:\WINDOWS\System32\svchost.exe
-# wrote ignore/certs/msedge.bin (10056 bytes) <- ...msedge.exe
-# wrote ignore/certs/onedrive.bin (10600 bytes) <- ...OneDrive.exe
-# wrote ignore/certs/acrobat.bin (10712 bytes) <- ...Acrobat.exe
-# wrote ignore/certs/firefox.bin (11904 bytes) <- ...firefox.exe
-# wrote ignore/certs/excel.bin  (21312 bytes) <- ...EXCEL.EXE
-# wrote ignore/certs/vscode.bin (10272 bytes) <- ...Code.exe
-# wrote ignore/certs/claude.bin (10400 bytes) <- ...claude.exe
-# SKIP cmd: PE file has no Authenticode certificate     # signed via system catalog (.cat)
-# SKIP notepad: PE file has no Authenticode certificate # signed via system catalog (.cat)
-# SKIP sevenzip: PE file has no Authenticode certificate # 7-Zip ships unsigned
-```
-
-`-out` defaults to `./ignore/certs` (gitignored — these blobs
-are large binaries that don't belong in version control).
-
-On the build host, graft from cache without needing the donor:
+10 reference Authenticode blobs ship pre-extracted inside
+[`pe/masquerade/donors`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/donors)
+(snapshot date exposed as `donors.SnapshotDate`). Graft offline
+with zero donor on disk:
 
 ```go
 import (
-    "os"
-
     "github.com/oioio-space/maldev/pe/cert"
+    "github.com/oioio-space/maldev/pe/masquerade/donors"
 )
 
-raw, _ := os.ReadFile(`./ignore/certs/claude.bin`)
-_ = cert.Write(`implant.exe`, &cert.Certificate{Raw: raw})
+raw, _ := donors.LoadBlob("claude") // also: cert.Write recomputes
+_ = cert.Write(`implant.exe`,       // the PE checksum automatically.
+    &cert.Certificate{Raw: raw})
 ```
 
-The grafted blob is **not cryptographically valid** (the implant's
-PE hash differs from the donor's) — same caveats as direct
-[`cert.Copy`](#copysrcpe-dstpe-string-error). Useful only for
-the cosmetic + naive-static-scanner cases described in OPSEC.
+Bundled IDs (each `<id>.bin` in `pe/masquerade/donors/blobs/`):
+`acrobat`, `claude`, `excel`, `explorer`, `firefox`, `msedge`,
+`onedrive`, `svchost`, `taskmgr`, `vscode`. Enumerate at runtime
+via [`donors.AvailableBlobs`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/donors#AvailableBlobs).
 
-**System32 binaries that ship without an embedded signature**
-(cmd, notepad, calc on most Win10/11 builds) are signed via the
-system *security catalog* (`C:\Windows\System32\CatRoot\*.cat`) —
-the embedded WIN_CERTIFICATE is absent because `signtool verify`
-resolves the signature against the catalog. cert-snapshot's
-SKIP for these donors is expected, not a bug. To clone a System32
-identity's catalog signature you need a different attack — out of
-scope for `pe/cert`.
+Unbundled IDs (`cmd`, `notepad`, `sevenzip`, `wt`) — see
+"Why some donors don't have bundled blobs" below.
+
+#### Refresh / extend the bundled set — `cmd/cert-snapshot`
+
+Authenticode roots rotate (Microsoft 2024, Adobe 2023). When a
+bundled blob ages out, re-run the extractor against fresh
+donors and overwrite the bundled files in-place:
+
+```bash
+go run ./cmd/cert-snapshot -out ./pe/masquerade/donors/blobs
+# wrote pe/masquerade/donors/blobs/svchost.bin (10408 bytes) <- C:\WINDOWS\System32\svchost.exe
+# wrote pe/masquerade/donors/blobs/msedge.bin  (10056 bytes) <- ...msedge.exe
+# wrote pe/masquerade/donors/blobs/claude.bin  (10400 bytes) <- ...claude.exe
+# ...
+```
+
+`-out` defaults to `./ignore/certs` (gitignored work directory)
+when you want a sandbox extraction without touching the bundled
+set. To extend with new donors, add them to
+[`donors.All`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/donors#pkg-variables)
+and re-run.
+
+#### Why some donors don't have bundled blobs
+
+`cmd`, `notepad` and most System32 binaries on Win10/11 ship
+**without an embedded WIN_CERTIFICATE**. Their signature lives
+in the system *security catalog*
+(`C:\Windows\System32\CatRoot\*.cat`) — `signtool verify`
+resolves it via the catalog at runtime, so `pe/cert.Read`
+correctly returns `ErrNoCertificate` from the PE itself.
+cert-snapshot's SKIP is faithful, not a bug. Cloning a
+catalog-signed identity needs a different attack
+(catalog poisoning / catalog hash forge) — out of scope for
+`pe/cert`. `sevenzip` ships unsigned; `wt` lives under the
+WindowsApps DACL and can't be opened.
+
+#### Caveats — bundled blobs are not cryptographically valid
+
+Same as direct [`cert.Copy`](#copysrcpe-dstpe-string-error):
+the grafted signature does NOT verify under `signtool verify
+/pa` because the implant's Authenticode hash differs from the
+donor's. Useful only for the cosmetic + naive-static-scanner
+cases described in OPSEC below.
 
 ## OPSEC & Detection
 
