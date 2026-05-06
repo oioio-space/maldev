@@ -8,6 +8,11 @@ reflects_commit: 3de532d
 
 [← injection index](README.md) · [docs/index](../../index.md)
 
+> **New to maldev injection?** Read the [injection/README.md
+> vocabulary callout](README.md#primer--vocabulary) first
+> (Self/Local/Remote/Child, Injector, *wsyscall.Caller, APC,
+> stealth tier).
+
 ## TL;DR
 
 Run shellcode by handing its address to a Windows API that **already**
@@ -17,6 +22,24 @@ takes a function pointer as part of its normal contract — `EnumWindows`,
 shellcode through its own dispatcher, so no `Create*Thread*` event
 fires. Local technique only — pair with a separate primitive that places
 the shellcode in executable memory.
+
+| Trait | Value |
+|---|---|
+| **Target class** | Local (current process) |
+| **Creates a new thread?** | No — shellcode runs on an existing thread the OS already owns |
+| **Uses `WriteProcessMemory`?** | No — caller pre-allocates RX in their own process |
+| **Stealth tier** | High — no Create*Thread / Queue*APC / SetContext call enters EDR's view |
+| **CET-affected variants** | `CallbackRtlRegisterWait` + `CallbackNtNotifyChangeDirectory` need `cet.Wrap` on Win11 24H2+. Use [`inject.ExecuteCallbackBytes`](#executecallbackbytesshellcode-callbackmethod) for auto-wrapping. |
+
+When to pick a different method:
+
+- Need to inject into a **different** process? → Local-only by
+  definition. See [CreateRemoteThread](create-remote-thread.md),
+  [Section Mapping](section-mapping.md), or
+  [Kernel Callback Table](kernel-callback-table.md).
+- Want a thread you control end-to-end? → [Thread Pool](thread-pool.md)
+  (still avoids Create*Thread but you own the work item).
+- Want shellcode running from a known-DLL image? → [Module Stomping](module-stomping.md).
 
 ## Primer
 
