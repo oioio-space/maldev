@@ -1,0 +1,288 @@
+---
+package: github.com/oioio-space/maldev/pe/packer
+last_reviewed: 2026-05-06
+reflects_commit: HEAD
+---
+
+# PE Packer (Phase 1a — encrypt + embed pipeline)
+
+[← pe index](README.md) · [docs/index](../../index.md)
+
+## TL;DR
+
+Encrypt + embed any byte buffer (PE / ELF / shellcode / config)
+into a self-describing maldev-format blob. The blob round-trips
+losslessly: `Pack(input, opts) → blob` and `Unpack(blob, key) → input`.
+
+⚠ **Phase 1a only — no execution path yet.** The blob is opaque
+data. To run a packed PE on the target, the reflective loader
+stub from Phase 1b is required (not yet shipped). Use today as
+a clean encrypted-payload pipeline; the deployment layer will
+land in a follow-up.
+
+| You want to… | Use | Notes |
+|---|---|---|
+| Encrypt a payload + carry it as a blob | [`packer.Pack`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#Pack) | Returns blob + AEAD key |
+| Recover the original from a blob | [`packer.Unpack`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#Unpack) | Needs the key Pack returned |
+| Same flow from the shell | `cmd/packer pack` / `cmd/packer unpack` | Thin wrapper around Pack/Unpack |
+
+What this DOES achieve (today, Phase 1a):
+
+- Self-describing blob format with version field — future
+  format bumps fail loudly via `ErrUnsupportedVersion`
+  instead of misinterpreting bytes.
+- AES-GCM AEAD — tampering / wrong-key both rejected by the
+  auth tag.
+- Polymorphic ciphertext per pack (random nonce) — same
+  input → different output bytes every call.
+- Round-trip-tested across input sizes (empty / 1 byte /
+  page / multi-page).
+
+What this does NOT achieve (today):
+
+- **Doesn't produce a runnable PE.** Phase 1b's reflective
+  loader stub is the missing layer. Today's blob is data,
+  not code.
+- **Doesn't compress.** `CompressorNone` is the only shipped
+  option; aPLib / LZMA / zstd / LZ4 land in Phase 1b.
+- **Doesn't ship ChaCha20 / RC4** despite reserved constants.
+  AES-GCM only for Phase 1a.
+- **Doesn't carry a stub** — see Phase 1b.
+
+For the full design (3 phases, threat model, polymorphism via
+compile-time templating, cross-platform Linux ELF, multi-target
+bundle, anti-debug, AMSI silence, cert graft), see
+[`docs/refactor-2026-doc/packer-design.md`](../../refactor-2026-doc/packer-design.md).
+
+## Primer — vocabulary
+
+Five terms recur on this page:
+
+> **AEAD** (Authenticated Encryption with Associated Data) —
+> cipher mode that produces both ciphertext AND an
+> authentication tag. Decrypt with wrong key OR tampered
+> ciphertext → tag mismatch → decrypt fails loudly. AES-GCM
+> is the AEAD shipped here.
+>
+> **Nonce** — single-use random bytes mixed into the cipher
+> so the same key + plaintext produces different ciphertext
+> on every call. AES-GCM uses 12 bytes; never reuse a nonce
+> with the same key (catastrophic break).
+>
+> **Magic** — fixed 4-byte prefix at the start of every
+> packed blob (`MLDV`). Lets `Unpack` distinguish a maldev
+> blob from random bytes / a different format. Trivially
+> fingerprinted today; Phase 1b wraps the blob in a host PE
+> so the magic is no longer at file offset 0.
+>
+> **FormatVersion** — uint16 in the header. Bumps on
+> backwards-incompatible layout changes. Old `Unpack` reading
+> a new blob fails with `ErrUnsupportedVersion`.
+>
+> **Reflective loader stub** — code that executes at the
+> start of the packed binary, locates the encrypted payload,
+> decrypts it, allocates RWX memory, applies relocations,
+> resolves imports, and jumps to the original entry point —
+> all from inside the running process. Phase 1b ships this.
+
+## How It Works
+
+```mermaid
+flowchart LR
+    IN[input bytes] --> COMP[Compressor pass<br>Phase 1a: passthrough]
+    COMP --> ENC[AES-GCM encrypt<br>+ random 12-byte nonce]
+    ENC --> HDR[Prepend 32-byte header<br>magic + version + cipher +<br>compressor + sizes + nonce size]
+    HDR --> OUT[blob bytes]
+    OUT --> UH[Unpack: parse header]
+    UH --> UD[AES-GCM decrypt<br>verify auth tag]
+    UD --> UC[Decompress<br>Phase 1a: passthrough]
+    UC --> RECOVERED[input bytes recovered]
+```
+
+## Examples
+
+### Quick start — round-trip a payload
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "os"
+
+    "github.com/oioio-space/maldev/pe/packer"
+)
+
+func main() {
+    payload, err := os.ReadFile("notepad.exe")
+    if err != nil { log.Fatal(err) }
+
+    // Step 1: pack. Default options = AES-GCM, no compression,
+    //         freshly-generated 32-byte key.
+    blob, key, err := packer.Pack(payload, packer.Options{})
+    if err != nil { log.Fatal(err) }
+    fmt.Printf("packed %d bytes → %d-byte blob\n", len(payload), len(blob))
+
+    // Step 2: ship the blob + key separately. The blob alone is
+    //         opaque AEAD ciphertext.
+    _ = os.WriteFile("payload.bin", blob, 0o644)
+    fmt.Printf("KEY (save it!): %x\n", key)
+
+    // Step 3 (much later): unpack on the build host that has
+    //         the key.
+    recovered, err := packer.Unpack(blob, key)
+    if err != nil { log.Fatal(err) }
+    fmt.Printf("recovered %d bytes\n", len(recovered))
+}
+```
+
+### CLI usage
+
+```bash
+# Pack: prints the AEAD key to stdout as 64-char hex.
+$ go run ./cmd/packer pack -in payload.exe -out payload.bin
+packed 184320 bytes → payload.bin (184380 bytes)
+b3a2c1d4e5f6...      # save this, you need it for unpack
+
+# Unpack: needs the key.
+$ go run ./cmd/packer unpack -in payload.bin -out recovered.exe -key b3a2c1d4e5f6...
+unpacked → recovered.exe (184320 bytes)
+
+# Or write the key to a file (more script-friendly).
+$ go run ./cmd/packer pack -in payload.exe -out payload.bin -keyout key.hex
+$ go run ./cmd/packer unpack -in payload.bin -out recovered.exe -key "$(cat key.hex)"
+```
+
+### Custom key (key-derivation pipelines)
+
+When the key comes from elsewhere — host fingerprint, KDF over a
+shared secret, server-fetched after sandbox check — supply it
+explicitly:
+
+```go
+import (
+    "crypto/sha256"
+
+    "github.com/oioio-space/maldev/pe/packer"
+)
+
+// Derive a 32-byte key from anything (here: hostname + magic word).
+shared := sha256.Sum256([]byte("operator-codename:" + getHostname()))
+
+blob, _, err := packer.Pack(payload, packer.Options{Key: shared[:]})
+// Same key on the build host = round-trip works.
+```
+
+## API Reference
+
+### `func Pack(data []byte, opts Options) (packed []byte, key []byte, err error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#Pack)
+
+Encrypt + embed `data` into a maldev-format blob.
+
+**Parameters:**
+
+- `data` — arbitrary bytes (PE / ELF / shellcode / anything).
+- `opts.Cipher` — `CipherAESGCM` (default; only ship in Phase 1a).
+- `opts.Compressor` — `CompressorNone` (default; only ship in Phase 1a).
+- `opts.Key` — 16/24/32 bytes for AES-GCM; nil → fresh random 32 bytes.
+
+**Returns:** `(blob, key, err)`. The key is the only material
+needed to call `Unpack` later.
+
+**OPSEC:** the blob carries the `MLDV` magic at offset 0. Phase
+1a is intentionally fingerprintable — Phase 1b wraps it.
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform.
+
+### `func Unpack(packed []byte, key []byte) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#Unpack)
+
+Reverse `Pack`. Returns the original `data` bytes.
+
+**Sentinels** (use `errors.Is`):
+
+- `ErrShortBlob` — input shorter than 32-byte header.
+- `ErrBadMagic` — input doesn't start with `MLDV`.
+- `ErrUnsupportedVersion` — blob's version field unknown.
+- `ErrUnsupportedCipher` — blob references a cipher this build
+  doesn't implement.
+- `ErrUnsupportedCompressor` — same for compressors.
+- `ErrPayloadSizeMismatch` — header sizes inconsistent (truncated
+  blob).
+
+Wrong key OR tampered ciphertext both surface as the underlying
+AEAD `cipher: message authentication failed` error (no maldev
+sentinel — match on the unwrapped error if needed).
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform.
+
+### `type Options struct`, `type Cipher`, `type Compressor`
+
+See package godoc for full constant lists. Phase 1a only
+implements `CipherAESGCM` + `CompressorNone`; other constants
+are reserved for Phase 1b/1c.
+
+## OPSEC & Detection
+
+| Artefact | Where defenders look |
+|---|---|
+| `MLDV` magic at file offset 0 | Static signature scanners — trivially flagged. **Phase 1b removes this surface** by wrapping the blob in a host PE (magic moves to a non-zero offset inside a custom section). |
+| AES-GCM ciphertext entropy profile | High-entropy regions are common in legitimate signed binaries (compressed resources, embedded certs) — high entropy alone is weak signal. |
+| Round number sizes (header is exactly 32 bytes) | Possible but weak; many file formats have round headers. |
+
+**D3FEND counters:**
+
+- [D3-FCA](https://d3fend.mitre.org/technique/d3f:FileContentAnalysis/)
+  — magic-byte fingerprinting catches Phase 1a output.
+
+**Hardening for the operator:**
+
+- Don't ship the Phase 1a blob standalone — wait for Phase 1b
+  to wrap it.
+- Carry the AEAD key in a separate channel (config / second-stage
+  fetch / host fingerprint derivation).
+- Use [`crypto`](../crypto/payload-encryption.md) layered
+  permutation (S-Box / XOR) BEFORE Pack to scramble the
+  high-entropy ciphertext profile.
+
+## MITRE ATT&CK
+
+| T-ID | Name | Sub-coverage |
+|---|---|---|
+| [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | Obfuscated Files or Information: Software Packing | partial — Phase 1a is the encrypt side; full coverage when Phase 1b ships |
+| [T1620](https://attack.mitre.org/techniques/T1620/) | Reflective Code Loading | not yet — Phase 1b |
+
+## Limitations
+
+- **Phase 1a is data-only.** No execution path. Use Phase 1b
+  (when it ships) for runnable PE output.
+- **Magic at offset 0.** Trivially fingerprinted; intentional
+  for Phase 1a — Phase 1b hides it.
+- **Compression not yet implemented.** `CompressorNone` only.
+- **AES-GCM only.** ChaCha20 + RC4 constants are placeholders.
+- **No polymorphic stub yet.** Per-pack uniqueness today comes
+  only from AES-GCM nonce randomness; Phase 1d adds
+  compile-time stub templating.
+- **Key management is the operator's problem.** Pack returns
+  the key; how the operator transports it to Unpack at the
+  target / build-host is not handled here.
+
+## See also
+
+- [Packer design doc](../../refactor-2026-doc/packer-design.md)
+  — full 3-phase plan, capability matrix, threat model.
+- [`pe/morph`](morph.md) — UPX section rename (adjacent
+  technique; both ship, different problems).
+- [`pe/srdi`](pe-to-shellcode.md) — Donut shellcode
+  (alternative path; packer is "Donut for PEs on disk" — once
+  Phase 1b lands).
+- [`crypto`](../crypto/payload-encryption.md) — AEAD primitives
+  also usable directly for the same encrypt-then-embed pattern.

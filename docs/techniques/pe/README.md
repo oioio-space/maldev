@@ -74,6 +74,7 @@ flowchart LR
 | [`pe/masquerade`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade) | [masquerade.md](masquerade.md) | quiet | manifest + icon + VERSIONINFO clone via `.syso` (preset or programmatic) |
 | [`pe/srdi`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi) | [pe-to-shellcode.md](pe-to-shellcode.md) | moderate | PE / .NET / script → Donut shellcode |
 | [`pe/dllproxy`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy) | [dll-proxy.md](dll-proxy.md) | very-quiet | Pure-Go forwarder DLL emitter for DLL-hijack payloads |
+| [`pe/packer`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer) | [packer.md](packer.md) | very-quiet (Phase 1a) | Custom packer — encrypt + embed pipeline (Phase 1a; reflective loader stub lands in Phase 1b) |
 
 ## Quick decision tree
 

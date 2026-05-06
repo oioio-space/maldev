@@ -13,7 +13,7 @@ reflects_commit: a705c32
 |-----------|---------------|------------|----------------------|
 | T1016 | System Network Configuration Discovery | `recon/network` (interfaces, gateway, DNS, public IP), `win/domain` (paired use) | D3-NTPM (Network Traffic Pattern Matching) |
 | T1027 | Obfuscated Files or Information | `evasion/sleepmask`, `pe/strip`, `crypto` (TEA/XTEA/ArithShift/SBox/MatrixTransform), `win/api` (PEB-walk hash imports) | D3-SMRA (System Memory Range Analysis) |
-| T1027.002 | Software Packing | `pe/morph` | D3-SEA (Static Executable Analysis) |
+| T1027.002 | Software Packing | `pe/morph`, `pe/packer` (Phase 1a — encrypt + embed pipeline) | D3-SEA (Static Executable Analysis) |
 | T1027.007 | Dynamic API Resolution | `win/api` (Hell's/Halo's/Tartarus/HashGate resolvers), `win/syscall` (SSN gating chain) | D3-SCA (System Call Analysis) |
 | T1027.013 | Encrypted/Encoded File | `crypto`, `encode` | D3-FCA (File Content Analysis) |
 | T1036 | Masquerading | `evasion/stealthopen`, `evasion/callstack` (call-stack spoof metadata) | D3-FHA (File Hash Analysis) |

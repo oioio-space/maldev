@@ -57,7 +57,7 @@ OPSEC / MITRE / Limitations / See also).
 | [T1016](https://attack.mitre.org/techniques/T1016/) | [`recon/network`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/network) · [`win/domain`](https://pkg.go.dev/github.com/oioio-space/maldev/win/domain) |
 | [T1021.002](https://attack.mitre.org/techniques/T1021/002/) | [`c2/transport/namedpipe`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport/namedpipe) |
 | [T1027](https://attack.mitre.org/techniques/T1027/) | [`crypto`](https://pkg.go.dev/github.com/oioio-space/maldev/crypto) · [`encode`](https://pkg.go.dev/github.com/oioio-space/maldev/encode) · [`evasion/hook/shellcode`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/shellcode) · [`evasion/sleepmask`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/sleepmask) · [`win/api`](https://pkg.go.dev/github.com/oioio-space/maldev/win/api) |
-| [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | [`pe`](https://pkg.go.dev/github.com/oioio-space/maldev/pe) · [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) · [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) · [`pe/strip`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip) |
+| [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | [`pe`](https://pkg.go.dev/github.com/oioio-space/maldev/pe) · [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) · [`pe/packer`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer) · [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) · [`pe/strip`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip) |
 | [T1027.005](https://attack.mitre.org/techniques/T1027/005/) | [`pe/strip`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip) · [`process/tamper/herpaderping`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/herpaderping) · [`process/tamper/hideprocess`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess) · [`recon/hwbp`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp) |
 | [T1027.007](https://attack.mitre.org/techniques/T1027/007/) | [`win/syscall`](https://pkg.go.dev/github.com/oioio-space/maldev/win/syscall) |
 | [T1027.013](https://attack.mitre.org/techniques/T1027/013/) | [`crypto`](https://pkg.go.dev/github.com/oioio-space/maldev/crypto) |
@@ -123,7 +123,7 @@ OPSEC / MITRE / Limitations / See also).
 | [T1574.001](https://attack.mitre.org/techniques/T1574/001/) | [`pe/dllproxy`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy) · [`recon/dllhijack`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack) |
 | [T1574.002](https://attack.mitre.org/techniques/T1574/002/) | [`pe/dllproxy`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/dllproxy) |
 | [T1574.012](https://attack.mitre.org/techniques/T1574/012/) | [`evasion`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion) · [`evasion/hook`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook) · [`evasion/hook/bridge`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/bridge) · [`evasion/hook/shellcode`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/shellcode) |
-| [T1620](https://attack.mitre.org/techniques/T1620/) | [`pe/srdi`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi) · [`runtime/bof`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof) · [`runtime/clr`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr) |
+| [T1620](https://attack.mitre.org/techniques/T1620/) | [`pe/packer`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer) · [`pe/srdi`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi) · [`runtime/bof`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/bof) · [`runtime/clr`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr) |
 | [T1622](https://attack.mitre.org/techniques/T1622/) | [`evasion`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion) · [`recon/antidebug`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antidebug) · [`recon/hwbp`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp) |
 
 <!-- END AUTOGEN: mitre-index -->
@@ -206,7 +206,7 @@ _Each area is collapsed by default — click to expand. Detection level is the c
 
 </details>
 
-<details><summary><strong>PE manipulation — `pe/*`</strong> — 11 packages</summary>
+<details><summary><strong>PE manipulation — `pe/*`</strong> — 12 packages</summary>
 
 | Package | Detection | Summary |
 |---|---|---|
@@ -218,6 +218,7 @@ _Each area is collapsed by default — click to expand. Detection level is the c
 | [`pe/masquerade/donors`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/donors) | very-quiet | lists the reference (donor) PE files the pe/masquerade preset generator and the cmd/cert-snapshot tool share |
 | [`pe/masquerade/preset`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/preset) | — | _(no doc.go summary)_ |
 | [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) | moderate | mutates UPX-packed PE headers so automatic unpackers fail to recognise the input |
+| [`pe/packer`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer) | very-quiet | is maldev's custom PE/ELF packer |
 | [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) | very-quiet | provides PE file parsing and modification utilities |
 | [`pe/srdi`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi) | moderate | converts PE / .NET / script payloads into position-independent shellcode via the Donut framework (github.com/Binject/go-donut) |
 | [`pe/strip`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip) | quiet | sanitises Go-built PE binaries by removing toolchain artefacts that fingerprint the producer |
