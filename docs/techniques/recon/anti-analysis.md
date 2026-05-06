@@ -10,26 +10,54 @@ reflects_commit: 7a8c466
 
 ## TL;DR
 
-Cross-platform debugger detection ([`antidebug`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antidebug))
-+ multi-vendor VM/hypervisor detection ([`antivm`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm)).
-Single-shot primitives the implant runs at startup; bail if a
-debugger is attached or the host fingerprints as VirtualBox /
-VMware / Hyper-V / Parallels / Xen / QEMU / Docker / WSL.
+Before doing anything risky, ask the host: "am I being
+analysed?" Two cheap checks run in microseconds and let your
+implant bail before the analyst's pipeline records anything
+useful.
 
-## Primer
+Pick the right check based on what you want to detect:
 
-Sandboxes are virtual machines. Analysts attach debuggers. If
-the implant exits before either can capture a behavioural trace,
-the analysis pipeline goes home with empty hands. `antidebug` +
-`antivm` are the two cheapest "is this an analysis environment?"
-primitives — both bail in microseconds.
+| You want to detect… | Use | Cost | Strength |
+|---|---|---|---|
+| Live debugger attached | [`antidebug.IsDebuggerPresent`](#func-isdebuggerpresent-bool) | 1 syscall | Bulletproof for default debuggers; defeated by anti-anti-debug plugins (ScyllaHide etc.) |
+| Common sandbox VMs (VirtualBox, VMware, Hyper-V, QEMU, Parallels, Xen, Docker, WSL) | [`antivm.RunChecks`](#func-runchecksopts-checkoptions-result) | <100ms | Multi-dimensional (registry + files + NICs + processes + DMI). Checks are vendor-fingerprintable. |
+| Modern HVCI/hardware-virt-aware hypervisors | [`antivm.HypervisorPresent`](#func-hypervisorpresent-bool) | 1 CPUID | Detects ANY hypervisor (including Hyper-V on a "real" Win11 machine). Use as a soft signal, not a hard bail. |
+| Comprehensive scoring across all signals | [`recon/sandbox`](sandbox.md) | varies | Orchestrator combining the above + idle time + drive count + uptime. |
 
-`antidebug` reads the PEB BeingDebugged flag (Windows) or
-`/proc/self/status TracerPid` (Linux). `antivm` runs configurable
-checks across 7 dimensions (registry, files, NIC MAC prefixes,
-processes, CPUID/BIOS, DMI info) keyed against vendor-specific
-fingerprints. Pair both with [`recon/sandbox`](sandbox.md) for
-the multi-factor orchestrator.
+Recommended startup pattern: bail on debugger immediately
+(very-low false-positive), score on VM signals (sandbox vs
+real machine is fuzzy), let `recon/sandbox` arbitrate.
+
+## Primer — vocabulary
+
+Five terms recur on this page:
+
+> **Sandbox** — a managed analysis environment (Cuckoo, ANY.RUN,
+> AV vendor labs) that runs your sample in a VM, traces every
+> syscall + network packet, then writes a report. Sandboxes
+> are usually VMs, so VM detection catches most of them.
+>
+> **PEB (Process Environment Block)** — Windows per-process
+> structure containing the `BeingDebugged` byte at offset
+> 0x02. Set by the kernel when a debugger attaches.
+> `IsDebuggerPresent` reads this flag.
+>
+> **CPUID** — x86 instruction the CPU answers with its
+> capabilities. The hypervisor-present bit (leaf 1, ECX bit 31)
+> is set by EVERY hypervisor (VMware, KVM, Hyper-V, Xen…) —
+> the hypervisor cannot lie about it without breaking the OS
+> running inside.
+>
+> **DMI (Desktop Management Interface)** — a small database
+> the BIOS exposes (manufacturer, product name, chassis type,
+> BIOS vendor). VMs have characteristic DMI strings ("VMware,
+> Inc.", "innotek GmbH" for VirtualBox, "Microsoft Corporation"
+> for Hyper-V) that don't appear on physical machines.
+>
+> **Indicator dimension** — a category of fingerprint signal:
+> registry keys (Windows), file paths, NIC MAC prefixes,
+> running process names, BIOS/DMI info, CPUID flags. `antivm`
+> runs configurable subsets via `CheckOptions`.
 
 ## How It Works
 
@@ -433,6 +461,83 @@ for the timing). No syscall, no kernel transition.
 registry/file/NIC dimensions).
 
 ## Examples
+
+### Quick start — startup bail-out triplet
+
+The canonical "is this safe to run?" check at implant startup.
+Three calls in order: debugger first (cheapest, hard fail),
+hypervisor probe second (1 CPUID, scoring), full VM scan last
+(most expensive, hard fail on known-sandbox vendors).
+
+```go
+package main
+
+import (
+    "log"
+    "os"
+
+    "github.com/oioio-space/maldev/recon/antidebug"
+    "github.com/oioio-space/maldev/recon/antivm"
+)
+
+func safeToRun() bool {
+    // Step 1: hard fail on attached debugger. Cheapest check
+    //         (~one syscall on Windows, one file read on Linux).
+    if antidebug.IsDebuggerPresent() {
+        log.Println("debugger attached — bailing")
+        return false
+    }
+
+    // Step 2: cheap CPUID-based hypervisor probe. Detects ANY
+    //         hypervisor — including Hyper-V on a real Win11
+    //         laptop, so use as a SOFT signal (log + lower
+    //         threshold for further checks), not a hard bail.
+    if antivm.HypervisorPresent() {
+        vendor := antivm.HypervisorVendorName()
+        log.Printf("hypervisor present: %s — running cautiously", vendor)
+        // continue, but maybe skip the loudest payloads
+    }
+
+    // Step 3: full VM detection across registry / files / NICs /
+    //         processes / DMI. Returns "" when no known sandbox
+    //         fingerprint matches. Hard bail when it does.
+    if name, _ := antivm.Detect(antivm.DefaultConfig()); name != "" {
+        log.Printf("sandbox detected: %s — bailing", name)
+        return false
+    }
+
+    return true
+}
+
+func main() {
+    if !safeToRun() {
+        os.Exit(0)
+    }
+    // ... real implant logic ...
+}
+```
+
+What this DOES catch:
+
+- ScyllaHide-free debuggers (x64dbg, Visual Studio, WinDbg
+  out-of-the-box).
+- Known sandboxes (Cuckoo, ANY.RUN, JoeSandbox) — they all run
+  on detectable VM stacks.
+- VirtualBox / VMware default installs.
+
+What this does NOT catch:
+
+- Hardware-level sandboxes running on bare metal with snapshot
+  rollback. Rare but exist.
+- Anti-anti-debug plugins (ScyllaHide, TitanHide) — patch the
+  PEB byte before your check runs.
+- Newer sandboxes that scrub VM artefacts (registry / DMI
+  cleanup, MAC randomisation). The CPUID hypervisor bit can
+  still be hidden by some hypervisors via VT-x manipulation.
+
+For higher coverage, layer with [`recon/sandbox`](sandbox.md)
+which adds idle-time + drive-count + uptime + recent-document
+heuristics on top of these primitives.
 
 ### Simple — bail on detection
 
