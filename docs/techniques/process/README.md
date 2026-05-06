@@ -41,6 +41,22 @@ flowchart TB
     PH --> EVA
 ```
 
+> **Where to start (novice path):**
+> 1. [`enum`](enum.md) — list processes / find by name. Foundation
+>    every other operation builds on (need a PID before you do
+>    anything to it).
+> 2. [`session`](session.md) — Windows session/token enumeration.
+>    Pair with `enum` when targeting cross-session work
+>    (Run-as-User, interactive desktop access).
+> 3. [`tamper/fakecmd`](fakecmd.md) — disguise YOUR command line
+>    in PEB. Pairs with [`evasion/ppid-spoofing`](../evasion/ppid-spoofing.md)
+>    for the parent disguise.
+> 4. [`tamper/hideprocess`](hideprocess.md) — hide YOUR process
+>    from Task Manager / ProcExp by patching their `NtQuerySystemInformation`.
+> 5. [`tamper/herpaderping`](herpaderping.md), [`tamper/phant0m`](phant0m.md)
+>    — specialised; pick when defender configuration warrants
+>    (kernel image-section cache abuse vs EventLog silencing).
+
 ## Packages
 
 | Package | Tech page | Detection | One-liner |

@@ -53,6 +53,23 @@ flowchart TB
     IFACE --> ALL
 ```
 
+> **Where to start (novice path):**
+> 1. [`registry`](registry.md) — HKCU Run key. The classic
+>    "implant relaunches at every user logon" mechanism.
+>    Smallest footprint, easiest to set up.
+> 2. [`startup-folder`](startup-folder.md) — drop a LNK in the
+>    Startup folder. Same trigger (user logon), different
+>    artefact class — use one or the other based on which
+>    surface defenders inventory.
+> 3. [`task-scheduler`](task-scheduler.md) — COM ITaskService.
+>    Survives when Run keys / startup folder get cleaned by AV
+>    remediation. Heavier setup but most resilient.
+> 4. [`service`](service.md) — boot-time SYSTEM persistence.
+>    Requires admin; pair with [`cleanup/service`](../cleanup/service.md)
+>    to hide it from `services.msc`.
+> 5. Compose 2-3 mechanisms via `InstallAll` so failure of one
+>    doesn't lose persistence. NEVER rely on a single mechanism.
+
 ## Packages
 
 | Package | Tech page | Detection | One-liner |

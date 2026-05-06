@@ -36,6 +36,17 @@ flowchart LR
     S --> OUT
 ```
 
+> **Where to start (novice path):**
+> 1. [`clipboard`](clipboard.md) — quietest collector. One-shot
+>    `ReadText` or polling `Watch` channel. Catches passwords
+>    pasted from password managers.
+> 2. [`screenshot`](screenshot.md) — periodic visual capture.
+>    Useful for rich applications (banking, encrypted chat)
+>    where the actual data isn't accessible programmatically.
+> 3. [`keylog`](keylogging.md) — last resort. Catches everything
+>    typed but the WH_KEYBOARD_LL hook is the textbook EDR
+>    signal. Use only when other paths don't suffice.
+
 ## Packages
 
 | Package | Tech page | Detection | One-liner |

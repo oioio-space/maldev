@@ -57,6 +57,19 @@ graph TD
     TOKEN -.->|"used by"| EXECAS
 ```
 
+> **Where to start (novice path):**
+> 1. [`win/token`](win-token.md) — `Steal(pid)` / `StealByName`.
+>    Grab another process's token (typically winlogon's SYSTEM
+>    token) and impersonate. Foundation everything else builds on.
+> 2. [`win/impersonate`](win-impersonate.md) — `LogonUser`-based
+>    impersonation when you have plaintext creds (vs token theft).
+> 3. [`win/privilege`](win-privilege.md) — enable specific
+>    privileges in the current token (`SeDebugPrivilege` for
+>    LSASS access, `SeBackupPrivilege` for `reg save`).
+> 4. [`privesc/uac`](privesc-uac.md) — UAC bypass methods
+>    (FODHelper, ComputerDefaults, sdclt, etc.) when you're
+>    Medium-IL and need High-IL.
+
 ## Documentation
 
 | Document | Description |
