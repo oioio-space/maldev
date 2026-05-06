@@ -7,6 +7,83 @@ reflects_commit: 0dc2bb2
 
 > **MITRE ATT&CK:** T1134.004 -- Access Token Manipulation: Parent PID Spoofing | **Detection:** Medium -- Process tree anomalies are detectable but require behavioral analysis
 
+## TL;DR
+
+When you spawn a child process, Windows records WHO spawned it
+(`ParentProcessId` field). EDRs use this for detection: `cmd.exe`
+spawned by `explorer.exe` looks normal; `cmd.exe` spawned by
+`excel.exe` triggers a macro-attack alert.
+
+PPID spoofing lies about the parent. The child appears in
+Process Hacker / Sysmon / EDR telemetry as if a chosen
+"benign" process spawned it.
+
+| You want… | Use | Cost |
+|---|---|---|
+| Spoof PPID using the Go-1.24+ syscall.SysProcAttr.ParentProcess field | [`shell.NewPPIDSpoofer`](#shellnewppidspoofer) + `FindTargetProcess` + `SysProcAttr` | One `OpenProcess(PROCESS_CREATE_PROCESS)` call to the target parent |
+| Use a specific parent PID (you already have one in mind) | `spoofer.SetTargetPID(pid)` then proceed as above | Same cost |
+
+What this DOES achieve:
+
+- Process tree shown in Process Hacker / Sysmon EID 1 /
+  Get-Process tree all show the spoofed parent.
+- Pattern-matching detections (`excel.exe → cmd.exe`,
+  `winword.exe → powershell.exe`) miss your child entirely.
+- Token, working directory, environment all unaffected — the
+  child runs as YOUR user, not the spoofed parent's user. The
+  lie is purely cosmetic on the parent field.
+
+What this does NOT achieve:
+
+- **Doesn't elevate** — your `OpenProcess` to the spoofed
+  parent must succeed. You can only spoof to parents you can
+  open with `PROCESS_CREATE_PROCESS`. Same-integrity targets
+  (other Medium IL processes) work; SYSTEM targets need
+  SeDebugPrivilege.
+- **Doesn't fool stack walking** — EDRs that walk the calling
+  thread's stack on `NtCreateUserProcess` see YOUR process
+  doing the spawn. Pair with [`evasion/callstack-spoof`](callstack-spoof.md)
+  for that.
+- **Doesn't fool ETW Provider Microsoft-Windows-Kernel-Process** —
+  this provider logs the actual creator (the process that
+  called `NtCreateUserProcess`), not the recorded parent. EDRs
+  subscribed to it cross-check.
+- **Doesn't survive deep telemetry** — Sysmon's `ParentProcessGuid`
+  field can be cross-referenced; sophisticated detection
+  notices when the spoofed-parent's known children profile
+  doesn't match.
+
+## Primer — vocabulary
+
+Five terms recur on this page:
+
+> **PPID (Parent Process ID)** — the PID stored in a child
+> process's `EPROCESS.InheritedFromUniqueProcessId` field. Set
+> by the kernel from `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS`
+> at process-create time, OR (default) from the calling
+> process's PID.
+>
+> **`PROC_THREAD_ATTRIBUTE_PARENT_PROCESS`** — the Win32
+> `STARTUPINFOEX.lpAttributeList` slot that overrides PPID
+> for a `CreateProcess` call. Legitimate API — Microsoft uses
+> it for service hosting. The presence of this attribute is
+> NOT itself suspicious.
+>
+> **`PROCESS_CREATE_PROCESS` access right** — the minimum
+> handle right needed on the spoofed parent. Less than
+> `PROCESS_ALL_ACCESS` (so the OpenProcess audit signal is
+> weaker). Most user-mode processes grant this to the same
+> user.
+>
+> **Process tree** — the hierarchical view Process Hacker /
+> Process Explorer / Sysmon EID 1 reconstruct from PPIDs.
+> Spoofing rewrites where your child appears in this view.
+>
+> **`SysProcAttr.ParentProcess`** — Go 1.24+ field on
+> `syscall.SysProcAttr` that handles all the
+> `PROC_THREAD_ATTRIBUTE_LIST` plumbing. Pre-1.24 you had to
+> roll the attribute list manually.
+
 ## Primer
 
 When a process creates a child process on Windows, the child inherits its parent's identity in the process tree. Security tools use this parent-child relationship as a key detection signal. For example, if `cmd.exe` is spawned by `explorer.exe`, that looks normal -- the user opened a command prompt. But if `cmd.exe` is spawned by `excel.exe`, that is highly suspicious and likely indicates a macro-based attack.
