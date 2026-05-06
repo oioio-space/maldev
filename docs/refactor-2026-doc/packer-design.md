@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-05-06
-status: design — pre-implementation
+status: design + Phase 1a + 1b shipped (v0.50.0 + v0.51.0); Phase 1c+ in progress
 ---
 
 # `pe/packer` design — scope, threat model, phases
@@ -252,27 +252,76 @@ func Unpack(packed []byte, key []byte) (orig []byte, err error)  // for tests
 - Stub obfuscation costs CPU at unpack time + doubles stub
   size; opt-in.
 
-## Build sequence
+## Industry survey (2026-05-06)
 
-Recommended implementation order:
+Inspected 6 public packers to lift good ideas + avoid known
+pitfalls. Findings drive the revised phase plan below.
 
-1. **Phase 1 design + skeleton** — `Pack` / `Unpack` with
-   simplest possible stub (write-to-disk-and-exec for
-   debugging). Validates encrypt + compress + embed pipeline.
-2. **Phase 1 reflective loader** — replace debug stub with
-   in-memory reflective loader. Windows first, Linux second.
-3. **Phase 1 polymorphism** — compile-time templating.
-4. **Phase 1 tech md + tests** — `docs/techniques/pe/packer.md`
-   with the full pedagogical layer (TL;DR table, vocabulary
-   callout, narrated quick start, OPSEC, MITRE T1027.002 +
-   T1620, Limitations).
-5. **Phase 1 opt-ins** — anti-debug, AMSI/ETW silence, cert
-   graft, multi-target — each as separate small ships.
-6. **Phase 2** — section shuffle first (smaller blast radius),
-   then IAT scramble (requires the stub to learn dynamic
-   resolution).
-7. **Phase 3** — junk sections + stub obfuscation last
-   (cosmetic; gates on Phase 2 shipping cleanly).
+| Repo | Killer feature(s) absorbed |
+|---|---|
+| [EgeBalci/amber](https://github.com/EgeBalci/amber) | SGN multi-pass encoder (`-e N`); PE header scrape (drop MZ+DOS stub); CRC32 + IAT API resolver alternatives; reflective payload self-erase post-load |
+| [phra/PEzor](https://github.com/phra/PEzor) | Memory fluctuation RX↔RW/NA during sleep (already covered by `evasion/sleepmask`); environmental keying (`GetComputerNameExA` XOR key); 9 output formats (exe / dll / reflective-dll / service-exe / service-dll / dotnet / bof / dotnet-pinvoke / dotnet-createsection); DLL-sideload generation; sleep-before-unpack; SGN integration; anti-debug + unhook opt-ins |
+| [rtecCyberSec/Packer_Development](https://github.com/rtecCyberSec/Packer_Development) | x33fcon 2024 workshop — explicitly addresses entropy-based detection + sandbox evasion; modular `encrypt` / `antidebug` / `sandbox` (Delay + DomainJoin keying) / `AMSIETWBypass` / `peload` / `shellcodeexecute` / `assemblyLoad` / `dll` |
+| [Unknow101/FuckThatPacker](https://github.com/Unknow101/FuckThatPacker) | Naive XOR + Base64 + UTF16-LE for AMSI bypass (limited useful patterns) |
+| [czs108/Windows-PE-Packer](https://github.com/czs108/Windows-PE-Packer) | "Shell entry" concept (educational); import-table runtime transformation; section name clearing — aligns with our Phase 2 |
+| [pmq20/ruby-packer](https://github.com/pmq20/ruby-packer) | Different domain (Ruby app packing via SquashFS); not directly transferable |
+
+## Composability + anti-entropy (2026-05-06 user requirements)
+
+User explicitly asked for two capabilities the original Phase 1
+plan didn't surface:
+
+### Composability — pipeline of multiple ciphers
+
+`Options.Cipher` (single value) is too narrow. Operators want
+to STACK ciphers + permutations + compression:
+
+```go
+opts.Pipeline = []packer.PipelineStep{
+    {Op: packer.OpCompress,   Algo: packer.CompressorAPLib},
+    {Op: packer.OpPermute,    Algo: packer.PermutationSBox},
+    {Op: packer.OpCipher,     Algo: packer.CipherAESGCM},
+}
+```
+
+Pack runs the pipeline forward; Unpack runs it reverse. Each
+step is one of:
+
+- `OpCipher` — any of the AEADs / stream ciphers in `crypto/`
+- `OpPermute` — S-Box / Matrix Hill / ArithShift / XOR (existing in `crypto/`)
+- `OpCompress` — aPLib (default) / LZMA / zstd / LZ4
+- `OpEntropyMask` — see below
+
+Ships in Phase 1c.
+
+### Anti-entropy techniques
+
+High entropy (~7.5+ bits/byte) is one of the most reliable AV
+signals. Five industrial techniques surveyed:
+
+| # | Technique | Apparent entropy | Size cost | CPU cost | Phase |
+|---|---|---|---|---|---|
+| 1 | **XOR mask with code-like bytes** (low-entropy mask matches `.text` profile) | ~4-5 bits/byte | 0% | µs | 1d |
+| 2 | **Carrier resource embedding** — ship blob inside `.rsrc` PNG/JPEG-shaped wrapper | hidden behind expected high-entropy resource | +5-10% PNG header | low | 1d |
+| 3 | Steganographic LSB (4× expansion) | follows carrier | 4× | medium | NOT shipped — too costly |
+| 4 | **Interleaved low-entropy padding** (insert runs of zeros / ASCII / fake-strings between ciphertext chunks) | sectional alternation | +20-50% | minimal | 1d |
+| 5 | ASCII-output encoding (Base64 + dictionary) | ~5 bits/byte | +33% (Base64) | low | NOT shipped — Base64 trips other heuristics |
+
+Ship #1 + #2 + #4 in Phase 1d as `Options.EntropyCover`.
+
+## Revised phase plan
+
+| Phase | Scope | Status |
+|---|---|---|
+| 1a | encrypt + embed pipeline (AES-GCM + blob format) | ✅ v0.50.0 |
+| 1b | Windows reflective loader stub | ✅ v0.51.0 |
+| **1c** | **Composability pipeline** — `Options.Pipeline []PipelineStep` + integration with `crypto/*` (cipher, permutation). | ⏳ next |
+| 1c.5 | Compression in pipeline — aPLib (smallest decoder, ~500 bytes) ships first, then LZMA / zstd / LZ4 as opt-in | ⏳ |
+| 1d | Anti-entropy — XOR mask + carrier resource + interleaved padding, all opt-in via `Options.EntropyCover` | ⏳ |
+| 1e | Polymorphic stub generation (compile-time templating) + multi-format output (exe / reflective-dll / service-exe / dotnet / bof) | ⏳ |
+| 1f | Linux ELF reflective loader (mirror Phase 1b) + remaining opt-ins (anti-debug / AMSI silence / cert graft / multi-target / env keying — host fingerprint / domain join / date range) | ⏳ |
+| 2 | Section shuffle + IAT scramble (host PE) | deferred |
+| 3 | Junk sections + stub control-flow obfuscation | deferred |
 
 ## Tracking
 
