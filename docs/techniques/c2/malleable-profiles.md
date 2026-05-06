@@ -16,6 +16,35 @@ headers (`Referer`, `Accept`), real browser User-Agent, optional data
 encoders. A network analyst inspecting the wire sees jQuery downloads,
 not C2 callbacks.
 
+| You want… | Use | Effect |
+|---|---|---|
+| Cover beacon traffic as benign HTTP | wrap any [`c2/transport`](transport.md) HTTP path with a profile | URLs / headers / methods all match the profile shape |
+| Use a Cobalt Strike-style profile you already have | parse + load via [`Profile`](#profile) struct | One profile drives both inbound + outbound shaping |
+| Encode beacon data into a header / cookie / body chunk | configure `DataEncoder` | Beacon bytes look like base64 session ID / form data / etc. |
+
+What this DOES achieve:
+
+- **HTTP-structure** cover, not just TLS encryption. Even
+  TLS-terminating proxies see plausible URLs, headers, and
+  request rhythms.
+- Composable: works with any HTTP transport (TLS / uTLS /
+  raw HTTP for testing).
+- One profile per campaign — defenders that fingerprint
+  campaign A's profile don't automatically catch campaign B
+  if you swap.
+
+What this does NOT achieve:
+
+- **Doesn't hide that you're beaconing** — request frequency is
+  observable even with perfect shape. Configure jitter +
+  large intervals; pair with [`evasion/sleepmask`](../evasion/sleep-mask.md)
+  to keep the implant invisible BETWEEN beacons.
+- **Profile freshness** — popular profiles (CS Malleable
+  defaults, public OST configs) are signature-fingerprinted
+  by AV / EDR vendors. Custom-build per engagement.
+- **No JA3/JA4 cover** — that's the TLS layer. Combine with
+  uTLS via [`c2/transport`](transport.md).
+
 ## Primer
 
 TLS encrypts payload bytes; it does not hide HTTP **structure**.

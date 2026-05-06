@@ -17,6 +17,38 @@ ID, optional BANNER-encoded hostname metadata, and a lifecycle event
 are in-memory only — they do not survive a manager restart. Never
 embedded in the implant.
 
+| You want to… | Use | Notes |
+|---|---|---|
+| Accept multiple incoming reverse-shell agents | [`Manager.Serve`](#serve) | Wraps any [`c2/transport`](transport.md) listener. Single port, many sessions. |
+| React to agent connect/disconnect events | `Manager.Events()` channel | `EventOpened{ID, Hostname}` + `EventClosed{ID}` |
+| Send commands to a specific session | `Manager.Session(id).Write(...)` | Per-session R/W; the operator picks who runs what |
+| Persist sessions across restart | **Not supported** | Wrap `Manager` with your own state file; in-memory by design |
+
+⚠ **Operator-side only**: this is the listener that runs on
+your C2 box. NEVER include `c2/multicat` in implant builds —
+it would create a listener on the target.
+
+What this DOES achieve:
+
+- Replaces `nc -lvp` for ops with more than one host.
+- Same transport flexibility as the implant side: TCP / TLS /
+  uTLS / named pipes (when you receive over an SMB pipe) all
+  work.
+- Optional `BANNER:<hostname>\n` hello so the operator's UI
+  can label sessions ("dc01" / "ws-finance-3") instead of
+  `192.168.1.5:34521`.
+
+What this does NOT achieve:
+
+- **Not a TUI / UI** — it's a manager library. Build your own
+  CLI / web UI on top using the events channel.
+- **No persistence** — manager restart = all sessions lost.
+  Implants reconnect on drop ([`c2/shell.ReverseLoop`](reverse-shell.md)),
+  so sessions reappear quickly under their new IDs.
+- **No authentication** — first connection in is session 1, no
+  shared-secret check. Pair the transport with `c2/transport`
+  cert pinning + mTLS to gate access.
+
 ## Primer
 
 Engagements with more than one host quickly outgrow a single `nc -lvp

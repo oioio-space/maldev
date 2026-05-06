@@ -17,6 +17,38 @@ NIDS visibility) or over **SMB** to another host (lateral C2 routed
 through the file-share redirector). Pipe traffic is the textbook
 example of "looks like normal Windows".
 
+| You want… | Pipe path | Crosses host? |
+|---|---|---|
+| Local IPC C2 (parent ↔ child, two implants on same host) | `\\.\pipe\xxx` | No — kernel-only. Invisible to NIDS / netflow. |
+| Lateral C2 from one host to another over SMB | `\\target-host\pipe\xxx` | Yes — over SMB to the target. Looks like normal Windows file-share traffic. |
+| Long-running listener on the agent host | [`Listen`](#listen) | One server pipe; accepts multiple connections sequentially or via reconnect-on-drop |
+
+What this DOES achieve:
+
+- Local-IPC C2 has zero network footprint — netflow, firewall,
+  NIDS see nothing. Defender memory-scan or process-tree
+  analysis is the only path that catches it.
+- SMB pipe lateral C2 blends into normal Windows file-share
+  traffic. Networks that allow `\\dc01\sysvol` access already
+  allow your pipe.
+- Same `Transport` interface as TCP / TLS / uTLS — every shell
+  / stager / beacon in maldev works over named pipes by
+  changing one config field.
+
+What this does NOT achieve:
+
+- **Local pipes are visible to local-host telemetry** — Sysmon
+  EID 17/18 (named-pipe create / connect) catches every
+  pipe op. EDRs match on suspicious-process / suspicious-pipe
+  combinations. Use random-looking pipe names to dodge
+  static rules.
+- **SMB requires authentication** — you need valid credentials
+  for the target host, OR an existing logon session that
+  carries them. Lateral movement prerequisite.
+- **No encryption of pipe content** — wrap your payload with
+  [`crypto`](../crypto/payload-encryption.md) if a host-local
+  packet capture (Wireshark with NPF driver) is in scope.
+
 ## Primer
 
 Most C2 traffic leaves the host over TCP / HTTP, where firewalls and

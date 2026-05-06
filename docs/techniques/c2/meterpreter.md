@@ -10,13 +10,45 @@ reflects_commit: 31f8854
 
 ## TL;DR
 
-Pulls a second-stage Meterpreter payload from a Metasploit
-`multi/handler` over TCP / HTTP / HTTPS and executes it in-process.
-`Config.Injector` overrides the default self-injection with any
-[`inject.Injector`](../injection/README.md) — Early Bird APC into a
-sacrificial child, indirect syscalls, decorator middleware, automatic
-fallback, the lot. Linux uses an ELF wrapper that requires the live
-socket fd; setting `Injector` on Linux is rejected.
+You want a Meterpreter session on the target without shipping
+the full Meterpreter binary (hundreds of KB, signature-rich).
+The classical pattern: a tiny **stager** pulls the second
+stage from your MSF `multi/handler` over the network and
+executes it in-process.
+
+| You want… | Use | Notes |
+|---|---|---|
+| Self-inject the stage in current process | `meterpreter.Run` (default — no `Config.Injector`) | Simplest. Stage runs as your implant's process. |
+| Inject the stage into a sacrificial child | `Config.Injector = inject.NewWindowsInjector(...)` with Early Bird APC etc. | Survives implant exit. Spoof PPID + args for cover. |
+| Linux target | `meterpreter.Run` | ELF wrapper needs the live socket fd; `Config.Injector` is rejected on Linux. |
+
+Transport options: TCP, HTTP, HTTPS, all routed through
+[`c2/transport`](transport.md) (so you get TLS pinning, uTLS,
+etc. for free).
+
+What this DOES achieve:
+
+- Operator gets a full MSF session — file ops, port forwarding,
+  privilege escalation modules, the lot.
+- Stager is small enough to fit in a Donut shellcode payload
+  or any `inject.*` flow.
+- Cross-platform — same Go code stages on Windows / Linux.
+
+What this does NOT achieve:
+
+- **Doesn't hide that you're staging Meterpreter** — once the
+  stage is in memory, `MZ` header + ReflectiveLoader byte
+  signature flag every memory scanner. Pair with
+  [`evasion/sleepmask`](../evasion/sleep-mask.md) so the bytes
+  hide between callbacks.
+- **No automatic OPSEC for MSF traffic** — the second stage is
+  Meterpreter as-is. Defenders running detection on its
+  protocol see standard MSF traffic. Use
+  [`malleable-profiles`](malleable-profiles.md) to wrap HTTP
+  staging only; the post-stage protocol is what MSF speaks.
+- **Network requirement** — needs egress to your handler. For
+  air-gapped or fully-offline ops, build a custom payload
+  with [`pe/srdi`](../pe/pe-to-shellcode.md) instead.
 
 ## Primer
 
