@@ -1,17 +1,3 @@
-// Package donors lists the reference (donor) PE files the
-// pe/masquerade preset generator and the cmd/cert-snapshot tool
-// share. Single source of truth so adding a new identity in one
-// place flows through both pipelines (cosmetic .syso bundling +
-// Authenticode cert blob extraction).
-//
-// Operators with custom build pipelines can iterate [All]
-// directly to drive their own per-identity tooling — there is no
-// stability guarantee on the contents (entries get added when
-// new donors land), only on the [Donor] struct shape.
-//
-// Paths use OS env-vars (${SystemRoot}, ${ProgramFiles},
-// ${LOCALAPPDATA}) — callers expand via os.ExpandEnv before
-// touching disk.
 package donors
 
 // Donor associates a Go-identifier-safe ID (used as preset

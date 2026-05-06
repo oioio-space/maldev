@@ -652,6 +652,16 @@ cases described in OPSEC below.
   verifiers that check it (rare in user-mode, mandatory for kernel
   drivers) see a self-consistent value. Independent callers can
   invoke `PatchPECheckSum(data)` directly after their own splices.
+- **Bundled cert blobs age.** `pe/masquerade/donors/blobs/<id>.bin`
+  ships a snapshot taken on
+  [`donors.SnapshotDate`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/donors#pkg-constants).
+  Authenticode roots rotate (Microsoft renewed in 2024, Adobe in
+  2023) — once a bundled cert's NotAfter passes or its issuer is
+  retired, file-properties UI may hint "expired publisher". Refresh
+  via `cmd/cert-snapshot -out ./pe/masquerade/donors/blobs` and
+  commit. The blobs themselves ARE published research artefacts
+  and may be fingerprinted by threat-intel crawlers indexing the
+  repo — accepted trade-off for the offline-graft convenience.
 - **`Forge` produces a chain that fails validation.** Pure-Go
   `Forge` builds a 2- or 3-tier self-signed chain wrapped in
   PKCS#7 SignedData — sufficient to populate the file-properties

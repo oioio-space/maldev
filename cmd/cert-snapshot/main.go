@@ -13,10 +13,6 @@
 //	c, _ := os.ReadFile("./ignore/certs/claude.bin")
 //	cert.Write("implant.exe", &cert.Certificate{Raw: c})
 //
-// SKIP-on-stat per donor — the same identity slice powers
-// pe/masquerade/internal/gen, so missing donors here just produce
-// fewer .bin files (no fatal).
-//
 // The grafted signature is NOT cryptographically valid (the PE
 // hash differs); this only fools static "does the file have a
 // signature blob?" checks and the file-properties UI. Real
@@ -45,15 +41,9 @@ func main() {
 	var ok, skipped int
 	for _, d := range donors.All {
 		exePath := os.ExpandEnv(d.Path)
-		st, err := os.Stat(exePath)
-		if err != nil || st.IsDir() {
-			log.Printf("SKIP %s: %v", d.ID, err)
-			skipped++
-			continue
-		}
 		c, err := cert.Read(exePath)
 		if err != nil {
-			log.Printf("SKIP %s: read cert: %v", d.ID, err)
+			log.Printf("SKIP %s: %v", d.ID, err)
 			skipped++
 			continue
 		}

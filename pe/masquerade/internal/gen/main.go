@@ -52,9 +52,6 @@ func (v variant) desc() string {
 	return s
 }
 
-// Donor list now lives in pe/masquerade/internal/donors so the
-// cmd/cert-snapshot tool can iterate the same identities without
-// duplicating the slice. Add a new identity there.
 
 func main() {
 	outRoot := flag.String("out", filepath.Join("pe", "masquerade"), "output root (should end with pe/masquerade)")

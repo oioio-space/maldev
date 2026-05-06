@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"strings"
+	"sync"
 )
 
 // Bundled cert blob snapshot taken 2026-05-06 from a Windows 11
@@ -59,17 +61,23 @@ func LoadBlob(id string) ([]byte, error) {
 //
 // Useful for operator UIs ("which donors can I graft offline?")
 // and for tests that want to round-trip every bundled blob.
+//
+// The result is computed once and cached — embed.FS contents
+// are immutable at runtime. Callers must not mutate the slice.
 func AvailableBlobs() []string {
+	return availableBlobs()
+}
+
+var availableBlobs = sync.OnceValue(func() []string {
 	entries, err := blobsFS.ReadDir("blobs")
 	if err != nil {
 		return nil
 	}
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
-		name := e.Name()
-		if len(name) > 4 && name[len(name)-4:] == ".bin" {
-			out = append(out, name[:len(name)-4])
+		if name := e.Name(); strings.HasSuffix(name, ".bin") {
+			out = append(out, strings.TrimSuffix(name, ".bin"))
 		}
 	}
 	return out
-}
+})
