@@ -17,6 +17,37 @@ delay. Unix path allocates a PTY for full interactive use; Windows
 path uses direct `cmd.exe` I/O and optionally patches AMSI / ETW /
 CLM / WLDP + disables PowerShell history before the shell starts.
 
+| You want… | Use | Notes |
+|---|---|---|
+| One-shot reverse shell over TCP/TLS/uTLS | [`Reverse`](#reversecfg-config-error) | Blocks until interpreter exits or transport drops |
+| Auto-reconnect loop | [`ReverseLoop`](#reverseloopcfg-config-error) | Retries N times with back-off; useful for long-running access |
+| Spoof the spawn's parent process | `Config.PPIDSpoofer` (Windows) | See [`evasion/ppid-spoofing`](../evasion/ppid-spoofing.md) |
+| Silence telemetry before shell starts | `Config.PreShell = preset.Stealth()` | Patches AMSI / ETW / CLM / WLDP — useful for PowerShell |
+
+What this DOES achieve:
+
+- Cross-platform. Windows uses `cmd.exe`; Unix allocates a PTY
+  for full readline / vi support.
+- Optional pre-shell evasion (Windows): silence AMSI + ETW,
+  disable PowerShell history, opt out of WLDP — done **before**
+  the shell launches so the operator's first command isn't
+  the loud one.
+- Composable transport — same shell code works over TCP / TLS /
+  uTLS based on `Config.Transport`.
+
+What this does NOT achieve:
+
+- **Not a beacon** — this is a long-lived TCP/TLS pipe, not a
+  poll-based check-in. For sleep-mask / encrypted-page beacons,
+  build on top with [`evasion/sleepmask`](../evasion/sleep-mask.md).
+- **No staging** — the interpreter (`cmd.exe`) is already on
+  the target. For shellcode delivery / .NET assembly run, see
+  [`pe/srdi`](../pe/pe-to-shellcode.md) + [`runtime/clr`](https://pkg.go.dev/github.com/oioio-space/maldev/runtime/clr).
+- **`cmd.exe` is loud** — process-creation event with
+  `cmd.exe` parent = your implant fires every EDR's "command
+  shell from non-shell process" rule. Use PPIDSpoofer + preset.Stealth
+  to mute the worst signals; a real beacon stays cleaner.
+
 ## Primer
 
 Network firewalls typically allow outbound connections and block

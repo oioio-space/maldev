@@ -10,12 +10,44 @@ reflects_commit: 31f8854
 
 ## TL;DR
 
-Pluggable network layer behind every reverse shell or stager. Three
-flavours: raw TCP, TLS with optional SHA-256 fingerprint pinning, and
-uTLS that emits a TLS ClientHello byte-for-byte identical to Chrome /
-Firefox / iOS Safari (defeats JA3/JA4-based detection). Pair with
-[`c2/cert`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/cert) to generate the operator's mTLS material
-and pin it on the implant side.
+Network layer behind every reverse shell, stager, or beacon.
+You pick the flavour based on what defenders inspect:
+
+| You're up against… | Use | What it defeats |
+|---|---|---|
+| Plaintext payload signatures, port-watching IDS | **TLS** ([`Dial`](#tlsconfig)) | DPI sees encrypted bytes only |
+| TLS-aware DPI matching server cert SHA-256 | **TLS + cert pinning** | MITM with a re-issued cert fails the pin check |
+| JA3/JA4-based handshake fingerprinting (most modern EDR/proxies) | **uTLS** ([`UTLSConfig`](#utlsconfig)) | TLS ClientHello looks byte-for-byte like Chrome / Firefox / iOS Safari |
+| Plaintext for testing only | **TCP** ([`TCPConfig`](#tcpconfig)) | Nothing — debug use only |
+
+Pair with [`c2/cert`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/cert)
+to generate the operator's mTLS material and pin it on the
+implant side.
+
+What this DOES achieve:
+
+- Pluggable: every reverse shell / stager / beacon in maldev
+  takes a `transport.Config` so the same payload flips
+  between TCP / TLS / uTLS without recompiling.
+- JA3/JA4 cover via uTLS — the canonical "implant looks like
+  a browser" technique. Burp / mitmproxy can't readily detect.
+- Optional certificate pinning by SHA-256 fingerprint —
+  catches attempted MITM even when the attacker gets a valid
+  cert from a public CA.
+
+What this does NOT achieve:
+
+- **Doesn't hide that an outbound connection happened** —
+  netflow logs see "implant.exe → 1.2.3.4:443" regardless of
+  TLS. Pair with [`evasion/preset.Stealth`](../evasion/preset.md)
+  to silence ETW network providers from this process.
+- **uTLS fingerprint freshness** — Chrome / Firefox update
+  their ClientHello frequently; an old uTLS preset becomes
+  its own fingerprint. Bump go-utls when shipping fresh
+  campaigns.
+- **No domain fronting / no CDN routing** — operator infra is
+  whatever IP the implant connects to. For domain fronting,
+  use a CDN that supports SNI rewrite outside this package.
 
 ## Primer
 
