@@ -423,37 +423,37 @@ func ReadSelfAuxvForTest(canaryPtr uintptr) []struct {
 	return out
 }
 
-// Run forks a child process, maps a fake kernel-style stack frame
-// in the child, and jumps to the loaded ELF entry point. The child
-// never returns; the parent waits and returns nil on exit 0.
+// Run jumps to the loaded image's entry point. ALWAYS gated by
+// MALDEV_PACKER_RUN_E2E=1 — production callers must opt in
+// explicitly. Returns once the entry point returns (most Go
+// static-PIE binaries call exit_group, so this typically does
+// NOT return).
 //
-// Why fork instead of jumping in-process:
-//   The parent is a Go binary with multiple OS threads. Clearing
-//   FS (arch_prctl ARCH_SET_FS=0) on one thread — which is
-//   required so the loaded binary's _rt0_amd64_linux can claim
-//   the TLS register — races with other goroutines reading g
-//   through FS. fork(2) gives us a single-threaded child where
-//   the FS clear is safe. The child inherits the mmap'd image
-//   (MAP_PRIVATE, copy-on-write) so no re-loading is needed.
-//
-// Gated behind MALDEV_PACKER_RUN_E2E=1 so unit test runs
-// that load the fixture for shape verification don't accidentally
-// execute the payload.
+// arch_prctl(ARCH_SET_FS) is per-thread on Linux, not per-process.
+// LockOSThread pins this goroutine to a single OS thread for the JMP
+// setup. Once the loaded binary's _rt0 issues arch_prctl(ARCH_SET_FS)
+// the Go runtime's TLS view on this thread is broken — but the JMP is
+// one-way and exit_group kills the whole process, so this thread never
+// schedules another goroutine. No UnlockOSThread needed.
 func (p *PreparedImage) Run() error {
 	if os.Getenv("MALDEV_PACKER_RUN_E2E") != "1" {
 		return errors.New("packer/runtime: PreparedImage.Run requires MALDEV_PACKER_RUN_E2E=1")
 	}
 
+	runtime.LockOSThread()
+
 	stack, err := unix.Mmap(-1, 0, fakeStackSize,
 		unix.PROT_READ|unix.PROT_WRITE,
 		unix.MAP_PRIVATE|unix.MAP_ANONYMOUS)
 	if err != nil {
+		runtime.UnlockOSThread()
 		return fmt.Errorf("packer/runtime: fake stack mmap: %w", err)
 	}
 
 	var canary [16]byte
 	if _, err := rand.Read(canary[:]); err != nil {
 		_ = unix.Munmap(stack)
+		runtime.UnlockOSThread()
 		return fmt.Errorf("packer/runtime: AT_RANDOM canary: %w", err)
 	}
 
@@ -477,52 +477,13 @@ func (p *PreparedImage) Run() error {
 	auxv, err := readSelfAuxv(patches)
 	if err != nil {
 		_ = unix.Munmap(stack)
+		runtime.UnlockOSThread()
 		return fmt.Errorf("packer/runtime: read /proc/self/auxv: %w", err)
 	}
 
 	stackTop := writeKernelFrame(stack, auxv, canary)
-
-	// LockOSThread pins the goroutine to one OS thread so the
-	// fork below happens on the same thread that built the stack
-	// frame — mmap and stack contents are in the child's address
-	// space regardless, but pinning avoids a race between the
-	// stack-frame write and the fork.
-	runtime.LockOSThread()
-
-	// fork(2): child pid 0 enters the loaded binary; parent
-	// waits and propagates the exit status.
-	pid, _, errno := unix.RawSyscall(unix.SYS_CLONE,
-		uintptr(unix.SIGCHLD), 0, 0)
-	if errno != 0 {
-		runtime.UnlockOSThread()
-		_ = unix.Munmap(stack)
-		return fmt.Errorf("packer/runtime: fork: %w", errno)
-	}
-
-	if pid == 0 {
-		// Child: single-threaded after fork. Safe to clear FS
-		// and JMP. enterEntry does arch_prctl(ARCH_SET_FS,0)
-		// then swaps RSP and JMPs — never returns.
-		enterEntry(p.EntryPoint, stackTop)
-		// Unreachable; enterEntry never returns.
-		unix.RawSyscall(unix.SYS_EXIT, 127, 0, 0)
-	}
-
-	// Parent: wait for child to exit.
-	var ws unix.WaitStatus
-	_, err = unix.Wait4(int(pid), &ws, 0, nil)
-	runtime.UnlockOSThread()
-	_ = unix.Munmap(stack)
-	if err != nil {
-		return fmt.Errorf("packer/runtime: wait4: %w", err)
-	}
-	if ws.Exited() && ws.ExitStatus() == 0 {
-		return nil
-	}
-	if ws.Signaled() {
-		return fmt.Errorf("packer/runtime: child killed by signal %d", ws.Signal())
-	}
-	return fmt.Errorf("packer/runtime: child exited with status %d", ws.ExitStatus())
+	enterEntry(p.EntryPoint, stackTop)
+	return nil // unreachable on happy path — exit_group never returns
 }
 
 // Free munmaps the mapped image. Safe to call multiple times;

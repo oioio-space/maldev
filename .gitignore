@@ -45,6 +45,10 @@ scripts/vm-test-x64dbg-mcp.go
 scripts/vm-test/config.local.yaml
 scripts/vm-test/kali-env.sh
 
+# Stray ELF test builds in packer testdata (iterative fixture rebuilds
+# that aren't the canonical hello_static_pie — *_test suffix, no extension).
+pe/packer/runtime/testdata/hello_static_pie_test*
+
 # Stray binaries from `go build ./cmd/...` without -o (Linux names, no
 # extension — *.exe already covers the Windows case above).
 /memscan-harness
