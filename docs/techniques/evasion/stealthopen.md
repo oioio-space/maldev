@@ -14,17 +14,76 @@ reflects_commit: 0dc2bb2
 
 ---
 
-## Primer
+## TL;DR
 
-Most file-monitoring tools (EDR minifilters, AV path filters, `Sysmon`
-FileCreate rules) decide whether to alert based on the **filename or path**
-that the process tried to open. If you can open the same file without ever
-mentioning its path, those filters go blind.
+You want to read a file (LSASS dump, NTDS.dit, decoy config)
+without any defender's path-keyed filter noticing. Sysmon
+FileCreate rules, EDR minifilters, AV path matchers — they all
+key on "what path did this process open?" If you open the file
+by its 128-bit NTFS Object ID instead of its path, those rules
+have nothing to match on.
 
-NTFS supports this natively. Every file can carry a 128-bit **Object ID** in
-its MFT record. Once that Object ID is known, Win32's `OpenFileById` opens the
-file by GUID — the kernel never sees a path in the open request, so any hook
-matching on `*.docx`, `ntds.dit`, `lsass.dmp`, etc. simply does not fire.
+The flow is two phases:
+
+| Phase | What you do | When |
+|---|---|---|
+| **Stamp** | [`GetObjectID(path)`](#stamp--getobjectidpath-string-byte-error) reads or assigns the file's Object ID. [`SetObjectID(path, guid)`](#set--setobjectidpath-string-id-byte-error) installs a caller-chosen GUID. | Once. On the build host, or by a stager process willing to touch the path one time. |
+| **Open path-free** | [`OpenByID(volume, guid)`](#open--openbyidvolume-string-id-byte-osfile-error) opens the file via the volume root, no path. | Every subsequent access. |
+
+What this DOES achieve:
+
+- Path-keyed Sysmon / EDR / AV filters don't trigger — the
+  open request the kernel sees has no path string.
+- Pre-shared GUID lets a stager and second-stage agree on a
+  file without either side carrying its path as a string.
+
+What this does NOT achieve:
+
+- **Minifilters that resolve back to a path** still see the
+  real file (`FltGetFileNameInformation` answers based on the
+  resolved `FILE_OBJECT`, not the open request). Mature EDRs
+  do this — defeat name-keyed filters, not signed-callback
+  data.
+- **NTFS only** — no FAT, no exFAT, no ReFS without Object ID
+  support. Most user data lives on NTFS, but USB drives and
+  network shares are a coin flip.
+- **The stamp is persistent** — the Object ID lives in the
+  MFT until the file is deleted. Defenders running
+  `fsutil objectid query <path>` see the GUID. If you want
+  truly invisible, use a freshly-stamped file you control.
+
+---
+
+## Primer — vocabulary
+
+Five terms recur on this page:
+
+> **NTFS Object ID** — a 128-bit GUID NTFS optionally attaches
+> to a file via the `$OBJECT_ID` MFT attribute. Either lazily
+> assigned by `FSCTL_CREATE_OR_GET_OBJECT_ID` (random GUID) or
+> caller-chosen via `FSCTL_SET_OBJECT_ID`. The file is then
+> reachable by GUID alone, no path needed.
+>
+> **MFT (Master File Table)** — NTFS's central index. Every
+> file has one MFT record holding its metadata (timestamps,
+> attributes, data runs). Object IDs live as one of those
+> attributes.
+>
+> **FSCTL (File System Control)** — a control code passed via
+> `DeviceIoControl` to talk directly to a filesystem driver.
+> `FSCTL_CREATE_OR_GET_OBJECT_ID` and `FSCTL_SET_OBJECT_ID`
+> are the two this technique uses.
+>
+> **OpenFileById** — Win32 API that opens a file by `FILE_ID`
+> (16 bytes for Object ID type, 8 bytes for FRN type). Takes a
+> *volume handle* + the ID — no path argument exists in the
+> call signature, so no path string can be logged.
+>
+> **Minifilter** — a kernel-mode filter driver (Sysmon's
+> `SysmonDrv`, EDR agents) that intercepts `IRP_MJ_CREATE` and
+> friends. Some key on the path field of the IRP (defeated
+> here); some resolve `FILE_OBJECT` back to a path after the
+> open succeeds (still see you).
 
 ---
 
