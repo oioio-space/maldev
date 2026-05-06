@@ -10,10 +10,43 @@ reflects_commit: 3de532d
 
 ## TL;DR
 
-Multi-pass overwrite a file with `crypto/rand` bytes, then `os.Remove`.
-Cross-platform. Defeats undelete utilities and partition recovery; does
-NOT defeat physical-layer recovery (residual magnetism on HDDs, SSD wear-
-levelling remap pools).
+You want a file gone from disk such that PhotoRec / Recuva /
+`ntfsundelete` can't recover it. `os.Remove` only unlinks the
+directory entry — content stays in unallocated clusters until
+overwritten. This package overwrites first, then removes.
+
+| You want to… | Use | Cost |
+|---|---|---|
+| Wipe a single file | [`File`](#file) | One pass random + remove |
+| Multi-pass for paranoia | [`FileN`](#filen) | N passes — diminishing returns past 1-3 |
+| Wipe a directory tree | [`Tree`](#tree) | Walks + wipes every regular file |
+
+What this DOES achieve:
+
+- Recovered cluster content is `crypto/rand` bytes. `strings`,
+  carve-by-format (PhotoRec), and undelete utilities all see
+  noise.
+- Cross-platform — works on Windows / Linux / macOS without
+  filesystem-specific code.
+
+What this does NOT achieve:
+
+- **SSD wear-levelling makes single-overwrite ineffective** —
+  the SSD controller maps logical writes to physical cells
+  via FTL. Your "overwrite" hits a NEW cell; the original
+  cell stays in the wear-leveling pool until garbage-collected.
+  TRIM/discard helps but isn't guaranteed. For high-assurance
+  SSD wipe: `secure erase` ATA command (out of scope here).
+- **Doesn't wipe `$LogFile` / `$UsnJrnl`** — NTFS journals
+  recorded the file's path + first ~4 KB on create. Forensic
+  carving from journals can recover.
+- **Doesn't wipe Volume Shadow Copies** — VSS snapshots taken
+  before your wipe still contain the original file. Run
+  `vssadmin delete shadows` (admin) BEFORE relying on this.
+- **Doesn't wipe physical residual magnetism on HDDs** — at
+  the platter level, multiple overwrites + slot rotation
+  reduce but don't eliminate. Threat model: nation-state
+  forensic lab. For most ops, single-pass is plenty.
 
 ## Primer
 

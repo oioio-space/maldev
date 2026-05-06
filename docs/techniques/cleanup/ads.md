@@ -10,10 +10,43 @@ reflects_commit: 3de532d
 
 ## TL;DR
 
-Read, write, list, delete named data streams attached to NTFS files
-(`file:streamname:$DATA`). Streams don't appear in `dir`, Explorer, or
-most file APIs — useful for hiding payloads, storing implant state, and
-the `cleanup/selfdelete` rename trick.
+NTFS lets you attach **named data streams** to any file. The
+streams share the host file's MFT entry / ACL / timestamps but
+are invisible to `dir`, Explorer, `Get-ChildItem`, and most
+file-listing APIs. Useful as a quiet stash for payloads,
+config, encrypted second-stage bytes, etc.
+
+| You want to… | Use | Notes |
+|---|---|---|
+| Hide a second-stage payload in an existing file | [`Write`](#write) | `\\file.txt:hidden:$DATA` |
+| Read it back | [`Read`](#read) | Same syntax — both stager and host file unaffected |
+| Enumerate hidden streams on a file | [`List`](#list) | Returns names only; not visible to `dir` |
+| Drop a stream without altering the host file | [`Delete`](#delete) | Removes only the named stream |
+
+What this DOES achieve:
+
+- Stash data on disk without creating a "new file" — defenders
+  enumerating new files in `\Users\Public\` see only what was
+  there before; ADS payload is invisible.
+- ACL inheritance from the host file — a stream attached to
+  `notepad.exe` inherits `notepad.exe`'s ACL.
+- Survives `os.Stat` (the host file's size unchanged from
+  the perspective of standard APIs).
+
+What this does NOT achieve:
+
+- **Sysmon EID 15 (FileCreateStreamHash) catches every write** —
+  named-stream creation is logged by default-Sysmon-config
+  installations. Stash with care.
+- **`dir /R` shows them** — defenders running it (or PowerShell
+  `Get-Item -Stream *`) see every stream. Standard tools don't,
+  but specialised triage scripts do.
+- **NTFS only** — no FAT / exFAT / network shares. Mail
+  attachments + zip extraction strip ADS by design.
+- **Mark-of-the-Web (`Zone.Identifier`) is also an ADS** —
+  removing it via this package's `Delete` clears the SmartScreen
+  warning but leaves your own audit trail in `$LogFile` /
+  `$UsnJrnl`.
 
 ## Primer
 

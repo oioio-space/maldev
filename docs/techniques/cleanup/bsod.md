@@ -17,10 +17,43 @@ reflects_commit: 3de532d
 
 ## TL;DR
 
-Enable `SeShutdownPrivilege`, then call `NtRaiseHardError` with a fatal
-status code. The kernel responds by triggering a bug-check (BSOD).
-In-memory state is destroyed faster than any forensic agent can flush
-it; the host reboots.
+Last-resort kill switch: crash the host so in-memory state
+(unflushed logs, EDR's pending event queue, your secrets) is
+destroyed before anything can hit disk.
+
+| You're up against… | Use | Cost |
+|---|---|---|
+| EDR about to ship telemetry, no time to wipe gracefully | [`Trigger`](#trigger) | One syscall, host gone |
+| Just want to wipe memory | **Don't use this** — see [`memory-wipe`](memory-wipe.md) | Reversible cleanup |
+
+⚠ **Destructive and irreversible.** The host reboots
+immediately. Use only when stopping log shipping is more
+valuable than the host itself. Tests for this primitive are
+gated behind a build tag and never run in CI by default.
+
+What this DOES achieve:
+
+- Pending writes in EDR's user-mode buffers, Event Log
+  service queues, and Sysmon's pre-flush state are all lost.
+- Memory dumps that would have captured your shellcode /
+  keys are gone — kernel produces a minidump on next boot
+  which excludes user-mode allocations by default.
+- One-syscall trigger; no need for admin shell — only
+  `SeShutdownPrivilege` (granted by default to interactive
+  users).
+
+What this does NOT achieve:
+
+- **Doesn't hide that it happened** — Event Log entry
+  "0xDEADBEEF" + `MEMORY.DMP` on disk after reboot tell the
+  forensic team a process called `NtRaiseHardError`. This is
+  a panic button, not stealth.
+- **Doesn't survive the reboot** — your implant is gone.
+  Persistence (auto-start service / registry run key /
+  scheduled task) must be in place beforehand.
+- **Doesn't wipe disk artefacts** — anything already on disk
+  (your dropper, prefetch, recent file activity) survives.
+  Pair with [`cleanup/wipe`](wipe.md) BEFORE crashing.
 
 ## Primer
 

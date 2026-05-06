@@ -10,10 +10,44 @@ reflects_commit: 3de532d
 
 ## TL;DR
 
-Apply a restrictive DACL (Discretionary Access Control List) to a Windows
-service so users — even Administrators — can't query its config or status
-through the SCM. The service still runs. `services.msc`, `sc.exe query`,
-`Get-Service`, and most EDR enumerators come up blank.
+You installed a persistence service (or want to hide an
+existing one) and want it invisible to standard service
+enumerators. This package replaces the service's DACL so
+even admins can't query its config or status through the SCM.
+The service still runs.
+
+| You want… | Use | Effect |
+|---|---|---|
+| Hide a service from `services.msc` / `sc query` / `Get-Service` | [`Hide`](#hide) | Service runs; querying returns ACCESS_DENIED |
+| Restore visibility | [`Unhide`](#unhide) | Re-applies default DACL |
+| Snapshot a DACL before mutating | [`GetSecurityDescriptor`](#getsecuritydescriptor) | For backup/restore by the operator |
+
+What this DOES achieve:
+
+- `services.msc`, `sc query`, `Get-Service`, `Win32_Service`
+  WMI all see "access denied" or skip the service entirely.
+- Naive EDR enumerators (`EnumServicesStatusEx`) skip
+  inaccessible services by default.
+- Service still runs — `Stop-Service` from a process holding
+  the original handle still works; the OS just blocks new
+  enumeration.
+
+What this does NOT achieve:
+
+- **Doesn't hide from the kernel** — `EtwTI` Service Control
+  Manager events fire on service start regardless. Defenders
+  watching ETW kernel-level service events still see you.
+- **Sophisticated EDR enumerators** open services with low
+  privileges first, retry with elevated. They notice the
+  ACCESS_DENIED anomaly + log it.
+- **Doesn't hide registry traces** — `HKLM\SYSTEM\CurrentControlSet\Services\<name>`
+  is still visible to `reg query` / `Get-ChildItem` from any
+  user with read access to the registry key. Combine with
+  registry-key DACL hardening (out of scope here).
+- **Reboot persistence depends on the registry config** — the
+  DACL change is on the SCM in-memory copy. After reboot,
+  the SCM re-reads the registry — your DACL change is lost
+  unless persisted there too.
 
 ## Primer
 
