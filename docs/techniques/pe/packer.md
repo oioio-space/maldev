@@ -4,27 +4,35 @@ last_reviewed: 2026-05-06
 reflects_commit: HEAD
 ---
 
-# PE Packer (Phase 1a — encrypt + embed pipeline)
+# PE Packer (Phase 1a + 1b — encrypt/embed + reflective loader)
 
 [← pe index](README.md) · [docs/index](../../index.md)
 
 ## TL;DR
 
-Encrypt + embed any byte buffer (PE / ELF / shellcode / config)
-into a self-describing maldev-format blob. The blob round-trips
-losslessly: `Pack(input, opts) → blob` and `Unpack(blob, key) → input`.
-
-⚠ **Phase 1a only — no execution path yet.** The blob is opaque
-data. To run a packed PE on the target, the reflective loader
-stub from Phase 1b is required (not yet shipped). Use today as
-a clean encrypted-payload pipeline; the deployment layer will
-land in a follow-up.
+Encrypt + embed any byte buffer (PE / shellcode / config) into a
+self-describing maldev-format blob, then **reflectively load the
+original PE into the current process's memory** at runtime. Two
+sub-packages compose the full pipeline:
 
 | You want to… | Use | Notes |
 |---|---|---|
-| Encrypt a payload + carry it as a blob | [`packer.Pack`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#Pack) | Returns blob + AEAD key |
-| Recover the original from a blob | [`packer.Unpack`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#Unpack) | Needs the key Pack returned |
-| Same flow from the shell | `cmd/packer pack` / `cmd/packer unpack` | Thin wrapper around Pack/Unpack |
+| Encrypt a payload + carry it as a blob | [`packer.Pack`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#Pack) | Phase 1a; returns blob + AEAD key |
+| Recover the original bytes from a blob | [`packer.Unpack`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#Unpack) | Phase 1a; needs the key Pack returned |
+| Reflectively load a packed PE in-process (Windows x64) | [`runtime.LoadPE`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/runtime#LoadPE) | Phase 1b; Unpack + map + relocate + resolve imports + set protections |
+| Inspect the loaded image without running it | [`runtime.Prepare`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/runtime#Prepare) | Tests + diagnostics |
+| Pack/unpack from the shell | `cmd/packer pack` / `cmd/packer unpack` | Thin wrapper |
+
+⚠ **`runtime.PreparedImage.Run` is gated by `MALDEV_PACKER_RUN_E2E=1`**
+so `go test` against unmodified binaries doesn't hand control
+to arbitrary payloads.
+
+⚠ **Known limitation (Phase 1b):** PEs depending on SxS-redirected
+ordinal imports (e.g. `notepad.exe` imports COMCTL32 by ordinal,
+which Windows redirects via activation context) fail at import
+resolution. Activation-context support lands in Phase 1c.
+Verified working on simpler EXEs (xcopy.exe, where.exe) which
+use the modern api-ms-win-core-* import set.
 
 What this DOES achieve (today, Phase 1a):
 
@@ -40,14 +48,24 @@ What this DOES achieve (today, Phase 1a):
 
 What this does NOT achieve (today):
 
-- **Doesn't produce a runnable PE.** Phase 1b's reflective
-  loader stub is the missing layer. Today's blob is data,
-  not code.
 - **Doesn't compress.** `CompressorNone` is the only shipped
-  option; aPLib / LZMA / zstd / LZ4 land in Phase 1b.
+  option; aPLib / LZMA / zstd / LZ4 land in a follow-up.
 - **Doesn't ship ChaCha20 / RC4** despite reserved constants.
-  AES-GCM only for Phase 1a.
-- **Doesn't carry a stub** — see Phase 1b.
+  AES-GCM only.
+- **Doesn't auto-build a host PE around the blob.** Operators
+  manually wire the `runtime.LoadPE` call in their implant's
+  Go program. Phase 1d's polymorphic stub generation will
+  produce the host PE automatically.
+- **DLLs not yet supported.** EXEs only — DLLs need DllMain
+  calling + HINSTANCE. Loader returns `runtime.ErrNotEXE`.
+- **TLS callbacks not yet supported.** Many production binaries
+  use them; loader rejects with `runtime.ErrTLSCallbacks`.
+- **x64 only.** x86 + ARM64 rejected with `runtime.ErrUnsupportedArch`.
+- **Linux ELF not yet supported.** Phase 1c.
+- **SxS-redirected ordinal imports fail.** notepad.exe (COMCTL32
+  v6 via activation context) hits `GetProcAddressByOrdinal`
+  failure. Verified working on simpler EXEs (xcopy, where, find)
+  with the modern api-ms-win-core-* import set.
 
 For the full design (3 phases, threat model, polymorphism via
 compile-time templating, cross-platform Linux ELF, multi-target

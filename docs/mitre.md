@@ -13,7 +13,7 @@ reflects_commit: a705c32
 |-----------|---------------|------------|----------------------|
 | T1016 | System Network Configuration Discovery | `recon/network` (interfaces, gateway, DNS, public IP), `win/domain` (paired use) | D3-NTPM (Network Traffic Pattern Matching) |
 | T1027 | Obfuscated Files or Information | `evasion/sleepmask`, `pe/strip`, `crypto` (TEA/XTEA/ArithShift/SBox/MatrixTransform), `win/api` (PEB-walk hash imports) | D3-SMRA (System Memory Range Analysis) |
-| T1027.002 | Software Packing | `pe/morph`, `pe/packer` (Phase 1a — encrypt + embed pipeline) | D3-SEA (Static Executable Analysis) |
+| T1027.002 | Software Packing | `pe/morph`, `pe/packer` (encrypt + embed pipeline) + `pe/packer/runtime` (Windows x64 reflective loader) | D3-SEA (Static Executable Analysis) |
 | T1027.007 | Dynamic API Resolution | `win/api` (Hell's/Halo's/Tartarus/HashGate resolvers), `win/syscall` (SSN gating chain) | D3-SCA (System Call Analysis) |
 | T1027.013 | Encrypted/Encoded File | `crypto`, `encode` | D3-FCA (File Content Analysis) |
 | T1036 | Masquerading | `evasion/stealthopen`, `evasion/callstack` (call-stack spoof metadata) | D3-FHA (File Hash Analysis) |
@@ -68,7 +68,7 @@ reflects_commit: a705c32
 | T1564 | Hide Artifacts | `cleanup/service` | D3-FRA |
 | T1564.001 | Hide Artifacts: Hidden Process | `process/tamper/hideprocess` | D3-PLA (Process Listing Analysis) |
 | T1564.004 | Hide Artifacts: NTFS File Attributes | `cleanup/ads` | D3-FRA (File Removal Analysis) |
-| T1620 | Reflective Code Loading | `runtime/clr` | D3-AIPA (Application Integrity Analysis) |
+| T1620 | Reflective Code Loading | `runtime/clr`, `pe/packer/runtime` (Windows x64 PE reflective loader) | D3-AIPA (Application Integrity Analysis) |
 | T1571 | Non-Standard Port | `c2/multicat` (operator-side multi-session listener) | D3-NTA (Network Traffic Analysis) |
 | T1573.002 | Asymmetric Cryptography | `c2/transport` (TLS, uTLS) | D3-DNSTA (DNS Traffic Analysis) |
 | T1622 | Debugger Evasion | `recon/antidebug`, `recon/hwbp` | D3-DICA (Debug Instruction Analysis) |
