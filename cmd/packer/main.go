@@ -83,6 +83,17 @@ func runPack(args []string) int {
 		return 1
 	}
 
+	// ELF inputs go through Stage C+D's Z-scope gate. Pack-time
+	// pre-flight saves a deploy-and-fail cycle when the operator
+	// forgot a build flag.
+	if len(data) >= 4 && data[0] == 0x7F && data[1] == 'E' && data[2] == 'L' && data[3] == 'F' {
+		if err := packer.ValidateELF(data); err != nil {
+			fmt.Fprintf(os.Stderr, "packer: input is not a loadable Go static-PIE: %v\n", err)
+			fmt.Fprintln(os.Stderr, "rebuild with: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -ldflags='-s -w' -o <out> <pkg>")
+			return 1
+		}
+	}
+
 	opts := packer.Options{}
 	if *keyHex != "" {
 		opts.Key, err = hex.DecodeString(*keyHex)

@@ -114,13 +114,13 @@ func TestGateRejectionReason_DTNeeded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseELFHeaders: %v", err)
 	}
-	if !h.hasDTNeeded {
+	if !h.HasDTNeeded {
 		t.Fatal("hasDTNeeded should be true for an ELF with DT_NEEDED entries")
 	}
-	if h.isGoStaticPIE {
+	if h.IsGoStaticPIE {
 		t.Fatal("isGoStaticPIE should be false when DT_NEEDED is present")
 	}
-	reason := h.gateRejectionReason()
+	reason := h.GateRejectionReason()
 	if reason == "" {
 		t.Fatal("gateRejectionReason returned empty string for a non-static-PIE binary")
 	}
@@ -142,7 +142,7 @@ func TestGateRejectionReason_Precedence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parseELFHeaders: %v", err)
 		}
-		reason := h.gateRejectionReason()
+		reason := h.GateRejectionReason()
 		if strings.Contains(reason, "PT_INTERP") {
 			t.Errorf("gateRejectionReason = %q; PT_INTERP alone should no longer cause rejection", reason)
 		}
@@ -157,7 +157,7 @@ func TestGateRejectionReason_Precedence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parseELFHeaders: %v", err)
 		}
-		reason := h.gateRejectionReason()
+		reason := h.GateRejectionReason()
 		if !strings.Contains(reason, "DT_NEEDED") {
 			t.Errorf("gateRejectionReason = %q; want DT_NEEDED before buildinfo fallback", reason)
 		}

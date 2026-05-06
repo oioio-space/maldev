@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/rand"
 	"errors"
+	"os"
+	"runtime"
 	"testing"
 
 	"github.com/oioio-space/maldev/pe/packer"
@@ -165,6 +167,25 @@ func TestMagic_IsFourBytes(t *testing.T) {
 func TestHeaderSize_MatchesSpec(t *testing.T) {
 	if packer.HeaderSize != 32 {
 		t.Errorf("HeaderSize = %d, want 32 — wire-format change requires version bump", packer.HeaderSize)
+	}
+}
+
+func TestValidateELF_AcceptsRealFixture(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("fixture is built for linux/amd64")
+	}
+	elf, err := os.ReadFile("runtime/testdata/hello_static_pie")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	if err := packer.ValidateELF(elf); err != nil {
+		t.Errorf("ValidateELF(fixture): got %v, want nil", err)
+	}
+}
+
+func TestValidateELF_RejectsGarbage(t *testing.T) {
+	if err := packer.ValidateELF([]byte{0x00, 0x00, 0x00, 0x00}); err == nil {
+		t.Error("ValidateELF(zeros): got nil, want error")
 	}
 }
 

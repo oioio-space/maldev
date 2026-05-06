@@ -119,10 +119,10 @@ func mapAndRelocate(pe []byte, h *peHeaders) (*PreparedImage, error) {
 // (free via PreparedImage.Free → munmap). Run() still stubs to
 // ErrNotImplemented; Stage D wires the jump-to-entry path.
 func mapAndRelocateELF(elf []byte, h *elfHeaders) (*PreparedImage, error) {
-	if !h.isGoStaticPIE {
-		return nil, fmt.Errorf("%w: %s", ErrNotImplemented, h.gateRejectionReason())
+	if !h.IsGoStaticPIE {
+		return nil, fmt.Errorf("%w: %s", ErrNotImplemented, h.GateRejectionReason())
 	}
-	if h.elfType != etDyn {
+	if h.ELFType != etDyn {
 		return nil, fmt.Errorf("%w: ET_EXEC not supported (need PIE / ET_DYN)", ErrNotImplemented)
 	}
 
@@ -132,7 +132,7 @@ func mapAndRelocateELF(elf []byte, h *elfHeaders) (*PreparedImage, error) {
 		dynPresent bool
 		spanEnd    uint64
 	)
-	for _, p := range h.programs {
+	for _, p := range h.Programs {
 		switch p.Type {
 		case ptLoad:
 			end := p.VAddr + p.MemSz
@@ -172,7 +172,7 @@ func mapAndRelocateELF(elf []byte, h *elfHeaders) (*PreparedImage, error) {
 
 	// Copy PT_LOAD file content. .bss tail (MemSz > FileSz) is
 	// already zeroed by MAP_ANONYMOUS.
-	for _, p := range h.programs {
+	for _, p := range h.Programs {
 		if p.Type != ptLoad || p.FileSz == 0 {
 			continue
 		}
@@ -207,7 +207,7 @@ func mapAndRelocateELF(elf []byte, h *elfHeaders) (*PreparedImage, error) {
 	// silently clobber the other's permissions; reject when a
 	// segment's vaddr isn't page-aligned (real toolchains always
 	// align PT_LOAD vaddrs to p_align ≥ pageSize).
-	for _, p := range h.programs {
+	for _, p := range h.Programs {
 		if p.Type != ptLoad {
 			continue
 		}
@@ -230,11 +230,11 @@ func mapAndRelocateELF(elf []byte, h *elfHeaders) (*PreparedImage, error) {
 	return &PreparedImage{
 		Base:         base,
 		SizeOfImage:  uint32(mapSize),
-		EntryPoint:   base + uintptr(h.entry),
+		EntryPoint:   base + uintptr(h.Entry),
 		region:       region,
-		elfPhdrOff:   h.phoff,
-		elfPhdrCount: uint64(h.phnum),
-		elfPhdrEnt:   uint64(h.phentsize),
+		elfPhdrOff:   h.Phoff,
+		elfPhdrCount: uint64(h.Phnum),
+		elfPhdrEnt:   uint64(h.Phentsize),
 	}, nil
 }
 

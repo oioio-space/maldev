@@ -14,6 +14,7 @@ import (
 	"fmt"
 
 	"github.com/oioio-space/maldev/crypto"
+	"github.com/oioio-space/maldev/pe/packer/internal/elfgate"
 )
 
 // Options tunes [Pack]. The zero value selects sensible defaults
@@ -73,6 +74,18 @@ func Pack(data []byte, opts Options) (packed []byte, key []byte, err error) {
 	}).marshalInto(out)
 	copy(out[HeaderSize:], body)
 	return out, key, nil
+}
+
+// ValidateELF returns nil when elf is a Go static-PIE binary
+// the Linux runtime can load, or an error explaining the
+// rejection reason. Operators should call this at pack time to
+// catch unsupported inputs before deploy.
+//
+// Thin wrapper around elfgate.CheckELFLoadable; lives on the
+// packer package so CLI / SDK callers don't need to import an
+// internal sub-package.
+func ValidateELF(elf []byte) error {
+	return elfgate.CheckELFLoadable(elf)
 }
 
 // Unpack reverses [Pack] given the original AEAD key. Returns

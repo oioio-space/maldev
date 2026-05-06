@@ -1,30 +1,29 @@
 package runtime
 
 import (
-	"bytes"
-	"debug/buildinfo"
-	"encoding/binary"
 	"errors"
-	"fmt"
+
+	"github.com/oioio-space/maldev/pe/packer/internal/elfgate"
 )
 
-// ELF format sentinels surfaced by [Prepare] when the input is
-// an ELF binary. PE inputs surface [ErrBadPE] / [ErrUnsupportedArch]
-// / [ErrNotEXE] from runtime.go instead.
+// ELF sentinels surfaced by [Prepare] when the input is an ELF
+// binary. Aliased from elfgate so callers that imported
+// packer/runtime can still errors.Is against them — the var
+// identity is preserved via errors.Is wrapping.
 var (
 	// ErrBadELF fires on header-walk inconsistencies (truncated,
 	// bad magic, impossible field values).
-	ErrBadELF = errors.New("packer/runtime: malformed ELF")
+	ErrBadELF = elfgate.ErrBadELF
 
 	// ErrUnsupportedELFArch fires when the ELF is not 64-bit
 	// little-endian x86_64. 32-bit, big-endian, ARM64 are out
 	// of scope.
-	ErrUnsupportedELFArch = errors.New("packer/runtime: only ELF64 little-endian x86_64 is supported")
+	ErrUnsupportedELFArch = elfgate.ErrUnsupportedELFArch
 
 	// ErrNotELFExec fires when the ELF type is neither ET_EXEC
 	// nor ET_DYN. Object files (ET_REL), core files (ET_CORE),
 	// and exotic types are out of scope.
-	ErrNotELFExec = errors.New("packer/runtime: only ET_EXEC and ET_DYN images are supported")
+	ErrNotELFExec = elfgate.ErrNotELFExec
 
 	// ErrFormatPlatformMismatch fires when an ELF is fed to the
 	// Windows backend or a PE to the Linux backend. Operators
@@ -32,9 +31,8 @@ var (
 	ErrFormatPlatformMismatch = errors.New("packer/runtime: format does not match host platform")
 
 	// ErrNotImplemented fires for backends that exist but haven't
-	// landed their map+relocate path yet (e.g. Linux ELF in
-	// Phase 1f Stage A — parser shipped, mapper deferred).
-	ErrNotImplemented = errors.New("packer/runtime: backend not yet implemented")
+	// landed their map+relocate path yet.
+	ErrNotImplemented = elfgate.ErrNotImplemented
 
 	// ErrNotWindows fires from the long-tail stub on platforms
 	// other than Windows / Linux. Defined cross-platform so test
@@ -43,242 +41,57 @@ var (
 	ErrNotWindows = errors.New("packer/runtime: reflective loader not supported on this OS")
 )
 
-// ELF on-wire constants. Names mirror the System V gABI / Linux
-// elf(5) so future contributors can grep against the standard.
+// ELF on-wire constants re-exported for runtime_linux.go and tests.
 const (
-	elfMagic0 = 0x7F
-	elfMagic1 = 'E'
-	elfMagic2 = 'L'
-	elfMagic3 = 'F'
+	elfMagic0 = elfgate.ElfMagic0
+	elfMagic1 = elfgate.ElfMagic1
+	elfMagic2 = elfgate.ElfMagic2
+	elfMagic3 = elfgate.ElfMagic3
 
-	elfClass64 = 2 // EI_CLASS = ELFCLASS64
-	elfDataLE  = 1 // EI_DATA  = ELFDATA2LSB
+	etDyn = 3 // ET_DYN — mirrored from elfgate for runtime.go / runtime_linux.go
 
-	etExec = 2 // ET_EXEC — non-PIE executable
-	etDyn  = 3 // ET_DYN  — shared object or PIE executable
+	ptLoad    = 1             // PT_LOAD
+	ptDynamic = 2             // PT_DYNAMIC
+	ptInterp  = 3             // PT_INTERP
+	ptTLS     = elfgate.PtTLS // PT_TLS
 
-	emX86_64 = 62 // EM_X86_64
+	pfX = 1 // PF_X
+	pfW = 2 // PF_W
+	pfR = 4 // PF_R
 
-	ptLoad    = 1 // PT_LOAD    — loadable segment
-	ptDynamic = 2 // PT_DYNAMIC — dynamic linking info
-	ptInterp  = 3 // PT_INTERP  — path of program interpreter
-	ptTLS     = 7 // PT_TLS     — thread-local storage template
+	// Dynamic-section tag values used by the Linux loader.
+	// dtNull and dtNeeded are cross-platform (shared with elfgate);
+	// re-declared here so runtime_linux.go doesn't import elfgate directly.
+	dtNull   = 0 // DT_NULL
+	dtNeeded = 1 // DT_NEEDED
 
-	pfX = 1 // PF_X — execute
-	pfW = 2 // PF_W — write
-	pfR = 4 // PF_R — read
-
-	// Dynamic-section tag values used in cross-platform detection
-	// (elf.go) and in the Linux loader (runtime_linux.go). Names
-	// track /usr/include/elf.h so future contributors can grep the
-	// standard.
-	dtNull   = 0 // DT_NULL   — end-of-table sentinel
-	dtNeeded = 1 // DT_NEEDED — shared-library dependency name
-
-	elfHeaderSize  = 64 // sizeof(Elf64_Ehdr)
-	elfProgHdrSize = 56 // sizeof(Elf64_Phdr)
+	elfHeaderSize  = elfgate.ELFHeaderSize
+	elfProgHdrSize = elfgate.ELFProgHdrSize
 )
 
-// elfHeaders is the parsed-out subset of the ELF header + program
-// header table the loader actually needs. Stays unexported so the
-// public surface remains [PreparedImage] regardless of format.
-type elfHeaders struct {
-	elfType   uint16 // e_type — ET_EXEC or ET_DYN
-	entry     uint64 // e_entry — virtual address
-	phoff     uint64 // e_phoff — file offset of program header table
-	phnum     uint16 // e_phnum — number of program headers
-	phentsize uint16 // e_phentsize — must be elfProgHdrSize on ELF64
+// elfHeaders aliases elfgate.ELFHeaders so runtime.go and
+// runtime_linux.go don't need to import elfgate directly — that
+// would create an import cycle because elfgate is already on the
+// path pe/packer → elfgate, and pe/packer/runtime → pe/packer.
+type elfHeaders = elfgate.ELFHeaders
 
-	// programs is the parsed program header table. Order
-	// preserved so the mapper can iterate in declaration order
-	// (ld.so does the same; some segments depend on adjacent ones).
-	programs []elfProgramHeader
+// elfProgramHeader aliases elfgate.ELFProgramHeader for the same
+// cycle-breaking reason.
+type elfProgramHeader = elfgate.ELFProgramHeader
 
-	// isGoStaticPIE is true when the ELF satisfies the Z-scope
-	// contract: ET_DYN + .go.buildinfo present + no DT_NEEDED +
-	// no PT_INTERP. Computed once in parseELFHeaders.
-	isGoStaticPIE bool
-
-	// goVersion is the Go toolchain version string (e.g. "go1.21.5")
-	// when isGoStaticPIE is true; empty otherwise. Surfaced in
-	// Run() error messages so operators can correlate runtime
-	// crashes to toolchain skew.
-	goVersion string
-
-	// hasDTNeeded is true when PT_DYNAMIC carries at least one DT_NEEDED
-	// entry. Surfaced via gateRejectionReason for accurate diagnostics
-	// so CGO / dynamically-linked Go binaries get the right message.
-	hasDTNeeded bool
-}
-
-// elfProgramHeader is one Elf64_Phdr entry. Field names match
-// the gABI for greppability.
-type elfProgramHeader struct {
-	Type   uint32 // p_type
-	Flags  uint32 // p_flags
-	Offset uint64 // p_offset — file offset
-	VAddr  uint64 // p_vaddr — virtual address
-	PAddr  uint64 // p_paddr — physical address (ignored on Linux)
-	FileSz uint64 // p_filesz — bytes in file
-	MemSz  uint64 // p_memsz — bytes in memory (≥ FileSz; tail is .bss)
-	Align  uint64 // p_align — alignment requirement
-}
-
-// parseELFHeaders walks the on-wire ELF64 structure (Ehdr + Phdr
-// table). Strict — rejects malformed or unsupported inputs early
-// so the mapper never allocates against a bogus SizeOfImage.
-//
-// Stage A consumer: [Prepare]'s magic-dispatch path. Stage B+
-// will hand the parsed headers to the Linux mapper.
+// parseELFHeaders delegates to elfgate so existing call-sites in
+// runtime.go don't need changing.
 func parseELFHeaders(in []byte) (*elfHeaders, error) {
-	if len(in) < elfHeaderSize {
-		return nil, fmt.Errorf("%w: input too small for ELF64 header (%d < %d)",
-			ErrBadELF, len(in), elfHeaderSize)
-	}
-	if in[0] != elfMagic0 || in[1] != elfMagic1 || in[2] != elfMagic2 || in[3] != elfMagic3 {
-		return nil, fmt.Errorf("%w: missing ELF magic (got % x)", ErrBadELF, in[:4])
-	}
-	if in[4] != elfClass64 {
-		return nil, fmt.Errorf("%w: not ELF64 (e_ident[EI_CLASS]=%d)", ErrUnsupportedELFArch, in[4])
-	}
-	if in[5] != elfDataLE {
-		return nil, fmt.Errorf("%w: not little-endian (e_ident[EI_DATA]=%d)",
-			ErrUnsupportedELFArch, in[5])
-	}
-
-	elfType := binary.LittleEndian.Uint16(in[16:18])
-	machine := binary.LittleEndian.Uint16(in[18:20])
-	if machine != emX86_64 {
-		return nil, fmt.Errorf("%w: e_machine=%d", ErrUnsupportedELFArch, machine)
-	}
-	if elfType != etExec && elfType != etDyn {
-		return nil, fmt.Errorf("%w: e_type=%d", ErrNotELFExec, elfType)
-	}
-
-	h := &elfHeaders{
-		elfType:   elfType,
-		entry:     binary.LittleEndian.Uint64(in[24:32]),
-		phoff:     binary.LittleEndian.Uint64(in[32:40]),
-		phentsize: binary.LittleEndian.Uint16(in[54:56]),
-		phnum:     binary.LittleEndian.Uint16(in[56:58]),
-	}
-	if h.phentsize != elfProgHdrSize {
-		return nil, fmt.Errorf("%w: e_phentsize=%d, expected %d for ELF64",
-			ErrBadELF, h.phentsize, elfProgHdrSize)
-	}
-	if h.phnum == 0 {
-		return nil, fmt.Errorf("%w: zero program headers", ErrBadELF)
-	}
-	end := int(h.phoff) + int(h.phnum)*int(h.phentsize)
-	if end > len(in) || end < 0 {
-		return nil, fmt.Errorf("%w: program headers past end of buffer (%d > %d)",
-			ErrBadELF, end, len(in))
-	}
-
-	h.programs = make([]elfProgramHeader, h.phnum)
-	for i := 0; i < int(h.phnum); i++ {
-		off := int(h.phoff) + i*int(h.phentsize)
-		h.programs[i] = elfProgramHeader{
-			Type:   binary.LittleEndian.Uint32(in[off : off+4]),
-			Flags:  binary.LittleEndian.Uint32(in[off+4 : off+8]),
-			Offset: binary.LittleEndian.Uint64(in[off+8 : off+16]),
-			VAddr:  binary.LittleEndian.Uint64(in[off+16 : off+24]),
-			PAddr:  binary.LittleEndian.Uint64(in[off+24 : off+32]),
-			FileSz: binary.LittleEndian.Uint64(in[off+32 : off+40]),
-			MemSz:  binary.LittleEndian.Uint64(in[off+40 : off+48]),
-			Align:  binary.LittleEndian.Uint64(in[off+48 : off+56]),
-		}
-	}
-
-	// Defensive: at least one PT_LOAD must exist or there's
-	// nothing to map. Stops early before the platform backend
-	// allocates.
-	hasLoad := false
-	for _, p := range h.programs {
-		if p.Type == ptLoad {
-			hasLoad = true
-			break
-		}
-	}
-	if !hasLoad {
-		return nil, fmt.Errorf("%w: no PT_LOAD program headers", ErrBadELF)
-	}
-
-	h.isGoStaticPIE, h.goVersion = detectGoStaticPIE(in, h)
-
-	return h, nil
+	return elfgate.ParseELFHeaders(in)
 }
 
-// detectGoStaticPIE runs the Z-scope gate after the program-header
-// walk completes. Uses debug/buildinfo from stdlib (stable since
-// Go 1.18) to find the .go.buildinfo section without reimplementing
-// ELF section parsing.
+// CheckELFLoadable returns nil when input is a Go static-PIE
+// binary the Linux runtime can load, or an error explaining the
+// rejection. Cross-platform — pure parse, no syscalls.
 //
-// PT_INTERP is allowed when DT_NEEDED is absent: Go's -buildmode=pie
-// toolchain sets an interpreter path for legacy ELF compatibility
-// reasons, but a binary with PT_INTERP and no DT_NEEDED is fully
-// self-contained — the dynamic linker is never invoked (no shared
-// libraries to resolve). The operative security check is DT_NEEDED.
-//
-// Returns (isGo, goVersion). When isGo is false, goVersion is empty.
-func detectGoStaticPIE(input []byte, h *elfHeaders) (bool, string) {
-	// Compute hasDTNeeded unconditionally so gateRejectionReason can
-	// surface the right message even when an earlier gate fires first.
-	h.hasDTNeeded = !dynamicHasNoNeeded(input, h)
-
-	if h.elfType != etDyn {
-		return false, ""
-	}
-	if h.hasDTNeeded {
-		return false, ""
-	}
-	bi, err := buildinfo.Read(bytes.NewReader(input))
-	if err != nil {
-		return false, ""
-	}
-	return true, bi.GoVersion
+// Delegates to elfgate.CheckELFLoadable so the two packages share
+// one implementation without an import cycle.
+func CheckELFLoadable(input []byte) error {
+	return elfgate.CheckELFLoadable(input)
 }
 
-// dynamicHasNoNeeded returns true when the PT_DYNAMIC segment
-// (if any) carries zero DT_NEEDED entries, or when there is no
-// PT_DYNAMIC at all (truly static binary).
-func dynamicHasNoNeeded(input []byte, h *elfHeaders) bool {
-	for _, p := range h.programs {
-		if p.Type != ptDynamic {
-			continue
-		}
-		end := p.Offset + p.FileSz
-		if end > uint64(len(input)) || end < p.Offset {
-			return false // malformed; conservative reject
-		}
-		dyn := input[p.Offset:end]
-		for off := 0; off+16 <= len(dyn); off += 16 {
-			tag := int64(binary.LittleEndian.Uint64(dyn[off : off+8]))
-			if tag == dtNull {
-				break
-			}
-			if tag == dtNeeded {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-// gateRejectionReason returns the specific Z-scope condition that
-// failed, suitable for embedding in an ErrNotImplemented message.
-// Returns "" when isGoStaticPIE is true, so callers can use a
-// non-empty return as the "needs rejection" signal.
-func (h *elfHeaders) gateRejectionReason() string {
-	if h.isGoStaticPIE {
-		return ""
-	}
-	if h.elfType != etDyn {
-		return "not ET_DYN (need PIE)"
-	}
-	if h.hasDTNeeded {
-		// PT_INTERP + DT_NEEDED = truly dynamic; ld.so required.
-		return "has DT_NEEDED entries (not a static binary)"
-	}
-	return "not a Go binary (no .go.buildinfo section)"
-}
