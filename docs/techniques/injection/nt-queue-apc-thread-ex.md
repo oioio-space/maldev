@@ -8,6 +8,9 @@ reflects_commit: f7d57a4
 
 [← injection index](README.md) · [docs/index](../../index.md)
 
+> **New to maldev injection?** Read the [injection/README.md
+> vocabulary callout](README.md#primer--vocabulary) first.
+
 ## TL;DR
 
 Cross-process APC injection that fires **immediately** at the next
@@ -16,6 +19,20 @@ alertable wait. Win10 1903+ only. Allocate / write / protect in the
 target as usual, then queue the APC with the
 `QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC` flag — the kernel delivers it
 on any thread the next time control returns to user mode.
+
+| Trait | Value |
+|---|---|
+| **Target class** | Remote (existing PID) |
+| **Creates a new thread?** | No — APC delivered to existing thread |
+| **Uses `WriteProcessMemory`?** | Yes (`NtWriteVirtualMemory`) |
+| **Stealth tier** | Medium — cleaner than CreateRemoteThread; still has WPM signal |
+| **Min Windows version** | Win10 1903+ (special user APC flag) |
+
+When to pick a different method:
+
+- Pre-Win10 1903 target? → [CreateRemoteThread](create-remote-thread.md).
+- Want to avoid WPM entirely? → [Section Mapping](section-mapping.md).
+- Have control of the spawn (CREATE_SUSPENDED)? → [Early Bird APC](early-bird-apc.md) — quieter setup with full control.
 
 ## Primer
 

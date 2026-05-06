@@ -8,6 +8,9 @@ reflects_commit: 3de532d
 
 [← injection index](README.md) · [docs/index](../../index.md)
 
+> **New to maldev injection?** Read the [injection/README.md
+> vocabulary callout](README.md#primer--vocabulary) first.
+
 ## TL;DR
 
 Cross-process injection **without `WriteProcessMemory`**. Create a
@@ -16,6 +19,19 @@ shellcode locally, then map a read-execute view of the **same** section
 in the target. Both views point at the same physical pages, so the
 local `memcpy` is instantly visible across the boundary. Trigger via
 `NtCreateThreadEx` (or whichever executor the caller chooses).
+
+| Trait | Value |
+|---|---|
+| **Target class** | Remote (existing PID) |
+| **Creates a new thread?** | Yes (caller chooses the executor — typically `NtCreateThreadEx`) |
+| **Uses `WriteProcessMemory`?** | **No** — the bypass-WPM is the whole point |
+| **Stealth tier** | High — no WPM signal; section-create + map-view is harder to baseline against legitimate IPC |
+
+When to pick a different method:
+
+- Want to avoid creating a thread too? → [Kernel Callback Table](kernel-callback-table.md), [NtQueueApcThreadEx](nt-queue-apc-thread-ex.md).
+- Want a file-backed image mapping (looks like a real DLL)? → [Phantom DLL hollowing](phantom-dll.md).
+- Don't need cross-process? → [Module Stomping](module-stomping.md) does the section trick locally.
 
 ## Primer
 

@@ -8,6 +8,9 @@ reflects_commit: 3de532d
 
 [← injection index](README.md) · [docs/index](../../index.md)
 
+> **New to maldev injection?** Read the [injection/README.md
+> vocabulary callout](README.md#primer--vocabulary) first.
+
 ## TL;DR
 
 Cross-process module stomping: open a real System32 DLL, build a
@@ -15,8 +18,22 @@ Cross-process module stomping: open a real System32 DLL, build a
 kernel records the mapping as a legitimate signed image, then overwrite
 the `.text` of the remote view with shellcode. Memory scanners see a
 file-backed amsi.dll mapping; the bytes are the implant's. Optionally
-routes the open through [`evasion/stealthopen`](../evasion/ntdll-unhooking.md)
+routes the open through [`evasion/stealthopen`](../evasion/stealthopen.md)
 to dodge path-based file hooks.
+
+| Trait | Value |
+|---|---|
+| **Target class** | Remote (placement only — no execution trigger) |
+| **Creates a new thread?** | No (placement only — caller picks an executor) |
+| **Uses `WriteProcessMemory`?** | Yes (to overwrite `.text` of the mapped image) |
+| **Stealth tier** | Very high — kernel records `SEC_IMAGE` mapping with the donor's path; memory scanners see a file-backed signed module |
+| **Composable** | Designed to chain with [Kernel Callback Table](kernel-callback-table.md) for the execution trigger (no thread creation either) |
+
+When to pick a different method:
+
+- Want a single self-contained "place + execute" call? → [Section Mapping](section-mapping.md) trades the file-backed mask for one less syscall chain.
+- Don't need image-backed mapping? → [CreateRemoteThread](create-remote-thread.md) is simpler when memory scanners aren't the threat.
+- Want the stomp to happen in YOUR process? → [Module Stomping](module-stomping.md) — same trick, local target.
 
 ## Primer
 

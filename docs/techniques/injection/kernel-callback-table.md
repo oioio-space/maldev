@@ -8,6 +8,9 @@ reflects_commit: 3de532d
 
 [← injection index](README.md) · [docs/index](../../index.md)
 
+> **New to maldev injection?** Read the [injection/README.md
+> vocabulary callout](README.md#primer--vocabulary) first.
+
 ## TL;DR
 
 Every Windows process holds a `KernelCallbackTable` pointer in its
@@ -16,6 +19,20 @@ back into for window-message handling. Overwrite the
 `__fnCOPYDATA` (index 3) slot in the **target's** table with the
 shellcode address, send the target window a `WM_COPYDATA` message,
 restore the original slot. Cross-process, no `CreateThread`, no APC.
+
+| Trait | Value |
+|---|---|
+| **Target class** | Remote (existing PID with at least one window) |
+| **Creates a new thread?** | No — kernel reuses the target's existing UI thread |
+| **Uses `WriteProcessMemory`?** | Yes (to swap the table slot, ~8 bytes) |
+| **Stealth tier** | High — no Create*Thread / Queue*APC / SetContext entries; the WM_COPYDATA send is a normal IPC pattern |
+| **Constraint** | Target must have a window (`USER32`-loaded process). Console-only targets can't be hit. |
+
+When to pick a different method:
+
+- Target has no window? → [Section Mapping](section-mapping.md), [NtQueueApcThreadEx](nt-queue-apc-thread-ex.md), or [CreateRemoteThread](create-remote-thread.md).
+- Want shellcode placed via image mapping (file-backed mask)? → Pair with [Phantom DLL](phantom-dll.md) for placement, then this for trigger.
+- Want fully local (no cross-process)? → [Callback execution](callback-execution.md) abuses the same family of dispatcher callbacks but in the current process.
 
 ## Primer
 
