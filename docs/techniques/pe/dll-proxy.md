@@ -16,20 +16,88 @@ reflects_commit: 3de532d
 
 ## TL;DR
 
-Pure-Go emitter that produces a valid Windows DLL forwarding every export to a legitimate target via the GLOBALROOT absolute-path trick. No MSVC, no MinGW, no toolchain — `[]byte` in, `[]byte` out. Pair with `recon/dllhijack` for end-to-end discovery + payload-write hijack chains, runnable from any host.
+You found a DLL-hijack opportunity (a victim program loads
+`X.dll` from a path you can write). To exploit it you need a
+working `X.dll` that:
 
-Two emission modes:
+1. Exports everything the victim expects (otherwise it crashes
+   on first call to a missing export).
+2. Forwards those calls to the real `X.dll` (otherwise the
+   victim breaks).
+3. Optionally runs your payload.
 
-- **Forwarder-only** (`Options.PayloadDLL == ""`): single `.rdata` section, no DllMain. Invisible at runtime once loaded; the real target executes as if loaded directly.
-- **+ Payload load** (`Options.PayloadDLL = "evil.dll"`): adds a `.text` section with a 32-byte x64 stub that `LoadLibraryA(payload)` on `DLL_PROCESS_ATTACH`, plus an import directory referencing `kernel32!LoadLibraryA`.
+Historically this required hand-coding C++ + linker pragmas +
+an MSVC toolchain, OR shipping a pre-built proxy and hoping
+the export set matches. `pe/dllproxy` makes it a single Go
+function call — pure-Go emitter, runs on Linux, no toolchain.
+
+Pick the mode based on what you need:
+
+| You want… | Set | Effect |
+|---|---|---|
+| Pure forwarder (testing the hijack works without delivering a payload yet) | `Options.PayloadDLL = ""` | Single `.rdata` section, no DllMain. Once loaded, invisible at runtime — the real target executes as if loaded directly. |
+| Forwarder + payload load | `Options.PayloadDLL = "evil.dll"` | Adds `.text` with a 32-byte x64 stub: `LoadLibraryA("evil.dll")` on `DLL_PROCESS_ATTACH`. Your payload runs ONCE on load; forwarding handles the rest. |
+
+What this DOES achieve:
+
+- Victim loads your DLL → your payload runs → all subsequent
+  victim calls forward transparently.
+- No toolchain on the build host. Pure Go, cross-compiles from
+  Linux.
+- The forwarder uses `\\.\GLOBALROOT\SystemRoot\System32\<target>.<export>`
+  — absolute path that doesn't recurse into your proxy even
+  when both DLLs share a directory.
+
+What this does NOT achieve:
+
+- **Doesn't find the hijack opportunity** — pair with
+  [`recon/dllhijack`](../recon/dll-hijack.md) for the
+  discovery side.
+- **Doesn't list the target's exports** — pair with
+  [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse).Open(target).Exports().
+- **Detectable on disk** — the forwarder string set + 32-byte
+  stub are static signatures defenders can YARA on. Pair with
+  [`pe/strip`](strip-sanitize.md) + [`pe/cert`](certificate-theft.md)
+  to muddy the static fingerprint.
 
 ---
 
-## Primer
+## Primer — vocabulary
 
-A DLL hijack works when a victim program loads a DLL from a path the operator can write. The classic problem: writing a working DLL there required either (a) hand-coding C++ + linker pragmas + an MSVC toolchain, or (b) shipping a pre-built proxy and hoping the export set matches.
+Five terms recur on this page:
 
-`pe/dllproxy` collapses this: hand it the target's name and its export list, get back a complete PE that, when loaded, transparently forwards every call to the real System32 copy. The forwarder uses an absolute path (`\\.\GLOBALROOT\SystemRoot\System32\<target>.<export>`) so the proxy does not recurse into itself even when deployed alongside the legitimate DLL — the *perfect proxy* trick from `mrexodia/perfect-dll-proxy`.
+> **DLL hijack / side-load** — a victim program loads a DLL by
+> name from a search path that includes a directory the operator
+> can write to. The operator drops a malicious DLL with the
+> matching name; the victim loads it instead of the legitimate
+> one.
+>
+> **Forwarder export** — a DLL export entry whose
+> `AddressOfFunctions[i]` value points at a STRING (not at code).
+> The string format is `"OtherDLL.OtherExport"` or
+> `"\\path\\to\\OtherDLL.OtherExport"`. The Windows loader
+> recognises this by checking if the value falls inside the
+> `IMAGE_DIRECTORY_ENTRY_EXPORT` range — if yes, it's a string
+> to follow, not code to call.
+>
+> **GLOBALROOT trick** — using `\\.\GLOBALROOT\SystemRoot\System32\X.dll`
+> as the forwarder target. `GLOBALROOT` is the NT object manager
+> root; `SystemRoot` resolves to `C:\Windows`. The combination
+> is an absolute path that bypasses the search order entirely —
+> guaranteed to find the *real* `X.dll`, never the proxy itself
+> even when both share the victim's directory.
+>
+> **DllMain** — a DLL's optional entry point Windows calls on
+> load (`DLL_PROCESS_ATTACH`), unload (`DLL_PROCESS_DETACH`),
+> and thread create/exit. `pe/dllproxy` uses it ONLY in
+> payload-load mode — the entry point is a 32-byte stub that
+> `LoadLibraryA(payload)` and returns TRUE.
+>
+> **Perfect proxy** — the term `mrexodia/perfect-dll-proxy`
+> coined for proxies that reliably handle every export with the
+> right ABI without recursion. The GLOBALROOT trick is the
+> "perfect" part: forwarders to a relative `target.export`
+> would loop into your own proxy.
 
 ```mermaid
 flowchart LR
