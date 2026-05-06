@@ -8,6 +8,11 @@ reflects_commit: 3de532d
 
 [← injection index](README.md) · [docs/index](../../index.md)
 
+> **New to maldev injection?** Read the [injection/README.md
+> vocabulary callout](README.md#primer--vocabulary) first
+> (Self/Local/Remote/Child, Injector, *wsyscall.Caller, APC,
+> stealth tier). Every per-method page assumes those terms.
+
 ## TL;DR
 
 The classic, reliable, **highly monitored** primitive: open a handle to
@@ -15,6 +20,22 @@ the target PID, allocate RW memory, write the shellcode, flip to RX,
 spawn a fresh thread at the shellcode address. Works on every Windows
 version. Choose this only when stealth is not the priority — it is the
 single most-watched injection path in the matrix.
+
+| Trait | Value |
+|---|---|
+| **Target class** | Remote (existing PID) |
+| **Creates a new thread?** | Yes (`NtCreateThreadEx` or `CreateRemoteThread`) |
+| **Uses `WriteProcessMemory`?** | Yes (`NtWriteVirtualMemory` under the hood) |
+| **Stealth tier** | Low — every API in the chain is hooked by every commercial EDR |
+| **Min Windows version** | All supported (Win7+) |
+| **Quietest variant** | `wsyscall.MethodIndirect` to bypass userland NTAPI hooks; pair with [`evasion/preset.Stealth`](../evasion/preset.md) for AMSI/ETW too |
+
+When to pick a different method:
+
+- Want to avoid `WriteProcessMemory`? → [Section Mapping](section-mapping.md)
+- Want to avoid creating a thread? → [NtQueueApcThreadEx](nt-queue-apc-thread-ex.md), [Kernel Callback Table](kernel-callback-table.md)
+- Don't need cross-process? → [Self-injection methods](README.md#per-method-index) (Callback, ThreadPool, EtwpCreateEtwThread)
+- Suspended child OK? → [Early Bird APC](early-bird-apc.md), [Thread Hijack](thread-hijack.md)
 
 ## Primer
 
