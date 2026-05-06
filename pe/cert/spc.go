@@ -87,10 +87,18 @@ func BuildSpcIndirectDataContent(digest []byte, hashAlg crypto.Hash) ([]byte, er
 		MessageDigest digestInfo
 	}
 
+	// SpcPEImageData with SpcLink::file = SpcString::unicode("<<<Obsolete>>>"),
+	// the Microsoft-canonical placeholder. signtool rejects the
+	// minimal NULL-value form, so we emit the full structure here.
+	pageHashes, err := buildSpcPEImageData()
+	if err != nil {
+		return nil, err
+	}
+
 	content := spcIndirectDataContent{
 		Data: spcAttribute{
 			Type:  OIDSpcPEImageDataObj,
-			Value: asn1.NullRawValue,
+			Value: asn1.RawValue{FullBytes: pageHashes},
 		},
 		MessageDigest: digestInfo{
 			DigestAlgorithm: algorithmIdentifier{
@@ -101,6 +109,59 @@ func BuildSpcIndirectDataContent(digest []byte, hashAlg crypto.Hash) ([]byte, er
 		},
 	}
 	return asn1.Marshal(content)
+}
+
+// buildSpcPEImageData emits the canonical SpcPEImageData per
+// Microsoft's Authenticode spec:
+//
+//	SpcPEImageData ::= SEQUENCE {
+//	    flags SpcPeImageFlags DEFAULT { includeResources },  -- BIT STRING
+//	    file  SpcLink                                          -- [0] EXPLICIT
+//	}
+//	SpcLink ::= CHOICE {
+//	    url     [0] IMPLICIT IA5STRING,
+//	    moniker [1] IMPLICIT SpcSerializedObject,
+//	    file    [2] EXPLICIT SpcString
+//	}
+//	SpcString ::= CHOICE {
+//	    unicode [0] IMPLICIT BMPSTRING,
+//	    ascii   [1] IMPLICIT IA5STRING
+//	}
+//
+// We emit the placeholder file = SpcString::unicode("<<<Obsolete>>>")
+// because every signtool-produced signature in the wild does too.
+func buildSpcPEImageData() ([]byte, error) {
+	// "<<<Obsolete>>>" as UCS-2 BE (BMPSTRING). 14 chars × 2 bytes = 28 bytes.
+	const obsolete = "<<<Obsolete>>>"
+	bmp := make([]byte, 0, len(obsolete)*2)
+	for _, r := range obsolete {
+		bmp = append(bmp, byte(r>>8), byte(r))
+	}
+	// SpcString::unicode = [0] IMPLICIT BMPSTRING — replace tag 0x1E with 0x80.
+	spcStringUnicode := []byte{0x80, byte(len(bmp))}
+	spcStringUnicode = append(spcStringUnicode, bmp...)
+
+	// SpcLink::file = [2] EXPLICIT SpcString — wraps SpcString in [2].
+	spcLinkFile := []byte{0xA2, byte(len(spcStringUnicode))}
+	spcLinkFile = append(spcLinkFile, spcStringUnicode...)
+
+	// SpcPEImageData SEQUENCE { flags (BIT STRING), file [0] EXPLICIT SpcLink }
+	// flags = empty BIT STRING (0 unused bits). DEFAULT includeResources
+	// in DER means we omit flags entirely when value matches default.
+	// signtool emits an explicit flags BIT STRING anyway — match that.
+	flagsBitString := []byte{0x03, 0x02, 0x00, 0x00} // BIT STRING (2) 00 00
+
+	// file [0] EXPLICIT SpcLink
+	fileExplicit := []byte{0xA0, byte(len(spcLinkFile))}
+	fileExplicit = append(fileExplicit, spcLinkFile...)
+
+	body := append([]byte(nil), flagsBitString...)
+	body = append(body, fileExplicit...)
+
+	// Outer SEQUENCE
+	out := []byte{0x30, byte(len(body))}
+	out = append(out, body...)
+	return out, nil
 }
 
 // authenticodeHashOID maps a crypto.Hash to its Authenticode OID.

