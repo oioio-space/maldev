@@ -33,6 +33,19 @@ flowchart LR
     NP --> MC
 ```
 
+> **Where to start (novice path):**
+> 1. [`reverse-shell`](reverse-shell.md) — the canonical
+>    "land a shell, react when it drops" loop. Most operators
+>    start and end here.
+> 2. [`transport`](transport.md) — pick TCP / TLS / uTLS based
+>    on what defenders inspect (table at top of that page).
+> 3. [`namedpipe`](namedpipe.md) — for local IPC or SMB
+>    lateral movement when network egress isn't an option.
+> 4. [`meterpreter`](meterpreter.md) — when the engagement
+>    needs a full MSF session, not just a shell.
+> 5. [`multicat`](multicat.md) — operator-side listener when
+>    you have more than one agent. NEVER ship in implants.
+
 ## Packages
 
 | Package | Tech page | Detection | One-liner |

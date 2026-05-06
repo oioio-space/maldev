@@ -40,6 +40,19 @@ flowchart LR
     GT --> KIRBI[kirbi blob<br>+ LSA cache inject]
 ```
 
+> **Where to start (novice path):**
+> 1. Want NTLM hashes / Kerberos tickets from the live host? →
+>    [`lsassdump`](lsassdump.md) → [`sekurlsa`](sekurlsa.md)
+>    chain. The two-package pipeline covers 90% of credential
+>    extraction needs.
+> 2. Want local SAM hashes (no LSASS access)? →
+>    [`samdump`](samdump.md) — offline-friendly REGF parser.
+> 3. Already have a krbtgt hash and want long-dwell domain admin? →
+>    [`goldenticket`](goldenticket.md) — forge + submit.
+>
+> The Quick decision tree below maps every common operator
+> question to the exact entry point.
+
 ## Packages
 
 | Package | Tech page | Detection | One-liner |

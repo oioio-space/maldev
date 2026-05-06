@@ -27,6 +27,18 @@ The "operator's first 100 ms" — restore clean syscall stubs, blind the
 two main monitoring channels, harden the process against future hooks,
 mask payload memory during sleep.
 
+> **Where to start (novice path):**
+> 1. [`preset`](preset.md) — bundle of all the above in one
+>    call. Most operators stop here.
+> 2. [`ntdll-unhooking`](ntdll-unhooking.md) — the foundation
+>    every other layer assumes.
+> 3. [`sleep-mask`](sleep-mask.md) — once your implant works,
+>    sleep masking keeps it invisible BETWEEN callbacks.
+> 4. [`callstack-spoof`](callstack-spoof.md), [`stealthopen`](stealthopen.md),
+>    [`kernel-callback-removal`](kernel-callback-removal.md) —
+>    advanced surfaces; pick when a specific defender forces
+>    you there.
+
 ## Packages
 
 | Package | Tech page | Detection | One-liner |

@@ -26,6 +26,21 @@ A typical end-of-mission chain: `memory.WipeAndFree` keys → `timestomp` any
 artefacts you can't delete → `wipe.File` what you can → `service.HideService`
 or unregister → `selfdelete.Run` (or `bsod.Trigger` if egress is critical).
 
+> **Where to start (novice path):**
+> 1. [`memory-wipe`](memory-wipe.md) — applies during the
+>    operation (not just at end). Wipe keys / decrypted bytes
+>    as soon as you're done with them.
+> 2. [`self-delete`](self-delete.md) — most common end-of-op
+>    cleanup. Drop the running EXE from disk while the process
+>    keeps executing.
+> 3. [`wipe`](wipe.md) + [`timestomp`](timestomp.md) — pair
+>    when you can't delete (loaded library, reference held by
+>    another process).
+> 4. [`ads`](ads.md) — for stashing payloads / state during ops,
+>    not just cleanup.
+> 5. [`bsod`](bsod.md) — last-resort kill switch only.
+>    Destructive + irreversible.
+
 ## Packages
 
 | Package | Tech page | Detection | One-liner |

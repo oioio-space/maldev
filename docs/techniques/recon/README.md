@@ -50,6 +50,18 @@ flowchart TB
     NET --> C2[source-aware C2]
 ```
 
+> **Where to start (novice path):**
+> 1. [`sandbox`](sandbox.md) — multi-factor "is this a real
+>    target?" orchestrator. Most operators ship with this at
+>    startup.
+> 2. [`anti-analysis`](anti-analysis.md) — debugger + VM
+>    detection primitives that sandbox composes.
+> 3. [`dll-hijack`](dll-hijack.md) — find privilege-escalation
+>    opportunities programmatically (services / procs / tasks
+>    / autoElevate).
+> 4. [`drive`](drive.md), [`folder`](folder.md), [`network`](network.md)
+>    — system enumeration when a specific question needs answering.
+
 ## Packages
 
 | Package | Tech page | Detection | One-liner |
