@@ -10,12 +10,42 @@ reflects_commit: f774f7e
 
 ## TL;DR
 
-Add, delete, modify, and enumerate Windows local user accounts
-via NetAPI32 (`NetUserAdd` / `NetUserDel` / `NetUserSetInfo` /
-`NetLocalGroupAddMembers`). The directory is named `account`;
-the package is declared `package user` (matches the Win32 API
-surface). Loudest persistence option in the tree — every action
-emits Security event 4720 / 4722 / 4732 / 4724 by default.
+Create a backdoor local user account that survives reboots,
+password rotations on other accounts, and full implant removal.
+Add the account to `Administrators` (SID-500 group) for full
+local control.
+
+| You want to… | Use | Telemetry |
+|---|---|---|
+| Add a backup admin account | [`Add`](#add) + [`AddToGroup`](#addtogroup) `"Administrators"` | Security 4720 (account created) + 4732 (group add) |
+| Modify password / properties | [`SetInfo`](#setinfo) | Security 4724 (password reset) |
+| Delete an account (cleanup) | [`Delete`](#delete) | Security 4726 |
+| List accounts (recon) | [`Enum`](#enum) | Read-only — no Security log entry |
+
+What this DOES achieve:
+
+- Independent credential — survives any cleanup that doesn't
+  enumerate all local users.
+- Member of `Administrators` = full local control without
+  needing to maintain implant access.
+- Standard NetAPI32 calls — no `net user` child-process
+  signal.
+
+What this does NOT achieve:
+
+- **Loudest persistence option in this tree** — every action
+  emits Security events that mature SIEMs cluster on.
+- **Easily inventoried** — `net user` / `Get-LocalUser` lists
+  every account on the machine. Defenders running periodic
+  user audits notice the new account immediately.
+- **Doesn't bypass admin requirement** — `NetUserAdd` needs
+  Administrator. For non-admin alternatives see
+  [`persistence/registry`](registry.md) (HKCU) or
+  [`persistence/startup-folder`](startup-folder.md).
+- **Domain-joined hosts**: local accounts only. Domain account
+  creation is a different attack class entirely (DC access,
+  domain admin, Kerberos manipulation — see
+  [`credentials/goldenticket`](../credentials/goldenticket.md)).
 
 ## Primer
 

@@ -10,12 +10,36 @@ reflects_commit: f774f7e
 
 ## TL;DR
 
-Drop a `.lnk` shortcut into the user or machine StartUp folder.
-Windows Shell launches every shortcut it finds at user logon. No
-admin needed for user-scope; admin for machine-wide. Implements
-[`persistence.Mechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence). Sibling to
-[`persistence/registry`](registry.md) — pair them for
-redundancy.
+Drop a `.lnk` shortcut into the StartUp folder. Windows Shell
+launches every shortcut it finds at user logon.
+
+| Scope | Folder | Admin? | When |
+|---|---|---|---|
+| Per-user | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\StartUp` | No | This user's logon only |
+| All users | `%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs\StartUp` | Yes | Every user's logon |
+
+What this DOES achieve:
+
+- No admin for user-scope — works from any user-token implant.
+- File-based artifact survives certain registry-only cleanup
+  scripts.
+- Composes with [`persistence/registry`](registry.md) via
+  `InstallAll` for redundant persistence.
+
+What this does NOT achieve:
+
+- **Highly monitored** — every EDR / autoruns scanner / user
+  experiencing suspicious behaviour checks StartUp folders
+  first. Sysmon EID 11 (FileCreate) catches the .lnk drop.
+- **`.lnk` content is easily inspectable** — `Get-Item`
+  expands the target path; defenders see your binary path.
+  Pair with [`pe/masquerade`](../pe/masquerade.md) so the
+  target name looks benign.
+- **No retry on failure** — if your binary crashes, Windows
+  doesn't restart it.
+- **Doesn't survive cleanup that targets file-based persistence** —
+  any "clear StartUp" sweep deletes you. For lower-visibility
+  triggers, see [`persistence/task-scheduler`](task-scheduler.md).
 
 ## Primer
 

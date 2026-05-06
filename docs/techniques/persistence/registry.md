@@ -10,11 +10,39 @@ reflects_commit: f774f7e
 
 ## TL;DR
 
-Write the implant's path to one of the four canonical Run /
-RunOnce registry keys (HKCU + HKLM, persistent + one-shot).
-Windows launches every value at user logon. HKCU does not need
-admin; HKLM does. Implements [`persistence.Mechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence)
-for redundant composition.
+Survive reboots by writing the implant's path to a Run/RunOnce
+registry key. Windows launches the value at every user logon.
+
+| You want… | Use | Hive | Admin? | Persistence |
+|---|---|---|---|---|
+| Per-user, no admin | `Hive=HKCU, RunOnce=false` | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` | No | Reboot-persistent |
+| Per-machine, all users | `Hive=HKLM, RunOnce=false` | `HKLM\…\Run` | Yes | Reboot-persistent |
+| One-shot bootstrap (delete after first run) | `RunOnce=true` | `…\RunOnce` | (depends on hive) | Self-deletes after firing |
+
+What this DOES achieve:
+
+- Trivial install — single `RegSetValueEx` on a known-key path.
+- HKCU path needs zero elevation — works from any user-token
+  implant.
+- Composes with other mechanisms via [`persistence.Mechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence)
+  + `InstallAll` so cleanup of one doesn't lose persistence
+  if you installed redundantly.
+
+What this does NOT achieve:
+
+- **Among the loudest persistence options** — Run/RunOnce is
+  the most-monitored persistence path on every EDR. AutoRuns,
+  Sysmon EID 13, every "persistence audit" PowerShell script
+  finds it first.
+- **HKCU = per-user only** — fires only when THIS user logs on.
+  Not for "any user logs in" coverage.
+- **String-only** — no obfuscation; the implant's path is
+  plaintext in the registry. Pair with [`pe/masquerade`](../pe/masquerade.md)
+  to make the path look benign (`%SystemRoot%\System32\svchost.exe`).
+- **No retry on failure** — if the implant crashes, Windows
+  doesn't restart it. For auto-restart, use
+  [`persistence/service`](service.md) (LocalSystem +
+  restart-on-failure).
 
 ## Primer
 

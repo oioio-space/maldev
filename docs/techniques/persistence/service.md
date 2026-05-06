@@ -10,12 +10,45 @@ reflects_commit: f774f7e
 
 ## TL;DR
 
-Install a Windows service via the Service Control Manager so the
-implant runs as `LocalSystem` at every boot. Highest-trust
-persistence available; also the loudest — service creation emits
-System Event 7045 + Security Event 4697 on every modern Windows
-host. Implements [`persistence.Mechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence)
-for composition with other persistence primitives.
+Install a Windows service so the implant runs as `LocalSystem`
+at every boot. Highest-trust persistence available; also the
+loudest.
+
+| Trait | Value |
+|---|---|
+| **Trigger** | Boot (or service start trigger) |
+| **Privilege** | `LocalSystem` (highest non-kernel) |
+| **Auto-restart on crash?** | Yes (configurable via SCM recovery actions) |
+| **Admin required to install?** | Yes — `SeCreateServicePrivilege` or admin SCM access |
+| **Telemetry signature** | System Event 7045 + Security Event 4697 every install |
+
+What this DOES achieve:
+
+- Survives reboots, user logoffs, AV cleanup sweeps that
+  target user-scope artefacts (Run keys, StartUp folders).
+- Runs as `LocalSystem` — full privilege, no UAC, can
+  manipulate other services.
+- Implements [`persistence.Mechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence)
+  — composes via `InstallAll` for redundant persistence.
+
+What this does NOT achieve:
+
+- **Loudest persistence option** — every modern EDR alerts on
+  service install. Pair with [`cleanup/service.Hide`](../cleanup/service.md)
+  to remove from `services.msc` enumeration after install
+  (still loud during install, quieter afterwards).
+- **Doesn't bypass admin requirement** — you need to be admin
+  to install. For non-admin persistence, see
+  [`persistence/registry`](registry.md) (HKCU) or
+  [`persistence/startup-folder`](startup-folder.md).
+- **EDR remediation often targets services first** — defenders
+  who notice see the service name + binary path, can stop +
+  delete with one PowerShell command.
+- **Service description is plaintext** — choose a name +
+  description that blends with legitimate Windows services
+  (e.g., "Windows Update Medic" variants), but ANY new
+  service in `HKLM\SYSTEM\CurrentControlSet\Services` is
+  inspectable.
 
 ## Primer
 

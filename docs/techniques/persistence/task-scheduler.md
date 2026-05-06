@@ -10,13 +10,41 @@ reflects_commit: f774f7e
 
 ## TL;DR
 
-Create, list, run, and delete Windows scheduled tasks via the
-COM `ITaskService` API — no `schtasks.exe` child process.
-Supports logon, startup, daily, and one-shot time triggers, plus
-a `Hidden` flag. Implements [`persistence.Mechanism`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence).
-Trade-off vs `persistence/service`: same SYSTEM-scope reach with
-broader trigger options and lower direct-spawn telemetry, but
-Event 4698 still emits.
+Create scheduled tasks via the COM `ITaskService` API — no
+`schtasks.exe` child process (which is itself a loud signal).
+Most flexible trigger surface in the persistence tree.
+
+| Trigger | When it fires | Admin required? |
+|---|---|---|
+| `Logon` | At any user logon | No (per-user task) |
+| `Startup` | At system boot | Yes |
+| `Daily` | Once per day at HH:MM | No (per-user) |
+| `Time` | One-shot at specified time | No (per-user) |
+| `Hidden=true` | Task invisible in Task Scheduler GUI | n/a (orthogonal flag) |
+
+What this DOES achieve:
+
+- COM call (`CoCreateInstance(CLSID_TaskScheduler)`) — no
+  child-process spawn (`schtasks.exe` is a flagged signal).
+- Trigger flexibility beyond Run/Startup: schedule, idle, log
+  events, custom XML.
+- `Hidden=true` flag removes from default Task Scheduler view
+  (still in `\Microsoft\Windows` if defenders look).
+
+What this does NOT achieve:
+
+- **Event 4698 (task created)** still fires regardless of COM
+  vs `schtasks.exe`. Defenders watching Security log see
+  every task.
+- **Hidden=true is cosmetic** — `Get-ScheduledTask` and
+  `schtasks /Query /V` show hidden tasks too. Only the GUI
+  filters.
+- **Per-user tasks live in HKCU\…\Schedule\TaskCache** —
+  defenders enumerating user-scope autoruns find them.
+- **For SYSTEM-trust tasks**, an alternative is
+  [`persistence/service`](service.md) — louder install
+  (Event 7045) but more familiar to operators reading
+  defender alerts.
 
 ## Primer
 
