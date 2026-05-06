@@ -16,6 +16,60 @@ in-process unpackers; signature-breaking permutations (S-Box, Matrix
 Hill, ArithShift, XOR) to defeat YARA byte patterns. Pure Go, no CGo,
 cross-platform.
 
+Recommended layer stack:
+
+```text
+implant.exe disk bytes
+    │
+    ├─ Layer 1: signature-breaking permutation (S-Box / XOR)
+    │           Defeats static YARA on the encrypted blob.
+    │
+    ├─ Layer 2: lightweight cipher (RC4 / TEA)
+    │           In-process unpacker — minimal footprint.
+    │
+    └─ Layer 3: AEAD outer envelope (AES-GCM)
+                Authenticated; tampering detection.
+```
+
+## Primer — vocabulary
+
+Six terms recur on this page:
+
+> **AEAD (Authenticated Encryption with Associated Data)** —
+> cipher mode that produces both ciphertext AND an
+> authentication tag. Decrypting with the wrong key OR
+> tampered ciphertext fails loudly (tag mismatch). AES-GCM and
+> XChaCha20-Poly1305 are the AEAD modes shipped here. Always
+> use AEAD for the outer envelope so on-disk corruption fails
+> early instead of producing garbage shellcode.
+>
+> **Nonce / IV** — single-use bytes that randomise the cipher's
+> output so the same key + plaintext doesn't always produce the
+> same ciphertext. Reusing a nonce with the same key catastrophically
+> breaks security (key recovery for stream ciphers, plaintext
+> recovery for AES-GCM). XChaCha20's 24-byte nonce is large
+> enough that random nonces practically never collide.
+>
+> **Authentication tag** — fixed-size value (16 bytes for
+> AES-GCM) appended to the ciphertext. Checked on decryption;
+> any byte flip in the ciphertext makes the tag mismatch.
+>
+> **Stream cipher** — produces a keystream of pseudorandom
+> bytes XOR'd with plaintext. RC4 is the canonical example.
+> No authentication; no nonce (just a key). Cheap to
+> implement; never use as outer envelope (no tampering detection).
+>
+> **Permutation** — reversible byte rearrangement (S-Box,
+> Matrix Hill, ArithShift) that defeats YARA static rules
+> looking for a known byte pattern. Doesn't add entropy —
+> just shuffles. Pair with a real cipher beneath.
+>
+> **YARA** — defender's pattern-matching language. Rules describe
+> byte sequences ("look for `\xE9\x4D\x32\xCB`"). Layered
+> permutation + cipher means the disk artefact never matches
+> any byte sequence the implant author or attacker tooling
+> baseline contains.
+
 ## Pick the primitive
 
 Side-by-side. Pick the row whose tradeoffs match the deployment
