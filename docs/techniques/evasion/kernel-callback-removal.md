@@ -9,15 +9,87 @@ reflects_commit: 5e0e5c2
 
 ## TL;DR
 
-`evasion/kcallback` reads the three in-kernel notify-callback arrays
-(`PspCreateProcessNotifyRoutine` / `PspCreateThreadNotifyRoutine` /
-`PspLoadImageNotifyRoutine`) through any caller-supplied
-`KernelReader` (BYOVD), maps each slot to the registering driver,
-and — when paired with a `KernelReadWriter` — selectively zeroes EDR
-slots and restores them later. No built-in offset database: callers
-pass an `OffsetTable` keyed on the running ntoskrnl build.
+EDR drivers don't just hook userland — they register **kernel
+notification callbacks** so the OS itself tells them every time
+a process / thread / image is created. Userland evasion (AMSI
+patches, ntdll unhooking) is invisible to these callbacks.
+Killing them at the kernel level is the only way to blind the
+EDR's process-spawn telemetry without admin-level driver work.
 
-## Primer
+This package gives you two operations:
+
+| Operation | What you need | What you get |
+|---|---|---|
+| [`Enumerate`](#enumeratereader-kernelreader-offsets-offsettable-callback-error) | A `KernelReader` (BYOVD) + the running ntoskrnl's offset table | List of every registered callback (kind / index / address / owning driver / enabled bit) — directly reveals which EDR driver is listening |
+| [`Remove`](#removerw-kernelreadwriter-kind-callbackkind-index-int-removetoken-error) + [`Restore`](#restorerw-kernelreadwriter-kind-callbackkind-index-int-token-removetoken-error) | A `KernelReadWriter` (BYOVD) + the index of a callback to silence | EDR stops getting that event class until you restore (or process exits) |
+
+What this DOES achieve:
+
+- Process / thread / image-load callbacks for the targeted EDR
+  go silent. The driver still runs, but it stops being notified.
+- Surgical: you can kill one EDR's callbacks without affecting
+  Windows Defender or other agents.
+
+What this does NOT achieve:
+
+- **Userland telemetry stays alive** — AMSI, ETW, inline hooks
+  in ntdll. Layer with [`evasion/preset.Stealth`](preset.md) for
+  those.
+- **Other kernel hook surfaces stay intact** — minifilter
+  callbacks (`FltRegisterFilter`), object callbacks
+  (`ObRegisterCallbacks`), Etw kernel-mode providers, etc. The
+  EDR can still see file opens / handle ops via those. Each is
+  a separate attack.
+- **Doesn't bypass HVCI/PG** — Microsoft's PatchGuard scans
+  these arrays periodically. If your driver's BYOVD primitive
+  triggers PG, you BSOD. Tested with RTCore64 → safe; untested
+  drivers may not be.
+
+⚠ **Requires BYOVD** — every kernel R/W primitive in this
+codebase routes through a signed-but-vulnerable driver
+(RTCore64, `kdmapper` + custom, EDRSandBlast). User-mode alone
+cannot read or write `nt!Psp*NotifyRoutine` arrays. See
+[`kernel/driver/rtcore64`](https://pkg.go.dev/github.com/oioio-space/maldev/kernel/driver/rtcore64).
+
+## Primer — vocabulary
+
+Six terms recur on this page:
+
+> **Notification callback** — a function pointer drivers register
+> via `PsSetCreateProcessNotifyRoutine`/etc. The kernel calls
+> every registered function on the relevant event (process
+> creation, thread creation, image load). Up to 64 slots per
+> array.
+>
+> **`PEX_CALLBACK`** — packed 64-bit slot value: upper 60 bits
+> point at a `ROUTINE_BLOCK`, lower 4 bits are flags
+> (enabled / refcount). The actual callback function lives at
+> offset 8 inside the `ROUTINE_BLOCK` — one indirection beyond
+> the slot.
+>
+> **BYOVD** ("Bring Your Own Vulnerable Driver") — load a
+> legitimately-signed-but-vulnerable third-party driver (RTCore64
+> from MSI Afterburner, GIGABYTE GDRV, …) that exposes an IOCTL
+> for arbitrary kernel R/W. The driver itself is signed, so
+> Driver Signature Enforcement loads it; the *vulnerability*
+> gives you the kernel primitive. Required for everything in
+> this package.
+>
+> **`OffsetTable`** — caller-supplied RVAs of `PspCreateProcessNotifyRoutine`
+> and friends in `ntoskrnl.exe`. Different per Windows build —
+> changes with every cumulative update. No built-in database
+> because hardcoding stale offsets points at garbage.
+>
+> **PatchGuard (PG)** — Windows kernel integrity check that
+> scans critical structures periodically. Some BYOVD primitives
+> trigger PG → BSOD. RTCore64's slow IOCTL pattern stays under
+> the radar; faster drivers may not.
+>
+> **HVCI (Hypervisor-protected Code Integrity)** — Win11 default
+> mitigation that runs the kernel under a hypervisor and refuses
+> to map unsigned kernel memory. HVCI ON breaks most BYOVD paths
+> (the driver loads but its kernel writes get blocked). The
+> rtcore64 path documents which builds it bypasses.
 
 Modern EDR / AV products hook into kernel event streams by registering
 **kernel notification callbacks** via `PsSetCreateProcessNotifyRoutine`,
