@@ -14,6 +14,73 @@ reflects_commit: 3de532d
 
 ---
 
+## TL;DR
+
+You want to intercept Windows API calls — log them, modify
+their arguments, suppress their results — without attaching a
+debugger or using kernel components. This package patches the
+target function's first bytes with a JMP to your Go callback,
+then provides a "trampoline" you can call to invoke the
+original (unpatched) code.
+
+Pick the right entry point based on what you have:
+
+| You have… | Use | Why |
+|---|---|---|
+| The function's address as `uintptr` | [`Install`](#installtargetaddr-handler-hook-error) | Direct path. You already resolved it via `windows.NewLazyDLL(...).NewProc(...).Addr()`. |
+| Just the DLL + function name | [`InstallByName`](#installbynamedllname-funcname-handler) | Resolves + installs in one call. |
+| The function exists but you don't know its signature | [`InstallProbe`](#installprobe--unknown-signatures) | Logs first N args without you guessing the type. Useful for reversing unknown APIs. |
+| Need to hook many related functions atomically | [`HookGroup`](#hookgroup--multi-hook) | All-or-nothing install (rolls back on partial failure). |
+
+What this DOES achieve:
+- Your callback runs every time the target is invoked.
+- Original arguments visible; return value optionally rewritable.
+- Trampoline lets you "call through" to the real function.
+
+What this does NOT achieve:
+- **Userland-only** — kernel callbacks (PsSetCreateProcessNotify
+  family) need a different attack. See
+  [`evasion/kernel-callback-removal`](kernel-callback-removal.md).
+- **Detectable** — EDR memory scanners flag patched prologues
+  (the JMP rel32 is a tell). For evading prologue scans, see
+  [`evasion/unhook`](ntdll-unhooking.md) which restores clean
+  prologues from a fresh ntdll image on disk.
+- **x64 only** — no x86, no ARM64.
+
+## Primer — vocabulary
+
+Five terms appear constantly on this page:
+
+> **Prologue** — the first few bytes of a function's machine
+> code. Inline hooking patches these bytes (typically the first
+> 5 — enough for a JMP rel32) so the CPU diverts to your code
+> instead of running the original.
+>
+> **JMP rel32** — a 5-byte x64 instruction that jumps to a
+> destination expressed as a 32-bit signed offset from the
+> jump's location. Reach: ±2 GB. The patch installs this; if
+> the target callback is more than 2 GB away, you need a relay.
+>
+> **Relay** — a small (13-byte) executable page allocated
+> within ±2 GB of the target, holding `MOV R10, <abs64>; JMP R10`.
+> The 5-byte patch jumps to the relay; the relay does the
+> 64-bit absolute jump to your Go callback (which can live
+> anywhere in the address space).
+>
+> **Trampoline** — a copy of the bytes you OVERWROTE in the
+> prologue (called "stolen bytes") followed by a JMP back to
+> the target's code AFTER the patch. Lets you "call through"
+> the hook to invoke the original logic. The package builds
+> this automatically using `golang.org/x/arch/x86/x86asm` to
+> decode the prologue and fix up RIP-relative addresses.
+>
+> **RIP-relative** — an addressing mode where the operand is
+> an offset from the *current* instruction pointer (e.g.,
+> `MOV RAX, [RIP+0x12345]`). When you copy bytes containing
+> RIP-relative addressing into the trampoline (which lives at
+> a different address), the offsets break unless fixed up.
+> The package handles this for you.
+
 ## Primer
 
 Every Windows function — `MessageBoxW`, `CreateFileW`, `NtAllocateVirtualMemory`
