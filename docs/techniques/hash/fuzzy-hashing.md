@@ -16,6 +16,37 @@ for similar inputs**. Use to detect variants of a known sample after
 small mutations (UPX section rename, packer entropy padding, single-byte
 patches) that defeat traditional cryptographic hashes.
 
+| You want to… | Use | Returns |
+|---|---|---|
+| Hash a buffer with ssdeep | [`Ssdeep`](#ssdeep) | `string` — VirusTotal / YARA-compatible format |
+| Hash a buffer with TLSH | [`TLSH`](#tlsh) | `string` — fixed length per spec |
+| Score similarity between two ssdeep hashes | [`SsdeepCompare`](#ssdeepcompare) | `int` 0-100 (higher = more similar) |
+| Score similarity between two TLSH hashes | [`TLSHCompare`](#tlshcompare) | `int` 0+ (LOWER = more similar; threshold ~30) |
+| Screen N samples against a known-bad seed | Pair with file-walk + threshold loop (see [Advanced example](#advanced-batch-similarity-scan)) | List of matches above threshold |
+
+What this DOES achieve:
+
+- Variant detection — identify samples derived from a known
+  sample even after small mutations.
+- Build-pipeline verification — measure that
+  [`pe/morph`](../pe/morph.md) actually shifted the fuzzy
+  fingerprint while keeping the family intact (or
+  intentionally broke it, depending on goal).
+- VirusTotal-compatible ssdeep format for cross-tool sharing.
+
+What this does NOT achieve:
+
+- **Doesn't catch radically different samples** — fuzzy hashes
+  measure SIMILARITY. If two implants share 0% structure, the
+  scores are at floor and you learn nothing.
+- **ssdeep score has direction-flip semantics vs TLSH** —
+  ssdeep: 100 = identical, 0 = unrelated. TLSH: 0 = identical,
+  high = unrelated (~30 typical "variant" threshold). Don't
+  cross-wire them.
+- **Computational cost** — TLSH minimum-length requirement
+  (~256 bytes); ssdeep linear-in-bytes. For huge files, prefer
+  TLSH.
+
 ## Primer
 
 A traditional hash like SHA-256 changes completely when a single byte

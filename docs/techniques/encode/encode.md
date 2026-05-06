@@ -14,6 +14,30 @@ Transport-safe byte transforms: Base64 (RFC 4648 §4 + §5), UTF-16LE,
 ROT13, and PowerShell `-EncodedCommand` (`Base64(UTF-16LE(script))`).
 Pure functions, no system interaction, cross-platform.
 
+| You want to send bytes through… | Use | Notes |
+|---|---|---|
+| HTTP body / JSON string / Go source const | [`Base64Encode`](#base64encode) | Standard alphabet (`+/`) |
+| URL path / filename / cookie | [`Base64URLEncode`](#base64urlencode) | URL-safe alphabet (`-_`) |
+| Windows API expecting `LPWSTR` | [`ToUTF16LE`](#toutf16le) | Pair with `windows.UTF16PtrFromString` for direct ABI use |
+| `powershell.exe -EncodedCommand` | [`PowerShell`](#powershell) | Auto-wraps: `Base64(UTF-16LE(script))` |
+| Defeat plaintext-string YARA on Win32 names | [`ROT13`](#rot13) | Novelty cover; not real encoding |
+
+What this DOES achieve:
+
+- Survives byte-mangling channels (HTTP, JSON, command line).
+- One-call helpers — no manual base64 + UTF-16 chaining.
+
+What this does NOT achieve:
+
+- **Encoding ≠ encryption** — Base64 is reversible without a
+  key. Always encrypt first, encode last (see
+  [`crypto`](../crypto/payload-encryption.md) recommended
+  stack diagram).
+- **Doesn't bypass Defender's `-EncodedCommand` heuristic** —
+  Defender flags long Base64 strings on PowerShell command
+  lines regardless of content. The technique is for transport
+  cover, not detection cover.
+
 ## Primer
 
 Encoding solves a different problem from encryption. Many channels

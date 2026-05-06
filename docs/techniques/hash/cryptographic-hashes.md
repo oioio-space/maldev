@@ -10,10 +10,29 @@ reflects_commit: 4236b30
 
 ## TL;DR
 
-One-shot hex-string wrappers around `crypto/md5`, `crypto/sha1`,
-`crypto/sha256`, `crypto/sha512`, plus the ROR13 algorithm used by
-shellcode for plaintext-free Win32 API resolution. Pure Go,
-cross-platform, no system interaction.
+Two distinct use cases under one roof:
+
+| You want to… | Use | Output |
+|---|---|---|
+| Fingerprint a buffer (integrity, identifier) | [`SHA256`](#sha256), [`SHA512`](#sha512), [`MD5`](#md5), [`SHA1`](#sha1) | hex string |
+| Compute a Win32 API name hash for a shellcode resolver | [`ROR13`](#ror13) | uint32 — match against `pe/imports.List` outputs |
+| Compute a module-name hash matching PEB-walk shellcode | [`ROR13Module`](#ror13module) | uint32 — pre-uppercased + UTF-16LE per shellcode convention |
+
+What this DOES achieve:
+
+- One-shot calls — `hash.SHA256(data)` returns the hex string
+  directly. No `hex.EncodeToString(h.Sum(nil))` chaining.
+- ROR13 matches the canonical shellcode algorithm — your
+  pre-computed constants work with public reflective loaders.
+
+What this does NOT achieve:
+
+- **Doesn't replace the crypto library** — for HMAC, streaming
+  hash, KDF, use `crypto/*` directly.
+- **MD5 / SHA1 are not collision-resistant** — use SHA256+
+  for any integrity assertion that matters.
+- **Doesn't compute fuzzy hashes** — see [`fuzzy-hashing`](fuzzy-hashing.md)
+  for ssdeep / TLSH (variant detection).
 
 ## Primer
 
