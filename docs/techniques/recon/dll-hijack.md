@@ -10,40 +10,92 @@ reflects_commit: 7a8c466
 
 ## TL;DR
 
-Discover DLL-search-order hijack opportunities across services,
-running processes, scheduled tasks, and `autoElevate=true`
-binaries. [`ScanAll`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack) returns
-`Opportunity` records carrying the writable hijack path + the
-legitimate resolved DLL location. [`Validate`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack)
-proves the hijack works by dropping a canary; [`Rank`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/dllhijack)
-prioritises by integrity gain.
+You want to find places where you (current user) can drop a
+malicious DLL such that a privileged target picks it up next
+time it loads. Four scanner surfaces, each catching a different
+victim class:
 
-## Primer
+| Surface | Catches | Reward when hit |
+|---|---|---|
+| [`ScanServices`](#func-scanservicesopts-scanopts-opportunity-error) | SYSTEM-running services with writable binary dir + missing imported DLL | SYSTEM exec on next service start |
+| [`ScanProcesses`](#func-scanprocessesopts-scanopts-opportunity-error) | Live processes with the same writable-search-path-+-missing-DLL pattern | Code exec at the process's privilege level on next launch |
+| [`ScanScheduledTasks`](#func-scanscheduledtasksopts-scanopts-opportunity-error) | Tasks registered via COM ITaskService | Exec on next task trigger (often runs as SYSTEM or stored creds) |
+| [`ScanAutoElevate`](#func-scanautoelevateopts-scanopts-opportunity-error) | System32 `.exe` with `autoElevate=true` manifest (fodhelper, sdclt, eventvwr, …) | UAC bypass — these silently elevate without prompt |
 
-A DLL hijack works when an application loads `xyz.dll` and
-Windows resolves the load via the search-order rules — first
-the application directory, then `System32`, then `PATH`. If the
-operator can drop a `xyz.dll` in a writable directory the
-application checks *before* `System32`, the operator's code
-runs at the next load.
+Or run all four in one call:
 
-This package finds those opportunities programmatically:
+| You want… | Use | Notes |
+|---|---|---|
+| Find every opportunity across all 4 surfaces | [`ScanAll`](#func-scanallopts-scanopts-opportunity-error) | Returns combined `[]Opportunity` |
+| Score what you found by integrity gain | [`Rank`](#func-rankops-opportunity) | Sorts SYSTEM > High-IL > Medium > current. Use to pick the best target first. |
+| Prove a candidate actually works | [`Validate`](#func-validateop-opportunity-opts-validateopts-validationresult-error) | Drops a canary DLL + triggers victim load + checks if the canary fired. Destructive — only run on opps you intend to use. |
 
-- **Services** — services running as SYSTEM whose binary path
-  is in a writable directory + missing IAT-imported DLL = root
-  on next service start.
-- **Processes** — live process IATs walked via Toolhelp32; same
-  filter.
-- **Scheduled tasks** — registered tasks parsed via COM
-  ITaskService.
-- **AutoElevate** — System32 `.exe` whose manifest carries
-  `autoElevate=true` (fodhelper, sdclt, eventvwr, …) — these
-  silently elevate without UAC prompt; a hijack here is a
-  textbook UAC bypass.
+What this DOES achieve:
 
-`KnownDLLs` (HKLM\…\Session Manager\KnownDLLs) are excluded —
-those are early-load-mapped from `\KnownDlls\` and bypass the
-search order entirely.
+- Programmatic discovery — no more eyeballing Process Monitor
+  for `NAME NOT FOUND` events.
+- Cross-surface coverage — services + processes + tasks +
+  autoElevate UAC bypass candidates in one pass.
+- Stealth scan — pass `ScanOpts.Opener` (stealthopen.Opener)
+  so PE reads bypass path-keyed EDR file hooks.
+
+What this does NOT achieve:
+
+- **Doesn't write the DLL** — that's the operator's job. Pair
+  with [`pe/dllproxy.Generate`](../pe/dll-proxy.md) to emit
+  the forwarder/payload DLL and `os.WriteFile` to drop it.
+- **Doesn't trigger the victim** — `Validate` does for
+  testing, but in real ops you wait for a natural load
+  (service restart, scheduled task fire) or trigger via your
+  own action.
+- **`KnownDLLs` are excluded** — DLLs in
+  `HKLM\…\Session Manager\KnownDLLs` are early-load-mapped
+  from `\KnownDlls\` and bypass search order entirely. Not
+  hijackable; this package skips them.
+- **Doesn't catch service-trigger-launched binaries** —
+  hosted services that load DLLs only when a specific event
+  fires. The IAT walk catches static imports; LoadLibrary at
+  runtime won't show up.
+
+## Primer — vocabulary
+
+Six terms recur on this page:
+
+> **DLL search order** — Windows's resolution algorithm when a
+> program calls `LoadLibrary("xyz.dll")` without a full path:
+> application directory first, then `System32`, then `SysWOW64`,
+> then `Windows`, then current dir, then `PATH`. If the
+> application directory is writable by you and `xyz.dll` doesn't
+> exist there, you can drop one and it'll be loaded first.
+>
+> **IAT (Import Address Table)** — the list of `(DLL, Function)`
+> pairs a PE statically depends on. `dllhijack` walks it for
+> every scanned binary; missing imports (DLL the IAT names but
+> isn't on disk in any search-order location) are the prime
+> hijack candidates.
+>
+> **autoElevate=true** — manifest attribute on Windows binaries
+> Microsoft has whitelisted to elevate without UAC prompt.
+> fodhelper.exe, sdclt.exe, eventvwr.exe, etc. A DLL hijack
+> against one of these = silent UAC bypass.
+>
+> **`Opportunity`** — record returned by every scanner. Carries
+> the writable hijack path (where you drop your DLL), the
+> resolved legitimate DLL location (the donor for export
+> forwarding), the victim binary + integrity level, and metadata
+> for ranking.
+>
+> **Integrity level** — Windows's process trust hierarchy: Low
+> (sandboxed apps), Medium (default user), High (elevated user),
+> System (services, kernel-adjacent). `Rank` sorts opportunities
+> by the gain you'd get hijacking them — System target from a
+> Medium implant beats Medium-from-Medium.
+>
+> **`KnownDLLs`** — registry list at
+> `HKLM\System\CurrentControlSet\Control\Session Manager\KnownDLLs`.
+> Windows pre-maps these from `\KnownDlls\` object directory at
+> boot; subsequent `LoadLibrary` for them never touches disk
+> and bypasses search order entirely. Not hijackable.
 
 ## How It Works
 
