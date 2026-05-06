@@ -84,6 +84,28 @@ type PreparedImage struct {
 	// the resolution layer worked without actually running the
 	// payload.
 	Imports []ResolvedImport
+
+	// region holds the original []byte slice returned by
+	// unix.Mmap (Linux) or windows.VirtualAlloc (Windows) so
+	// Free() can call the matching release API without converting
+	// Base (uintptr) back to unsafe.Pointer — that conversion
+	// violates Go's unsafe rules when the value is stored across
+	// calls (the GC could, in theory, have invalidated it).
+	// Unexported: callers never need the raw backing slice.
+	region []byte
+
+	// elfPhdrOff, elfPhdrCount, elfPhdrEnt record the program-header
+	// table layout of the loaded ELF. Set by mapAndRelocateELF on
+	// Linux; zero on Windows. Run() adds elfPhdrOff to Base to form
+	// the AT_PHDR auxv value so _rt0_amd64_linux walks the loaded
+	// binary's own phdrs rather than the parent process's.
+	//
+	// elfPhdrOff is the ELF e_phoff value — the file offset of the
+	// phdr table, which for a Go static-PIE equals the virtual
+	// address (PT_LOAD VAddr == file offset for the first segment).
+	elfPhdrOff   uint64 // e_phoff: file offset = VAddr for Go static-PIE
+	elfPhdrCount uint64 // e_phnum: number of program header entries
+	elfPhdrEnt   uint64 // e_phentsize: bytes per entry (Elf64_Phdr = 56)
 }
 
 // ResolvedImport captures one IAT entry the loader populated.

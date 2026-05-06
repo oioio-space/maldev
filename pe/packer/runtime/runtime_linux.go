@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"unsafe"
+
+	"crypto/rand"
 
 	"golang.org/x/sys/unix"
 )
@@ -33,6 +36,38 @@ const (
 	dtRelaSz  = 8
 	dtRelaEnt = 9
 )
+
+const (
+	// fakeStackSize is the byte size of the kernel-style stack
+	// mmap'd by Run() before transferring control. 256 KiB is
+	// ample: Go's _rt0_amd64_linux + rt0_go switch to the g0
+	// stack within hundreds of bytes of stack use; the rest is
+	// headroom for auxv parsing and arch_prctl.
+	fakeStackSize = 256 * 1024
+)
+
+// auxv type constants from <sys/auxv.h> / Linux elf(5). Only the
+// entries that Run() needs to patch or zero are listed here.
+const (
+	atNull   = 0  // AT_NULL   — end of auxv vector
+	atPhdr   = 3  // AT_PHDR   — address of the ELF program header table
+	atPhent  = 4  // AT_PHENT  — size (bytes) of one Elf64_Phdr entry
+	atPhnum  = 5  // AT_PHNUM  — number of program headers
+	atEntry  = 9  // AT_ENTRY  — executable entry point (informational)
+	atRandom = 25 // AT_RANDOM — address of 16 random bytes (stack canary)
+)
+
+// auxvEntry mirrors one Elf64_auxv_t (i64 a_type, u64 a_val).
+type auxvEntry struct {
+	Type uint64
+	Val  uint64
+}
+
+// enterEntry swaps RSP to stackTop and JMPs to entry. Implemented
+// in runtime_linux_amd64.s. Never returns.
+//
+//go:noescape
+func enterEntry(entry, stackTop uintptr)
 
 // rela64 mirrors Elf64_Rela. Field names track the ABI for
 // greppability against /usr/include/elf.h.
@@ -72,8 +107,10 @@ func mapAndRelocate(pe []byte, h *peHeaders) (*PreparedImage, error) {
 //     R_X86_64_RELATIVE relocs applied as `*(u64*)(base+offset) =
 //     base + addend`. Symbol-bound relocs surface
 //     ErrNotImplemented (Stage C territory).
-//   - PT_INTERP rejected as a defensive guard (the Z-scope gate
-//     already excludes it; this is a belt-and-suspenders check).
+//   - PT_INTERP: accepted when DT_NEEDED is absent. Go's
+//     -buildmode=pie toolchain sets an interpreter path for
+//     legacy ELF compatibility; without DT_NEEDED ld.so is
+//     never invoked. We are the interpreter.
 //   - PT_TLS: Go static-PIE binaries self-amorce TLS via
 //     arch_prctl(ARCH_SET_FS) in their own _rt0, so no TLS init
 //     is needed from the loader. No rejection needed here.
@@ -90,7 +127,6 @@ func mapAndRelocateELF(elf []byte, h *elfHeaders) (*PreparedImage, error) {
 	}
 
 	var (
-		hasInterp  bool
 		dynVAddr   uint64
 		dynFileSz  uint64
 		dynPresent bool
@@ -107,14 +143,13 @@ func mapAndRelocateELF(elf []byte, h *elfHeaders) (*PreparedImage, error) {
 			dynVAddr = p.VAddr
 			dynFileSz = p.FileSz
 			dynPresent = true
-		case ptInterp:
-			hasInterp = true
 		}
 	}
-	if hasInterp {
-		// Reachable only if isGoStaticPIE detection has a bug; defensive.
-		return nil, fmt.Errorf("%w: PT_INTERP requires ld.so resolution (Stage C)", ErrNotImplemented)
-	}
+	// PT_INTERP is allowed: Go's -buildmode=pie sets an interpreter
+	// path even for static binaries with no DT_NEEDED. The gate in
+	// detectGoStaticPIE already confirmed DT_NEEDED is absent, so
+	// ld.so will never be invoked. We simply ignore the PT_INTERP
+	// segment — our loader is the only interpreter needed.
 	// No PT_DYNAMIC is valid for Go static-PIE binaries built with
 	// -ldflags='-d' (Go internal linker omits the dynamic segment when
 	// no interpreter is requested). The gate already accepted the binary
@@ -193,9 +228,13 @@ func mapAndRelocateELF(elf []byte, h *elfHeaders) (*PreparedImage, error) {
 	}
 
 	return &PreparedImage{
-		Base:        base,
-		SizeOfImage: uint32(mapSize),
-		EntryPoint:  base + uintptr(h.entry),
+		Base:         base,
+		SizeOfImage:  uint32(mapSize),
+		EntryPoint:   base + uintptr(h.entry),
+		region:       region,
+		elfPhdrOff:   h.phoff,
+		elfPhdrCount: uint64(h.phnum),
+		elfPhdrEnt:   uint64(h.phentsize),
 	}, nil
 }
 
@@ -288,14 +327,202 @@ func protFromPF(flags uint32) int {
 // be a power of two — pageSize on Linux always is.
 func alignUp(v, align uint64) uint64 { return (v + align - 1) &^ (align - 1) }
 
-// Run is the Linux Run gate. Mirrors the Windows env-var contract
-// so cross-platform operators can rely on the same opt-in. Stage D
-// will replace the body with the actual jump-to-entry path.
+// readSelfAuxv reads /proc/self/auxv, parses the entries, and
+// applies patches — a map from auxv type to new value — before
+// returning. The trailing AT_NULL terminator is preserved.
+//
+// Callers must patch at minimum:
+//   - AT_RANDOM (25): replace with address of fresh canary bytes
+//     so the loaded binary doesn't share the parent's stack canary.
+//   - AT_PHDR  (3):  replace with base + phdr_file_offset so the
+//     loaded binary walks its own program headers, not the parent's.
+//   - AT_PHENT (4):  replace with the loaded ELF's phentsize.
+//   - AT_PHNUM (5):  replace with the loaded ELF's phnum.
+//   - AT_ENTRY (9):  replace with the loaded binary's entry point.
+func readSelfAuxv(patches map[uint64]uint64) ([]auxvEntry, error) {
+	data, err := os.ReadFile("/proc/self/auxv")
+	if err != nil {
+		return nil, err
+	}
+	if len(data)%16 != 0 {
+		return nil, fmt.Errorf("auxv length %d not a multiple of 16", len(data))
+	}
+	out := make([]auxvEntry, 0, len(data)/16)
+	for off := 0; off+16 <= len(data); off += 16 {
+		e := auxvEntry{
+			Type: binary.LittleEndian.Uint64(data[off : off+8]),
+			Val:  binary.LittleEndian.Uint64(data[off+8 : off+16]),
+		}
+		if v, ok := patches[e.Type]; ok {
+			e.Val = v
+		}
+		out = append(out, e)
+		if e.Type == atNull {
+			return out, nil
+		}
+	}
+	return nil, fmt.Errorf("auxv missing AT_NULL terminator")
+}
+
+// writeKernelFrame writes the Linux SysV-ABI process startup
+// frame at the top of `stack`, mimicking what the kernel sets
+// up for a freshly-execve'd binary. Returns the resulting RSP
+// (16-byte aligned per x86_64 ABI; rsp -= padding when needed).
+func writeKernelFrame(stack []byte, auxv []auxvEntry, canary [16]byte) uintptr {
+	top := len(stack)
+	canaryOff := top - 16
+	copy(stack[canaryOff:top], canary[:])
+
+	off := canaryOff
+	for i := len(auxv) - 1; i >= 0; i-- {
+		off -= 16
+		binary.LittleEndian.PutUint64(stack[off:off+8], auxv[i].Type)
+		binary.LittleEndian.PutUint64(stack[off+8:off+16], auxv[i].Val)
+	}
+
+	// argc/argv/envp sit below auxv. We need argc's address to be
+	// 16-byte aligned so the loaded binary's _start sees a properly
+	// aligned initial RSP. Align off DOWN first (before the three
+	// 8-byte slots), not after, so the alignment gap falls between
+	// the envp terminator and the auxv block — not between envp and
+	// argc, which would corrupt the kernel-frame layout.
+	//
+	// After writing three 8-byte slots the alignment is:
+	//   off_after_auxv (16-aligned) - 3*8 = off_after_auxv - 24
+	// 24 % 16 == 8, so we need one extra 8-byte pad above the
+	// argc slot to re-align. We insert it here by rounding off
+	// down to the next 16-byte boundary, then stepping down 24.
+	off &^= 0xF // align gap between auxv and envp NULL
+	off -= 8
+	binary.LittleEndian.PutUint64(stack[off:off+8], 0) // envp NULL
+	off -= 8
+	binary.LittleEndian.PutUint64(stack[off:off+8], 0) // argv NULL
+	off -= 8
+	binary.LittleEndian.PutUint64(stack[off:off+8], 0) // argc = 0
+
+	return uintptr(unsafe.Pointer(&stack[off]))
+}
+
+// ReadSelfAuxvForTest exposes the auxv parser to runtime_test
+// without leaking the auxvEntry type into the public API. Linux-
+// only mirror of readSelfAuxv that accepts a single canaryPtr
+// override (the common test case) and returns a typed pair slice
+// the test package can iterate.
+func ReadSelfAuxvForTest(canaryPtr uintptr) []struct {
+	Type, Val uint64
+} {
+	patches := map[uint64]uint64{atRandom: uint64(canaryPtr)}
+	entries, err := readSelfAuxv(patches)
+	if err != nil {
+		return nil
+	}
+	out := make([]struct{ Type, Val uint64 }, len(entries))
+	for i, e := range entries {
+		out[i] = struct{ Type, Val uint64 }{e.Type, e.Val}
+	}
+	return out
+}
+
+// Run forks a child process, maps a fake kernel-style stack frame
+// in the child, and jumps to the loaded ELF entry point. The child
+// never returns; the parent waits and returns nil on exit 0.
+//
+// Why fork instead of jumping in-process:
+//   The parent is a Go binary with multiple OS threads. Clearing
+//   FS (arch_prctl ARCH_SET_FS=0) on one thread — which is
+//   required so the loaded binary's _rt0_amd64_linux can claim
+//   the TLS register — races with other goroutines reading g
+//   through FS. fork(2) gives us a single-threaded child where
+//   the FS clear is safe. The child inherits the mmap'd image
+//   (MAP_PRIVATE, copy-on-write) so no re-loading is needed.
+//
+// Gated behind MALDEV_PACKER_RUN_E2E=1 so unit test runs
+// that load the fixture for shape verification don't accidentally
+// execute the payload.
 func (p *PreparedImage) Run() error {
 	if os.Getenv("MALDEV_PACKER_RUN_E2E") != "1" {
 		return errors.New("packer/runtime: PreparedImage.Run requires MALDEV_PACKER_RUN_E2E=1")
 	}
-	return fmt.Errorf("%w: Linux ELF Run (Stage D)", ErrNotImplemented)
+
+	stack, err := unix.Mmap(-1, 0, fakeStackSize,
+		unix.PROT_READ|unix.PROT_WRITE,
+		unix.MAP_PRIVATE|unix.MAP_ANONYMOUS)
+	if err != nil {
+		return fmt.Errorf("packer/runtime: fake stack mmap: %w", err)
+	}
+
+	var canary [16]byte
+	if _, err := rand.Read(canary[:]); err != nil {
+		_ = unix.Munmap(stack)
+		return fmt.Errorf("packer/runtime: AT_RANDOM canary: %w", err)
+	}
+
+	canaryPtr := uintptr(unsafe.Pointer(&stack[len(stack)-16]))
+
+	// Patch the auxv entries that must reflect the loaded binary,
+	// not the parent process:
+	//   AT_PHDR  — program header table address (base + file offset)
+	//   AT_PHENT — program header entry size
+	//   AT_PHNUM — number of program headers
+	//   AT_ENTRY — entry point of the loaded binary
+	//   AT_RANDOM — fresh canary so the loaded runtime doesn't share
+	//               the parent's stack canary seed
+	patches := map[uint64]uint64{
+		atPhdr:   uint64(p.Base) + p.elfPhdrOff,
+		atPhent:  p.elfPhdrEnt,
+		atPhnum:  p.elfPhdrCount,
+		atEntry:  uint64(p.EntryPoint),
+		atRandom: uint64(canaryPtr),
+	}
+	auxv, err := readSelfAuxv(patches)
+	if err != nil {
+		_ = unix.Munmap(stack)
+		return fmt.Errorf("packer/runtime: read /proc/self/auxv: %w", err)
+	}
+
+	stackTop := writeKernelFrame(stack, auxv, canary)
+
+	// LockOSThread pins the goroutine to one OS thread so the
+	// fork below happens on the same thread that built the stack
+	// frame — mmap and stack contents are in the child's address
+	// space regardless, but pinning avoids a race between the
+	// stack-frame write and the fork.
+	runtime.LockOSThread()
+
+	// fork(2): child pid 0 enters the loaded binary; parent
+	// waits and propagates the exit status.
+	pid, _, errno := unix.RawSyscall(unix.SYS_CLONE,
+		uintptr(unix.SIGCHLD), 0, 0)
+	if errno != 0 {
+		runtime.UnlockOSThread()
+		_ = unix.Munmap(stack)
+		return fmt.Errorf("packer/runtime: fork: %w", errno)
+	}
+
+	if pid == 0 {
+		// Child: single-threaded after fork. Safe to clear FS
+		// and JMP. enterEntry does arch_prctl(ARCH_SET_FS,0)
+		// then swaps RSP and JMPs — never returns.
+		enterEntry(p.EntryPoint, stackTop)
+		// Unreachable; enterEntry never returns.
+		unix.RawSyscall(unix.SYS_EXIT, 127, 0, 0)
+	}
+
+	// Parent: wait for child to exit.
+	var ws unix.WaitStatus
+	_, err = unix.Wait4(int(pid), &ws, 0, nil)
+	runtime.UnlockOSThread()
+	_ = unix.Munmap(stack)
+	if err != nil {
+		return fmt.Errorf("packer/runtime: wait4: %w", err)
+	}
+	if ws.Exited() && ws.ExitStatus() == 0 {
+		return nil
+	}
+	if ws.Signaled() {
+		return fmt.Errorf("packer/runtime: child killed by signal %d", ws.Signal())
+	}
+	return fmt.Errorf("packer/runtime: child exited with status %d", ws.ExitStatus())
 }
 
 // Free munmaps the mapped image. Safe to call multiple times;
@@ -304,9 +531,9 @@ func (p *PreparedImage) Free() error {
 	if p.Base == 0 {
 		return nil
 	}
-	region := unsafe.Slice((*byte)(unsafe.Pointer(p.Base)), p.SizeOfImage)
-	err := unix.Munmap(region)
+	err := unix.Munmap(p.region)
 	p.Base = 0
+	p.region = nil
 	if err != nil {
 		return fmt.Errorf("packer/runtime: munmap: %w", err)
 	}

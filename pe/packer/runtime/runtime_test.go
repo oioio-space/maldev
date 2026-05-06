@@ -225,39 +225,48 @@ func TestPrepare_ELF_RejectsETExecOnLinux(t *testing.T) {
 }
 
 // TestPrepare_ELF_ETExecGateIsFirst confirms that detectGoStaticPIE
-// rejects ET_EXEC before even checking DT_NEEDED or .go.buildinfo.
+// rejects ET_EXEC before checking DT_NEEDED or .go.buildinfo.
 // A Go ET_EXEC binary (built without -buildmode=pie) has no
-// PT_INTERP and no DT_NEEDED, so without the ET_DYN check it would
-// be falsely classified as static-PIE.
+// DT_NEEDED, so without the ET_DYN check it would be falsely
+// classified as static-PIE.
 func TestPrepare_ELF_ETExecGateIsFirst(t *testing.T) {
 	if goruntime.GOOS != "linux" {
 		t.Skip("Stage B is Linux-only")
 	}
-	// ET_EXEC with no PT_INTERP and no DT_NEEDED — the three
-	// conditions that previously defined "static-PIE" before the
+	// ET_EXEC with no DT_NEEDED — the condition that previously
+	// could have been misclassified as static-PIE before the
 	// ET_DYN gate was added.
 	elf := buildMinimalELF(t, elfHeaderOpts{Type: 2}) // ET_EXEC, no dynamic
 	_, err := runtime.Prepare(elf)
 	if !errors.Is(err, runtime.ErrNotImplemented) {
-		t.Errorf("Prepare(ET_EXEC no-interp no-needed): got %v, want ErrNotImplemented", err)
+		t.Errorf("Prepare(ET_EXEC no-needed): got %v, want ErrNotImplemented", err)
 	}
-	// The rejection reason must identify ET_DYN as the blocker, not
-	// PT_INTERP or .go.buildinfo — those gates were never reached.
+	// The rejection reason must identify ET_DYN as the blocker.
 	if err != nil && !strings.Contains(err.Error(), "ET_DYN") {
 		t.Errorf("rejection reason should mention ET_DYN; got: %v", err)
 	}
 }
 
-// TestPrepare_ELF_RejectsInterpOnLinux confirms PT_INTERP triggers
-// the ld.so-required path that Stage C will own.
-func TestPrepare_ELF_RejectsInterpOnLinux(t *testing.T) {
+// TestPrepare_ELF_InterpWithoutNeededIsNotRejectedForInterp confirms
+// that PT_INTERP alone (no DT_NEEDED) no longer triggers an
+// "ld.so required" rejection. Go's -buildmode=pie toolchain emits
+// PT_INTERP even for fully static binaries. The operative check is
+// DT_NEEDED: without it the interpreter is never invoked.
+// A minimal ET_DYN + PT_INTERP (no .go.buildinfo) must be rejected
+// for the buildinfo gate, not for PT_INTERP.
+func TestPrepare_ELF_InterpWithoutNeededIsNotRejectedForInterp(t *testing.T) {
 	if goruntime.GOOS != "linux" {
 		t.Skip("Stage B is Linux-only")
 	}
-	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithInterp: true}) // ET_DYN + PT_INTERP
+	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithInterp: true}) // ET_DYN + PT_INTERP, no DT_NEEDED
 	_, err := runtime.Prepare(elf)
 	if !errors.Is(err, runtime.ErrNotImplemented) {
-		t.Errorf("Prepare(PT_INTERP) on linux: got %v, want ErrNotImplemented", err)
+		t.Errorf("Prepare(PT_INTERP no DT_NEEDED) on linux: got %v, want ErrNotImplemented", err)
+	}
+	// Must NOT say "PT_INTERP" — the gate now accepts PT_INTERP
+	// without DT_NEEDED; the rejection must be for missing buildinfo.
+	if err != nil && strings.Contains(err.Error(), "PT_INTERP") {
+		t.Errorf("rejection reason should not mention PT_INTERP; got: %v", err)
 	}
 }
 
@@ -413,6 +422,30 @@ func TestCheckELFLoadable_NonGo(t *testing.T) {
 	}
 	if !errors.Is(err, runtime.ErrNotImplemented) {
 		t.Errorf("got %v, want ErrNotImplemented", err)
+	}
+}
+
+// TestReadSelfAuxv_ContainsCanaryOverride confirms readSelfAuxv
+// rewrites AT_RANDOM (type 25) to the supplied canaryPtr so the
+// loaded Go runtime reads our fresh canary rather than inheriting
+// the parent's stack canary.
+func TestReadSelfAuxv_ContainsCanaryOverride(t *testing.T) {
+	if goruntime.GOOS != "linux" {
+		t.Skip("/proc/self/auxv is Linux-only")
+	}
+	canary := uintptr(0xCAFEBABE)
+	auxv := runtime.ReadSelfAuxvForTest(canary)
+	var found bool
+	for _, e := range auxv {
+		if e.Type == 25 { // AT_RANDOM
+			if e.Val != uint64(canary) {
+				t.Errorf("AT_RANDOM not overridden: got %#x, want %#x", e.Val, canary)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Skip("/proc/self/auxv on this kernel doesn't carry AT_RANDOM (uncommon, no fault of ours)")
 	}
 }
 

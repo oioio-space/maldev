@@ -209,13 +209,18 @@ func parseELFHeaders(in []byte) (*elfHeaders, error) {
 	return h, nil
 }
 
-// detectGoStaticPIE runs the four-condition Z-scope gate after
-// the program-header walk completes. Uses debug/buildinfo from
-// stdlib (stable since Go 1.18) to find the .go.buildinfo
-// section without re-implementing ELF section parsing.
+// detectGoStaticPIE runs the Z-scope gate after the program-header
+// walk completes. Uses debug/buildinfo from stdlib (stable since
+// Go 1.18) to find the .go.buildinfo section without reimplementing
+// ELF section parsing.
 //
-// Returns (isGo, goVersion). When isGo is false, goVersion is
-// always empty.
+// PT_INTERP is allowed when DT_NEEDED is absent: Go's -buildmode=pie
+// toolchain sets an interpreter path for legacy ELF compatibility
+// reasons, but a binary with PT_INTERP and no DT_NEEDED is fully
+// self-contained — the dynamic linker is never invoked (no shared
+// libraries to resolve). The operative security check is DT_NEEDED.
+//
+// Returns (isGo, goVersion). When isGo is false, goVersion is empty.
 func detectGoStaticPIE(input []byte, h *elfHeaders) (bool, string) {
 	// Compute hasDTNeeded unconditionally so gateRejectionReason can
 	// surface the right message even when an earlier gate fires first.
@@ -223,11 +228,6 @@ func detectGoStaticPIE(input []byte, h *elfHeaders) (bool, string) {
 
 	if h.elfType != etDyn {
 		return false, ""
-	}
-	for _, p := range h.programs {
-		if p.Type == ptInterp {
-			return false, ""
-		}
 	}
 	if h.hasDTNeeded {
 		return false, ""
@@ -273,15 +273,11 @@ func (h *elfHeaders) gateRejectionReason() string {
 	if h.isGoStaticPIE {
 		return ""
 	}
-	for _, p := range h.programs {
-		if p.Type == ptInterp {
-			return "has PT_INTERP (binary requires ld.so resolution)"
-		}
-	}
 	if h.elfType != etDyn {
 		return "not ET_DYN (need PIE)"
 	}
 	if h.hasDTNeeded {
+		// PT_INTERP + DT_NEEDED = truly dynamic; ld.so required.
 		return "has DT_NEEDED entries (not a static binary)"
 	}
 	return "not a Go binary (no .go.buildinfo section)"
