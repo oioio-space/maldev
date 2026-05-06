@@ -12,6 +12,47 @@ reflects_commit: 7ac8438
 
 ---
 
+## TL;DR
+
+You're admin (or have `SeDebugPrivilege`) and want to act as
+SYSTEM (or as another user). Steal their token, use it to
+spawn a process as them.
+
+| You want to… | Use | Result |
+|---|---|---|
+| Get a SYSTEM token from `winlogon.exe` / `lsass.exe` | [`StealFromProcess`](#stealfromprocess) | Token handle ready for impersonation or process spawn |
+| Spawn a process AS that user | [`CreateProcessWithToken`](#createprocesswithtoken) | New process running with the stolen token |
+| Just impersonate on the current thread | Pair with [`tokens/impersonation`](impersonation.md) | Per-thread; reverts when done |
+
+What this DOES achieve:
+
+- SYSTEM-level access from any admin starting point. Once
+  you have a SYSTEM token + `CreateProcessWithToken`, you can
+  spawn an implant that runs as SYSTEM with no UAC prompt.
+- Original process unaffected — duplication, not transfer.
+- Composes with [`tokens/impersonation`](impersonation.md) for
+  per-thread use.
+
+What this does NOT achieve:
+
+- **Needs `SeDebugPrivilege`** — admin token has it disabled
+  by default; enable via `process/session.EnableSeDebugPrivilege`
+  first. Standard user can't steal high-priv tokens.
+- **Loud** — `OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_DUP_HANDLE)`
+  on `lsass.exe` is the textbook EDR trigger for credential
+  access. Pair with [`evasion/preset.Stealth`](../evasion/preset.md)
+  to silence ETW first.
+- **Doesn't bypass kernel callbacks** — `PsSetCreateProcessNotify`
+  fires when you spawn the new process. EDR sees a
+  high-integrity process spawned by your medium-integrity
+  one — anomaly.
+- **Per-process, not per-domain** — token theft = local
+  identity transfer. For domain access, the stolen token
+  needs network logon credentials inside it (interactive
+  logons usually do; service tokens often don't).
+
+---
+
 ## Primer
 
 Every process on Windows runs under a security token that defines who it is and what it can do. A SYSTEM process has a powerful token; a regular user process has a limited one.

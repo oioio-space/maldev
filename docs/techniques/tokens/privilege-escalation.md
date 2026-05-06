@@ -12,6 +12,48 @@ reflects_commit: 718bd33
 
 ---
 
+## TL;DR
+
+You're an admin account but your process runs at Medium IL
+(default user-mode posture; UAC didn't elevate you). To run as
+High IL without showing a UAC prompt, hijack one of Windows's
+**auto-elevating** binaries (fodhelper, sdclt, eventvwr, etc.).
+
+| You want to… | Use | Cost |
+|---|---|---|
+| Bypass UAC via fodhelper registry hijack | [`FodhelperBypass`](#fodhelperbypass) | One registry write (HKCU) — fodhelper auto-elevates and reads back the value |
+| Discover other auto-elevate hijack candidates programmatically | [`recon/dllhijack.ScanAutoElevate`](../recon/dll-hijack.md) | Cross-references autoElevate manifest + writable search paths |
+
+What this DOES achieve:
+
+- High IL (admin's full token) without UAC consent dialog —
+  the auto-elevating binary runs your payload as part of its
+  normal flow.
+- HKCU write only — no admin needed BEFORE the bypass; you
+  use HKCU to redirect HKCR lookups that fodhelper makes.
+- Reverses cleanly — delete the registry key after the bypass
+  fires.
+
+What this does NOT achieve:
+
+- **Doesn't work on Always-Notify UAC** — when UAC slider is
+  at the top, even auto-elevate binaries prompt. Default
+  setting is one notch lower; bypass works there.
+- **Detected by mature EDR** — Microsoft Defender catches
+  fodhelper UAC bypass since 2019; CrowdStrike / SentinelOne
+  same. Use as a stepping stone in lab work, not as primary
+  privesc on hardened hosts.
+- **Already-admin token required** — bypasses elevate
+  Medium-IL admin to High-IL admin. They do NOT escalate
+  standard user → admin. For that, see kernel exploits
+  (e.g., [`privesc/cve202430088`](../privesc/cve202430088.md)).
+- **Microsoft patches these** — every documented bypass has a
+  finite shelf life. fodhelper, sdclt, eventvwr have all
+  been patched at least once each. Check current Windows
+  build before relying.
+
+---
+
 ## Primer
 
 Even if you have an administrator account on Windows, your processes run with limited privileges by default. User Account Control (UAC) prevents automatic elevation -- you need to explicitly "Run as administrator" for each program.

@@ -12,6 +12,49 @@ reflects_commit: 123bd90
 
 ---
 
+## TL;DR
+
+You stole / borrowed another user's token (via [token-theft](token-theft.md)
+or `LogonUserW`). To USE that token for an operation (open a
+file as them, hit an SMB share with their creds), you attach
+it to a thread — that thread now acts as that user until you
+revert.
+
+| You want… | Use | Scope |
+|---|---|---|
+| Run a callback as another user | [`As`](#as) | One callback's lifetime; auto-revert |
+| Long-lived impersonation across calls | `ImpersonateLoggedOnUser` + manual revert | Until `RevertToSelf` |
+| Per-thread, parallel impersonations | `runtime.LockOSThread` + `As` per goroutine | One per OS thread |
+
+What this DOES achieve:
+
+- Network operations (SMB, WinRM, MSRPC) authenticate as the
+  impersonated user — useful for accessing shares your
+  current token can't reach.
+- File / registry access checks against the impersonated
+  token's ACLs.
+- Scoped + reversible — the token attaches to ONE thread,
+  not the whole process.
+
+What this does NOT achieve:
+
+- **Doesn't change WHO the process is** — Process Hacker /
+  Sysmon EID 1 still see your real user. Impersonation is
+  per-thread and per-API-call.
+- **Goroutine ↔ OS-thread mismatch** — Go's scheduler can
+  move your goroutine onto a different OS thread mid-call,
+  losing the impersonation. `runtime.LockOSThread` is
+  mandatory before `ImpersonateLoggedOnUser`.
+- **Doesn't survive `CreateProcess`** — child processes
+  inherit the PROCESS token, not the THREAD token. To spawn
+  AS the impersonated user, use [`token-theft`](token-theft.md)'s
+  `CreateProcessWithToken` path instead.
+- **`SeImpersonatePrivilege` required** — most service
+  accounts have it; standard user does not. Check before
+  trying.
+
+---
+
 ## Primer
 
 Token theft gives you a copy of someone else's badge. Thread impersonation goes further -- it lets a specific thread in your process temporarily wear that badge to perform actions as that user, then revert back to your original identity.
