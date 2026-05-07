@@ -55,6 +55,17 @@ pe/packer/runtime/testdata/hello_static_pie_test*
 /memscan-harness-ssn
 /memscan-mcp
 /memscan-server
+/packer-suite
+/pe-suite
+/c2-suite
+/cleanup-suite
+/collection-suite
+/credentials-suite
+/injection-evasion
+/kernel-byovd
+/persistence-admin
+/persistence-user
+/preset-suite
 /test-report
 /vmtest
 vendor/
