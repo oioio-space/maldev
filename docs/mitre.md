@@ -13,7 +13,7 @@ reflects_commit: a705c32
 |-----------|---------------|------------|----------------------|
 | T1016 | System Network Configuration Discovery | `recon/network` (interfaces, gateway, DNS, public IP), `win/domain` (paired use) | D3-NTPM (Network Traffic Pattern Matching) |
 | T1027 | Obfuscated Files or Information | `evasion/sleepmask`, `pe/strip`, `crypto` (TEA/XTEA/ArithShift/SBox/MatrixTransform), `win/api` (PEB-walk hash imports) | D3-SMRA (System Memory Range Analysis) |
-| T1027.002 | Software Packing | `pe/morph`, `pe/packer` (encrypt + embed pipeline) + `pe/packer/runtime` (Windows x64 reflective loader) | D3-SEA (Static Executable Analysis) |
+| T1027.002 | Software Packing | `pe/morph`, `pe/packer` — three pipelines: (1) `Pack`/`PackPipeline` encrypt-and-embed blob; (2) `PackBinary` v0.61.0 UPX-style in-place `.text` encryption + polymorphic decoder stub (single-binary output, kernel does loading); (3) `AddCoverPE`/`AddCoverELF` + `ApplyDefaultCover` anti-static-unpacker junk-section overlay; plus `pe/packer/runtime` (Windows x64 reflective loader) | D3-SEA (Static Executable Analysis) |
 | T1027.007 | Dynamic API Resolution | `win/api` (Hell's/Halo's/Tartarus/HashGate resolvers), `win/syscall` (SSN gating chain) | D3-SCA (System Call Analysis) |
 | T1027.013 | Encrypted/Encoded File | `crypto`, `encode` | D3-FCA (File Content Analysis) |
 | T1036 | Masquerading | `evasion/stealthopen`, `evasion/callstack` (call-stack spoof metadata) | D3-FHA (File Hash Analysis) |
@@ -52,7 +52,7 @@ reflects_commit: a705c32
 | T1136.001 | Create Account: Local Account | `persistence/account` | D3-UAP (User Account Profiling) |
 | T1204.002 | User Execution: Malicious File | `persistence/lnk` | D3-EFA (Executable File Analysis) |
 | T1497 | Virtualization/Sandbox Evasion | `recon/sandbox` | D3-DA (Dynamic Analysis) |
-| T1497.001 | System Checks | `recon/antivm` | D3-DA |
+| T1497.001 | System Checks | `recon/antivm` — registry/file/NIC/DMI/process probes (`Detect`/`DetectAll`) + CPUID hypervisor stack (`Hypervisor`, `HypervisorPresent`, `HypervisorVendor`, `RDTSCDelta`) + Red Pill descriptor-table primitives (`SIDT`, `SGDT`, `SLDT`, `Probe`) | D3-DA |
 | T1497.003 | Time Based Evasion | `recon/timing` | D3-DA |
 | T1529 | System Shutdown/Reboot | `cleanup/bsod` | D3-DA (Dynamic Analysis) |
 | T1014 | Rootkit | `kernel/driver/rtcore64` (BYOVD — RTCore64 / CVE-2019-16098) | D3-DLIC (Driver Load Integrity Checking) |
