@@ -55,6 +55,7 @@ pe/packer/runtime/testdata/hello_static_pie_test*
 /memscan-harness-ssn
 /memscan-mcp
 /memscan-server
+/packer
 /packer-suite
 /pe-suite
 /c2-suite
