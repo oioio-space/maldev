@@ -4,7 +4,7 @@
 // Usage:
 //
 //	packer pack   -in <file> -out <file> [-key <hex32>] [-keyout <file>]
-//	              [-format blob|windows-exe] [-rounds N] [-seed S]
+//	              [-format blob|windows-exe|linux-elf] [-rounds N] [-seed S]
 //	packer unpack -in <file> -out <file>  -key <hex32>
 //
 // pack:
@@ -14,9 +14,12 @@
 //     `-out`, printing the AEAD key to stdout as hex (or to
 //     `-keyout` when set).
 //   - when -format=windows-exe (Phase 1e-A): runs PackBinary, writes
-//     a runnable PE32+ to `-out`, and prints the RC4 key to stdout.
+//     a runnable PE32+ to `-out`, and prints the AEAD key to stdout.
 //     Use -rounds (default 3) and -seed (default 0 = crypto-random)
 //     to tune the polymorphic stage-1 decoder.
+//   - when -format=linux-elf (Phase 1e-B): runs PackBinary, writes
+//     a runnable ELF64 static-PIE to `-out`, and prints the AEAD key
+//     to stdout. Same -rounds/-seed knobs as windows-exe.
 //
 // unpack:
 //   - reads `-in`,
@@ -57,16 +60,18 @@ func usage() {
 	fmt.Fprint(os.Stderr, `packer — maldev pe/packer CLI
 
 Usage:
-  packer pack   -in <file> -out <file> [-format blob|windows-exe]
+  packer pack   -in <file> -out <file> [-format blob|windows-exe|linux-elf]
                 [-key <hex32>] [-keyout <file>]
                 [-rounds N] [-seed S]
   packer unpack -in <file> -out <file>  -key <hex32>
 
 Formats:
   blob         (default) AES-GCM encrypted bytes; key printed as 64-char hex
-  windows-exe  Phase 1e-A runnable PE32+; RC4 key printed as hex.
+  windows-exe  Phase 1e-A runnable PE32+; AEAD key printed as hex.
                -rounds (default 3) and -seed (default 0 = crypto-random)
                tune the polymorphic SGN-style stage-1 decoder.
+  linux-elf    Phase 1e-B runnable ELF64 static-PIE; AEAD key printed as hex.
+               Same -rounds/-seed knobs as windows-exe.
 `)
 }
 
@@ -76,9 +81,9 @@ func runPack(args []string) int {
 	out := fs.String("out", "", "output file path")
 	keyHex := fs.String("key", "", "AEAD key as 64-char hex (default: generate fresh)")
 	keyOut := fs.String("keyout", "", "write the AEAD key to this file (hex); default: stdout")
-	format := fs.String("format", "blob", `output format: "blob" (legacy: encrypted bytes) or "windows-exe" (Phase 1e-A: runnable PE32+)`)
-	rounds := fs.Int("rounds", 3, "SGN polymorphism rounds (1-10); windows-exe only")
-	seed := fs.Int64("seed", 0, "poly seed (0 = crypto-random); windows-exe only")
+	format := fs.String("format", "blob", `output format: "blob" (legacy: encrypted bytes), "windows-exe" (Phase 1e-A: runnable PE32+), "linux-elf" (Phase 1e-B: runnable ELF static-PIE)`)
+	rounds := fs.Int("rounds", 3, "SGN polymorphism rounds (1-10); windows-exe and linux-elf")
+	seed := fs.Int64("seed", 0, "poly seed (0 = crypto-random); windows-exe and linux-elf")
 	_ = fs.Parse(args)
 
 	if *in == "" || *out == "" {
@@ -96,9 +101,11 @@ func runPack(args []string) int {
 	case "blob":
 		return runPackBlob(data, *out, *keyHex, *keyOut)
 	case "windows-exe":
-		return runPackWindowsExe(data, *out, *rounds, *seed)
+		return runPackBinary(data, *out, packer.FormatWindowsExe, *rounds, *seed)
+	case "linux-elf":
+		return runPackBinary(data, *out, packer.FormatLinuxELF, *rounds, *seed)
 	default:
-		fmt.Fprintf(os.Stderr, "pack: unknown format %q (want \"blob\" or \"windows-exe\")\n", *format)
+		fmt.Fprintf(os.Stderr, "pack: unknown format %q (want \"blob\", \"windows-exe\", or \"linux-elf\")\n", *format)
 		return 1
 	}
 }
@@ -149,13 +156,13 @@ func runPackBlob(data []byte, out, keyHex, keyOut string) int {
 	return 0
 }
 
-// runPackWindowsExe is the Phase 1e-A path: wraps the payload in a
-// polymorphic PE32+ with an SGN-encoded stage-1 decoder.
-// The RC4 key printed to stdout must be captured — it is NOT stored
-// in the output PE.
-func runPackWindowsExe(data []byte, out string, rounds int, seed int64) int {
+// runPackBinary wraps the payload in a polymorphic host binary via
+// PackBinary. The AEAD key is printed to stdout — it is NOT stored in
+// the output binary, so the caller must capture it for out-of-band
+// delivery.
+func runPackBinary(data []byte, out string, format packer.Format, rounds int, seed int64) int {
 	hostBytes, key, err := packer.PackBinary(data, packer.PackBinaryOptions{
-		Format:       packer.FormatWindowsExe,
+		Format:       format,
 		Stage1Rounds: rounds,
 		Seed:         seed,
 	})
@@ -167,8 +174,6 @@ func runPackWindowsExe(data []byte, out string, rounds int, seed int64) int {
 		fmt.Fprintf(os.Stderr, "pack: write %s: %v\n", out, err)
 		return 1
 	}
-	// Print the key so the operator can capture it for out-of-band
-	// delivery; the packed PE contains no key material.
 	fmt.Printf("%x\n", key)
 	fmt.Fprintf(os.Stderr, "packed %d bytes → %s (%d bytes)\n", len(data), out, len(hostBytes))
 	return 0
