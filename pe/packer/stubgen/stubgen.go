@@ -94,11 +94,12 @@ func Generate(opts Options) ([]byte, []byte, error) {
 	// 2. Extract .text bytes
 	textBytes := opts.Input[plan.TextFileOff : plan.TextFileOff+plan.TextSize]
 
-	// 3. Encrypt .text with XOR key.
-	// SGN's polymorphic engine already provides AV-evasion cover; the
-	// XOR layer ensures .text bytes in the output are not plaintext.
-	// Phase 1c+ pipeline integration (AES-GCM) replaces this in a
-	// future chantier.
+	// 3. SGN-encode the .text bytes directly. No outer XOR layer —
+	// the stub's decoder only undoes SGN rounds, so any wrapping
+	// cipher would be left in place at runtime and corrupt OEP. The
+	// SGN engine itself produces non-plaintext output; if Phase 1c+
+	// AES-GCM integration is added later, the stub must gain the
+	// matching outer-layer decoder before that wrapping is enabled.
 	key := opts.CipherKey
 	if key == nil {
 		key = make([]byte, 32)
@@ -106,17 +107,13 @@ func Generate(opts Options) ([]byte, []byte, error) {
 			return nil, nil, fmt.Errorf("stubgen: cipher key: %w", err)
 		}
 	}
-	encrypted := make([]byte, len(textBytes))
-	for i := range textBytes {
-		encrypted[i] = textBytes[i] ^ key[i%len(key)]
-	}
 
-	// 4. SGN-encode the encrypted bytes
+	// 4. SGN-encode the .text bytes
 	eng, err := poly.NewEngine(seed, rounds)
 	if err != nil {
 		return nil, nil, fmt.Errorf("stubgen: NewEngine: %w", err)
 	}
-	finalEncoded, polyRounds, err := eng.EncodePayload(encrypted)
+	finalEncoded, polyRounds, err := eng.EncodePayload(textBytes)
 	if err != nil {
 		return nil, nil, fmt.Errorf("stubgen: EncodePayload: %w", err)
 	}

@@ -203,10 +203,13 @@ func TestPatchTextDisplacement_HappyPath(t *testing.T) {
 		t.Errorf("patches = %d, want 1", n)
 	}
 
-	// Verify the patched displacement:
-	// nextRIP = StubRVA + prefixLen + 4 = 0x2000 + 3 + 4 = 0x2007
-	// disp = int32(0x1000) - int32(0x2007) = -0x1007
-	expectedDisp := int32(plan.TextRVA) - int32(plan.StubRVA+prefixLen+4)
+	// Verify the patched displacement using the CALL+POP+ADD reference
+	// point: r15 = StubRVA + popOffset (= +5) after the 5-byte CALL.
+	// The synthetic buffer here represents only the ADD instruction in
+	// isolation, so the patch formula uses the known stub-internal
+	// constant popOffset = 5 regardless of this buffer's layout.
+	const popOffset = 5
+	expectedDisp := int32(plan.TextRVA) - int32(plan.StubRVA+popOffset)
 	got := int32(binary.LittleEndian.Uint32(stub[prefixLen:]))
 	if got != expectedDisp {
 		t.Errorf("patched displacement = %d (0x%x), want %d (0x%x)",

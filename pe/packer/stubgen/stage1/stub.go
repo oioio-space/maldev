@@ -138,12 +138,14 @@ func EmitStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round) error 
 //
 // The displacement is computed as:
 //
-//	int32(plan.TextRVA) − int32(plan.StubRVA + imm32FileOffset + 4)
+//	int32(plan.TextRVA) − int32(plan.StubRVA + popOffset)
 //
-// where imm32FileOffset is the byte position of the 0xCAFEBABE value
-// inside the assembled stub. The "+4" accounts for the x86 convention
-// that ADD's immediate operand is resolved relative to the instruction
-// after the ADD (i.e., the start of the next instruction).
+// where popOffset is the file offset of the POP instruction inside the
+// stub (= 5, the byte after the 5-byte CALL). The reference point is
+// the POP's address — NOT a RIP-relative offset — because the ADD
+// adds its imm32 to %r15, which the POP loaded with the return address
+// pushed by CALL (= address of the POP itself). This is the classical
+// CALL+POP+ADD shellcode idiom, not RIP-relative addressing.
 //
 // Returns the number of patches applied. A well-formed stub has exactly
 // one sentinel; the function returns an error for zero or more than one.
@@ -164,10 +166,12 @@ func PatchTextDisplacement(stubBytes []byte, plan transform.Plan) (int, error) {
 		return 0, fmt.Errorf("stage1: multiple sentinel 0xCAFEBABE matches; expected exactly 1")
 	}
 
-	// i is the file offset of the imm32 within stubBytes.
-	// At runtime the ADD's next-RIP = StubRVA + i + 4.
-	nextRIP := plan.StubRVA + uint32(i) + 4
-	disp := uint32(int32(plan.TextRVA) - int32(nextRIP))
+	// CALL+POP+ADD: %r15 = address of POP (= StubRVA + 5) after the
+	// 5-byte CALL. ADD imm32 is added to %r15 directly — NOT
+	// RIP-relative. Displacement reference point is the POP's address.
+	const popOffset = 5
+	popAddr := plan.StubRVA + popOffset
+	disp := uint32(int32(plan.TextRVA) - int32(popAddr))
 	stubBytes[i] = byte(disp)
 	stubBytes[i+1] = byte(disp >> 8)
 	stubBytes[i+2] = byte(disp >> 16)

@@ -6,6 +6,8 @@ import (
 	"debug/pe"
 	"encoding/binary"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/oioio-space/maldev/pe/packer/stubgen"
@@ -208,13 +210,15 @@ func TestGenerate_PEEntryPointIsStub(t *testing.T) {
 }
 
 // TestGenerate_ELFPasses verifies the ELF round-trip: debug/elf parses
-// the output, e_entry changed to StubRVA, two PT_LOAD segments.
+// the output, e_entry changed to StubRVA, multiple PT_LOAD segments.
+// Uses the real Phase 1f fixture because PlanELF requires a true .text
+// section in the SHT, which the buildMinimalELF synthetic helper does
+// not provide (and adding SHT to it would duplicate the real fixture).
 func TestGenerate_ELFPasses(t *testing.T) {
-	// buildMinimalELF places text at textOff = page_align(ehdrSize + phdrSize).
-	// The entry must be inside that segment [textOff, textOff+textSize).
-	// Use textOff + 0x10 as the OEP (same convention as the transform ELF tests).
-	const textOff = ((64 + 56) + 0x1000 - 1) &^ (0x1000 - 1)
-	input := buildMinimalELF(0x500, uint64(textOff)+0x10)
+	input, err := os.ReadFile(filepath.Join("..", "runtime", "testdata", "hello_static_pie"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
 
 	out, key, err := stubgen.Generate(stubgen.Options{
 		Input:  input,
@@ -240,11 +244,13 @@ func TestGenerate_ELFPasses(t *testing.T) {
 			loadCount++
 		}
 	}
-	if loadCount != 2 {
-		t.Errorf("PT_LOAD count = %d, want 2 (text + stub)", loadCount)
+	if loadCount < 2 {
+		t.Errorf("PT_LOAD count = %d, want >= 2 (original + stub)", loadCount)
 	}
-	// Entry must differ from the original OEP (textOff + 0x10).
-	if f.Entry == uint64(textOff)+0x10 {
+	// Entry must differ from the original OEP. Read the input's e_entry
+	// from the same fixture and compare against the packed output's.
+	origEntry := binary.LittleEndian.Uint64(input[0x18 : 0x18+8])
+	if f.Entry == origEntry {
 		t.Error("e_entry unchanged — stub not wired up")
 	}
 }
