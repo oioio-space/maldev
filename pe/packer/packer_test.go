@@ -3,6 +3,7 @@ package packer_test
 import (
 	"bytes"
 	"crypto/rand"
+	"debug/pe"
 	"errors"
 	"os"
 	"runtime"
@@ -187,6 +188,35 @@ func TestValidateELF_RejectsGarbage(t *testing.T) {
 	if err := packer.ValidateELF([]byte{0x00, 0x00, 0x00, 0x00}); err == nil {
 		t.Error("ValidateELF(zeros): got nil, want error")
 	}
+}
+
+func TestPackBinary_RejectsUnsupportedFormat(t *testing.T) {
+	_, _, err := packer.PackBinary([]byte("payload"), packer.PackBinaryOptions{
+		Format: packer.FormatUnknown,
+	})
+	if !errors.Is(err, packer.ErrUnsupportedFormat) {
+		t.Errorf("got %v, want ErrUnsupportedFormat", err)
+	}
+}
+
+func TestPackBinary_ProducesParsablePE(t *testing.T) {
+	payload := []byte("hello payload")
+	out, key, err := packer.PackBinary(payload, packer.PackBinaryOptions{
+		Format:       packer.FormatWindowsExe,
+		Stage1Rounds: 3,
+		Seed:         1,
+	})
+	if err != nil {
+		t.Fatalf("PackBinary: %v", err)
+	}
+	if len(key) == 0 {
+		t.Error("returned key is empty")
+	}
+	f, err := pe.NewFile(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("debug/pe rejected output: %v", err)
+	}
+	defer f.Close()
 }
 
 func randBytes(t *testing.T, n int) []byte {

