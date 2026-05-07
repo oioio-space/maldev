@@ -106,11 +106,14 @@ func TestEngine_EncodeDecodeRoundTrip(t *testing.T) {
 				t.Fatalf("encoded len %d, want %d", len(encoded), len(original))
 			}
 			// Reverse the rounds (outermost layer first) to recover original.
+			// Use each round's Decode function — the Go-side mirror of the
+			// runtime asm decoder — so this test catches encode/decode mismatches
+			// regardless of which substitution variant was chosen.
 			decoded := append([]byte(nil), encoded...)
 			for i := rounds - 1; i >= 0; i-- {
 				key := rds[i].Key
 				for j := range decoded {
-					decoded[j] ^= key
+					decoded[j] = rds[i].Subst.Decode(decoded[j], key)
 				}
 			}
 			if !bytes.Equal(decoded, original) {
@@ -126,6 +129,30 @@ func TestEngine_RejectsOutOfRangeRounds(t *testing.T) {
 		if _, err := poly.NewEngine(1, n); err == nil {
 			t.Errorf("NewEngine rounds=%d: got nil err, want range error", n)
 		}
+	}
+}
+
+// TestEngine_RoundTripPerSubst explicitly forces each substitution variant and
+// verifies that Encode followed by Decode recovers the original byte. This is
+// the regression test for the bug where subNegate and addComplement had a
+// hardcoded XOR encoder that did not invert the respective asm decoder.
+func TestEngine_RoundTripPerSubst(t *testing.T) {
+	data := []byte("hello world")
+	key := uint8(0x42)
+	for substIdx, subst := range poly.XorSubsts {
+		t.Run(fmt.Sprintf("subst_%d", substIdx), func(t *testing.T) {
+			encoded := make([]byte, len(data))
+			for i, b := range data {
+				encoded[i] = subst.Encode(b, key)
+			}
+			decoded := make([]byte, len(encoded))
+			for i, b := range encoded {
+				decoded[i] = subst.Decode(b, key)
+			}
+			if !bytes.Equal(decoded, data) {
+				t.Errorf("subst %d round-trip failed: got %x, want %x", substIdx, decoded, data)
+			}
+		})
 	}
 }
 

@@ -45,8 +45,8 @@ func NewEngine(seed int64, rounds int) (*Engine, error) {
 // Round captures the per-round parameters the stage1 emitter needs to
 // build a single decoder loop.
 type Round struct {
-	Key   uint8 // single-byte XOR key applied uniformly to every payload byte
-	Subst Subst // chosen XOR rewrite (canonicalXOR / subNegate / addComplement)
+	Key   uint8 // single-byte key applied uniformly to every payload byte
+	Subst Subst // chosen encode/decode pair (canonicalXOR / subNegate / addComplement)
 	// Register assignments — freshly allocated each round from the pool so
 	// consecutive decoder loops use different registers, maximising the
 	// byte-level difference across the emitted machine code.
@@ -94,7 +94,7 @@ func (e *Engine) EncodePayload(data []byte) (encoded []byte, rounds []Round, err
 		}
 
 		for j := range encoded {
-			encoded[j] ^= key
+			encoded[j] = subst.Encode(encoded[j], key)
 		}
 
 		pool.Release(keyReg)

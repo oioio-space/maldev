@@ -6,57 +6,75 @@ import (
 	"github.com/oioio-space/maldev/pe/packer/stubgen/amd64"
 )
 
-// Subst rewrites "dst ^= key" using one of several instruction sequences
-// that produce distinct byte patterns in the emitted decoder while
-// performing the same logical operation.
+// Subst pairs a stage-1 decoder asm emitter with matching Go-side Encode and
+// Decode functions so the pack-time encoder and the runtime decoder are always
+// algebraically inverse.
 //
-// The SUB and ADD variants are NOT algebraic XOR equivalences in general:
-// SUB dst, -key computes dst - (-key mod 256) = dst + key mod 256, which
-// differs from dst XOR key for most values. They are obfuscation substitutions
-// whose correctness relies on the encoder having used XOR with the same key:
-// the decoder undoes the encoding by reapplying the same XOR key, regardless
-// of which instruction sequence the decoder uses to do so. The stage-1 loop
-// enforces that the key is reused unchanged, so the substitution choice affects
-// only the decoder's byte pattern, not the decoded result.
+// The three variants in XorSubsts each decode to the SAME byte value for the
+// same (input, key) pair. They differ only in which x86 instruction sequence
+// appears in the emitted decoder stub, giving per-pack byte-level polymorphism
+// without altering semantics.
 //
-// All three variants require the upper bits of dst to be zero at the call
-// site so that the 64-bit arithmetic operates on the byte value only. The
-// stage-1 loop guarantees this by loading a fresh byte before each apply.
+// Encoder math, tracking through each decoder:
+//
+//	canonicalXOR  decoder: XOR dst, K       (dst ^ K)
+//	              encoder: XOR byte with K  (self-inverse)
+//
+//	subNegate     decoder: SUB dst, -K      (dst - (-K mod 256) = dst + K)
+//	              encoder: SUB key from byte (b - K) so decoder adds K back
+//
+//	addComplement decoder: ADD dst, ^K+1    (dst + (-K mod 256) = dst - K)
+//	              encoder: ADD key to byte  (b + K) so decoder subtracts K back
 //
 // New Subst entries can be appended to XorSubsts; the engine indexes
-// uniformly into the slice, so all variants are equally likely.
-type Subst func(b *amd64.Builder, dst amd64.Reg, key uint8) error
+// uniformly into the slice so all variants are equally likely.
+type Subst struct {
+	// EmitDecoder emits the runtime decoder asm for one byte stored in dst.
+	// Upper bits of dst must be zero at the call site; the stage-1 loop
+	// guarantees this by loading a fresh byte before each substitution.
+	EmitDecoder func(b *amd64.Builder, dst amd64.Reg, key uint8) error
+
+	// Encode applies the pack-time inverse so the runtime decoder reverses it
+	// cleanly. Called once per payload byte during EncodePayload.
+	Encode func(b byte, key uint8) byte
+
+	// Decode is the Go-side mirror of EmitDecoder. Used by pre-deploy
+	// self-tests and by the round-trip tests to verify correctness without
+	// executing the emitted asm.
+	Decode func(b byte, key uint8) byte
+}
 
 // XorSubsts is the registered set of substitution variants.
 var XorSubsts = []Subst{
-	canonicalXOR,
-	subNegate,
-	addComplement,
-}
-
-// canonicalXOR emits the straightforward XOR dst, imm.
-func canonicalXOR(b *amd64.Builder, dst amd64.Reg, key uint8) error {
-	return b.XOR(dst, amd64.Imm(int64(key)))
-}
-
-// subNegate emits SUB dst, -key (two's-complement negation). Produces a
-// different byte pattern than XOR in the emitted decoder; the decode
-// outcome is identical because the encoder used the same key with XOR
-// and the stage-1 decoder reapplies the same key to undo it.
-// Upper bits of dst must be zero at the call site — the stage-1 loop
-// enforces this by loading a fresh byte before each substitution.
-func subNegate(b *amd64.Builder, dst amd64.Reg, key uint8) error {
-	return b.SUB(dst, amd64.Imm(int64(uint8(-key))))
-}
-
-// addComplement emits ADD dst, ^key+1, i.e. ADD dst, two's-complement
-// of key. Same byte-width caveat as subNegate: upper bits of dst must
-// be zero, which the stage-1 loop guarantees.
-func addComplement(b *amd64.Builder, dst amd64.Reg, key uint8) error {
-	return b.ADD(dst, amd64.Imm(int64(uint8(^key)+1)))
+	{EmitDecoder: emitDecoderXOR, Encode: encodeXOR, Decode: decodeXOR},
+	{EmitDecoder: emitDecoderSubNeg, Encode: encodeSubNeg, Decode: decodeSubNeg},
+	{EmitDecoder: emitDecoderAddCpl, Encode: encodeAddCpl, Decode: decodeAddCpl},
 }
 
 // PickSubst returns one substitution from XorSubsts uniformly at random.
 func PickSubst(rng *rand.Rand) Subst {
 	return XorSubsts[rng.Intn(len(XorSubsts))]
+}
+
+// XOR is self-inverse: encode and decode both XOR with key.
+func encodeXOR(b, key uint8) byte { return b ^ key }
+func decodeXOR(b, key uint8) byte { return b ^ key }
+func emitDecoderXOR(asm *amd64.Builder, dst amd64.Reg, key uint8) error {
+	return asm.XOR(dst, amd64.Imm(int64(key)))
+}
+
+// subNegate decoder runs SUB dst, -key, which is dst = dst - (-key) = dst + key.
+// To reverse, encoder must subtract key (mod 256) so the decoder adds it back.
+func encodeSubNeg(b, key uint8) byte { return b - key }
+func decodeSubNeg(b, key uint8) byte { return b + key }
+func emitDecoderSubNeg(asm *amd64.Builder, dst amd64.Reg, key uint8) error {
+	return asm.SUB(dst, amd64.Imm(int64(uint8(-key))))
+}
+
+// addComplement decoder runs ADD dst, ^key+1, which is dst = dst + (-key) = dst - key.
+// To reverse, encoder must add key (mod 256) so the decoder subtracts it back.
+func encodeAddCpl(b, key uint8) byte { return b + key }
+func decodeAddCpl(b, key uint8) byte { return b - key }
+func emitDecoderAddCpl(asm *amd64.Builder, dst amd64.Reg, key uint8) error {
+	return asm.ADD(dst, amd64.Imm(int64(uint8(^key)+1)))
 }
