@@ -35,6 +35,18 @@
 //     bytes differ per pack (polymorphic) which defeats hash-based
 //     batch detection, but the RWX new section and entry-point
 //     rewrite are heuristically suspicious.
+//   - 3a (post-v0.61.0) — Anti-static-unpacker cover layer via
+//     [AddCoverPE] / [AddCoverELF] / [ApplyDefaultCover]: appends
+//     junk sections (PE) or junk PT_LOADs (ELF) with caller-chosen
+//     [JunkFill] strategy ([JunkFillRandom] for ~8 bits/byte
+//     entropy, [JunkFillZero] for flat-entropy padding,
+//     [JunkFillPattern] for machine-code-shaped histograms). The
+//     cover sections carry MEM_READ only — kernel maps them but
+//     never executes; runtime path is unchanged. Pair with
+//     [PackBinary] to inflate the static surface and frustrate
+//     fingerprints that match on exact section count + offset.
+//     [DefaultCoverOptions] picks 3 reasonable sections and is
+//     exposed via [ApplyDefaultCover] for one-liner integration.
 //
 // The full design (capability matrix, threat model, hard
 // constraints, phase plan) is at
