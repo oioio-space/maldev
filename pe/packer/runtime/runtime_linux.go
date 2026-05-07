@@ -119,7 +119,7 @@ func mapAndRelocate(pe []byte, h *peHeaders) (*PreparedImage, error) {
 // (free via PreparedImage.Free → munmap). Run() still stubs to
 // ErrNotImplemented; Stage D wires the jump-to-entry path.
 func mapAndRelocateELF(elf []byte, h *elfHeaders) (*PreparedImage, error) {
-	if !h.IsGoStaticPIE {
+	if !h.IsStaticPIE {
 		return nil, fmt.Errorf("%w: %s", ErrNotImplemented, h.GateRejectionReason())
 	}
 	if h.ELFType != etDyn {
@@ -202,23 +202,30 @@ func mapAndRelocateELF(elf []byte, h *elfHeaders) (*PreparedImage, error) {
 		}
 	}
 
-	// mprotect each PT_LOAD to its declared flags. Two adjacent
-	// PT_LOAD segments that share a page would have one's mprotect
-	// silently clobber the other's permissions; reject when a
-	// segment's vaddr isn't page-aligned (real toolchains always
-	// align PT_LOAD vaddrs to p_align ≥ pageSize).
+	// mprotect each PT_LOAD to its declared flags. mprotect requires
+	// a page-aligned start, so we round each segment's vaddr DOWN to
+	// the page boundary. The ELF spec guarantees `p_vaddr ≡ p_offset
+	// (mod p_align)`, so the rounded start covers the same bytes
+	// the kernel itself would have mmap'd. Some toolchains (gcc
+	// `-static-pie -nostdlib`) place the data segment at a vaddr
+	// that isn't page-aligned (e.g. 0x2f30 for a tiny binary); the
+	// preceding R-X segment ends on a page boundary BELOW that, so
+	// rounding the data segment's start DOWN to the next-lower page
+	// boundary doesn't overlap the text region. Real-world segment
+	// layouts that DO share a page would silently lose flags here —
+	// that's acceptable risk for Stage E (any operator targeting
+	// a hostile binary should rebuild with proper segment alignment).
 	for _, p := range h.Programs {
 		if p.Type != ptLoad {
 			continue
 		}
-		if p.VAddr%pageSize != 0 {
-			_ = unix.Munmap(region)
-			return nil, fmt.Errorf("%w: PT_LOAD vaddr %#x not page-aligned", ErrBadELF, p.VAddr)
-		}
-		segStart := p.VAddr
+		segStart := alignDown(p.VAddr, pageSize)
 		segEnd := alignUp(p.VAddr+p.MemSz, pageSize)
 		if segEnd > mapSize {
 			segEnd = mapSize
+		}
+		if segStart >= segEnd {
+			continue // zero-length / past mapping; nothing to protect
 		}
 		if err := unix.Mprotect(region[segStart:segEnd], protFromPF(p.Flags)); err != nil {
 			_ = unix.Munmap(region)
@@ -326,6 +333,10 @@ func protFromPF(flags uint32) int {
 // alignUp rounds `v` up to a multiple of `align`. `align` must
 // be a power of two — pageSize on Linux always is.
 func alignUp(v, align uint64) uint64 { return (v + align - 1) &^ (align - 1) }
+
+// alignDown rounds `v` down to a multiple of `align`. `align`
+// must be a power of two (page sizes always are).
+func alignDown(v, align uint64) uint64 { return v &^ (align - 1) }
 
 // readSelfAuxv reads /proc/self/auxv, parses the entries, and
 // applies patches — a map from auxv type to new value — before

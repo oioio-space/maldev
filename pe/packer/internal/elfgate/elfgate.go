@@ -77,12 +77,20 @@ type ELFHeaders struct {
 	// so the mapper can iterate in declaration order.
 	Programs []ELFProgramHeader
 
-	// IsGoStaticPIE is true when the ELF satisfies the Z-scope
-	// contract: ET_DYN + .go.buildinfo present + no DT_NEEDED.
-	IsGoStaticPIE bool
+	// IsStaticPIE is true when the ELF satisfies the structural
+	// static-PIE contract: ET_DYN + no DT_NEEDED + at least one
+	// PT_LOAD. Phase 1f Stage E broadened the gate from
+	// "Go static-PIE only" to any self-contained ELF — Go,
+	// hand-rolled asm, and C/Rust built with -static-pie all
+	// pass when they meet the structural definition.
+	IsStaticPIE bool
 
-	// GoVersion is the Go toolchain version string when IsGoStaticPIE
-	// is true; empty otherwise.
+	// GoVersion is the Go toolchain version string parsed via
+	// debug/buildinfo when the ELF carries a .go.buildinfo
+	// section. Empty for non-Go binaries (asm, C/Rust). Useful
+	// purely for diagnostics — a non-empty value tells callers
+	// "this was built by Go go<X>" without affecting whether the
+	// binary is loadable (which IsStaticPIE owns).
 	GoVersion string
 
 	// HasDTNeeded is true when PT_DYNAMIC carries at least one
@@ -102,10 +110,15 @@ type ELFProgramHeader struct {
 	Align  uint64 // p_align
 }
 
-// CheckELFLoadable returns nil when input is a Go static-PIE
-// binary the Linux runtime can load, or a wrapped sentinel
+// CheckELFLoadable returns nil when input is a self-contained
+// static-PIE the Linux runtime can load, or a wrapped sentinel
 // explaining the rejection. Cross-platform — pure parse, no
 // syscalls.
+//
+// Stage E contract: ET_DYN + no DT_NEEDED + at least one PT_LOAD.
+// Go-built (Stage C+D), hand-rolled asm, and C/Rust binaries
+// produced by `-static-pie` all pass when they meet the
+// structural definition.
 func CheckELFLoadable(input []byte) error {
 	if len(input) < 4 {
 		return fmt.Errorf("%w: input shorter than ELF magic", ErrBadELF)
@@ -121,7 +134,7 @@ func CheckELFLoadable(input []byte) error {
 	if h.ELFType != etDyn {
 		return fmt.Errorf("%w: ET_EXEC not supported (need PIE / ET_DYN)", ErrNotImplemented)
 	}
-	if !h.IsGoStaticPIE {
+	if !h.IsStaticPIE {
 		return fmt.Errorf("%w: %s", ErrNotImplemented, h.GateRejectionReason())
 	}
 	return nil
@@ -202,16 +215,19 @@ func ParseELFHeaders(in []byte) (*ELFHeaders, error) {
 		return nil, fmt.Errorf("%w: no PT_LOAD program headers", ErrBadELF)
 	}
 
-	h.IsGoStaticPIE, h.GoVersion = detectGoStaticPIE(in, h)
+	h.IsStaticPIE, h.GoVersion = detectStaticPIE(in, h)
 	return h, nil
 }
 
-// detectGoStaticPIE runs the Z-scope gate after the program-header
-// walk. PT_INTERP is allowed when DT_NEEDED is absent: Go's
-// -buildmode=pie sets an interpreter path for legacy ELF
-// compatibility but the dynamic linker is never invoked when
-// there are no shared libraries to resolve.
-func detectGoStaticPIE(input []byte, h *ELFHeaders) (bool, string) {
+// detectStaticPIE runs the structural static-PIE gate after the
+// program-header walk: ET_DYN + no DT_NEEDED. PT_INTERP is allowed
+// when DT_NEEDED is absent because the dynamic linker is never
+// invoked without shared libraries to resolve. The .go.buildinfo
+// section is no longer required for the gate decision (Stage E
+// broadening); when present, GoVersion is populated for diagnostic
+// purposes only — the loader treats Go and non-Go static-PIE the
+// same way.
+func detectStaticPIE(input []byte, h *ELFHeaders) (bool, string) {
 	h.HasDTNeeded = !dynamicHasNoNeeded(input, h)
 	if h.ELFType != etDyn {
 		return false, ""
@@ -219,11 +235,14 @@ func detectGoStaticPIE(input []byte, h *ELFHeaders) (bool, string) {
 	if h.HasDTNeeded {
 		return false, ""
 	}
-	bi, err := buildinfo.Read(bytes.NewReader(input))
-	if err != nil {
-		return false, ""
+	// .go.buildinfo presence is purely informational from Stage E
+	// onwards. A read failure means "not a Go binary"; the gate
+	// still accepts the binary as long as the structural checks
+	// pass.
+	if bi, err := buildinfo.Read(bytes.NewReader(input)); err == nil {
+		return true, bi.GoVersion
 	}
-	return true, bi.GoVersion
+	return true, ""
 }
 
 // dynamicHasNoNeeded returns true when PT_DYNAMIC carries zero
@@ -251,11 +270,17 @@ func dynamicHasNoNeeded(input []byte, h *ELFHeaders) bool {
 	return true
 }
 
-// GateRejectionReason returns the specific Z-scope condition that
-// failed, for embedding in an ErrNotImplemented message. Returns ""
-// when IsGoStaticPIE is true.
+// GateRejectionReason returns the specific structural condition
+// that failed, for embedding in an ErrNotImplemented message.
+// Returns "" when IsStaticPIE is true.
+//
+// Two failure modes after Stage E:
+//   - "not ET_DYN (need PIE)" — non-PIE ELF (ET_EXEC / ET_REL).
+//   - "has DT_NEEDED entries (not a static binary)" — dynamically
+//     linked ELF; rebuild with `-static-pie` (or for Go,
+//     `-buildmode=pie -ldflags='-s -w'` with CGO_ENABLED=0).
 func (h *ELFHeaders) GateRejectionReason() string {
-	if h.IsGoStaticPIE {
+	if h.IsStaticPIE {
 		return ""
 	}
 	if h.ELFType != etDyn {
@@ -264,5 +289,8 @@ func (h *ELFHeaders) GateRejectionReason() string {
 	if h.HasDTNeeded {
 		return "has DT_NEEDED entries (not a static binary)"
 	}
-	return "not a Go binary (no .go.buildinfo section)"
+	// Reachable only if some future check is added to detectStaticPIE
+	// without a matching branch here. Defensive sentinel — keeps the
+	// function's contract obvious to future contributors.
+	return "structural static-PIE check failed (unknown reason)"
 }

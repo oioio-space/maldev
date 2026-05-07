@@ -117,8 +117,8 @@ func TestGateRejectionReason_DTNeeded(t *testing.T) {
 	if !h.HasDTNeeded {
 		t.Fatal("hasDTNeeded should be true for an ELF with DT_NEEDED entries")
 	}
-	if h.IsGoStaticPIE {
-		t.Fatal("isGoStaticPIE should be false when DT_NEEDED is present")
+	if h.IsStaticPIE {
+		t.Fatal("IsStaticPIE should be false when DT_NEEDED is present")
 	}
 	reason := h.GateRejectionReason()
 	if reason == "" {
@@ -129,40 +129,35 @@ func TestGateRejectionReason_DTNeeded(t *testing.T) {
 	}
 }
 
-// TestGateRejectionReason_Precedence verifies the ET_DYN >
-// DT_NEEDED > .go.buildinfo ordering of the rejection reasons.
-// PT_INTERP is no longer a rejection condition when DT_NEEDED is
-// absent — Go's -buildmode=pie emits PT_INTERP for static binaries.
+// TestGateRejectionReason_Precedence verifies the structural
+// rejection ordering: ET_DYN > DT_NEEDED. After Stage E broadened
+// the gate to drop the .go.buildinfo requirement, a binary that
+// passes both structural checks (ET_DYN + no DT_NEEDED) is
+// accepted — IsStaticPIE is true, GateRejectionReason returns "".
 func TestGateRejectionReason_Precedence(t *testing.T) {
-	t.Run("PT_INTERP without DT_NEEDED falls through to buildinfo", func(t *testing.T) {
-		// A minimal ET_DYN + PT_INTERP binary with no DT_NEEDED and no
-		// .go.buildinfo: the gate should NOT mention PT_INTERP; it should
-		// fall through to the buildinfo check.
+	t.Run("PT_INTERP alone is accepted (no rejection)", func(t *testing.T) {
+		// A minimal ET_DYN + PT_INTERP binary with no DT_NEEDED:
+		// passes structural gate; rejection reason is empty.
 		h, err := parseELFHeaders(buildInterpELF(t))
 		if err != nil {
 			t.Fatalf("parseELFHeaders: %v", err)
 		}
-		reason := h.GateRejectionReason()
-		if strings.Contains(reason, "PT_INTERP") {
-			t.Errorf("gateRejectionReason = %q; PT_INTERP alone should no longer cause rejection", reason)
+		if !h.IsStaticPIE {
+			t.Errorf("IsStaticPIE = false; ET_DYN + PT_INTERP without DT_NEEDED must pass Stage E gate")
 		}
-		// Must fall through to the .go.buildinfo check.
-		if !strings.Contains(reason, ".go.buildinfo") {
-			t.Errorf("gateRejectionReason = %q; want buildinfo message when only PT_INTERP present", reason)
+		if reason := h.GateRejectionReason(); reason != "" {
+			t.Errorf("gateRejectionReason = %q; expected empty for accepted binary", reason)
 		}
 	})
 
-	t.Run("DT_NEEDED beats buildinfo fallback", func(t *testing.T) {
+	t.Run("DT_NEEDED is the primary rejection signal", func(t *testing.T) {
 		h, err := parseELFHeaders(buildNeededELF(t))
 		if err != nil {
 			t.Fatalf("parseELFHeaders: %v", err)
 		}
 		reason := h.GateRejectionReason()
 		if !strings.Contains(reason, "DT_NEEDED") {
-			t.Errorf("gateRejectionReason = %q; want DT_NEEDED before buildinfo fallback", reason)
-		}
-		if strings.Contains(reason, ".go.buildinfo") {
-			t.Errorf("gateRejectionReason = %q; should not fall through to buildinfo message when DT_NEEDED is set", reason)
+			t.Errorf("gateRejectionReason = %q; want DT_NEEDED rejection", reason)
 		}
 	})
 }

@@ -11,17 +11,24 @@
 //   - Phase 1f Stage B — Linux mmap of PT_LOAD segments,
 //     R_X86_64_RELATIVE relocations, per-segment mprotect.
 //   - Phase 1f Stage C+D — Go static-PIE end-to-end on Linux:
-//     four-condition Z-scope gate via debug/buildinfo;
-//     PT_TLS lift conditional on the gate; Run() builds a
-//     kernel-style stack frame (argc/argv/envp/auxv from
-//     /proc/self/auxv with AT_RANDOM canary) and JMPs to the
-//     binary's entry point via Plan 9 asm. Symmetric with the
-//     Windows side's "JMP OEP, never returns" contract.
+//     Z-scope gate via debug/buildinfo; PT_TLS lift conditional
+//     on the gate; Run() builds a kernel-style stack frame
+//     (argc/argv/envp/auxv from /proc/self/auxv with AT_RANDOM
+//     canary) and JMPs to the binary's entry point via Plan 9
+//     asm. Symmetric with the Windows side's "JMP OEP, never
+//     returns" contract.
+//   - Phase 1f Stage E — broadened gate to all self-contained
+//     static-PIE binaries (Go, hand-rolled asm, C/Rust built
+//     with -static-pie). Structural contract: ET_DYN +
+//     no DT_NEEDED + at least one PT_LOAD. The .go.buildinfo
+//     check is now informational only — GoVersion is populated
+//     for diagnostics when available, but does not gate
+//     loading.
 //
-// Other ELFs (C-built, libc-using, IFUNC, versioned symbols,
-// ET_EXEC) continue to surface [ErrNotImplemented] with a clear
-// rebuild hint. Stage E will broaden to non-Go static-PIE; Stage
-// F to full ld.so emulation.
+// Other ELFs (libc-using with DT_NEEDED, IFUNC, versioned
+// symbols, ET_EXEC) continue to surface [ErrNotImplemented]
+// with a clear rebuild hint. Stage F will eventually broaden
+// to full ld.so emulation for libc-using binaries.
 //
 // Out of scope (rejected at parse time or surfaced as resolution
 // failures): DLLs (calling DllMain), TLS callbacks, x86,

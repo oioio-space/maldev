@@ -252,34 +252,25 @@ func TestPrepare_ELF_ETExecGateIsFirst(t *testing.T) {
 // "ld.so required" rejection. Go's -buildmode=pie toolchain emits
 // PT_INTERP even for fully static binaries. The operative check is
 // DT_NEEDED: without it the interpreter is never invoked.
-// A minimal ET_DYN + PT_INTERP (no .go.buildinfo) must be rejected
-// for the buildinfo gate, not for PT_INTERP.
-func TestPrepare_ELF_InterpWithoutNeededIsNotRejectedForInterp(t *testing.T) {
-	if goruntime.GOOS != "linux" {
-		t.Skip("Stage B is Linux-only")
-	}
+// TestStaticPIEGate_AcceptsInterpWithoutNeeded confirms the Stage E
+// gate accepts ET_DYN binaries that carry PT_INTERP as long as no
+// DT_NEEDED is present. Real Go static-PIE has both; the kernel
+// only invokes ld.so when DT_NEEDED actually requests a library.
+func TestStaticPIEGate_AcceptsInterpWithoutNeeded(t *testing.T) {
 	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithInterp: true}) // ET_DYN + PT_INTERP, no DT_NEEDED
-	_, err := runtime.Prepare(elf)
-	if !errors.Is(err, runtime.ErrNotImplemented) {
-		t.Errorf("Prepare(PT_INTERP no DT_NEEDED) on linux: got %v, want ErrNotImplemented", err)
-	}
-	// Must NOT say "PT_INTERP" — the gate now accepts PT_INTERP
-	// without DT_NEEDED; the rejection must be for missing buildinfo.
-	if err != nil && strings.Contains(err.Error(), "PT_INTERP") {
-		t.Errorf("rejection reason should not mention PT_INTERP; got: %v", err)
+	if err := runtime.CheckELFLoadable(elf); err != nil {
+		t.Errorf("CheckELFLoadable(PT_INTERP no DT_NEEDED): got %v, want nil", err)
 	}
 }
 
-// TestPrepare_ELF_RejectsTLSOnLinux confirms PT_TLS triggers the
-// TLS-init path that Stage D will own.
-func TestPrepare_ELF_RejectsTLSOnLinux(t *testing.T) {
-	if goruntime.GOOS != "linux" {
-		t.Skip("Stage B is Linux-only")
-	}
-	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithTLS: true}) // ET_DYN + PT_TLS
-	_, err := runtime.Prepare(elf)
-	if !errors.Is(err, runtime.ErrNotImplemented) {
-		t.Errorf("Prepare(PT_TLS) on linux: got %v, want ErrNotImplemented", err)
+// TestStaticPIEGate_AcceptsTLSWithoutNeeded confirms PT_TLS no
+// longer triggers a gate rejection. Static-PIE binaries (Go,
+// musl, glibc -static-pie) self-amorce TLS in their own _start /
+// _rt0; the loader never has to set up TLS itself.
+func TestStaticPIEGate_AcceptsTLSWithoutNeeded(t *testing.T) {
+	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithTLS: true}) // ET_DYN + PT_TLS, no DT_NEEDED
+	if err := runtime.CheckELFLoadable(elf); err != nil {
+		t.Errorf("CheckELFLoadable(PT_TLS no DT_NEEDED): got %v, want nil", err)
 	}
 }
 
@@ -398,30 +389,69 @@ func TestPrepare_ELF_AcceptsRealGoStaticPIE(t *testing.T) {
 	}
 }
 
-// TestPrepare_ELF_LinuxRejectsNonGoStaticPIE confirms the Linux
-// backend rejects non-Go ET_DYN inputs at Stage B with
-// ErrNotImplemented (same surface as CheckELFLoadable).
-func TestPrepare_ELF_LinuxRejectsNonGoStaticPIE(t *testing.T) {
+// TestPrepare_ELF_AcceptsRealNonGoStaticPIE exercises the Stage E
+// mapper happy-path against the real hand-rolled asm fixture
+// (testdata/hello_static_pie_c). Mirrors TestPrepare_ELF_AcceptsRealGoStaticPIE
+// but for a non-Go binary — confirms the loader handles ELFs
+// without any Go runtime metadata. Does NOT call Run(); the
+// gated E2E covers that path.
+func TestPrepare_ELF_AcceptsRealNonGoStaticPIE(t *testing.T) {
 	if goruntime.GOOS != "linux" {
-		t.Skip("Stage B gate is Linux-only; CheckELFLoadable covers cross-platform")
+		t.Skip("Stage E mapper is Linux-only")
 	}
-	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithDynamic: true})
-	_, err := runtime.Prepare(elf)
-	if !errors.Is(err, runtime.ErrNotImplemented) {
-		t.Errorf("got %v, want ErrNotImplemented", err)
+	elf, err := os.ReadFile("testdata/hello_static_pie_c")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	img, err := runtime.Prepare(elf)
+	if err != nil {
+		t.Fatalf("Prepare(hello_static_pie_c): %v", err)
+	}
+	defer func() {
+		if err := img.Free(); err != nil {
+			t.Errorf("Free: %v", err)
+		}
+	}()
+	if img.Base == 0 {
+		t.Error("Base = 0 — mapper did not allocate")
+	}
+	if img.EntryPoint <= img.Base {
+		t.Errorf("EntryPoint %#x not within mapped region (base %#x)",
+			img.EntryPoint, img.Base)
 	}
 }
 
-// TestCheckELFLoadable_NonGo confirms a synthetic non-Go ET_DYN
-// binary is rejected with ErrNotImplemented + a clear reason.
-func TestCheckELFLoadable_NonGo(t *testing.T) {
+// TestStaticPIEGate_AcceptsNonGoSynthetic confirms Stage E
+// broadens the gate so ET_DYN + no DT_NEEDED passes regardless of
+// whether the binary carries .go.buildinfo. The pre-Stage-E
+// contract rejected such binaries as "not a Go binary"; that gate
+// is now structural-only.
+//
+// Pinned via CheckELFLoadable (cross-platform) so the assertion
+// holds the same way operators packing on macOS / Windows would
+// see when validating their Linux ELF outputs.
+func TestStaticPIEGate_AcceptsNonGoSynthetic(t *testing.T) {
 	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithDynamic: true})
+	if err := runtime.CheckELFLoadable(elf); err != nil {
+		t.Errorf("CheckELFLoadable(ET_DYN no DT_NEEDED, no .go.buildinfo): got %v, want nil", err)
+	}
+}
+
+// TestCheckELFLoadable_RejectsETDynWithDTNeeded confirms the
+// structural gate still rejects dynamically-linked ET_DYN inputs
+// (the Stage E broadening only dropped the .go.buildinfo
+// requirement; DT_NEEDED is still a blocker).
+func TestCheckELFLoadable_RejectsETDynWithDTNeeded(t *testing.T) {
+	elf := buildMinimalELF(t, elfHeaderOpts{Type: 3, WithNeeded: true})
 	err := runtime.CheckELFLoadable(elf)
 	if err == nil {
 		t.Fatal("got nil, want non-nil error")
 	}
 	if !errors.Is(err, runtime.ErrNotImplemented) {
 		t.Errorf("got %v, want ErrNotImplemented", err)
+	}
+	if !strings.Contains(err.Error(), "DT_NEEDED") {
+		t.Errorf("rejection should mention DT_NEEDED; got: %v", err)
 	}
 }
 
