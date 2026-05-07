@@ -157,4 +157,6 @@
 - [Basic implant](examples/basic-implant.md)
 - [Evasive injection](examples/evasive-injection.md)
 - [Full chain](examples/full-chain.md)
+- [DLL proxy side-load](examples/dllproxy-side-load.md)
+- [UPX-style packer + cover](examples/upx-style-packer.md)
 
