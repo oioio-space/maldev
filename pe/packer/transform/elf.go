@@ -1,6 +1,8 @@
 package transform
 
 import (
+	"bytes"
+	"debug/elf"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -32,9 +34,22 @@ const (
 )
 
 // PlanELF inspects an input ELF64 and computes the transform layout.
-// Picks the FIRST PT_LOAD with PF_X as the "text" segment.
-// Returns ErrOEPOutsideText if e_entry is not within that segment,
-// ErrNoTextSection if no executable PT_LOAD exists.
+//
+// Go static-PIE binaries pack the ELF header into the first executable
+// PT_LOAD (file offset 0). Encrypting the whole segment would destroy the
+// header, so we locate the .text SECTION via the section-header table
+// (using debug/elf) and use its tighter bounds for TextRVA/TextFileOff/
+// TextSize. The encrypted region covers only actual code; the ELF header,
+// program-header table, and non-text data remain pristine for the kernel.
+//
+// We still walk the PT_LOAD table to compute StubRVA/StubFileOff, and to
+// confirm .text is inside an executable segment.
+//
+// Returns ErrNoTextSection when:
+//   - no .text section exists (stripped binary), or
+//   - .text is not inside an executable PT_LOAD.
+//
+// Returns ErrOEPOutsideText if e_entry is not within the .text section.
 func PlanELF(input []byte, stubMaxSize uint32) (Plan, error) {
 	if DetectFormat(input) != FormatELF {
 		return Plan{}, ErrUnsupportedInputFormat
@@ -55,13 +70,14 @@ func PlanELF(input []byte, stubMaxSize uint32) (Plan, error) {
 		return Plan{}, fmt.Errorf("%w: phentsize %d != %d", ErrUnsupportedInputFormat, phentsize, elfPhdrSize)
 	}
 
+	// Walk PT_LOAD headers to find the executable segment bounds and
+	// compute where the new stub PT_LOAD can be appended.
 	var (
-		textOffset uint64
-		textVAddr  uint64
-		textSize   uint64
-		textFound  bool
-		lastEnd    uint64 // highest virtual end across all PT_LOADs
-		lastFEnd   uint64 // highest file end across all PT_LOADs
+		textSegVAddrStart uint64
+		textSegVAddrEnd   uint64
+		textSegFound      bool
+		lastEnd           uint64 // highest virtual end across all PT_LOADs
+		lastFEnd          uint64 // highest file end across all PT_LOADs
 	)
 	for i := uint16(0); i < phnum; i++ {
 		off := phoff + uint64(i)*uint64(phentsize)
@@ -70,16 +86,15 @@ func PlanELF(input []byte, stubMaxSize uint32) (Plan, error) {
 		}
 		ptype := binary.LittleEndian.Uint32(input[off : off+4])
 		flags := binary.LittleEndian.Uint32(input[off+elfPhdrFlagsOffset : off+elfPhdrFlagsOffset+4])
-		o := binary.LittleEndian.Uint64(input[off+elfPhdrOffsetOffset : off+elfPhdrOffsetOffset+8])
 		va := binary.LittleEndian.Uint64(input[off+elfPhdrVAddrOffset : off+elfPhdrVAddrOffset+8])
 		fs := binary.LittleEndian.Uint64(input[off+elfPhdrFileSzOffset : off+elfPhdrFileSzOffset+8])
 		ms := binary.LittleEndian.Uint64(input[off+elfPhdrMemSzOffset : off+elfPhdrMemSzOffset+8])
+		o := binary.LittleEndian.Uint64(input[off+elfPhdrOffsetOffset : off+elfPhdrOffsetOffset+8])
 
-		if ptype == elfPT_LOAD && !textFound && (flags&elfPF_X) != 0 {
-			textOffset = o
-			textVAddr = va
-			textSize = fs
-			textFound = true
+		if ptype == elfPT_LOAD && !textSegFound && (flags&elfPF_X) != 0 {
+			textSegVAddrStart = va
+			textSegVAddrEnd = va + fs
+			textSegFound = true
 		}
 		if ptype == elfPT_LOAD {
 			end := alignUpU64(va+ms, elfPageSize)
@@ -93,18 +108,47 @@ func PlanELF(input []byte, stubMaxSize uint32) (Plan, error) {
 		}
 	}
 
-	if !textFound {
+	if !textSegFound {
 		return Plan{}, ErrNoTextSection
 	}
+
+	// Use debug/elf to locate the .text section precisely. Go static-PIE
+	// binaries embed the ELF header inside the first executable PT_LOAD, so
+	// using the segment bounds directly would encrypt the header and corrupt
+	// e_phoff, causing the kernel to reject the output and InjectStubELF to
+	// read ciphertext as a file offset.
+	ef, err := elf.NewFile(bytes.NewReader(input))
+	if err != nil {
+		return Plan{}, fmt.Errorf("%w: debug/elf rejected input: %v", ErrUnsupportedInputFormat, err)
+	}
+	defer ef.Close()
+
+	textSection := ef.Section(".text")
+	if textSection == nil {
+		return Plan{}, fmt.Errorf("%w: no .text section (stripped binary?)", ErrNoTextSection)
+	}
+
+	textVAddr := textSection.Addr
+	textFileOff := textSection.Offset
+	textSize := textSection.FileSize
+
+	// Cross-check: .text must reside within the executable PT_LOAD we found.
+	// This guards against stripped binaries where .text might be absent or
+	// misplaced relative to the phdr layout.
+	if textVAddr < textSegVAddrStart || textVAddr+textSize > textSegVAddrEnd {
+		return Plan{}, fmt.Errorf("%w: .text section [%#x, %#x) not inside executable PT_LOAD [%#x, %#x)",
+			ErrNoTextSection, textVAddr, textVAddr+textSize, textSegVAddrStart, textSegVAddrEnd)
+	}
+
 	if entry < textVAddr || entry >= textVAddr+textSize {
-		return Plan{}, fmt.Errorf("%w: entry %#x not in text segment [%#x, %#x)",
+		return Plan{}, fmt.Errorf("%w: entry %#x not in .text [%#x, %#x)",
 			ErrOEPOutsideText, entry, textVAddr, textVAddr+textSize)
 	}
 
 	return Plan{
 		Format:      FormatELF,
 		TextRVA:     uint32(textVAddr),
-		TextFileOff: uint32(textOffset),
+		TextFileOff: uint32(textFileOff),
 		TextSize:    uint32(textSize),
 		OEPRVA:      uint32(entry),
 		StubRVA:     uint32(alignUpU64(lastEnd, elfPageSize)),
@@ -114,10 +158,14 @@ func PlanELF(input []byte, stubMaxSize uint32) (Plan, error) {
 }
 
 // InjectStubELF applies the planned mutations: writes encryptedText
-// into the text segment's file slot, ORs PF_W into its flags (RWX),
-// appends a new PT_LOAD entry (R+E) with the stub bytes, bumps
-// e_phnum, rewrites e_entry. Pre-return self-test verifies e_entry
+// into the text section's file slot, ORs PF_W into the text segment's
+// flags (RWX), appends a new PT_LOAD entry (R+E) with the stub bytes,
+// bumps e_phnum, rewrites e_entry. Pre-return self-test verifies e_entry
 // and e_phnum.
+//
+// All reads of phdr metadata use the original input buffer. Mutations
+// are written to out. This strict separation avoids reading ciphertext
+// as a file offset when the encrypted region overlaps the phdr table.
 func InjectStubELF(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, error) {
 	if plan.Format != FormatELF {
 		return nil, ErrPlanFormatMismatch
@@ -129,6 +177,31 @@ func InjectStubELF(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, e
 		return nil, fmt.Errorf("transform: encryptedText len %d != plan.TextSize %d", len(encryptedText), plan.TextSize)
 	}
 
+	// Read all phdr metadata from input BEFORE any mutation, to avoid
+	// interpreting ciphertext as offsets if the encrypted region touches
+	// the header area.
+	phoff := binary.LittleEndian.Uint64(input[elfPhoffOffset : elfPhoffOffset+8])
+	phnum := binary.LittleEndian.Uint16(input[elfPhnumOffset : elfPhnumOffset+2])
+
+	textPhdrOff := uint64(0)
+	for i := uint16(0); i < phnum; i++ {
+		off := phoff + uint64(i)*elfPhdrSize
+		flags := binary.LittleEndian.Uint32(input[off+elfPhdrFlagsOffset : off+elfPhdrFlagsOffset+4])
+		va := binary.LittleEndian.Uint64(input[off+elfPhdrVAddrOffset : off+elfPhdrVAddrOffset+8])
+		// Match the executable PT_LOAD that contains .text by vaddr.
+		// plan.TextRVA is the .text section's vaddr, which lies inside
+		// the executable segment; find that segment by checking the
+		// segment's vaddr range.
+		fs := binary.LittleEndian.Uint64(input[off+elfPhdrFileSzOffset : off+elfPhdrFileSzOffset+8])
+		if (flags&elfPF_X) != 0 && va <= uint64(plan.TextRVA) && uint64(plan.TextRVA) < va+fs {
+			textPhdrOff = off
+			break
+		}
+	}
+	if textPhdrOff == 0 {
+		return nil, ErrNoTextSection
+	}
+
 	stubPagedSize := alignUpU32(plan.StubMaxSize, elfPageSize)
 	totalSize := plan.StubFileOff + stubPagedSize
 	if int(totalSize) < len(input) {
@@ -137,27 +210,12 @@ func InjectStubELF(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, e
 	out := make([]byte, totalSize)
 	copy(out, input)
 
-	// 1. Replace text segment bytes with the pre-encrypted payload.
+	// 1. Replace text section bytes with the pre-encrypted payload.
 	copy(out[plan.TextFileOff:plan.TextFileOff+plan.TextSize], encryptedText)
 
-	// 2. Mark text PT_LOAD RWX: the stub will VirtualProtect / mprotect
-	//    this range before decrypting, but setting PF_W here ensures the
-	//    kernel maps it writable in the first place for static-PIE cases.
-	phoff := binary.LittleEndian.Uint64(out[elfPhoffOffset : elfPhoffOffset+8])
-	phnum := binary.LittleEndian.Uint16(out[elfPhnumOffset : elfPhnumOffset+2])
-	textPhdrOff := uint64(0)
-	for i := uint16(0); i < phnum; i++ {
-		off := phoff + uint64(i)*elfPhdrSize
-		flags := binary.LittleEndian.Uint32(out[off+elfPhdrFlagsOffset : off+elfPhdrFlagsOffset+4])
-		va := binary.LittleEndian.Uint64(out[off+elfPhdrVAddrOffset : off+elfPhdrVAddrOffset+8])
-		if (flags&elfPF_X) != 0 && va == uint64(plan.TextRVA) {
-			textPhdrOff = off
-			break
-		}
-	}
-	if textPhdrOff == 0 {
-		return nil, ErrNoTextSection
-	}
+	// 2. Mark text PT_LOAD RWX: the stub will mprotect this range before
+	//    decrypting; PF_W here ensures the kernel maps it writable in the
+	//    first place for static-PIE cases.
 	flags := binary.LittleEndian.Uint32(out[textPhdrOff+elfPhdrFlagsOffset : textPhdrOff+elfPhdrFlagsOffset+4])
 	flags |= elfPF_W
 	binary.LittleEndian.PutUint32(out[textPhdrOff+elfPhdrFlagsOffset:textPhdrOff+elfPhdrFlagsOffset+4], flags)
@@ -170,8 +228,6 @@ func InjectStubELF(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, e
 	if int(newPhdrOff)+elfPhdrSize > int(plan.TextFileOff) {
 		return nil, ErrSectionTableFull
 	}
-	// Slot at newPhdrOff is already zero: it lies beyond the copy(out, input)
-	// region (input ends at plan.StubFileOff-ish; make zeroes the tail).
 	binary.LittleEndian.PutUint32(out[newPhdrOff:newPhdrOff+4], elfPT_LOAD)
 	binary.LittleEndian.PutUint32(out[newPhdrOff+elfPhdrFlagsOffset:newPhdrOff+elfPhdrFlagsOffset+4], elfPF_R|elfPF_X)
 	binary.LittleEndian.PutUint64(out[newPhdrOff+elfPhdrOffsetOffset:newPhdrOff+elfPhdrOffsetOffset+8], uint64(plan.StubFileOff))

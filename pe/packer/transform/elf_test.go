@@ -5,61 +5,114 @@ import (
 	"debug/elf"
 	"encoding/binary"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/oioio-space/maldev/pe/packer/transform"
 )
 
-// buildMinimalELF emits a minimal Elf64 with one PT_LOAD R+E
-// segment (the "text" equivalent). Optional textOEP places the
-// entry point inside the segment.
+// buildMinimalELF emits a minimal ELF64 with one PT_LOAD R+E segment
+// and a section-header table containing a null entry, a .text section,
+// and a .shstrtab section. The section-header table is required because
+// PlanELF uses debug/elf to locate .text precisely — Go static-PIE
+// binaries embed the ELF header inside the first executable PT_LOAD
+// (file offset 0), so encrypting the whole segment would corrupt the
+// header.
 func buildMinimalELF(t *testing.T, opts minimalELFOpts) []byte {
 	t.Helper()
-	const ehdrSize = 64
-	const phdrSize = 56
-	const pageSize = 0x1000
+	const (
+		ehdrSize = 64
+		phdrSize = 56
+		shdrSize = 64 // Elf64_Shdr
+		pageSize = 0x1000
+	)
 
 	if opts.TextSize == 0 {
 		opts.TextSize = 0x100
 	}
-	textOff := uint64(ehdrSize + phdrSize) // right after phdr
-	textOff = (textOff + pageSize - 1) &^ (pageSize - 1)
-	textVAddr := textOff
+
+	// Layout:
+	//   [0x00, 0x40)  Ehdr
+	//   [0x40, 0x78)  Phdr[0]  (PT_LOAD R+E)
+	//   [0x78, 0x88)  slack (fits one more phdr slot for InjectStubELF)
+	//   [0x88, 0xF0)  shstrtab (section name string table)
+	//   [pageSize, pageSize+TextSize)  .text bytes
+	//   [pageSize+TextSize, …)  shdrs (3 entries)
+	//
+	// The slack between phdr table end (0x78) and .text start (pageSize)
+	// gives InjectStubELF room to append one new phdr entry.
+
+	shstrtab := []byte("\x00.text\x00.shstrtab\x00")
+	shstrtabOff := uint64(ehdrSize + phdrSize*2) // 0x78 — after 2 phdr slots
+	textOff := uint64(pageSize)
+	textVAddr := textOff // identity-mapped for simplicity
 	if opts.TextEntry == 0 {
 		opts.TextEntry = textVAddr + 0x10
 	}
 
-	totalSize := textOff + uint64(opts.TextSize)
+	// Section headers follow immediately after the text section.
+	shOff := textOff + uint64(opts.TextSize)
+	// Align to 8 bytes.
+	shOff = (shOff + 7) &^ 7
+
+	totalSize := shOff + uint64(shdrSize*3)
 	out := make([]byte, totalSize)
 
-	// e_ident
-	out[0] = 0x7F
-	out[1] = 'E'
-	out[2] = 'L'
-	out[3] = 'F'
-	out[4] = 2 // EI_CLASS = ELFCLASS64
-	out[5] = 1 // EI_DATA = ELFDATA2LSB
-	out[6] = 1 // EI_VERSION
-	// Ehdr fields
-	binary.LittleEndian.PutUint16(out[0x10:0x12], 3)  // ET_DYN
-	binary.LittleEndian.PutUint16(out[0x12:0x14], 62) // EM_X86_64
-	binary.LittleEndian.PutUint32(out[0x14:0x18], 1)
-	binary.LittleEndian.PutUint64(out[0x18:0x20], opts.TextEntry)
-	binary.LittleEndian.PutUint64(out[0x20:0x28], ehdrSize) // e_phoff
-	binary.LittleEndian.PutUint16(out[0x34:0x36], ehdrSize) // e_ehsize
-	binary.LittleEndian.PutUint16(out[0x36:0x38], phdrSize) // e_phentsize
-	binary.LittleEndian.PutUint16(out[0x38:0x3A], 1)        // e_phnum
+	// --- Ehdr ---
+	out[0] = 0x7F; out[1] = 'E'; out[2] = 'L'; out[3] = 'F'
+	out[4] = 2 // ELFCLASS64
+	out[5] = 1 // ELFDATA2LSB
+	out[6] = 1 // EV_CURRENT
+	binary.LittleEndian.PutUint16(out[0x10:], 3)      // ET_DYN
+	binary.LittleEndian.PutUint16(out[0x12:], 62)     // EM_X86_64
+	binary.LittleEndian.PutUint32(out[0x14:], 1)      // e_version
+	binary.LittleEndian.PutUint64(out[0x18:], opts.TextEntry) // e_entry
+	binary.LittleEndian.PutUint64(out[0x20:], ehdrSize)       // e_phoff
+	binary.LittleEndian.PutUint64(out[0x28:], shOff)          // e_shoff
+	binary.LittleEndian.PutUint16(out[0x34:], ehdrSize)       // e_ehsize
+	binary.LittleEndian.PutUint16(out[0x36:], phdrSize)       // e_phentsize
+	binary.LittleEndian.PutUint16(out[0x38:], 1)              // e_phnum
+	binary.LittleEndian.PutUint16(out[0x3A:], shdrSize)       // e_shentsize
+	binary.LittleEndian.PutUint16(out[0x3C:], 3)              // e_shnum
+	binary.LittleEndian.PutUint16(out[0x3E:], 2)              // e_shstrndx
 
-	// Phdr (PT_LOAD R+E)
-	pOff := uint64(ehdrSize)
-	binary.LittleEndian.PutUint32(out[pOff:pOff+4], 1)                              // PT_LOAD
-	binary.LittleEndian.PutUint32(out[pOff+4:pOff+8], 5)                            // PF_R | PF_X
-	binary.LittleEndian.PutUint64(out[pOff+8:pOff+16], textOff)                     // p_offset
-	binary.LittleEndian.PutUint64(out[pOff+16:pOff+24], textVAddr)                  // p_vaddr
-	binary.LittleEndian.PutUint64(out[pOff+24:pOff+32], textVAddr)                  // p_paddr
-	binary.LittleEndian.PutUint64(out[pOff+32:pOff+40], uint64(opts.TextSize))      // p_filesz
-	binary.LittleEndian.PutUint64(out[pOff+40:pOff+48], uint64(opts.TextSize))      // p_memsz
-	binary.LittleEndian.PutUint64(out[pOff+48:pOff+56], pageSize)
+	// --- Phdr[0]: PT_LOAD R+E covering the full text segment ---
+	p0 := uint64(ehdrSize)
+	binary.LittleEndian.PutUint32(out[p0:], 1)                        // PT_LOAD
+	binary.LittleEndian.PutUint32(out[p0+4:], 5)                      // PF_R|PF_X
+	binary.LittleEndian.PutUint64(out[p0+8:], textOff)                // p_offset
+	binary.LittleEndian.PutUint64(out[p0+16:], textVAddr)             // p_vaddr
+	binary.LittleEndian.PutUint64(out[p0+24:], textVAddr)             // p_paddr
+	binary.LittleEndian.PutUint64(out[p0+32:], uint64(opts.TextSize)) // p_filesz
+	binary.LittleEndian.PutUint64(out[p0+40:], uint64(opts.TextSize)) // p_memsz
+	binary.LittleEndian.PutUint64(out[p0+48:], pageSize)              // p_align
+
+	// --- shstrtab bytes at shstrtabOff ---
+	copy(out[shstrtabOff:], shstrtab)
+
+	// --- Section headers at shOff ---
+	// SHdr[0]: null — all-zero, already set by make.
+
+	// SHdr[1]: .text — name offset 1 in shstrtab ("\x00.text\x00…")
+	s1 := shOff + shdrSize
+	binary.LittleEndian.PutUint32(out[s1:], 1)                                       // sh_name
+	binary.LittleEndian.PutUint32(out[s1+4:], uint32(elf.SHT_PROGBITS))              // sh_type
+	binary.LittleEndian.PutUint64(out[s1+8:], uint64(elf.SHF_ALLOC|elf.SHF_EXECINSTR)) // sh_flags
+	binary.LittleEndian.PutUint64(out[s1+16:], textVAddr)                             // sh_addr
+	binary.LittleEndian.PutUint64(out[s1+24:], textOff)                               // sh_offset
+	binary.LittleEndian.PutUint64(out[s1+32:], uint64(opts.TextSize))                 // sh_size
+	binary.LittleEndian.PutUint64(out[s1+48:], 1)                                     // sh_addralign
+
+	// SHdr[2]: .shstrtab — name offset 7 ("\x00.text\x00.shstrtab\x00")
+	s2 := shOff + shdrSize*2
+	binary.LittleEndian.PutUint32(out[s2:], 7)                           // sh_name
+	binary.LittleEndian.PutUint32(out[s2+4:], uint32(elf.SHT_STRTAB))   // sh_type
+	// sh_addr = 0: .shstrtab is not loaded into memory
+	binary.LittleEndian.PutUint64(out[s2+24:], shstrtabOff)              // sh_offset
+	binary.LittleEndian.PutUint64(out[s2+32:], uint64(len(shstrtab)))    // sh_size
+	binary.LittleEndian.PutUint64(out[s2+48:], 1)                        // sh_addralign
+
 	return out
 }
 
@@ -68,7 +121,28 @@ type minimalELFOpts struct {
 	TextEntry uint64
 }
 
+// fixtureBytes reads pe/packer/runtime/testdata/hello_static_pie and
+// skips the test if the file is absent (non-Linux CI without the fixture).
+func fixtureBytes(t *testing.T) []byte {
+	t.Helper()
+	// Navigate from pe/packer/transform/ up to pe/packer/, then into runtime/testdata.
+	path := filepath.Join("..", "runtime", "testdata", "hello_static_pie")
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		t.Skipf("fixture path resolution failed: %v", err)
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		t.Skipf("hello_static_pie fixture not found (%v) — skipping", err)
+	}
+	return data
+}
+
+// ---- existing tests (updated for SHT-aware buildMinimalELF) ----------------
+
 func TestPlanELF_HappyPath(t *testing.T) {
+	// TextEntry must be inside the .text section (vaddr = pageSize = 0x1000,
+	// size = 0x500), so pick 0x1010.
 	elfBytes := buildMinimalELF(t, minimalELFOpts{TextSize: 0x500, TextEntry: 0x1010})
 	plan, err := transform.PlanELF(elfBytes, 4096)
 	if err != nil {
@@ -91,7 +165,7 @@ func TestPlanELF_HappyPath(t *testing.T) {
 func TestPlanELF_RejectsOEPOutsideText(t *testing.T) {
 	elfBytes := buildMinimalELF(t, minimalELFOpts{
 		TextSize:  0x100,
-		TextEntry: 0x9000, // way past
+		TextEntry: 0x9000, // well past .text end (0x1000 + 0x100)
 	})
 	_, err := transform.PlanELF(elfBytes, 4096)
 	if !errors.Is(err, transform.ErrOEPOutsideText) {
@@ -100,7 +174,20 @@ func TestPlanELF_RejectsOEPOutsideText(t *testing.T) {
 }
 
 func TestInjectStubELF_DebugELFParses(t *testing.T) {
-	input := buildMinimalELF(t, minimalELFOpts{TextSize: 0x500, TextEntry: 0x1010})
+	// Exercise both the synthetic fixture and the real Go binary (when present).
+	t.Run("synthetic", func(t *testing.T) {
+		input := buildMinimalELF(t, minimalELFOpts{TextSize: 0x500, TextEntry: 0x1010})
+		injectAndVerifyELF(t, input)
+	})
+	t.Run("real_fixture", func(t *testing.T) {
+		input := fixtureBytes(t)
+		injectAndVerifyELF(t, input)
+	})
+}
+
+// injectAndVerifyELF is the shared body: plan → inject → debug/elf parse.
+func injectAndVerifyELF(t *testing.T, input []byte) {
+	t.Helper()
 	plan, err := transform.PlanELF(input, 4096)
 	if err != nil {
 		t.Fatalf("PlanELF: %v", err)
@@ -130,18 +217,144 @@ func TestInjectStubELF_DebugELFParses(t *testing.T) {
 			loadCount++
 		}
 	}
-	if loadCount != 2 {
-		t.Errorf("PT_LOAD count = %d, want 2 (text + new stub)", loadCount)
+	if loadCount < 2 {
+		t.Errorf("PT_LOAD count = %d, want ≥ 2 (text + new stub)", loadCount)
 	}
 }
 
 func TestInjectStubELF_RejectsStubTooLarge(t *testing.T) {
 	input := buildMinimalELF(t, minimalELFOpts{})
-	plan, _ := transform.PlanELF(input, 16)
+	plan, err := transform.PlanELF(input, 16)
+	if err != nil {
+		t.Fatalf("PlanELF: %v", err)
+	}
 	encryptedText := bytes.Repeat([]byte{0xAA}, int(plan.TextSize))
 	stubBytes := bytes.Repeat([]byte{0x90}, 100)
-	_, err := transform.InjectStubELF(input, encryptedText, stubBytes, plan)
+	_, err = transform.InjectStubELF(input, encryptedText, stubBytes, plan)
 	if !errors.Is(err, transform.ErrStubTooLarge) {
 		t.Errorf("got %v, want ErrStubTooLarge", err)
+	}
+}
+
+// ---- new tests for the SHT-based .text lookup (Bug 1 fix) ------------------
+
+// TestPlanELF_GoStaticPIEFixture confirms that PlanELF uses the .text
+// SECTION rather than the enclosing PT_LOAD. Go static-PIE binaries place
+// the ELF header in the first executable PT_LOAD (file offset 0); using
+// the segment bounds directly would set TextFileOff=0 and destroy the header.
+func TestPlanELF_GoStaticPIEFixture(t *testing.T) {
+	input := fixtureBytes(t)
+	plan, err := transform.PlanELF(input, 4096)
+	if err != nil {
+		t.Fatalf("PlanELF: %v", err)
+	}
+
+	// .text starts at file offset 0x1000 in the fixture — well past the
+	// ELF header + phdr table. Any value of 0 here means we accidentally
+	// used the PT_LOAD bounds.
+	if plan.TextFileOff == 0 {
+		t.Errorf("TextFileOff = 0: PlanELF is using PT_LOAD origin, not .text section")
+	}
+
+	// TextSize must be smaller than the total file — segment-wide encryption
+	// would yield TextSize ≈ len(input).
+	if plan.TextSize >= uint32(len(input)) {
+		t.Errorf("TextSize %d ≥ len(input) %d: looks like PT_LOAD, not .text", plan.TextSize, len(input))
+	}
+
+	// TextRVA must match the .text section's virtual address in the fixture
+	// (0x401000 as confirmed by readelf -S).
+	const wantTextVAddr = 0x401000
+	if plan.TextRVA != wantTextVAddr {
+		t.Errorf("TextRVA = %#x, want %#x (.text section vaddr)", plan.TextRVA, wantTextVAddr)
+	}
+}
+
+// TestInjectStubELF_PreservesELFHeader verifies that packing the real Go
+// static-PIE fixture does not touch the ELF header or the phdr table.
+// Because Go binaries put the ELF header inside the first executable
+// PT_LOAD, a correct implementation must narrow encryption to .text only.
+func TestInjectStubELF_PreservesELFHeader(t *testing.T) {
+	const (
+		ehdrSize = 64
+		phdrSize = 56
+	)
+	input := fixtureBytes(t)
+	plan, err := transform.PlanELF(input, 4096)
+	if err != nil {
+		t.Fatalf("PlanELF: %v", err)
+	}
+
+	encryptedText := bytes.Repeat([]byte{0xAA}, int(plan.TextSize))
+	stubBytes := []byte{0x90, 0x90, 0xC3}
+	out, err := transform.InjectStubELF(input, encryptedText, stubBytes, plan)
+	if err != nil {
+		t.Fatalf("InjectStubELF: %v", err)
+	}
+
+	// ELF header [0, 64) must be byte-identical (except e_entry + e_phnum,
+	// which InjectStubELF legally mutates).
+	for i := 0; i < ehdrSize; i++ {
+		if i >= 0x18 && i < 0x20 { // e_entry range — intentionally rewritten
+			continue
+		}
+		if i >= 0x38 && i < 0x3A { // e_phnum range — intentionally bumped
+			continue
+		}
+		if out[i] != input[i] {
+			t.Errorf("ELF header byte [%d] = %#02x, want %#02x (from input)", i, out[i], input[i])
+		}
+	}
+
+	// The phdr table must be preserved (InjectStubELF only appends, never rewrites
+	// existing entries other than adding PF_W to the text segment flags).
+	phoff := binary.LittleEndian.Uint64(input[0x20 : 0x20+8])
+	phnum := binary.LittleEndian.Uint16(input[0x38 : 0x38+2])
+	phTableEnd := phoff + uint64(phnum)*phdrSize
+	if int(phTableEnd) > len(input) {
+		t.Fatal("phdr table extends past input — fixture malformed")
+	}
+	// Check every existing phdr slot for preservation (flags byte excluded for
+	// the text PT_LOAD since PF_W is ORed in).
+	for i := uint16(0); i < phnum; i++ {
+		off := phoff + uint64(i)*phdrSize
+		for j := uint64(0); j < phdrSize; j++ {
+			// Skip the flags field of the text PT_LOAD (PF_W is intentionally added).
+			if j >= 4 && j < 8 {
+				continue
+			}
+			if out[off+j] != input[off+j] {
+				t.Errorf("phdr[%d] byte [%d] = %#02x, want %#02x", i, j, out[off+j], input[off+j])
+			}
+		}
+	}
+}
+
+// TestInjectStubELF_DebugELFParsesRealFixture is a standalone guard that
+// debug/elf.NewFile accepts the packed output of the real Go static-PIE fixture.
+// Kept separate from TestInjectStubELF_DebugELFParses so failures are easy
+// to triage by fixture vs synthetic.
+func TestInjectStubELF_DebugELFParsesRealFixture(t *testing.T) {
+	input := fixtureBytes(t)
+	plan, err := transform.PlanELF(input, 4096)
+	if err != nil {
+		t.Fatalf("PlanELF: %v", err)
+	}
+	encryptedText := bytes.Repeat([]byte{0xAA}, int(plan.TextSize))
+	stubBytes := []byte{0x90, 0x90, 0xC3}
+
+	out, err := transform.InjectStubELF(input, encryptedText, stubBytes, plan)
+	if err != nil {
+		t.Fatalf("InjectStubELF: %v", err)
+	}
+
+	f, err := elf.NewFile(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("debug/elf.NewFile rejected packed output: %v", err)
+	}
+	defer f.Close()
+
+	if uint32(f.FileHeader.Entry) != plan.StubRVA {
+		t.Errorf("e_entry = %#x, want StubRVA %#x", f.FileHeader.Entry, plan.StubRVA)
 	}
 }
