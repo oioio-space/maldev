@@ -5,6 +5,7 @@
 //
 //	packer pack   -in <file> -out <file> [-key <hex32>] [-keyout <file>]
 //	              [-format blob|windows-exe|linux-elf] [-rounds N] [-seed S]
+//	              [-cover]
 //	packer unpack -in <file> -out <file>  -key <hex32>
 //
 // pack:
@@ -62,7 +63,7 @@ func usage() {
 Usage:
   packer pack   -in <file> -out <file> [-format blob|windows-exe|linux-elf]
                 [-key <hex32>] [-keyout <file>]
-                [-rounds N] [-seed S]
+                [-rounds N] [-seed S] [-cover]
   packer unpack -in <file> -out <file>  -key <hex32>
 
 Formats:
@@ -84,6 +85,7 @@ func runPack(args []string) int {
 	format := fs.String("format", "blob", `output format: "blob" (legacy: encrypted bytes), "windows-exe" (Phase 1e-A: runnable PE32+), "linux-elf" (Phase 1e-B: runnable ELF static-PIE)`)
 	rounds := fs.Int("rounds", 3, "SGN polymorphism rounds (1-10); windows-exe and linux-elf")
 	seed := fs.Int64("seed", 0, "poly seed (0 = crypto-random); windows-exe and linux-elf")
+	cover := fs.Bool("cover", false, "after PackBinary, chain ApplyDefaultCover (3 junk sections of mixed entropy); windows-exe and linux-elf only")
 	_ = fs.Parse(args)
 
 	if *in == "" || *out == "" {
@@ -99,11 +101,15 @@ func runPack(args []string) int {
 
 	switch *format {
 	case "blob":
+		if *cover {
+			fmt.Fprintln(os.Stderr, "pack: -cover only applies to -format=windows-exe / linux-elf")
+			return 2
+		}
 		return runPackBlob(data, *out, *keyHex, *keyOut)
 	case "windows-exe":
-		return runPackBinary(data, *out, packer.FormatWindowsExe, *rounds, *seed)
+		return runPackBinary(data, *out, packer.FormatWindowsExe, *rounds, *seed, *cover)
 	case "linux-elf":
-		return runPackBinary(data, *out, packer.FormatLinuxELF, *rounds, *seed)
+		return runPackBinary(data, *out, packer.FormatLinuxELF, *rounds, *seed, *cover)
 	default:
 		fmt.Fprintf(os.Stderr, "pack: unknown format %q (want \"blob\", \"windows-exe\", or \"linux-elf\")\n", *format)
 		return 1
@@ -160,7 +166,12 @@ func runPackBlob(data []byte, out, keyHex, keyOut string) int {
 // PackBinary. The AEAD key is printed to stdout — it is NOT stored in
 // the output binary, so the caller must capture it for out-of-band
 // delivery.
-func runPackBinary(data []byte, out string, format packer.Format, rounds int, seed int64) int {
+//
+// When cover is true, the output is additionally run through
+// ApplyDefaultCover. ELF inputs without PHT slack (Go static-PIE)
+// surface a non-fatal warning and ship the bare PackBinary output;
+// PE always succeeds because section-table slack is plentiful.
+func runPackBinary(data []byte, out string, format packer.Format, rounds int, seed int64, cover bool) int {
 	hostBytes, key, err := packer.PackBinary(data, packer.PackBinaryOptions{
 		Format:       format,
 		Stage1Rounds: rounds,
@@ -170,12 +181,30 @@ func runPackBinary(data []byte, out string, format packer.Format, rounds int, se
 		fmt.Fprintf(os.Stderr, "pack: %v\n", err)
 		return 1
 	}
-	if err := os.WriteFile(out, hostBytes, 0o755); err != nil {
+	finalBytes := hostBytes
+	if cover {
+		// Use seed+1 so the cover layer's RNG diverges from the
+		// PackBinary RNG. Falling back to the bare output on the
+		// PHT-slack limitation matches the worked-example flow.
+		coverSeed := seed + 1
+		if coverSeed == 0 {
+			coverSeed = 1
+		}
+		covered, coverErr := packer.ApplyDefaultCover(hostBytes, coverSeed)
+		switch {
+		case coverErr == nil:
+			finalBytes = covered
+			fmt.Fprintf(os.Stderr, "cover: %d → %d bytes\n", len(hostBytes), len(covered))
+		default:
+			fmt.Fprintf(os.Stderr, "cover: skipped (%v)\n", coverErr)
+		}
+	}
+	if err := os.WriteFile(out, finalBytes, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "pack: write %s: %v\n", out, err)
 		return 1
 	}
 	fmt.Printf("%x\n", key)
-	fmt.Fprintf(os.Stderr, "packed %d bytes → %s (%d bytes)\n", len(data), out, len(hostBytes))
+	fmt.Fprintf(os.Stderr, "packed %d bytes → %s (%d bytes)\n", len(data), out, len(finalBytes))
 	return 0
 }
 
