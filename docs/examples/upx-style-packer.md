@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-05-07
-reflects_commit: cb38152
+reflects_commit: 9f49a7e
 ---
 
 # Worked example — UPX-style packer + cover layer
@@ -143,6 +143,22 @@ xxd /tmp/hello.packed | head -200                   # no Go strings
 echo $?                                             # 0
 ```
 
+## Multi-seed correctness
+
+`v0.61.1` fixed a register-clobber bug that made `PackBinary`
+silently produce non-runnable binaries for ~85% of seeds (only
+`Seed: 1` and `Seed: 2` happened to dodge it). The root cause:
+the per-round register allocator was allowed to pick `R15`,
+which the CALL+POP+ADD prologue uses to carry the runtime
+`.text` address. When a round took `R15` as its key/counter
+register, that address was clobbered and the decoder loop
+dereferenced the encryption key as a pointer. Multi-seed E2E
+test (`TestPackBinary_LinuxELF_MultiSeed`) packs and runs eight
+seeds end-to-end on every push.
+
+If you observe a clean exit with `Seed: 1` but a SIGSEGV with
+`time.Now().UnixNano()`, you are running pre-v0.61.1 — upgrade.
+
 ## Hardening dials
 
 Three swap-points the operator can flip without re-architecting:
@@ -188,7 +204,8 @@ Honest reading of where this technique **stops working**:
   — three-phase design rationale + capability matrix.
 - [`docs/refactor-2026-doc/KNOWN-ISSUES-1e.md`](../refactor-2026-doc/KNOWN-ISSUES-1e.md)
   — v0.59.0 / v0.60.0 architectural gap post-mortem.
-- [Phase 1f reflective loader](../techniques/pe/packer.md#runtimeloadpe)
-  — alternate operator path that DOES use `pe/packer/runtime`
+- [Phase 1f reflective loader](../techniques/pe/packer.md) —
+  alternate operator path that DOES use `pe/packer/runtime`
   for in-process reflective load (separate from this example's
-  kernel-loaded UPX-style flow).
+  kernel-loaded UPX-style flow). See the `runtime.LoadPE` row
+  in the TL;DR table.

@@ -126,15 +126,15 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 		return nil, fmt.Errorf("%w: not a PE32+ (no MZ/PE)", ErrCoverInvalidOptions)
 	}
 
-	peOff := binary.LittleEndian.Uint32(input[0x3C:0x40])
-	coffOff := peOff + 4 // PE\0\0
-	numSections := binary.LittleEndian.Uint16(input[coffOff+2 : coffOff+4])
-	sizeOfOptHdr := binary.LittleEndian.Uint16(input[coffOff+0x10 : coffOff+0x12])
-	optOff := coffOff + 20
+	peOff := binary.LittleEndian.Uint32(input[transform.PEELfanewOffset : transform.PEELfanewOffset+4])
+	coffOff := peOff + transform.PESignatureSize
+	numSections := binary.LittleEndian.Uint16(input[coffOff+transform.COFFNumSectionsOffset : coffOff+transform.COFFNumSectionsOffset+2])
+	sizeOfOptHdr := binary.LittleEndian.Uint16(input[coffOff+transform.COFFSizeOfOptHdrOffset : coffOff+transform.COFFSizeOfOptHdrOffset+2])
+	optOff := coffOff + transform.PECOFFHdrSize
 
-	sectionAlign := binary.LittleEndian.Uint32(input[optOff+0x20 : optOff+0x24])
-	fileAlign := binary.LittleEndian.Uint32(input[optOff+0x24 : optOff+0x28])
-	sizeOfImage := binary.LittleEndian.Uint32(input[optOff+0x38 : optOff+0x3C])
+	sectionAlign := binary.LittleEndian.Uint32(input[optOff+transform.OptSectionAlignOffset : optOff+transform.OptSectionAlignOffset+4])
+	fileAlign := binary.LittleEndian.Uint32(input[optOff+transform.OptFileAlignOffset : optOff+transform.OptFileAlignOffset+4])
+	sizeOfImage := binary.LittleEndian.Uint32(input[optOff+transform.OptSizeOfImageOffset : optOff+transform.OptSizeOfImageOffset+4])
 
 	sectionTableOff := uint32(optOff) + uint32(sizeOfOptHdr)
 
@@ -145,11 +145,11 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 	var maxRVAEnd, maxRawEnd uint32
 	firstSecRaw := uint32(0xFFFFFFFF)
 	for i := uint16(0); i < numSections; i++ {
-		hdr := sectionTableOff + uint32(i)*40
-		va := binary.LittleEndian.Uint32(input[hdr+0x0C : hdr+0x10])
-		vSize := binary.LittleEndian.Uint32(input[hdr+0x08 : hdr+0x0C])
-		raw := binary.LittleEndian.Uint32(input[hdr+0x14 : hdr+0x18])
-		rawSize := binary.LittleEndian.Uint32(input[hdr+0x10 : hdr+0x14])
+		hdr := sectionTableOff + uint32(i)*transform.PESectionHdrSize
+		va := binary.LittleEndian.Uint32(input[hdr+transform.SecVirtualAddressOffset : hdr+transform.SecVirtualAddressOffset+4])
+		vSize := binary.LittleEndian.Uint32(input[hdr+transform.SecVirtualSizeOffset : hdr+transform.SecVirtualSizeOffset+4])
+		raw := binary.LittleEndian.Uint32(input[hdr+transform.SecPointerToRawDataOffset : hdr+transform.SecPointerToRawDataOffset+4])
+		rawSize := binary.LittleEndian.Uint32(input[hdr+transform.SecSizeOfRawDataOffset : hdr+transform.SecSizeOfRawDataOffset+4])
 		if e := transform.AlignUpU32(va+vSize, sectionAlign); e > maxRVAEnd {
 			maxRVAEnd = e
 		}
@@ -193,7 +193,7 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 
 	// Reject when the new section headers would overrun into the
 	// first section's body bytes (no slack between table and data).
-	newTableEnd := sectionTableOff + uint32(numSections+uint16(len(plans)))*40
+	newTableEnd := sectionTableOff + uint32(numSections+uint16(len(plans)))*transform.PESectionHdrSize
 	if newTableEnd > firstSecRaw {
 		return nil, ErrCoverSectionTableFull
 	}
@@ -206,25 +206,24 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 	copy(out, input)
 
 	for i, p := range plans {
-		hdrOff := sectionTableOff + uint32(numSections+uint16(i))*40
+		hdrOff := sectionTableOff + uint32(numSections+uint16(i))*transform.PESectionHdrSize
 		copy(out[hdrOff:hdrOff+8], p.name[:])
-		binary.LittleEndian.PutUint32(out[hdrOff+0x08:hdrOff+0x0C], p.size)    // VirtualSize
-		binary.LittleEndian.PutUint32(out[hdrOff+0x0C:hdrOff+0x10], p.rva)     // VirtualAddress
-		binary.LittleEndian.PutUint32(out[hdrOff+0x10:hdrOff+0x14], p.rawSize) // SizeOfRawData
-		binary.LittleEndian.PutUint32(out[hdrOff+0x14:hdrOff+0x18], p.raw)     // PointerToRawData
-		// Characteristics: MEM_READ + CNT_INITIALIZED_DATA. No W, no X.
-		binary.LittleEndian.PutUint32(out[hdrOff+0x24:hdrOff+0x28], 0x40000040)
+		binary.LittleEndian.PutUint32(out[hdrOff+transform.SecVirtualSizeOffset:hdrOff+transform.SecVirtualSizeOffset+4], p.size)
+		binary.LittleEndian.PutUint32(out[hdrOff+transform.SecVirtualAddressOffset:hdrOff+transform.SecVirtualAddressOffset+4], p.rva)
+		binary.LittleEndian.PutUint32(out[hdrOff+transform.SecSizeOfRawDataOffset:hdrOff+transform.SecSizeOfRawDataOffset+4], p.rawSize)
+		binary.LittleEndian.PutUint32(out[hdrOff+transform.SecPointerToRawDataOffset:hdrOff+transform.SecPointerToRawDataOffset+4], p.raw)
+		binary.LittleEndian.PutUint32(out[hdrOff+transform.SecCharacteristicsOffset:hdrOff+transform.SecCharacteristicsOffset+4], transform.ScnMemReadInitData)
 		if err := writeJunkBody(out[p.raw:p.raw+p.size], p.fill); err != nil {
 			return nil, err
 		}
 	}
 
 	// Bump NumberOfSections.
-	binary.LittleEndian.PutUint16(out[coffOff+2:coffOff+4], numSections+uint16(len(plans)))
+	binary.LittleEndian.PutUint16(out[coffOff+transform.COFFNumSectionsOffset:coffOff+transform.COFFNumSectionsOffset+2], numSections+uint16(len(plans)))
 
 	// Bump SizeOfImage to cover the new RVAs.
 	if rvaCursor > sizeOfImage {
-		binary.LittleEndian.PutUint32(out[optOff+0x38:optOff+0x3C], rvaCursor)
+		binary.LittleEndian.PutUint32(out[optOff+transform.OptSizeOfImageOffset:optOff+transform.OptSizeOfImageOffset+4], rvaCursor)
 	}
 
 	return out, nil
@@ -257,16 +256,17 @@ func writeJunkBody(dst []byte, fill JunkFill) error {
 // without doing the full PlanPE walk. Fast pre-flight for cover-layer
 // rejection.
 func bytesAreLikelyPE(input []byte) bool {
-	if len(input) < 0x40 {
+	if len(input) < transform.PEELfanewOffset+4 {
 		return false
 	}
 	if input[0] != 'M' || input[1] != 'Z' {
 		return false
 	}
-	peOff := binary.LittleEndian.Uint32(input[0x3C:0x40])
-	if int(peOff)+4 > len(input) {
+	peOff := binary.LittleEndian.Uint32(input[transform.PEELfanewOffset : transform.PEELfanewOffset+4])
+	if int(peOff)+transform.PESignatureSize > len(input) {
 		return false
 	}
-	return binary.LittleEndian.Uint32(input[peOff:peOff+4]) == 0x00004550
+	// PE\0\0 little-endian = 0x00004550.
+	return binary.LittleEndian.Uint32(input[peOff:peOff+transform.PESignatureSize]) == 0x00004550
 }
 
