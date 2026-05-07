@@ -1,26 +1,23 @@
-// Package stubgen orchestrates Phase 1e-A's per-pack stub generation.
-// Generate() takes the inner blob (stage 2 || encrypted payload || key)
-// plus configuration and produces a complete runnable Windows PE32+ that,
-// when executed, peels the polymorphic SGN encoding and JMPs into the
-// embedded stage 2.
+// Package stubgen drives the UPX-style transform pipeline for
+// Phase 1e:
 //
-// Pipeline at a glance:
+//  1. transform.PlanPE / PlanELF — compute layout RVAs from input
+//  2. poly.Engine.EncodePayload — N-round SGN-encode the input's .text bytes
+//  3. stage1.EmitStub — emit the polymorphic decoder asm
+//  4. stage1.PatchTextDisplacement — patch the CALL+POP+ADD
+//     prologue's text displacement
+//  5. transform.InjectStubPE / InjectStubELF — write the modified
+//     binary
 //
-//	encoded, rounds := poly.Engine.EncodePayload(inner)
-//	for i = N-1 .. 0:
-//	    stage1.Emit(builder, rounds[i], "loop_i", "payload", len(encoded))
-//	stage1Bytes = builder.Encode()
-//	host.EmitPE(stage1Bytes, encoded) → final PE
-//
-// Self-test: before returning, the package re-applies the rounds in
-// reverse via a Go reference decoder; if the recovered bytes don't match
-// the original inner, ErrEncodingSelfTestFailed fires.
+// The Phase 1e-A/B host emitter and stage 2 Go EXE are removed.
+// The kernel handles all binary loading; the stub only decrypts
+// and JMPs.
 //
 // # Detection level
 //
-// N/A — pack-time only. No technique-specific detection concern: the
-// output PE's detection surface belongs to the caller's payload, not
-// to this package.
+// N/A — pack-time only. The modified binary at runtime is "loud"
+// (RWX section, entry point not in the original .text). Pair with
+// evasion/sleepmask + evasion/preset for memory-side cover.
 //
 // # MITRE ATT&CK
 //

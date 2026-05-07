@@ -4,198 +4,236 @@ import (
 	"bytes"
 	"debug/elf"
 	"debug/pe"
+	"encoding/binary"
 	"errors"
 	"testing"
 
 	"github.com/oioio-space/maldev/pe/packer/stubgen"
+	"github.com/oioio-space/maldev/pe/packer/transform"
 )
 
-// TestGenerate_ProducesParsablePE verifies that Generate emits a
-// structurally valid PE32+ with exactly 2 sections (.text + .maldev).
-func TestGenerate_ProducesParsablePE(t *testing.T) {
-	inner := bytes.Repeat([]byte("the quick brown fox "), 100) // ~2 KB
-	out, err := stubgen.Generate(stubgen.Options{
-		Inner:  inner,
+// buildMinimalPE constructs a synthetic PE32+ with a single .text
+// section. Replicated from transform/pe_test.go — cross-package
+// test helpers are awkward in Go (they'd need an exported testutil
+// subpackage); duplicating the ~30-line builder keeps this package
+// self-contained and avoids a test-only import cycle.
+func buildMinimalPE(textSize, oepRVA uint32) []byte {
+	const (
+		dosHdrSize   = 0x40
+		peSigSize    = 4
+		coffSize     = 20
+		optHdrSize   = 240
+		fileAlign    = 0x200
+		sectionAlign = 0x1000
+	)
+	headersSize := uint32(dosHdrSize + peSigSize + coffSize + optHdrSize + 40)
+	headersAligned := (headersSize + fileAlign - 1) &^ (fileAlign - 1)
+	textRVA := uint32(0x1000)
+	textFileOff := headersAligned
+	textRawSize := (textSize + fileAlign - 1) &^ (fileAlign - 1)
+	totalSize := textFileOff + textRawSize
+
+	out := make([]byte, totalSize)
+	out[0] = 'M'
+	out[1] = 'Z'
+	binary.LittleEndian.PutUint32(out[0x3C:0x40], dosHdrSize)
+
+	off := uint32(dosHdrSize)
+	binary.LittleEndian.PutUint32(out[off:off+4], 0x00004550) // PE sig
+	off += peSigSize
+
+	binary.LittleEndian.PutUint16(out[off:off+2], 0x8664) // Machine AMD64
+	binary.LittleEndian.PutUint16(out[off+2:off+4], 1)    // NumberOfSections
+	binary.LittleEndian.PutUint16(out[off+16:off+18], optHdrSize)
+	binary.LittleEndian.PutUint16(out[off+18:off+20], 0x0022) // EXE | LARGE_ADDR_AWARE
+	off += coffSize
+
+	binary.LittleEndian.PutUint16(out[off:off+2], 0x20B)          // PE32+
+	binary.LittleEndian.PutUint32(out[off+0x10:off+0x14], oepRVA) // AddressOfEntryPoint
+	binary.LittleEndian.PutUint64(out[off+0x18:off+0x20], 0x140000000)
+	binary.LittleEndian.PutUint32(out[off+0x20:off+0x24], sectionAlign)
+	binary.LittleEndian.PutUint32(out[off+0x24:off+0x28], fileAlign)
+	binary.LittleEndian.PutUint16(out[off+0x30:off+0x32], 6)                   // MajorSubsystemVer
+	binary.LittleEndian.PutUint32(out[off+0x38:off+0x3C], textRVA+textRawSize) // SizeOfImage
+	binary.LittleEndian.PutUint32(out[off+0x3C:off+0x40], headersAligned)      // SizeOfHeaders
+	binary.LittleEndian.PutUint16(out[off+0x44:off+0x46], 3)                   // Subsystem CUI
+	binary.LittleEndian.PutUint64(out[off+0x48:off+0x50], 0x100000)
+	binary.LittleEndian.PutUint64(out[off+0x50:off+0x58], 0x1000)
+	binary.LittleEndian.PutUint64(out[off+0x58:off+0x60], 0x100000)
+	binary.LittleEndian.PutUint64(out[off+0x60:off+0x68], 0x1000)
+	binary.LittleEndian.PutUint32(out[off+0x6C:off+0x70], 16) // NumberOfRvaAndSizes
+	off += optHdrSize
+
+	// .text section header
+	copy(out[off:off+8], []byte(".text\x00\x00\x00"))
+	binary.LittleEndian.PutUint32(out[off+8:off+12], textSize)     // VirtualSize
+	binary.LittleEndian.PutUint32(out[off+12:off+16], textRVA)     // VirtualAddress
+	binary.LittleEndian.PutUint32(out[off+16:off+20], textRawSize) // SizeOfRawData
+	binary.LittleEndian.PutUint32(out[off+20:off+24], textFileOff) // PointerToRawData
+	binary.LittleEndian.PutUint32(out[off+36:off+40], 0x60000020)  // CODE|EXEC|READ
+	return out
+}
+
+// buildMinimalELF constructs a synthetic ELF64 with one PT_LOAD R+E
+// segment (the "text" equivalent).
+func buildMinimalELF(textSize uint32, textEntry uint64) []byte {
+	const (
+		ehdrSize = 64
+		phdrSize = 56
+		pageSize = 0x1000
+	)
+	textOff := uint64(ehdrSize + phdrSize)
+	textOff = (textOff + pageSize - 1) &^ (pageSize - 1)
+	textVAddr := textOff
+
+	totalSize := textOff + uint64(textSize)
+	out := make([]byte, totalSize)
+
+	out[0] = 0x7F
+	out[1] = 'E'
+	out[2] = 'L'
+	out[3] = 'F'
+	out[4] = 2                                        // ELFCLASS64
+	out[5] = 1                                        // ELFDATA2LSB
+	out[6] = 1                                        // EI_VERSION
+	binary.LittleEndian.PutUint16(out[0x10:0x12], 3)  // ET_DYN
+	binary.LittleEndian.PutUint16(out[0x12:0x14], 62) // EM_X86_64
+	binary.LittleEndian.PutUint32(out[0x14:0x18], 1)
+	binary.LittleEndian.PutUint64(out[0x18:0x20], textEntry)
+	binary.LittleEndian.PutUint64(out[0x20:0x28], ehdrSize) // e_phoff
+	binary.LittleEndian.PutUint16(out[0x34:0x36], ehdrSize) // e_ehsize
+	binary.LittleEndian.PutUint16(out[0x36:0x38], phdrSize) // e_phentsize
+	binary.LittleEndian.PutUint16(out[0x38:0x3A], 1)        // e_phnum=1
+
+	pOff := uint64(ehdrSize)
+	binary.LittleEndian.PutUint32(out[pOff:pOff+4], 1)                    // PT_LOAD
+	binary.LittleEndian.PutUint32(out[pOff+4:pOff+8], 5)                  // PF_R|PF_X
+	binary.LittleEndian.PutUint64(out[pOff+8:pOff+16], textOff)           // p_offset
+	binary.LittleEndian.PutUint64(out[pOff+16:pOff+24], textVAddr)        // p_vaddr
+	binary.LittleEndian.PutUint64(out[pOff+24:pOff+32], textVAddr)        // p_paddr
+	binary.LittleEndian.PutUint64(out[pOff+32:pOff+40], uint64(textSize)) // p_filesz
+	binary.LittleEndian.PutUint64(out[pOff+40:pOff+48], uint64(textSize)) // p_memsz
+	binary.LittleEndian.PutUint64(out[pOff+48:pOff+56], pageSize)         // p_align
+	return out
+}
+
+// TestGenerate_PEPasses verifies that Generate transforms a synthetic PE32+
+// into a structurally valid modified binary parsed cleanly by debug/pe.
+func TestGenerate_PEPasses(t *testing.T) {
+	input := buildMinimalPE(0x500, 0x1010)
+	out, key, err := stubgen.Generate(stubgen.Options{
+		Input:  input,
 		Rounds: 3,
 		Seed:   1,
 	})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
+	if len(key) == 0 {
+		t.Error("returned key is empty")
+	}
+
 	f, err := pe.NewFile(bytes.NewReader(out))
 	if err != nil {
-		t.Fatalf("debug/pe rejected emitted PE: %v", err)
+		t.Fatalf("debug/pe rejected output: %v", err)
 	}
 	defer f.Close()
 
 	if len(f.Sections) != 2 {
-		t.Errorf("Sections = %d, want 2", len(f.Sections))
-	}
-	if f.FileHeader.Machine != pe.IMAGE_FILE_MACHINE_AMD64 {
-		t.Errorf("Machine = %#x, want AMD64 (%#x)", f.FileHeader.Machine, pe.IMAGE_FILE_MACHINE_AMD64)
+		t.Errorf("Sections = %d, want 2 (.text + stub)", len(f.Sections))
 	}
 }
 
-// TestGenerate_RejectsOutOfRangeRounds ensures values outside [1,10]
-// are rejected with ErrInvalidRounds.
-func TestGenerate_RejectsOutOfRangeRounds(t *testing.T) {
-	for _, r := range []int{0, -1, 11} {
-		_, err := stubgen.Generate(stubgen.Options{Inner: []byte("x"), Rounds: r})
-		if !errors.Is(err, stubgen.ErrInvalidRounds) {
-			t.Errorf("rounds=%d: got %v, want ErrInvalidRounds", r, err)
+// TestGenerate_PETextEncrypted verifies that .text bytes in the output
+// differ from the input — they are encrypted, not plaintext.
+func TestGenerate_PETextEncrypted(t *testing.T) {
+	input := buildMinimalPE(0x500, 0x1010)
+
+	// Seed the .text region with a recognisable pattern.
+	const (
+		headersSize = 0x40 + 4 + 20 + 240 + 40 // DOS+PE+COFF+Opt+1 section hdr
+		fileAlign   = 0x200
+		textFileOff = (headersSize + fileAlign - 1) &^ (fileAlign - 1)
+	)
+	for i := uint32(0); i < 0x500 && int(textFileOff+i) < len(input); i++ {
+		input[textFileOff+i] = 0xCC // INT3 — recognisable filler
+	}
+
+	out, _, err := stubgen.Generate(stubgen.Options{Input: input, Rounds: 1, Seed: 1})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	// .text region in the output must not be all 0xCC
+	allUnchanged := true
+	for i := uint32(0); i < 0x500 && int(textFileOff+i) < len(out); i++ {
+		if out[textFileOff+i] != 0xCC {
+			allUnchanged = false
+			break
 		}
 	}
-}
-
-// TestGenerate_PerPackUniqueness checks that different seeds produce
-// meaningfully different output: overall Hamming distance ≥ 25% of the
-// shorter output's length. Seeds drive different register allocations,
-// substitution choices, and junk insertion, so the .text section bytes
-// should diverge well beyond the 25% threshold.
-func TestGenerate_PerPackUniqueness(t *testing.T) {
-	inner := bytes.Repeat([]byte{0x42}, 1024)
-	out1, err := stubgen.Generate(stubgen.Options{Inner: inner, Rounds: 3, Seed: 1})
-	if err != nil {
-		t.Fatalf("Generate seed=1: %v", err)
-	}
-	out2, err := stubgen.Generate(stubgen.Options{Inner: inner, Rounds: 3, Seed: 2})
-	if err != nil {
-		t.Fatalf("Generate seed=2: %v", err)
-	}
-	if bytes.Equal(out1, out2) {
-		t.Fatal("two packs with different seeds produced identical output")
-	}
-	minLen := min(len(out1), len(out2))
-	differing := 0
-	for i := 0; i < minLen; i++ {
-		if out1[i] != out2[i] {
-			differing++
-		}
-	}
-	if differing < minLen/4 {
-		t.Errorf("Hamming distance %d/%d < 25%%; per-pack uniqueness too low", differing, minLen)
+	if allUnchanged {
+		t.Error(".text region in output is identical to input — encryption not applied")
 	}
 }
 
-// TestPatchStage2_RoundTrip verifies that a patched stage-2 binary still
-// parses as a valid PE and contains the payload bytes verbatim in the
-// appended trailer.
-func TestPatchStage2_RoundTrip(t *testing.T) {
-	stage2, err := stubgen.PickStage2Variant(0, stubgen.HostFormatPE)
+// TestGenerate_PEEntryPointIsStub verifies that the output PE's
+// AddressOfEntryPoint matches the plan's StubRVA, not the original OEP.
+func TestGenerate_PEEntryPointIsStub(t *testing.T) {
+	input := buildMinimalPE(0x500, 0x1010)
+	out, _, err := stubgen.Generate(stubgen.Options{Input: input, Rounds: 1, Seed: 1})
 	if err != nil {
-		t.Fatalf("PickStage2Variant: %v", err)
+		t.Fatalf("Generate: %v", err)
 	}
-	payload := []byte("hello payload")
-	key := []byte("aes-gcm-key")
-	patched, err := stubgen.PatchStage2(stage2, payload, key)
-	if err != nil {
-		t.Fatalf("PatchStage2: %v", err)
-	}
-	// The trailer is appended after the PE body; debug/pe should still
-	// parse the headers cleanly because it reads from offset 0.
-	f, err := pe.NewFile(bytes.NewReader(patched))
-	if err != nil {
-		t.Errorf("patched stage2 doesn't parse as PE: %v", err)
-	} else {
-		f.Close()
-	}
-	if !bytes.Contains(patched, payload) {
-		t.Error("patched binary doesn't contain payload bytes verbatim")
-	}
-}
 
-// TestPatchStage2_MissingSentinel ensures that a buffer lacking the
-// sentinel is rejected with ErrStage2SentinelMissing.
-func TestPatchStage2_MissingSentinel(t *testing.T) {
-	noSentinel := bytes.Repeat([]byte{0x00}, 1024)
-	_, err := stubgen.PatchStage2(noSentinel, []byte("p"), []byte("k"))
-	if !errors.Is(err, stubgen.ErrStage2SentinelMissing) {
-		t.Errorf("got %v, want ErrStage2SentinelMissing", err)
-	}
-}
-
-// TestGenerate_RoundsAffectOutputSize checks that more rounds produce
-// strictly more stage-1 asm: each additional decoder loop adds
-// instructions, growing the .text section's VirtualSize monotonically.
-// File size stays constant because PE file-alignment (0x200) swallows
-// small asm differences, so we compare the .text VirtualSize directly.
-func TestGenerate_RoundsAffectOutputSize(t *testing.T) {
-	inner := bytes.Repeat([]byte{0xAA}, 256)
-	out1, err := stubgen.Generate(stubgen.Options{Inner: inner, Rounds: 1, Seed: 1})
+	f, err := pe.NewFile(bytes.NewReader(out))
 	if err != nil {
-		t.Fatalf("Generate rounds=1: %v", err)
-	}
-	out5, err := stubgen.Generate(stubgen.Options{Inner: inner, Rounds: 5, Seed: 1})
-	if err != nil {
-		t.Fatalf("Generate rounds=5: %v", err)
-	}
-	textVirt := func(raw []byte) uint32 {
-		f, err := pe.NewFile(bytes.NewReader(raw))
-		if err != nil {
-			t.Fatalf("debug/pe rejected PE: %v", err)
-		}
-		defer f.Close()
-		if len(f.Sections) == 0 {
-			t.Fatal("no sections")
-		}
-		return f.Sections[0].VirtualSize
-	}
-	v1 := textVirt(out1)
-	v5 := textVirt(out5)
-	if v5 <= v1 {
-		t.Errorf(".text VirtualSize rounds=5 (%d) not > rounds=1 (%d); extra decoder loops must grow .text", v5, v1)
-	}
-}
-
-// TestPickStage2Variant_ELF verifies the embedded Linux binary is
-// well-formed ELF. debug/elf.NewFile is pure Go and cross-platform,
-// so this test runs on all hosts — no skip guard needed.
-func TestPickStage2Variant_ELF(t *testing.T) {
-	stage2, err := stubgen.PickStage2Variant(0, stubgen.HostFormatELF)
-	if err != nil {
-		t.Fatalf("PickStage2Variant ELF: %v", err)
-	}
-	if len(stage2) == 0 {
-		t.Fatal("Linux stage-2 variant is empty")
-	}
-	f, err := elf.NewFile(bytes.NewReader(stage2))
-	if err != nil {
-		t.Fatalf("debug/elf rejects the embedded Linux variant: %v", err)
+		t.Fatalf("debug/pe rejected: %v", err)
 	}
 	defer f.Close()
-	if f.FileHeader.Type != elf.ET_DYN {
-		t.Errorf("embedded variant is not ET_DYN: %v", f.FileHeader.Type)
+
+	// Entry point must not be the original OEP (0x1010) — it must point
+	// into the new stub section.
+	if f.OptionalHeader == nil {
+		t.Fatal("no OptionalHeader")
+	}
+	opt := f.OptionalHeader.(*pe.OptionalHeader64)
+	if opt.AddressOfEntryPoint == 0x1010 {
+		t.Error("entry point still points to original OEP — stub section not wired up")
+	}
+	// Must be page-aligned (stub section RVA is always page-aligned by PlanPE)
+	if opt.AddressOfEntryPoint%0x1000 != 0 {
+		t.Errorf("entry point %#x not page-aligned (expected stub RVA)", opt.AddressOfEntryPoint)
 	}
 }
 
-// TestPickStage2Variant_RejectsUnknownFormat ensures an unrecognised
-// HostFormat value is rejected with ErrUnsupportedHostFormat.
-func TestPickStage2Variant_RejectsUnknownFormat(t *testing.T) {
-	_, err := stubgen.PickStage2Variant(0, stubgen.HostFormat(99))
-	if !errors.Is(err, stubgen.ErrUnsupportedHostFormat) {
-		t.Errorf("got %v, want ErrUnsupportedHostFormat", err)
-	}
-}
+// TestGenerate_ELFPasses verifies the ELF round-trip: debug/elf parses
+// the output, e_entry changed to StubRVA, two PT_LOAD segments.
+func TestGenerate_ELFPasses(t *testing.T) {
+	// buildMinimalELF places text at textOff = page_align(ehdrSize + phdrSize).
+	// The entry must be inside that segment [textOff, textOff+textSize).
+	// Use textOff + 0x10 as the OEP (same convention as the transform ELF tests).
+	const textOff = ((64 + 56) + 0x1000 - 1) &^ (0x1000 - 1)
+	input := buildMinimalELF(0x500, uint64(textOff)+0x10)
 
-// TestGenerate_LinuxELF_ProducesParsableELF verifies that Generate
-// with HostFormatELF emits bytes that debug/elf accepts and that the
-// output has exactly 2 PT_LOAD program headers (text + data).
-func TestGenerate_LinuxELF_ProducesParsableELF(t *testing.T) {
-	inner := bytes.Repeat([]byte("the quick brown fox "), 100)
-	out, err := stubgen.Generate(stubgen.Options{
-		Inner:      inner,
-		Rounds:     3,
-		Seed:       1,
-		HostFormat: stubgen.HostFormatELF,
+	out, key, err := stubgen.Generate(stubgen.Options{
+		Input:  input,
+		Rounds: 3,
+		Seed:   1,
 	})
 	if err != nil {
 		t.Fatalf("Generate ELF: %v", err)
 	}
+	if len(key) == 0 {
+		t.Error("returned key is empty")
+	}
+
 	f, err := elf.NewFile(bytes.NewReader(out))
 	if err != nil {
 		t.Fatalf("debug/elf rejected: %v", err)
 	}
 	defer f.Close()
+
 	loadCount := 0
 	for _, p := range f.Progs {
 		if p.Type == elf.PT_LOAD {
@@ -203,6 +241,59 @@ func TestGenerate_LinuxELF_ProducesParsableELF(t *testing.T) {
 		}
 	}
 	if loadCount != 2 {
-		t.Errorf("PT_LOAD count = %d, want 2", loadCount)
+		t.Errorf("PT_LOAD count = %d, want 2 (text + stub)", loadCount)
+	}
+	// Entry must differ from the original OEP (textOff + 0x10).
+	if f.Entry == uint64(textOff)+0x10 {
+		t.Error("e_entry unchanged — stub not wired up")
+	}
+}
+
+// TestGenerate_RejectsZeroInput verifies ErrNoInput.
+func TestGenerate_RejectsZeroInput(t *testing.T) {
+	_, _, err := stubgen.Generate(stubgen.Options{Input: nil})
+	if !errors.Is(err, stubgen.ErrNoInput) {
+		t.Errorf("got %v, want ErrNoInput", err)
+	}
+}
+
+// TestGenerate_RejectsOutOfRangeRounds verifies ErrInvalidRounds.
+func TestGenerate_RejectsOutOfRangeRounds(t *testing.T) {
+	input := buildMinimalPE(0x500, 0x1010)
+	for _, r := range []int{-1, 11, 100} {
+		_, _, err := stubgen.Generate(stubgen.Options{Input: input, Rounds: r})
+		if !errors.Is(err, stubgen.ErrInvalidRounds) {
+			t.Errorf("rounds=%d: got %v, want ErrInvalidRounds", r, err)
+		}
+	}
+}
+
+// TestGenerate_PerPackUniqueness verifies that different seeds produce
+// different output bytes.
+func TestGenerate_PerPackUniqueness(t *testing.T) {
+	input := buildMinimalPE(0x500, 0x1010)
+	out1, _, err := stubgen.Generate(stubgen.Options{Input: input, Rounds: 3, Seed: 1})
+	if err != nil {
+		t.Fatalf("Generate seed=1: %v", err)
+	}
+	out2, _, err := stubgen.Generate(stubgen.Options{Input: input, Rounds: 3, Seed: 2})
+	if err != nil {
+		t.Fatalf("Generate seed=2: %v", err)
+	}
+	if bytes.Equal(out1, out2) {
+		t.Error("seed=1 and seed=2 produced identical output")
+	}
+}
+
+// TestGenerate_RejectsUnknownFormat verifies ErrUnsupportedInputFormat
+// for garbage input.
+func TestGenerate_RejectsUnknownFormat(t *testing.T) {
+	_, _, err := stubgen.Generate(stubgen.Options{
+		Input:  bytes.Repeat([]byte{0x00}, 64),
+		Rounds: 1,
+		Seed:   1,
+	})
+	if !errors.Is(err, transform.ErrUnsupportedInputFormat) {
+		t.Errorf("got %v, want ErrUnsupportedInputFormat", err)
 	}
 }
