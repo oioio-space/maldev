@@ -2,6 +2,7 @@ package stubgen_test
 
 import (
 	"bytes"
+	"debug/elf"
 	"debug/pe"
 	"errors"
 	"testing"
@@ -80,7 +81,7 @@ func TestGenerate_PerPackUniqueness(t *testing.T) {
 // parses as a valid PE and contains the payload bytes verbatim in the
 // appended trailer.
 func TestPatchStage2_RoundTrip(t *testing.T) {
-	stage2, err := stubgen.PickStage2Variant(0)
+	stage2, err := stubgen.PickStage2Variant(0, stubgen.HostFormatPE)
 	if err != nil {
 		t.Fatalf("PickStage2Variant: %v", err)
 	}
@@ -143,5 +144,65 @@ func TestGenerate_RoundsAffectOutputSize(t *testing.T) {
 	v5 := textVirt(out5)
 	if v5 <= v1 {
 		t.Errorf(".text VirtualSize rounds=5 (%d) not > rounds=1 (%d); extra decoder loops must grow .text", v5, v1)
+	}
+}
+
+// TestPickStage2Variant_ELF verifies the embedded Linux binary is
+// well-formed ELF. debug/elf.NewFile is pure Go and cross-platform,
+// so this test runs on all hosts — no skip guard needed.
+func TestPickStage2Variant_ELF(t *testing.T) {
+	stage2, err := stubgen.PickStage2Variant(0, stubgen.HostFormatELF)
+	if err != nil {
+		t.Fatalf("PickStage2Variant ELF: %v", err)
+	}
+	if len(stage2) == 0 {
+		t.Fatal("Linux stage-2 variant is empty")
+	}
+	f, err := elf.NewFile(bytes.NewReader(stage2))
+	if err != nil {
+		t.Fatalf("debug/elf rejects the embedded Linux variant: %v", err)
+	}
+	defer f.Close()
+	if f.FileHeader.Type != elf.ET_DYN {
+		t.Errorf("embedded variant is not ET_DYN: %v", f.FileHeader.Type)
+	}
+}
+
+// TestPickStage2Variant_RejectsUnknownFormat ensures an unrecognised
+// HostFormat value is rejected with ErrUnsupportedHostFormat.
+func TestPickStage2Variant_RejectsUnknownFormat(t *testing.T) {
+	_, err := stubgen.PickStage2Variant(0, stubgen.HostFormat(99))
+	if !errors.Is(err, stubgen.ErrUnsupportedHostFormat) {
+		t.Errorf("got %v, want ErrUnsupportedHostFormat", err)
+	}
+}
+
+// TestGenerate_LinuxELF_ProducesParsableELF verifies that Generate
+// with HostFormatELF emits bytes that debug/elf accepts and that the
+// output has exactly 2 PT_LOAD program headers (text + data).
+func TestGenerate_LinuxELF_ProducesParsableELF(t *testing.T) {
+	inner := bytes.Repeat([]byte("the quick brown fox "), 100)
+	out, err := stubgen.Generate(stubgen.Options{
+		Inner:      inner,
+		Rounds:     3,
+		Seed:       1,
+		HostFormat: stubgen.HostFormatELF,
+	})
+	if err != nil {
+		t.Fatalf("Generate ELF: %v", err)
+	}
+	f, err := elf.NewFile(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("debug/elf rejected: %v", err)
+	}
+	defer f.Close()
+	loadCount := 0
+	for _, p := range f.Progs {
+		if p.Type == elf.PT_LOAD {
+			loadCount++
+		}
+	}
+	if loadCount != 2 {
+		t.Errorf("PT_LOAD count = %d, want 2", loadCount)
 	}
 }

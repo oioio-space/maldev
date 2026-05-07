@@ -13,6 +13,30 @@ import (
 	"github.com/oioio-space/maldev/pe/packer/stubgen/stage1"
 )
 
+// HostFormat selects which output format Generate produces.
+type HostFormat uint8
+
+const (
+	// HostFormatPE emits a Windows PE32+ executable (Phase 1e-A).
+	// Zero value preserves backward compatibility for all 1e-A callers
+	// that leave Options.HostFormat unset.
+	HostFormatPE HostFormat = 0
+	// HostFormatELF emits a Linux ELF64 static-PIE (Phase 1e-B).
+	HostFormatELF HostFormat = 1
+)
+
+// String returns the canonical lowercase format name.
+func (h HostFormat) String() string {
+	switch h {
+	case HostFormatPE:
+		return "pe"
+	case HostFormatELF:
+		return "elf"
+	default:
+		return fmt.Sprintf("hostformat(%d)", uint8(h))
+	}
+}
+
 // Sentinels.
 var (
 	// ErrInvalidRounds fires when Options.Rounds is outside [1, 10].
@@ -30,19 +54,31 @@ var (
 	// ErrStage2SentinelMissing fires when PatchStage2 cannot locate the
 	// 16-byte sentinel in the provided stage-2 binary.
 	ErrStage2SentinelMissing = errors.New("stubgen: stage-2 binary missing payload sentinel")
+	// ErrUnsupportedHostFormat fires when Generate / PickStage2Variant
+	// receives an unknown HostFormat value.
+	ErrUnsupportedHostFormat = errors.New("stubgen: unsupported host format")
 )
 
-// stage2V01 is the committed Phase 1e-A stage-2 loader binary.
+// stage2V01PE is the committed Phase 1e-A stage-2 loader binary (Windows PE32+).
 // Embedded at build time; operators never rebuild it unless they are
 // maintainers regenerating the stubvariants set.
 //
 //go:embed stubvariants/stage2_v01.exe
-var stage2V01 []byte
+var stage2V01PE []byte
 
-// variants holds all committed stage-2 binaries. Future variants
+// stage2V01ELF is the committed Phase 1e-B stage-2 loader binary (Linux ELF64 static-PIE).
+// Built from the same cross-platform stage2_main.go with -buildmode=pie.
+//
+//go:embed stubvariants/stage2_linux_v01
+var stage2V01ELF []byte
+
+// variantsPE holds all committed PE stage-2 binaries. Future variants
 // (v02..v08) are appended here and in the go:embed directives when
 // committed. The packer selects deterministically via seed % len.
-var variants = [][]byte{stage2V01}
+var variantsPE = [][]byte{stage2V01PE}
+
+// variantsELF holds all committed ELF stage-2 binaries (parallel to variantsPE).
+var variantsELF = [][]byte{stage2V01ELF}
 
 // sentinel must match the byte sequence in stubvariants/stage2_main.go
 // exactly. If they diverge, PatchStage2 finds the sentinel at pack-time
@@ -70,12 +106,16 @@ type Options struct {
 	// same Inner produce distinct output bytes (Hamming distance ≥ 25%
 	// in the .text section). Zero means crypto-random.
 	Seed int64
+	// HostFormat selects the output container format. Zero value
+	// (HostFormatPE) preserves Phase 1e-A behavior for existing callers.
+	HostFormat HostFormat
 }
 
 const maxInnerSize = 100 * 1024 * 1024 // 100 MB safety cap
 
-// Generate produces a complete PE32+ Windows executable containing a
-// polymorphic stage-1 decoder and the multi-round-encoded Inner blob.
+// Generate produces a runnable host binary wrapping a polymorphic
+// stage-1 decoder and the multi-round-encoded Inner blob. The output
+// format is determined by opts.HostFormat (default HostFormatPE).
 //
 // Pipeline:
 //  1. poly.NewEngine encodes Inner through Rounds XOR rounds.
@@ -83,8 +123,8 @@ const maxInnerSize = 100 * 1024 * 1024 // 100 MB safety cap
 //  3. stage1.Emit writes one decoder loop per round; the outermost
 //     round (rounds[N-1]) is emitted first so it executes first at
 //     runtime, peeling the outermost encoding layer.
-//  4. host.EmitPE wraps the assembled stage-1 bytes and the encoded
-//     payload blob in a 2-section PE32+ (.text + .maldev).
+//  4. host.EmitPE / host.EmitELF wraps the stage-1 bytes and encoded
+//     payload blob in the requested container format.
 func Generate(opts Options) ([]byte, error) {
 	if opts.Rounds < 1 || opts.Rounds > 10 {
 		return nil, fmt.Errorf("%w: rounds=%d", ErrInvalidRounds, opts.Rounds)
@@ -129,25 +169,49 @@ func Generate(opts Options) ([]byte, error) {
 		return nil, fmt.Errorf("stubgen: amd64.Encode: %w", err)
 	}
 
-	out, err := host.EmitPE(host.PEConfig{
-		Stage1Bytes: stage1Bytes,
-		PayloadBlob: encoded,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("stubgen: host.EmitPE: %w", err)
+	switch opts.HostFormat {
+	case HostFormatPE:
+		out, err := host.EmitPE(host.PEConfig{
+			Stage1Bytes: stage1Bytes,
+			PayloadBlob: encoded,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("stubgen: host.EmitPE: %w", err)
+		}
+		return out, nil
+	case HostFormatELF:
+		out, err := host.EmitELF(host.ELFConfig{
+			Stage1Bytes: stage1Bytes,
+			PayloadBlob: encoded,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("stubgen: host.EmitELF: %w", err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedHostFormat, opts.HostFormat)
 	}
-
-	return out, nil
 }
 
-// PickStage2Variant returns one of the committed stage-2 binaries,
-// chosen deterministically from seed. With one committed variant,
-// seed is irrelevant; future variants make the selection meaningful.
-func PickStage2Variant(seed int64) ([]byte, error) {
-	if len(variants) == 0 {
-		return nil, ErrNoStage2Variant
+// PickStage2Variant returns one of the committed stage-2 binaries for
+// the requested format, chosen deterministically from seed. With one
+// variant per format today the selection is trivial; future variants
+// (v02..v08) make the seed meaningful.
+func PickStage2Variant(seed int64, format HostFormat) ([]byte, error) {
+	switch format {
+	case HostFormatPE:
+		if len(variantsPE) == 0 {
+			return nil, ErrNoStage2Variant
+		}
+		return variantsPE[uint64(seed)%uint64(len(variantsPE))], nil
+	case HostFormatELF:
+		if len(variantsELF) == 0 {
+			return nil, ErrNoStage2Variant
+		}
+		return variantsELF[uint64(seed)%uint64(len(variantsELF))], nil
+	default:
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedHostFormat, format)
 	}
-	return variants[uint64(seed)%uint64(len(variants))], nil
 }
 
 // PatchStage2 locates the sentinel in the stage-2 binary and appends a
