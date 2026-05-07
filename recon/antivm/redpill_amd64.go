@@ -38,19 +38,23 @@ func sldtRaw(buf *byte)
 // on a sandbox should treat any panic from this routine as
 // "VM-likely" rather than "bare-metal".
 func SIDT() (base uint64, limit uint16) {
-	var buf [10]byte
-	sidtRaw(&buf[0])
-	limit = binary.LittleEndian.Uint16(buf[0:2])
-	base = binary.LittleEndian.Uint64(buf[2:10])
-	return base, limit
+	return readDescriptorTable(sidtRaw)
 }
 
 // SGDT mirrors [SIDT] for the Global Descriptor Table. Same
 // caveats: unprivileged, historically a Red Pill signal, weak on
 // modern VT-x / AMD-V. Returns base=0, limit=0 on non-amd64.
 func SGDT() (base uint64, limit uint16) {
+	return readDescriptorTable(sgdtRaw)
+}
+
+// readDescriptorTable runs the supplied 10-byte-emitting raw asm
+// helper (sidtRaw / sgdtRaw) and parses the canonical AMD64
+// pseudo-descriptor layout: 2-byte limit at offset 0, 8-byte base
+// at offset 2.
+func readDescriptorTable(emit func(*byte)) (base uint64, limit uint16) {
 	var buf [10]byte
-	sgdtRaw(&buf[0])
+	emit(&buf[0])
 	limit = binary.LittleEndian.Uint16(buf[0:2])
 	base = binary.LittleEndian.Uint64(buf[2:10])
 	return base, limit

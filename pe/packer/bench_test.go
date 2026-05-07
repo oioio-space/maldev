@@ -1,6 +1,7 @@
 package packer_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -44,7 +45,7 @@ func BenchmarkPackBinary_VaryRounds(b *testing.B) {
 		b.Fatalf("read fixture: %v", err)
 	}
 	for _, rounds := range []int{1, 3, 5, 7} {
-		b.Run(roundsLabel(rounds), func(sub *testing.B) {
+		b.Run(fmt.Sprintf("%drounds", rounds), func(sub *testing.B) {
 			sub.SetBytes(int64(len(input)))
 			sub.ResetTimer()
 			for i := 0; i < sub.N; i++ {
@@ -76,16 +77,3 @@ func BenchmarkAddCoverPE_DefaultCover(b *testing.B) {
 	}
 }
 
-func roundsLabel(n int) string {
-	switch n {
-	case 1:
-		return "1round"
-	case 3:
-		return "3rounds"
-	case 5:
-		return "5rounds"
-	case 7:
-		return "7rounds"
-	}
-	return "Nrounds"
-}

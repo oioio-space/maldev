@@ -40,10 +40,14 @@ func main() {
 		format = packer.FormatWindowsExe
 	}
 
+	// One captured seed feeds both PackBinary and the cover layer
+	// (offset by 1 so the two RNG streams diverge). Capturing once
+	// avoids same-nanosecond-tick collision on fast machines.
+	seed := time.Now().UnixNano()
 	packed, key, err := packer.PackBinary(payload, packer.PackBinaryOptions{
 		Format:       format,
 		Stage1Rounds: 3,
-		Seed:         time.Now().UnixNano(),
+		Seed:         seed,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "PackBinary: %v\n", err)
@@ -52,7 +56,7 @@ func main() {
 	fmt.Printf("packed %d → %d bytes (key %x...)\n", len(payload), len(packed), key[:8])
 
 	out := packed
-	covered, coverErr := packer.ApplyDefaultCover(packed, time.Now().UnixNano())
+	covered, coverErr := packer.ApplyDefaultCover(packed, seed+1)
 	switch {
 	case coverErr == nil:
 		out = covered

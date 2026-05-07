@@ -3,6 +3,7 @@ package poly
 import (
 	"fmt"
 	"math/rand"
+	"slices"
 
 	"github.com/oioio-space/maldev/pe/packer/stubgen/amd64"
 )
@@ -29,23 +30,9 @@ func NewRegPool(rng *rand.Rand) *RegPool {
 // randomisation cannot clobber the runtime TextRVA pointer it
 // holds across all rounds.
 func NewRegPoolExcluding(rng *rand.Rand, excluded ...amd64.Reg) *RegPool {
-	all := amd64.AllGPRs()
-	if len(excluded) > 0 {
-		filtered := all[:0]
-		for _, r := range all {
-			drop := false
-			for _, e := range excluded {
-				if r == e {
-					drop = true
-					break
-				}
-			}
-			if !drop {
-				filtered = append(filtered, r)
-			}
-		}
-		all = filtered
-	}
+	all := slices.DeleteFunc(amd64.AllGPRs(), func(r amd64.Reg) bool {
+		return slices.Contains(excluded, r)
+	})
 	rng.Shuffle(len(all), func(i, j int) { all[i], all[j] = all[j], all[i] })
 	return &RegPool{available: all, rng: rng}
 }

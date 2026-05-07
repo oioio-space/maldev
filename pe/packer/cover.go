@@ -136,9 +136,12 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 
 	sectionTableOff := uint32(optOff) + uint32(sizeOfOptHdr)
 
-	// Compute the highest existing RVA + raw end so the new
-	// sections sit cleanly after them.
+	// One pass over the section table records the highest existing
+	// RVA + raw end (so new sections can sit cleanly after them) and
+	// the lowest raw offset (so the section-table-grow check below
+	// knows the slack ceiling).
 	var maxRVAEnd, maxRawEnd uint32
+	firstSecRaw := uint32(0xFFFFFFFF)
 	for i := uint16(0); i < numSections; i++ {
 		hdr := sectionTableOff + uint32(i)*40
 		va := binary.LittleEndian.Uint32(input[hdr+0x0C : hdr+0x10])
@@ -150,6 +153,9 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 		}
 		if e := raw + rawSize; e > maxRawEnd {
 			maxRawEnd = e
+		}
+		if raw < firstSecRaw {
+			firstSecRaw = raw
 		}
 	}
 
@@ -185,21 +191,13 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 		rawCursor += plans[i].rawSize
 	}
 
-	// Verify the section table has room for the new headers.
-	firstSecRaw := uint32(0xFFFFFFFF)
-	for i := uint16(0); i < numSections; i++ {
-		hdr := sectionTableOff + uint32(i)*40
-		raw := binary.LittleEndian.Uint32(input[hdr+0x14 : hdr+0x18])
-		if raw < firstSecRaw {
-			firstSecRaw = raw
-		}
-	}
+	// Reject when the new section headers would overrun into the
+	// first section's body bytes (no slack between table and data).
 	newTableEnd := sectionTableOff + uint32(numSections+uint16(len(plans)))*40
 	if newTableEnd > firstSecRaw {
 		return nil, ErrCoverSectionTableFull
 	}
 
-	// Build the output buffer.
 	totalSize := rawCursor
 	if uint32(len(input)) > totalSize {
 		totalSize = uint32(len(input))
@@ -207,7 +205,6 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 	out := make([]byte, totalSize)
 	copy(out, input)
 
-	// Patch new section headers + bodies.
 	for i, p := range plans {
 		hdrOff := sectionTableOff + uint32(numSections+uint16(i))*40
 		copy(out[hdrOff:hdrOff+8], p.name[:])

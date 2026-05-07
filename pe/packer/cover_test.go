@@ -49,8 +49,7 @@ func minimalPE32Plus(textSize uint32) []byte {
 	put32(buf[coff+0x08:], 0)      // PointerToSymbolTable
 	put32(buf[coff+0x0C:], 0)      // NumberOfSymbols
 	put16(buf[coff+0x10:], optHdrSize)
-	put16(buf[coff+0x12:], 0x2022) // Characteristics: EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE | DLL? → use EXEC|LARGE
-	// adjust: EXECUTABLE_IMAGE = 0x0002, LARGE_ADDRESS_AWARE = 0x0020 → 0x0022
+	// Characteristics: EXECUTABLE_IMAGE (0x0002) | LARGE_ADDRESS_AWARE (0x0020).
 	put16(buf[coff+0x12:], 0x0022)
 
 	opt := coff + 20
