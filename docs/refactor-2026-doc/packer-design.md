@@ -333,7 +333,7 @@ ratio. Stack with HexAlphabet (or accept the 50% size cost of
 | **1c** | **Composability pipeline** — `Options.Pipeline []PipelineStep` + integration with `crypto/*` (cipher, permutation). | ⏳ next |
 | 1c.5 | Compression in pipeline — flate + gzip (stdlib) ship first; aPLib / LZMA / zstd / LZ4 reserved | ✅ v0.53.0 |
 | **1d** | **Anti-entropy** — `OpEntropyCover` step with three algorithms: `EntropyCoverInterleave` (low-entropy padding spliced between ciphertext chunks; default 33% padding lands at ~7.4 bits/byte; stack with HexAlphabet for <5), `EntropyCoverCarrier` (PNG-shaped 32-byte prefix), `EntropyCoverHexAlphabet` (byte → 2-byte code-like alphabet pair; apparent entropy ≤ 4 bits/byte). | ✅ this commit |
-| 1e | Polymorphic stub generation (compile-time templating) + multi-format output (exe / reflective-dll / service-exe / dotnet / bof) | ⏳ |
+| 1e | Polymorphic stub generation + multi-format output. **Stage 1e-A** ✅ this commit: pure-Go SGN-style polymorphic stage-1 decoder via golang-asm + pre-built committed stage-2 stub variants + minimal PE32+ host emitter. No `go build` at pack-time. Phase 1e-B (Linux ELF host), 1e-C (Windows DLL), 1e-D (BOF), 1e-E (.NET) staged separately. | 🟡 Stage A |
 | 1f | Linux ELF reflective loader for any self-contained static-PIE (Stage A: parser + dispatch; Stage B: mmap + RELATIVE; Stage C+D: Go static-PIE gate + Run() jump-to-entry; Stage E: broadened gate to non-Go static-PIE — hand-rolled asm, C/Rust built with -static-pie — gated by structural ET_DYN + no DT_NEEDED + ≥1 PT_LOAD). Stage F (full ld.so emulation for libc-using binaries) out of scope. | ✅ Stages A+B+C+D+E |
 | 2 | Section shuffle + IAT scramble (host PE) | deferred |
 | 3 | Junk sections + stub control-flow obfuscation | deferred |

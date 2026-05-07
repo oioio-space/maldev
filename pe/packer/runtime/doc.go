@@ -30,6 +30,13 @@
 // with a clear rebuild hint. Stage F will eventually broaden
 // to full ld.so emulation for libc-using binaries.
 //
+// Phase 1e-A composes on top of the runtime: pe/packer.PackBinary
+// produces a runnable Windows PE32+ that, at execution, peels a
+// polymorphic SGN-encoded stage-1 decoder loop and JMPs into an
+// embedded stage-2 (a pre-built Go EXE that consumes this runtime
+// via runtime.LoadPE). The runtime needs no changes for Phase 1e-A
+// — it is the unchanged second stage of the new packed-binary flow.
+//
 // Out of scope (rejected at parse time or surfaced as resolution
 // failures): DLLs (calling DllMain), TLS callbacks, x86,
 // SxS-redirected ordinal imports (e.g., COMCTL32 v6), big-endian
