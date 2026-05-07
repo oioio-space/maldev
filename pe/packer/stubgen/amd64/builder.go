@@ -151,8 +151,37 @@ func (bb *Builder) DEC(dst Op) error {
 	return nil
 }
 
+// POP emits POP dst (64-bit pop from stack). Used by the CALL+POP+ADD
+// PIC prologue in the UPX-style stub to read the return address pushed
+// by CALL into a callee-saved register.
+func (bb *Builder) POP(dst Op) error {
+	p := bb.b.NewProg()
+	p.As = x86.APOPQ
+	if err := setOperand(&p.To, dst); err != nil {
+		return fmt.Errorf("amd64: POP dst: %w", err)
+	}
+	bb.b.AddInstruction(p)
+	return nil
+}
+
+// RawBytes emits raw machine bytes verbatim into the output stream.
+// Used for instructions golang-asm cannot express (e.g. CALL rel32=0
+// for the CALL+POP+ADD PIC prologue — a forward CALL whose target is
+// the immediately following instruction).
+func (bb *Builder) RawBytes(bs []byte) error {
+	for _, b8 := range bs {
+		p := bb.b.NewProg()
+		p.As = x86.ABYTE
+		p.From.Type = obj.TYPE_CONST
+		p.From.Offset = int64(b8)
+		bb.b.AddInstruction(p)
+	}
+	return nil
+}
+
 // JMP emits an unconditional jump. target must be a LabelRef
-// (resolved before Encode) or a MemOp (indirect jump).
+// (resolved before Encode), a MemOp (indirect jump through memory),
+// or a Reg (indirect jump through register, e.g. JMP r15).
 func (bb *Builder) JMP(target Op) error { return bb.branchOp(obj.AJMP, "JMP", target) }
 
 // JNZ emits a jump-if-not-zero (JNE). target must be LabelRef or MemOp.
@@ -166,6 +195,9 @@ func (bb *Builder) CALL(target Op) error { return bb.branchOp(obj.ACALL, "CALL",
 
 // branchOp is the shared emitter for branch/call instructions.
 // LabelRef targets are deferred — Encode patches them before Assemble().
+// Reg targets produce an indirect jump/call through the register (FF /4
+// for JMP r/m64; FF /2 for CALL r/m64), needed by the stub epilogue's
+// JMP r15.
 func (bb *Builder) branchOp(as obj.As, name string, target Op) error {
 	p := bb.b.NewProg()
 	p.As = as
@@ -179,8 +211,11 @@ func (bb *Builder) branchOp(as obj.As, name string, target Op) error {
 		if err := setOperand(&p.To, v); err != nil {
 			return fmt.Errorf("amd64: %s target: %w", name, err)
 		}
+	case Reg:
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = regToObj(v)
 	default:
-		return fmt.Errorf("amd64: %s target must be LabelRef or MemOp, got %T", name, target)
+		return fmt.Errorf("amd64: %s target must be LabelRef, MemOp, or Reg, got %T", name, target)
 	}
 	bb.b.AddInstruction(p)
 	return nil

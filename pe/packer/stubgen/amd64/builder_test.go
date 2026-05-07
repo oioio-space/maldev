@@ -128,6 +128,74 @@ func TestBuilder_MOVB(t *testing.T) {
 	}
 }
 
+// TestBuilder_POP verifies that POP R15 encodes to the Intel 41 5F
+// form and disassembles as POP. Required by the CALL+POP+ADD PIC
+// prologue in the UPX-style stub.
+func TestBuilder_POP(t *testing.T) {
+	b, err := amd64.New()
+	require.NoError(t, err)
+
+	require.NoError(t, b.POP(amd64.R15))
+
+	out, err := b.Encode()
+	require.NoError(t, err)
+	require.NotEmpty(t, out)
+
+	inst, err := x86asm.Decode(out, 64)
+	require.NoError(t, err, "Decode (bytes=% x)", out)
+	if inst.Op != x86asm.POP {
+		t.Errorf("got %v, want POP", inst.Op)
+	}
+	// Intel Vol 2B: POP R15 = 41 5F
+	if len(out) < 2 || out[0] != 0x41 || out[1] != 0x5F {
+		t.Errorf("encoding % x, want 41 5f", out)
+	}
+}
+
+// TestBuilder_RawBytes verifies that RawBytes emits verbatim bytes,
+// specifically the E8 00 00 00 00 CALL+0 idiom used by the PIC prologue
+// to push the return address without a linker symbol.
+func TestBuilder_RawBytes(t *testing.T) {
+	b, err := amd64.New()
+	require.NoError(t, err)
+
+	// CALL rel32=0 — CALL to next instruction (PIC address-of-self)
+	require.NoError(t, b.RawBytes([]byte{0xE8, 0x00, 0x00, 0x00, 0x00}))
+
+	out, err := b.Encode()
+	require.NoError(t, err)
+	require.Equal(t, 5, len(out), "expected 5 bytes for CALL rel32=0")
+
+	inst, err := x86asm.Decode(out, 64)
+	require.NoError(t, err, "Decode (bytes=% x)", out)
+	if inst.Op != x86asm.CALL {
+		t.Errorf("got %v, want CALL", inst.Op)
+	}
+}
+
+// TestBuilder_JMP_Reg verifies that JMP(Reg) encodes to the Intel FF /4
+// (JMP r/m64) form — required by the stub epilogue's JMP r15.
+func TestBuilder_JMP_Reg(t *testing.T) {
+	b, err := amd64.New()
+	require.NoError(t, err)
+
+	require.NoError(t, b.JMP(amd64.R15))
+
+	out, err := b.Encode()
+	require.NoError(t, err)
+	require.NotEmpty(t, out)
+
+	inst, err := x86asm.Decode(out, 64)
+	require.NoError(t, err, "Decode (bytes=% x)", out)
+	if inst.Op != x86asm.JMP {
+		t.Errorf("got %v, want JMP", inst.Op)
+	}
+	// Intel Vol 2A: JMP r/m64 with REX.B+R15 = 41 FF E7
+	if len(out) < 3 || out[0] != 0x41 || out[1] != 0xFF || out[2] != 0xE7 {
+		t.Errorf("encoding % x, want 41 ff e7", out)
+	}
+}
+
 // TestBuilder_LabelAndJMP verifies that a backward JMP to a label
 // resolves to the correct target and disassembles as JMP.
 func TestBuilder_LabelAndJMP(t *testing.T) {
