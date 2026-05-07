@@ -1,10 +1,10 @@
 ---
 package: github.com/oioio-space/maldev/pe/packer
-last_reviewed: 2026-05-06
-reflects_commit: HEAD
+last_reviewed: 2026-05-07
+reflects_commit: 7284426
 ---
 
-# PE Packer (Phase 1a + 1b — encrypt/embed + reflective loader)
+# PE Packer (Phase 1a–1e — encrypt/embed + reflective loader + UPX-style)
 
 [← pe index](README.md) · [docs/index](../../index.md)
 
@@ -283,6 +283,134 @@ See package godoc for full constant lists. Phase 1a only
 implements `CipherAESGCM` + `CompressorNone`; other constants
 are reserved for Phase 1b/1c.
 
+### `func PackBinary(input []byte, opts PackBinaryOptions) (out []byte, key []byte, err error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#PackBinary)
+
+**v0.61.0 — Phase 1e UPX-style packer.** Modifies an input
+PE32+ or ELF64 in place: encrypts the `.text` section with the
+SGN polymorphic encoder, appends a small CALL+POP+ADD-prologue
+decoder stub as a new section, rewrites the entry point. Output
+is a single self-contained binary the kernel loads normally; no
+secondary stage 2.
+
+This replaces the broken `v0.59.0` / `v0.60.0` architecture
+(host wrapper + stage 2 Go EXE) which produced byte-shape-correct
+binaries that crashed at runtime. See
+`docs/refactor-2026-doc/KNOWN-ISSUES-1e.md` for the post-mortem.
+
+**Parameters:**
+
+- `input` — full PE32+ or ELF64 binary bytes.
+- `opts.Format` — `FormatWindowsExe` or `FormatLinuxELF`.
+- `opts.Stage1Rounds` — number of SGN decoder rounds (3 is the
+  ship-tested baseline; higher = larger stub + longer decrypt).
+- `opts.Seed` — RNG seed for the polymorphic engine. Same seed
+  + same input + same rounds = byte-identical output (useful
+  for tests; vary per pack in production).
+- `opts.CipherKey` — currently informational only (the SGN
+  layer is the encryption); reserved for future Phase 1c+ AES
+  wrapping.
+
+**Returns:** `(packed, key, err)`. `packed` is a runnable
+single-binary; `key` is the seed-derived key material.
+
+**Sentinels** (use `errors.Is`):
+
+- `transform.ErrUnsupportedInputFormat` — magic bytes don't
+  match the requested `Format`.
+- `transform.ErrNoTextSection` — input lacks an executable
+  `.text` section.
+- `transform.ErrOEPOutsideText` — original entry point falls
+  outside the `.text` section.
+- `transform.ErrTLSCallbacks` — input has TLS callbacks (would
+  run before OEP and touch encrypted bytes).
+- `transform.ErrStubTooLarge` — stub exceeded `StubMaxSize`.
+
+**Side effects:** none — pure-Go byte manipulation.
+
+**OPSEC:** the output PE/ELF carries an extra section (named
+randomly per pack) and a slightly elevated entropy footprint.
+Pair with [AddCoverPE]/[AddCoverELF] to inflate the static
+surface and frustrate naive packer fingerprints.
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform — pack-time behaviour is identical
+on linux/windows/darwin. Output runs on Windows (PE) or Linux
+(ELF).
+
+**E2E ship gate:** `TestPackBinary_LinuxELF_E2E` (gated behind
+`-tags=maldev_packer_run_e2e`) packs the
+`pe/packer/runtime/testdata/hello_static_pie` fixture and
+asserts the subprocess runs to clean exit with the payload's
+`"hello from packer"` output captured.
+
+### `func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#AddCoverPE)
+
+Anti-static-unpacker primitive (P3.1 Phase 3a). Appends junk
+sections to a packed PE32+ produced by [PackBinary]. Each
+section carries `MEM_READ` only (no W, no X) — the kernel maps
+them but never executes; the runtime path is unchanged.
+
+**Parameters:**
+
+- `input` — packed PE32+ bytes.
+- `opts.JunkSections` — ordered list of `JunkSection{Name, Size,
+  Fill}`. `Name` is the 8-byte section name; common cover
+  choices: `.rsrc`, `.rdata2`, `.pdata`, `.tls`. Empty defaults
+  to `.rdata`.
+
+**Fill strategies (`JunkFill`):**
+
+| Constant | Body | Use |
+|---|---|---|
+| `JunkFillRandom` | `crypto/rand` bytes | ~8.0 bits/byte entropy — hide among legit `.rsrc` sections |
+| `JunkFillZero` | zeros | flatten the entropy curve to evade percentage thresholds |
+| `JunkFillPattern` | frequency-ordered byte alphabet (`0x00`, `0x48`, `0xC3`, `0xCC`, `0x90`, `0xFF`, `0xE8`, `0x55`) | mimics `.text` shape under casual entropy plots |
+
+**Returns:** new buffer with cover sections appended;
+`NumberOfSections` and `SizeOfImage` updated. Original `.text`
+body bytes are byte-identical.
+
+**Sentinels:**
+
+- `ErrCoverInvalidOptions` — empty `JunkSections` or non-PE input.
+- `ErrCoverSectionTableFull` — section header table cannot grow
+  (no slack between table and first section's file offset).
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform pack-time; output runs on Windows.
+
+### `func AddCoverELF(input []byte, opts CoverOptions) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#AddCoverELF)
+
+ELF64 mirror of [AddCoverPE]. Each `JunkSection` becomes a new
+`PT_LOAD` program-header entry with `PF_R` only.
+
+**Limitation — Go static-PIE:** the input must have PHT slack
+between the program-header-table end and the first PT_LOAD's
+file offset. Go static-PIE binaries place the first PT_LOAD at
+file offset 0 → returns `ErrCoverSectionTableFull`. The v2
+follow-up will relocate the PHT to file-end and update
+`e_phoff`. Until then, operators packing Go binaries should
+chain only `AddCoverPE` (target-Windows) or accept the limitation
+on the ELF side.
+
+**Section header table (SHT):** cover layer adds entries to the
+PHT only — the SHT is left untouched, so a stripped binary
+stays stripped.
+
+**Parameters / Returns / Sentinels:** same shape as `AddCoverPE`.
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform pack-time; output runs on Linux.
+
 ## OPSEC & Detection
 
 | Artefact | Where defenders look |
@@ -315,18 +443,33 @@ are reserved for Phase 1b/1c.
 
 ## Limitations
 
-- **Phase 1a is data-only.** No execution path. Use Phase 1b
-  (when it ships) for runnable PE output.
-- **Magic at offset 0.** Trivially fingerprinted; intentional
-  for Phase 1a — Phase 1b hides it.
-- **Compression not yet implemented.** `CompressorNone` only.
-- **AES-GCM only.** ChaCha20 + RC4 constants are placeholders.
-- **No polymorphic stub yet.** Per-pack uniqueness today comes
-  only from AES-GCM nonce randomness; Phase 1d adds
-  compile-time stub templating.
-- **Key management is the operator's problem.** Pack returns
-  the key; how the operator transports it to Unpack at the
-  target / build-host is not handled here.
+- **`PackBinary` (v0.61.0) requires `.text` to host OEP.** The
+  original entry point must lie inside the `.text` section so
+  the stub's final JMP lands on decrypted code. Binaries that
+  start in another section (custom linkers, packed-twice
+  inputs) return `ErrOEPOutsideText`.
+- **`PackBinary` rejects TLS callbacks.** TLS callbacks run
+  before OEP and would touch encrypted bytes. Inputs with a
+  non-empty TLS Data Directory return `ErrTLSCallbacks`.
+- **`AddCoverELF` requires PHT slack.** Go static-PIE binaries
+  (first PT_LOAD at file offset 0) return
+  `ErrCoverSectionTableFull`. PHT relocation to file-end is the
+  v2 follow-up.
+- **Cover-layer fake imports not yet shipped.** Only junk
+  sections / PT_LOADs ship today; the v2 will add a benign-DLL
+  Import Directory + IAT for static-analysis cover.
+- **`Pack` (Phase 1a) magic at offset 0.** Trivially
+  fingerprinted; use `PackBinary` (Phase 1e) for binary output
+  or `PackPipeline` (Phase 1c) for blob output where the magic
+  travels inside a wrapper.
+- **`Pack` compression not yet implemented.** `CompressorNone`
+  only on the single-step Pack path; the pipeline path
+  (`PackPipeline`) ships `CompressorFlate` + `CompressorGzip`.
+- **`Pack` AES-GCM only.** ChaCha20 + RC4 constants are
+  placeholders for future Cipher additions.
+- **Key management is the operator's problem.** All packers
+  return the key; how the operator transports it to Unpack at
+  the target / build-host is not handled here.
 
 ## See also
 
