@@ -7,32 +7,6 @@ import (
 	"github.com/oioio-space/maldev/pe/packer/transform"
 )
 
-// ELF64 layout constants. The transform package keeps its own
-// unexported copies of overlapping fields (Phdr offsets, page
-// size); promoting those into a shared exported set is a separate
-// chantier. Until then the cover layer carries this small set.
-const (
-	elfEhdrSizeC         = 64
-	elfPhdrSizeC         = 56
-	elfPageSizeC  uint64 = 0x1000
-
-	ehdrPhoffOff   = 0x20
-	ehdrPhentszOff = 0x36
-	ehdrPhnumOff   = 0x38
-
-	phdrTypeOff   = 0x00
-	phdrFlagsOff  = 0x04
-	phdrOffsetOff = 0x08
-	phdrVAddrOff  = 0x10
-	phdrPAddrOff  = 0x18
-	phdrFileSzOff = 0x20
-	phdrMemSzOff  = 0x28
-	phdrAlignOff  = 0x30
-
-	pfReadC uint32 = 4
-	ptLoadC uint32 = 1
-)
-
 // AddCoverELF is the ELF64 mirror of [AddCoverPE]. Each
 // [JunkSection] becomes a new PT_LOAD program-header entry with R
 // only (no W, no X). The kernel maps each PT_LOAD as ordinary
@@ -66,11 +40,11 @@ func AddCoverELF(input []byte, opts CoverOptions) ([]byte, error) {
 		return nil, fmt.Errorf("%w: not an ELF64", ErrCoverInvalidOptions)
 	}
 
-	phoff := binary.LittleEndian.Uint64(input[ehdrPhoffOff : ehdrPhoffOff+8])
-	phentsize := binary.LittleEndian.Uint16(input[ehdrPhentszOff : ehdrPhentszOff+2])
-	phnum := binary.LittleEndian.Uint16(input[ehdrPhnumOff : ehdrPhnumOff+2])
-	if phentsize != elfPhdrSizeC {
-		return nil, fmt.Errorf("%w: phentsize %d != %d", ErrCoverInvalidOptions, phentsize, elfPhdrSizeC)
+	phoff := binary.LittleEndian.Uint64(input[transform.ElfEhdrPhoffOffset : transform.ElfEhdrPhoffOffset+8])
+	phentsize := binary.LittleEndian.Uint16(input[transform.ElfEhdrPhentszOffset : transform.ElfEhdrPhentszOffset+2])
+	phnum := binary.LittleEndian.Uint16(input[transform.ElfEhdrPhnumOffset : transform.ElfEhdrPhnumOffset+2])
+	if phentsize != transform.ElfPhdrSize {
+		return nil, fmt.Errorf("%w: phentsize %d != %d", ErrCoverInvalidOptions, phentsize, transform.ElfPhdrSize)
 	}
 
 	// Locate the highest virtual end + file end across all
@@ -82,15 +56,15 @@ func AddCoverELF(input []byte, opts CoverOptions) ([]byte, error) {
 		if int(off)+int(phentsize) > len(input) {
 			return nil, fmt.Errorf("%w: phdr past end of input", ErrCoverInvalidOptions)
 		}
-		ptype := binary.LittleEndian.Uint32(input[off+phdrTypeOff : off+phdrTypeOff+4])
-		if ptype != ptLoadC {
+		ptype := binary.LittleEndian.Uint32(input[off+transform.ElfPhdrTypeOffset : off+transform.ElfPhdrTypeOffset+4])
+		if ptype != transform.ElfPTLoad {
 			continue
 		}
-		o := binary.LittleEndian.Uint64(input[off+phdrOffsetOff : off+phdrOffsetOff+8])
-		va := binary.LittleEndian.Uint64(input[off+phdrVAddrOff : off+phdrVAddrOff+8])
-		fs := binary.LittleEndian.Uint64(input[off+phdrFileSzOff : off+phdrFileSzOff+8])
-		ms := binary.LittleEndian.Uint64(input[off+phdrMemSzOff : off+phdrMemSzOff+8])
-		if e := transform.AlignUpU64(va+ms, elfPageSizeC); e > maxVEnd {
+		o := binary.LittleEndian.Uint64(input[off+transform.ElfPhdrOffsetOffset : off+transform.ElfPhdrOffsetOffset+8])
+		va := binary.LittleEndian.Uint64(input[off+transform.ElfPhdrVAddrOffset : off+transform.ElfPhdrVAddrOffset+8])
+		fs := binary.LittleEndian.Uint64(input[off+transform.ElfPhdrFileSzOffset : off+transform.ElfPhdrFileSzOffset+8])
+		ms := binary.LittleEndian.Uint64(input[off+transform.ElfPhdrMemSzOffset : off+transform.ElfPhdrMemSzOffset+8])
+		if e := transform.AlignUpU64(va+ms, transform.ElfPageSize); e > maxVEnd {
 			maxVEnd = e
 		}
 		if e := o + fs; e > maxFEnd {
@@ -107,33 +81,29 @@ func AddCoverELF(input []byte, opts CoverOptions) ([]byte, error) {
 		return nil, ErrCoverSectionTableFull
 	}
 
-	// Plan the new PT_LOADs.
+	// Plan the new PT_LOADs. Bodies are filled directly into the
+	// output buffer below — no per-section intermediate alloc.
 	type planned struct {
 		fileOff uint64
 		vaddr   uint64
 		size    uint64
-		body    []byte
+		fill    JunkFill
 	}
 	plans := make([]planned, len(opts.JunkSections))
-	vCursor := transform.AlignUpU64(maxVEnd, elfPageSizeC)
-	fCursor := transform.AlignUpU64(maxFEnd, elfPageSizeC)
+	vCursor := transform.AlignUpU64(maxVEnd, transform.ElfPageSize)
+	fCursor := transform.AlignUpU64(maxFEnd, transform.ElfPageSize)
 	for i, js := range opts.JunkSections {
-		body, err := generateJunkBody(js.Size, js.Fill)
-		if err != nil {
-			return nil, err
-		}
-		paged := transform.AlignUpU64(uint64(js.Size), elfPageSizeC)
+		paged := transform.AlignUpU64(uint64(js.Size), transform.ElfPageSize)
 		plans[i] = planned{
 			fileOff: fCursor,
 			vaddr:   vCursor,
 			size:    uint64(js.Size),
-			body:    body,
+			fill:    js.Fill,
 		}
 		vCursor += paged
 		fCursor += paged
 	}
 
-	// Build output buffer.
 	totalSize := fCursor
 	if uint64(len(input)) > totalSize {
 		totalSize = uint64(len(input))
@@ -141,22 +111,23 @@ func AddCoverELF(input []byte, opts CoverOptions) ([]byte, error) {
 	out := make([]byte, totalSize)
 	copy(out, input)
 
-	// Patch new phdr slots.
 	for i, p := range plans {
 		off := phoff + uint64(uint16(phnum)+uint16(i))*uint64(phentsize)
-		binary.LittleEndian.PutUint32(out[off+phdrTypeOff:off+phdrTypeOff+4], ptLoadC)
-		binary.LittleEndian.PutUint32(out[off+phdrFlagsOff:off+phdrFlagsOff+4], pfReadC)
-		binary.LittleEndian.PutUint64(out[off+phdrOffsetOff:off+phdrOffsetOff+8], p.fileOff)
-		binary.LittleEndian.PutUint64(out[off+phdrVAddrOff:off+phdrVAddrOff+8], p.vaddr)
-		binary.LittleEndian.PutUint64(out[off+phdrPAddrOff:off+phdrPAddrOff+8], p.vaddr)
-		binary.LittleEndian.PutUint64(out[off+phdrFileSzOff:off+phdrFileSzOff+8], p.size)
-		binary.LittleEndian.PutUint64(out[off+phdrMemSzOff:off+phdrMemSzOff+8], p.size)
-		binary.LittleEndian.PutUint64(out[off+phdrAlignOff:off+phdrAlignOff+8], elfPageSizeC)
-		copy(out[p.fileOff:p.fileOff+uint64(len(p.body))], p.body)
+		binary.LittleEndian.PutUint32(out[off+transform.ElfPhdrTypeOffset:off+transform.ElfPhdrTypeOffset+4], transform.ElfPTLoad)
+		binary.LittleEndian.PutUint32(out[off+transform.ElfPhdrFlagsOffset:off+transform.ElfPhdrFlagsOffset+4], transform.ElfPFR)
+		binary.LittleEndian.PutUint64(out[off+transform.ElfPhdrOffsetOffset:off+transform.ElfPhdrOffsetOffset+8], p.fileOff)
+		binary.LittleEndian.PutUint64(out[off+transform.ElfPhdrVAddrOffset:off+transform.ElfPhdrVAddrOffset+8], p.vaddr)
+		binary.LittleEndian.PutUint64(out[off+transform.ElfPhdrPAddrOffset:off+transform.ElfPhdrPAddrOffset+8], p.vaddr)
+		binary.LittleEndian.PutUint64(out[off+transform.ElfPhdrFileSzOffset:off+transform.ElfPhdrFileSzOffset+8], p.size)
+		binary.LittleEndian.PutUint64(out[off+transform.ElfPhdrMemSzOffset:off+transform.ElfPhdrMemSzOffset+8], p.size)
+		binary.LittleEndian.PutUint64(out[off+transform.ElfPhdrAlignOffset:off+transform.ElfPhdrAlignOffset+8], transform.ElfPageSize)
+		if err := writeJunkBody(out[p.fileOff:p.fileOff+p.size], p.fill); err != nil {
+			return nil, err
+		}
 	}
 
 	// Bump e_phnum.
-	binary.LittleEndian.PutUint16(out[ehdrPhnumOff:ehdrPhnumOff+2], phnum+uint16(len(opts.JunkSections)))
+	binary.LittleEndian.PutUint16(out[transform.ElfEhdrPhnumOffset:transform.ElfEhdrPhnumOffset+2], phnum+uint16(len(opts.JunkSections)))
 
 	return out, nil
 }
@@ -164,7 +135,7 @@ func AddCoverELF(input []byte, opts CoverOptions) ([]byte, error) {
 // bytesAreLikelyELF checks the ELF magic + EI_CLASS=64 + EI_DATA=LE
 // without doing a full PHT walk.
 func bytesAreLikelyELF(input []byte) bool {
-	if len(input) < elfEhdrSizeC {
+	if len(input) < transform.ElfEhdrSize {
 		return false
 	}
 	if input[0] != 0x7F || input[1] != 'E' || input[2] != 'L' || input[3] != 'F' {

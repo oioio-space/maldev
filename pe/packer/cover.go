@@ -162,13 +162,15 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 	}
 
 	// Plan the new sections: each gets aligned RVA + file offset.
+	// Bodies are filled directly into the output buffer below — no
+	// intermediate allocation per section.
 	type planned struct {
-		name     [8]byte
-		rva      uint32
-		raw      uint32
-		size     uint32
-		rawSize  uint32
-		fillBody []byte
+		name    [8]byte
+		rva     uint32
+		raw     uint32
+		size    uint32
+		rawSize uint32
+		fill    JunkFill
 	}
 	plans := make([]planned, len(opts.JunkSections))
 	rvaCursor := transform.AlignUpU32(maxRVAEnd, sectionAlign)
@@ -184,11 +186,7 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 		plans[i].raw = rawCursor
 		plans[i].size = js.Size
 		plans[i].rawSize = transform.AlignUpU32(js.Size, fileAlign)
-		body, err := generateJunkBody(js.Size, js.Fill)
-		if err != nil {
-			return nil, err
-		}
-		plans[i].fillBody = body
+		plans[i].fill = js.Fill
 		rvaCursor = transform.AlignUpU32(rvaCursor+js.Size, sectionAlign)
 		rawCursor += plans[i].rawSize
 	}
@@ -216,7 +214,9 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 		binary.LittleEndian.PutUint32(out[hdrOff+0x14:hdrOff+0x18], p.raw)     // PointerToRawData
 		// Characteristics: MEM_READ + CNT_INITIALIZED_DATA. No W, no X.
 		binary.LittleEndian.PutUint32(out[hdrOff+0x24:hdrOff+0x28], 0x40000040)
-		copy(out[p.raw:p.raw+uint32(len(p.fillBody))], p.fillBody)
+		if err := writeJunkBody(out[p.raw:p.raw+p.size], p.fill); err != nil {
+			return nil, err
+		}
 	}
 
 	// Bump NumberOfSections.
@@ -230,24 +230,27 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 	return out, nil
 }
 
-// generateJunkBody produces `size` bytes per the chosen JunkFill.
-func generateJunkBody(size uint32, fill JunkFill) ([]byte, error) {
-	body := make([]byte, size)
+// writeJunkBody fills dst in place per the chosen JunkFill. Avoids
+// the per-section intermediate slice the original generateJunkBody
+// allocated — the output buffer already exists by this point and is
+// pre-zeroed by make(), so JunkFillZero is now a no-op rather than
+// an alloc + memcpy.
+func writeJunkBody(dst []byte, fill JunkFill) error {
 	switch fill {
 	case JunkFillRandom:
-		if _, err := rand.Read(body); err != nil {
-			return nil, fmt.Errorf("packer/cover: random fill: %w", err)
+		if _, err := rand.Read(dst); err != nil {
+			return fmt.Errorf("packer/cover: random fill: %w", err)
 		}
 	case JunkFillZero:
-		// make() already zeroes.
+		// make([]byte, …) zeroed dst already.
 	case JunkFillPattern:
-		for i := range body {
-			body[i] = frequencyOrderedPattern[i%len(frequencyOrderedPattern)]
+		for i := range dst {
+			dst[i] = frequencyOrderedPattern[i%len(frequencyOrderedPattern)]
 		}
 	default:
-		return nil, fmt.Errorf("%w: unknown JunkFill %d", ErrCoverInvalidOptions, fill)
+		return fmt.Errorf("%w: unknown JunkFill %d", ErrCoverInvalidOptions, fill)
 	}
-	return body, nil
+	return nil
 }
 
 // bytesAreLikelyPE checks the MZ magic + e_lfanew + PE\0\0 signature
