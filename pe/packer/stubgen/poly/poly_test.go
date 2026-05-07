@@ -10,6 +10,54 @@ import (
 	"github.com/oioio-space/maldev/pe/packer/stubgen/poly"
 )
 
+// TestRegPool_ExcludingFiltersRequestedRegs is the regression
+// guard for the seed-3+ R15-clobber bug: when stage1 reserves
+// BaseReg (R15) via NewRegPoolExcluding, no Take() call may ever
+// hand it back, regardless of seed.
+func TestRegPool_ExcludingFiltersRequestedRegs(t *testing.T) {
+	for seed := int64(1); seed <= 50; seed++ {
+		rng := rand.New(rand.NewSource(seed))
+		p := poly.NewRegPoolExcluding(rng, amd64.R15)
+		if got := p.Available(); got != 13 {
+			t.Fatalf("seed=%d Available() = %d, want 13 (14 - R15)", seed, got)
+		}
+		for i := 0; i < 13; i++ {
+			r, err := p.Take()
+			if err != nil {
+				t.Fatalf("seed=%d Take #%d: %v", seed, i, err)
+			}
+			if r == amd64.R15 {
+				t.Fatalf("seed=%d Take returned R15 despite exclusion", seed)
+			}
+		}
+	}
+}
+
+// TestEncodePayloadExcluding_RoundDescriptorsHonourExclusion
+// confirms the engine wires the exclusion list through to the
+// per-round register allocator — no Round may ever assign R15
+// to KeyReg/ByteReg/SrcReg/CntReg when R15 is excluded.
+func TestEncodePayloadExcluding_RoundDescriptorsHonourExclusion(t *testing.T) {
+	const rounds = 5
+	for seed := int64(1); seed <= 20; seed++ {
+		eng, err := poly.NewEngine(seed, rounds)
+		if err != nil {
+			t.Fatalf("seed=%d NewEngine: %v", seed, err)
+		}
+		_, descriptors, err := eng.EncodePayloadExcluding([]byte("payload"), amd64.R15)
+		if err != nil {
+			t.Fatalf("seed=%d EncodePayloadExcluding: %v", seed, err)
+		}
+		for i, r := range descriptors {
+			for _, used := range []amd64.Reg{r.KeyReg, r.ByteReg, r.SrcReg, r.CntReg} {
+				if used == amd64.R15 {
+					t.Errorf("seed=%d round=%d assigned R15 despite exclusion (%+v)", seed, i, r)
+				}
+			}
+		}
+	}
+}
+
 func TestRegPool_TakeReturnsAllGPRs(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	p := poly.NewRegPool(rng)

@@ -21,6 +21,12 @@ var ErrNoRounds = errors.New("stage1: no rounds to emit")
 //     distinct from legacy-register forms — useful for entropy analysis.
 const baseReg = amd64.R15
 
+// BaseReg is the public alias for [baseReg] — stubgen.Generate
+// passes it to [poly.Engine.EncodePayloadExcluding] so the poly
+// engine's per-round register randomisation cannot clobber the
+// runtime TextRVA pointer the prologue loads.
+const BaseReg = baseReg
+
 // EmitStub writes a complete polymorphic decoder stub into b.
 //
 // Layout:

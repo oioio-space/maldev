@@ -64,9 +64,18 @@ type Round struct {
 // The stage1 emitter must emit decoders in REVERSE order: rounds[N-1]
 // first (outermost layer), rounds[0] last (innermost layer).
 func (e *Engine) EncodePayload(data []byte) (encoded []byte, rounds []Round, err error) {
+	return e.EncodePayloadExcluding(data)
+}
+
+// EncodePayloadExcluding is [EncodePayload] with caller-supplied
+// register exclusions. Stage 1 reserves the CALL+POP+ADD baseReg
+// (typically R15) so per-round register randomisation cannot
+// clobber the runtime TextRVA pointer it carries across all
+// rounds. EncodePayload calls this with no exclusions.
+func (e *Engine) EncodePayloadExcluding(data []byte, excluded ...amd64.Reg) (encoded []byte, rounds []Round, err error) {
 	encoded = append([]byte(nil), data...) // defensive copy; caller's slice is never modified
 	rounds = make([]Round, e.rounds)
-	pool := NewRegPool(e.rng)
+	pool := NewRegPoolExcluding(e.rng, excluded...)
 
 	for i := 0; i < e.rounds; i++ {
 		// Four registers, one role each: key constant, current byte,

@@ -113,7 +113,14 @@ func Generate(opts Options) ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("stubgen: NewEngine: %w", err)
 	}
-	finalEncoded, polyRounds, err := eng.EncodePayload(textBytes)
+	// EncodePayloadExcluding(stage1.BaseReg) keeps R15 out of the
+	// per-round register randomisation. R15 holds the runtime
+	// TextRVA pointer set by the CALL+POP+ADD prologue and read by
+	// every round (`MOV src, r15`); if a round took it as the key
+	// or counter register, the address would be clobbered → SIGSEGV
+	// on the first decoder dereference. Caught by the seed-3+
+	// regression test in stubgen_test.go.
+	finalEncoded, polyRounds, err := eng.EncodePayloadExcluding(textBytes, stage1.BaseReg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("stubgen: EncodePayload: %w", err)
 	}

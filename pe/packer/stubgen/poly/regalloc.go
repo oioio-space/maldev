@@ -20,7 +20,32 @@ type RegPool struct {
 // NewRegPool returns a pool seeded by the given math/rand source.
 // The pool starts with all 14 GPRs (RSP and RBP excluded).
 func NewRegPool(rng *rand.Rand) *RegPool {
+	return NewRegPoolExcluding(rng)
+}
+
+// NewRegPoolExcluding is like NewRegPool but additionally removes
+// the given registers from the pool. Stage 1 callers reserve the
+// CALL+POP+ADD baseReg (typically R15) so per-round register
+// randomisation cannot clobber the runtime TextRVA pointer it
+// holds across all rounds.
+func NewRegPoolExcluding(rng *rand.Rand, excluded ...amd64.Reg) *RegPool {
 	all := amd64.AllGPRs()
+	if len(excluded) > 0 {
+		filtered := all[:0]
+		for _, r := range all {
+			drop := false
+			for _, e := range excluded {
+				if r == e {
+					drop = true
+					break
+				}
+			}
+			if !drop {
+				filtered = append(filtered, r)
+			}
+		}
+		all = filtered
+	}
 	rng.Shuffle(len(all), func(i, j int) { all[i], all[j] = all[j], all[i] })
 	return &RegPool{available: all, rng: rng}
 }
