@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	packerpkg "github.com/oioio-space/maldev/pe/packer"
+	"github.com/oioio-space/maldev/pe/packer/transform"
 )
 
 // TestAddCoverELF_RejectsEmptyOptions covers the JunkSections=0 path.
@@ -104,7 +105,7 @@ func minimalELF64WithSlack(textSize uint64) []byte {
 		entryVA = 0x401000
 	)
 	textOff := uint64(page)
-	totalSize := textOff + alignUpU64Local(textSize, page)
+	totalSize := textOff + transform.AlignUpU64(textSize, page)
 	buf := make([]byte, totalSize)
 
 	// Ehdr.
@@ -143,9 +144,3 @@ func minimalELF64WithSlack(textSize uint64) []byte {
 	return buf
 }
 
-func alignUpU64Local(v, a uint64) uint64 {
-	if a == 0 {
-		return v
-	}
-	return (v + a - 1) &^ (a - 1)
-}

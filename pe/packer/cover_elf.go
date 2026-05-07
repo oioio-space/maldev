@@ -3,10 +3,14 @@ package packer
 import (
 	"encoding/binary"
 	"fmt"
+
+	"github.com/oioio-space/maldev/pe/packer/transform"
 )
 
-// ELF64 phdr layout — local copies so cover_elf.go stays decoupled
-// from the transform package's private constants.
+// ELF64 layout constants. The transform package keeps its own
+// unexported copies of overlapping fields (Phdr offsets, page
+// size); promoting those into a shared exported set is a separate
+// chantier. Until then the cover layer carries this small set.
 const (
 	elfEhdrSizeC         = 64
 	elfPhdrSizeC         = 56
@@ -25,8 +29,8 @@ const (
 	phdrMemSzOff  = 0x28
 	phdrAlignOff  = 0x30
 
-	pfReadC    uint32 = 4
-	ptLoadC    uint32 = 1
+	pfReadC uint32 = 4
+	ptLoadC uint32 = 1
 )
 
 // AddCoverELF is the ELF64 mirror of [AddCoverPE]. Each
@@ -86,7 +90,7 @@ func AddCoverELF(input []byte, opts CoverOptions) ([]byte, error) {
 		va := binary.LittleEndian.Uint64(input[off+phdrVAddrOff : off+phdrVAddrOff+8])
 		fs := binary.LittleEndian.Uint64(input[off+phdrFileSzOff : off+phdrFileSzOff+8])
 		ms := binary.LittleEndian.Uint64(input[off+phdrMemSzOff : off+phdrMemSzOff+8])
-		if e := alignUpU64C(va+ms, elfPageSizeC); e > maxVEnd {
+		if e := transform.AlignUpU64(va+ms, elfPageSizeC); e > maxVEnd {
 			maxVEnd = e
 		}
 		if e := o + fs; e > maxFEnd {
@@ -111,14 +115,14 @@ func AddCoverELF(input []byte, opts CoverOptions) ([]byte, error) {
 		body    []byte
 	}
 	plans := make([]planned, len(opts.JunkSections))
-	vCursor := alignUpU64C(maxVEnd, elfPageSizeC)
-	fCursor := alignUpU64C(maxFEnd, elfPageSizeC)
+	vCursor := transform.AlignUpU64(maxVEnd, elfPageSizeC)
+	fCursor := transform.AlignUpU64(maxFEnd, elfPageSizeC)
 	for i, js := range opts.JunkSections {
 		body, err := generateJunkBody(js.Size, js.Fill)
 		if err != nil {
 			return nil, err
 		}
-		paged := alignUpU64C(uint64(js.Size), elfPageSizeC)
+		paged := transform.AlignUpU64(uint64(js.Size), elfPageSizeC)
 		plans[i] = planned{
 			fileOff: fCursor,
 			vaddr:   vCursor,
@@ -169,12 +173,4 @@ func bytesAreLikelyELF(input []byte) bool {
 	return input[4] == 2 && input[5] == 1
 }
 
-// alignUpU64C is a local copy of transform's helper. Keeps the
-// cover layer free of cross-package coupling for trivial helpers.
-func alignUpU64C(v, align uint64) uint64 {
-	if align == 0 {
-		return v
-	}
-	return (v + align - 1) &^ (align - 1)
-}
 

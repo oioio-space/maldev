@@ -29,6 +29,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
+	"github.com/oioio-space/maldev/pe/packer/transform"
 )
 
 // JunkFill chooses how a junk section's body is generated. Each
@@ -148,7 +150,7 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 		vSize := binary.LittleEndian.Uint32(input[hdr+0x08 : hdr+0x0C])
 		raw := binary.LittleEndian.Uint32(input[hdr+0x14 : hdr+0x18])
 		rawSize := binary.LittleEndian.Uint32(input[hdr+0x10 : hdr+0x14])
-		if e := alignUp32(va+vSize, sectionAlign); e > maxRVAEnd {
+		if e := transform.AlignUpU32(va+vSize, sectionAlign); e > maxRVAEnd {
 			maxRVAEnd = e
 		}
 		if e := raw + rawSize; e > maxRawEnd {
@@ -169,8 +171,8 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 		fillBody []byte
 	}
 	plans := make([]planned, len(opts.JunkSections))
-	rvaCursor := alignUp32(maxRVAEnd, sectionAlign)
-	rawCursor := alignUp32(maxRawEnd, fileAlign)
+	rvaCursor := transform.AlignUpU32(maxRVAEnd, sectionAlign)
+	rawCursor := transform.AlignUpU32(maxRawEnd, fileAlign)
 
 	for i, js := range opts.JunkSections {
 		name := js.Name
@@ -181,13 +183,13 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 		plans[i].rva = rvaCursor
 		plans[i].raw = rawCursor
 		plans[i].size = js.Size
-		plans[i].rawSize = alignUp32(js.Size, fileAlign)
+		plans[i].rawSize = transform.AlignUpU32(js.Size, fileAlign)
 		body, err := generateJunkBody(js.Size, js.Fill)
 		if err != nil {
 			return nil, err
 		}
 		plans[i].fillBody = body
-		rvaCursor = alignUp32(rvaCursor+js.Size, sectionAlign)
+		rvaCursor = transform.AlignUpU32(rvaCursor+js.Size, sectionAlign)
 		rawCursor += plans[i].rawSize
 	}
 
@@ -265,10 +267,3 @@ func bytesAreLikelyPE(input []byte) bool {
 	return binary.LittleEndian.Uint32(input[peOff:peOff+4]) == 0x00004550
 }
 
-// alignUp32 rounds v up to the nearest multiple of align.
-func alignUp32(v, align uint32) uint32 {
-	if align == 0 {
-		return v
-	}
-	return (v + align - 1) &^ (align - 1)
-}

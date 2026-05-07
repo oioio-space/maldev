@@ -242,6 +242,16 @@ func selfTestPE(out []byte, plan Plan) error {
 	return nil
 }
 
-func alignUpU32(v, align uint32) uint32 {
+// AlignUpU32 rounds v up to the nearest multiple of align.
+// Exported so sibling packages in pe/packer/ can reuse the same
+// alignment math without re-deriving it. Returns v unchanged when
+// align is 0 (defensive — alignment of 0 is malformed PE/ELF).
+func AlignUpU32(v, align uint32) uint32 {
+	if align == 0 {
+		return v
+	}
 	return (v + align - 1) &^ (align - 1)
 }
+
+// alignUpU32 keeps the in-package call sites concise.
+func alignUpU32(v, align uint32) uint32 { return AlignUpU32(v, align) }
