@@ -92,6 +92,39 @@ func (bb *Builder) SUB(dst, src Op) error { return bb.binaryOp(x86.ASUBQ, "SUB",
 // ADD emits ADD dst, src.
 func (bb *Builder) ADD(dst, src Op) error { return bb.binaryOp(x86.AADDQ, "ADD", dst, src) }
 
+// MOVZX emits MOVZX dst, byte ptr [src] — zero-extends one byte from
+// memory into a 64-bit register, zeroing the upper 56 bits. This is the
+// correct instruction for the SGN decoder loop's byte load: it gives the
+// substitution a clean 64-bit destination without polluting upper bits.
+func (bb *Builder) MOVZX(dst Reg, src MemOp) error {
+	p := bb.b.NewProg()
+	p.As = x86.AMOVBQZX
+	if err := setOperand(&p.From, src); err != nil {
+		return fmt.Errorf("amd64: MOVZX src: %w", err)
+	}
+	p.To.Type = obj.TYPE_REG
+	p.To.Reg = regToObj(dst)
+	bb.b.AddInstruction(p)
+	return nil
+}
+
+// MOVB emits MOVB byte ptr [dst], src — stores the low 8 bits of src
+// into the memory location pointed to by dst. Used as the write-back in
+// the SGN decoder loop after the substitution has updated the byte register.
+// golang-asm requires the byte-sized alias of src (AL, BL, …); regToByteReg
+// handles the mapping so callers pass the same Reg they use everywhere else.
+func (bb *Builder) MOVB(dst MemOp, src Reg) error {
+	p := bb.b.NewProg()
+	p.As = x86.AMOVB
+	p.From.Type = obj.TYPE_REG
+	p.From.Reg = regToByteReg(src)
+	if err := setOperand(&p.To, dst); err != nil {
+		return fmt.Errorf("amd64: MOVB dst: %w", err)
+	}
+	bb.b.AddInstruction(p)
+	return nil
+}
+
 // binaryOp is the shared emitter for two-operand arithmetic (XOR/SUB/ADD).
 // golang-asm's Plan-9 convention is From=src, To=dst — same as MOV.
 func (bb *Builder) binaryOp(as obj.As, name string, dst, src Op) error {
@@ -273,4 +306,42 @@ func regToObj(r Reg) int16 {
 		return x86.REG_R15
 	}
 	panic(fmt.Sprintf("amd64: unknown Reg %d", r))
+}
+
+// regToByteReg maps a 64-bit GPR to its 8-bit low-byte alias, which is
+// required by MOVB's source operand. golang-asm's x86 assembler
+// treats MOVB with a full 64-bit register as an error ("illegal register")
+// because the Plan 9 byte-register encoding differs from the full GPR encoding.
+func regToByteReg(r Reg) int16 {
+	switch r {
+	case RAX:
+		return x86.REG_AL
+	case RBX:
+		return x86.REG_BL
+	case RCX:
+		return x86.REG_CL
+	case RDX:
+		return x86.REG_DL
+	case RSI:
+		return x86.REG_SIB
+	case RDI:
+		return x86.REG_DIB
+	case R8:
+		return x86.REG_R8B
+	case R9:
+		return x86.REG_R9B
+	case R10:
+		return x86.REG_R10B
+	case R11:
+		return x86.REG_R11B
+	case R12:
+		return x86.REG_R12B
+	case R13:
+		return x86.REG_R13B
+	case R14:
+		return x86.REG_R14B
+	case R15:
+		return x86.REG_R15B
+	}
+	panic(fmt.Sprintf("amd64: unknown Reg %d for byte alias", r))
 }

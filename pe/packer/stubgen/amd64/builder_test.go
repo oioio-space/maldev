@@ -82,6 +82,52 @@ func TestBuilder_AllMnemonics(t *testing.T) {
 	}
 }
 
+// TestBuilder_MOVZX verifies that MOVZX dst, byte ptr [src] encodes to the
+// Intel 0F B6 form (MOVZX r64, r/m8) — the load instruction the SGN
+// decoder loop uses for its per-byte fetch.
+func TestBuilder_MOVZX(t *testing.T) {
+	b, err := amd64.New()
+	require.NoError(t, err)
+
+	require.NoError(t, b.MOVZX(amd64.RAX, amd64.MemOp{Base: amd64.RBX}))
+
+	out, err := b.Encode()
+	require.NoError(t, err)
+	require.NotEmpty(t, out)
+
+	inst, err := x86asm.Decode(out, 64)
+	require.NoError(t, err, "Decode (bytes=% x)", out)
+	if inst.Op != x86asm.MOVZX {
+		t.Errorf("got %v, want MOVZX", inst.Op)
+	}
+}
+
+// TestBuilder_MOVB verifies that MOVB byte ptr [dst], src encodes to
+// the Intel 88 /r form (MOV r/m8, r8) — the write-back instruction the
+// SGN decoder loop uses to store the decoded byte back to the payload.
+func TestBuilder_MOVB(t *testing.T) {
+	b, err := amd64.New()
+	require.NoError(t, err)
+
+	require.NoError(t, b.MOVB(amd64.MemOp{Base: amd64.RBX}, amd64.RAX))
+
+	out, err := b.Encode()
+	require.NoError(t, err)
+	require.NotEmpty(t, out)
+
+	inst, err := x86asm.Decode(out, 64)
+	require.NoError(t, err, "Decode (bytes=% x)", out)
+	if inst.Op != x86asm.MOV {
+		t.Errorf("got %v, want MOV", inst.Op)
+	}
+	// Confirm it's a byte-width MOV by checking the destination is
+	// a memory reference with RBX as base. x86asm reports the base
+	// using the 64-bit register name even for byte-addressed operands.
+	if inst.Args[0] != (x86asm.Mem{Base: x86asm.RBX, Disp: 0}) {
+		t.Errorf("dst = %v, want [RBX]", inst.Args[0])
+	}
+}
+
 // TestBuilder_LabelAndJMP verifies that a backward JMP to a label
 // resolves to the correct target and disassembles as JMP.
 func TestBuilder_LabelAndJMP(t *testing.T) {
