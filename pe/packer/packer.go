@@ -1,10 +1,11 @@
 // Package packer is maldev's custom PE/ELF packer.
 //
 // [Pack] / [Unpack] handle the encrypt-only pipeline (Phase 1c+).
-// [PackBinary] is the operator-facing entry point added in Phase 1e-A:
-// it wraps a payload in a runnable Windows PE32+ host containing a
-// polymorphic SGN-style stage-1 decoder and a reflective stage-2 loader.
-// No go build or system toolchain is required at pack time.
+// [PackBinary] is the operator-facing entry point added in Phase 1e-A/B:
+// it wraps a payload in a runnable host binary (Windows PE32+ via
+// [FormatWindowsExe] or Linux ELF64 static-PIE via [FormatLinuxELF])
+// containing a polymorphic SGN-style stage-1 decoder and a reflective
+// stage-2 loader. No go build or system toolchain is required at pack time.
 //
 // Design + roadmap: docs/refactor-2026-doc/packer-design.md.
 package packer
@@ -77,13 +78,13 @@ func Pack(data []byte, opts Options) (packed []byte, key []byte, err error) {
 	return out, key, nil
 }
 
-// Format selects the host binary shape PackBinary emits. Phase 1e-A
-// only supports FormatWindowsExe; other formats land in 1e-B/C/D/E.
+// Format selects the host binary shape PackBinary emits.
 type Format uint8
 
 const (
 	FormatUnknown    Format = iota // zero value; rejected by PackBinary
-	FormatWindowsExe               // PE32+ Windows executable
+	FormatWindowsExe               // Phase 1e-A: PE32+ Windows executable
+	FormatLinuxELF                 // Phase 1e-B: ELF64 Linux static-PIE
 )
 
 // String returns the canonical lowercase format name.
@@ -91,6 +92,8 @@ func (f Format) String() string {
 	switch f {
 	case FormatWindowsExe:
 		return "windows-exe"
+	case FormatLinuxELF:
+		return "linux-elf"
 	default:
 		return fmt.Sprintf("format(%d)", uint8(f))
 	}
@@ -98,8 +101,8 @@ func (f Format) String() string {
 
 // PackBinaryOptions parameterizes [PackBinary].
 type PackBinaryOptions struct {
-	// Format selects the host binary shape. Only FormatWindowsExe is
-	// supported today; FormatUnknown (zero) is always rejected.
+	// Format selects the host binary shape. FormatUnknown (zero) is
+	// always rejected; callers must be explicit.
 	Format Format
 
 	// Pipeline is the Phase 1c+ encryption pipeline applied to the
@@ -116,12 +119,14 @@ type PackBinaryOptions struct {
 	Seed int64
 }
 
-// ErrUnsupportedFormat fires when [PackBinary] is asked for a format
-// not yet implemented. Phase 1e-B/C/D/E extend the Format enum.
+// ErrUnsupportedFormat fires when [PackBinary] is asked for an unknown
+// or unimplemented format. Phase 1e-C/D/E will extend the Format enum.
 var ErrUnsupportedFormat = errors.New("packer: unsupported format")
 
-// PackBinary wraps a target payload in a runnable Windows PE32+ host
-// with a polymorphic stage-1 decoder and a reflective stage-2 loader.
+// PackBinary wraps a target payload in a runnable host binary with a
+// polymorphic stage-1 decoder and a reflective stage-2 loader.
+// Supported formats: [FormatWindowsExe] (Phase 1e-A) and [FormatLinuxELF]
+// (Phase 1e-B).
 //
 // Pure Go: no go build, no system toolchain at pack-time.
 //
@@ -129,14 +134,23 @@ var ErrUnsupportedFormat = errors.New("packer: unsupported format")
 //  1. [PackPipeline] encrypts the payload (default: single AES-GCM step).
 //  2. [stubgen.PickStage2Variant] selects a committed stage-2 binary.
 //  3. [stubgen.PatchStage2] appends the encrypted payload + key trailer.
-//  4. [stubgen.Generate] runs SGN rounds and emits the host PE32+.
+//  4. [stubgen.Generate] runs SGN rounds and emits the host binary.
 //
 // Sentinels: [ErrUnsupportedFormat], [stubgen.ErrInvalidRounds],
 // [stubgen.ErrPayloadTooLarge], [stubgen.ErrEncodingSelfTestFailed].
 func PackBinary(payload []byte, opts PackBinaryOptions) (host []byte, key []byte, err error) {
-	if opts.Format != FormatWindowsExe {
+	// Two-layer enum: packer.Format is operator-facing; stubgen.HostFormat is
+	// internal. The mapping keeps the public API decoupled from the pipeline.
+	var hostFormat stubgen.HostFormat
+	switch opts.Format {
+	case FormatWindowsExe:
+		hostFormat = stubgen.HostFormatPE
+	case FormatLinuxELF:
+		hostFormat = stubgen.HostFormatELF
+	default:
 		return nil, nil, fmt.Errorf("%w: %s", ErrUnsupportedFormat, opts.Format)
 	}
+
 	rounds := opts.Stage1Rounds
 	if rounds == 0 {
 		rounds = 3
@@ -158,7 +172,7 @@ func PackBinary(payload []byte, opts PackBinaryOptions) (host []byte, key []byte
 	// directly.
 	key = keys[0]
 
-	stage2, err := stubgen.PickStage2Variant(opts.Seed)
+	stage2, err := stubgen.PickStage2Variant(opts.Seed, hostFormat)
 	if err != nil {
 		return nil, nil, fmt.Errorf("packer: %w", err)
 	}
@@ -169,9 +183,10 @@ func PackBinary(payload []byte, opts PackBinaryOptions) (host []byte, key []byte
 	}
 
 	host, err = stubgen.Generate(stubgen.Options{
-		Inner:  inner,
-		Rounds: rounds,
-		Seed:   opts.Seed,
+		Inner:      inner,
+		Rounds:     rounds,
+		Seed:       opts.Seed,
+		HostFormat: hostFormat,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("packer: stubgen.Generate: %w", err)

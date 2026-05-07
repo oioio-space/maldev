@@ -3,6 +3,7 @@ package packer_test
 import (
 	"bytes"
 	"crypto/rand"
+	"debug/elf"
 	"debug/pe"
 	"errors"
 	"os"
@@ -217,6 +218,32 @@ func TestPackBinary_ProducesParsablePE(t *testing.T) {
 		t.Fatalf("debug/pe rejected output: %v", err)
 	}
 	defer f.Close()
+}
+
+func TestPackBinary_LinuxELF_ProducesParsableELF(t *testing.T) {
+	payload := []byte("hello payload")
+	out, key, err := packer.PackBinary(payload, packer.PackBinaryOptions{
+		Format:       packer.FormatLinuxELF,
+		Stage1Rounds: 3,
+		Seed:         1,
+	})
+	if err != nil {
+		t.Fatalf("PackBinary Linux: %v", err)
+	}
+	if len(key) == 0 {
+		t.Error("returned key is empty")
+	}
+	f, err := elf.NewFile(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("debug/elf rejected: %v", err)
+	}
+	defer f.Close()
+	if f.FileHeader.Type != elf.ET_DYN {
+		t.Errorf("Type = %v, want ET_DYN", f.FileHeader.Type)
+	}
+	if f.FileHeader.Machine != elf.EM_X86_64 {
+		t.Errorf("Machine = %v, want EM_X86_64", f.FileHeader.Machine)
+	}
 }
 
 func randBytes(t *testing.T, n int) []byte {
