@@ -1,6 +1,8 @@
 package poly_test
 
 import (
+	"bytes"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -75,11 +77,77 @@ func TestInsertJunk_DensityOneEmitsSomething(t *testing.T) {
 	if err := poly.InsertJunk(b, 1.0, 9, regs, rng); err != nil {
 		t.Fatalf("InsertJunk: %v", err)
 	}
-	bytes, err := b.Encode()
+	got, err := b.Encode()
 	if err != nil {
 		t.Fatalf("Encode: %v", err)
 	}
-	if len(bytes) == 0 {
+	if len(got) == 0 {
 		t.Error("density=1 produced 0 bytes, want > 0")
+	}
+}
+
+func TestEngine_EncodeDecodeRoundTrip(t *testing.T) {
+	original := make([]byte, 4096)
+	for i := range original {
+		original[i] = byte(i ^ 0x5A)
+	}
+
+	for _, rounds := range []int{1, 3, 7, 10} {
+		t.Run(fmt.Sprintf("rounds=%d", rounds), func(t *testing.T) {
+			eng, err := poly.NewEngine(int64(rounds*42+7), rounds)
+			if err != nil {
+				t.Fatalf("NewEngine: %v", err)
+			}
+			encoded, rds, err := eng.EncodePayload(original)
+			if err != nil {
+				t.Fatalf("EncodePayload: %v", err)
+			}
+			if len(encoded) != len(original) {
+				t.Fatalf("encoded len %d, want %d", len(encoded), len(original))
+			}
+			// Reverse the rounds (outermost layer first) to recover original.
+			decoded := append([]byte(nil), encoded...)
+			for i := rounds - 1; i >= 0; i-- {
+				key := rds[i].Key
+				for j := range decoded {
+					decoded[j] ^= key
+				}
+			}
+			if !bytes.Equal(decoded, original) {
+				t.Errorf("round-trip mismatch (first 8 bytes: encoded=%x decoded=%x original=%x)",
+					encoded[:8], decoded[:8], original[:8])
+			}
+		})
+	}
+}
+
+func TestEngine_RejectsOutOfRangeRounds(t *testing.T) {
+	for _, n := range []int{0, -1, 11, 100} {
+		if _, err := poly.NewEngine(1, n); err == nil {
+			t.Errorf("NewEngine rounds=%d: got nil err, want range error", n)
+		}
+	}
+}
+
+func TestEngine_DifferentSeedsProduceDifferentOutput(t *testing.T) {
+	original := []byte("the quick brown fox")
+	e1, err := poly.NewEngine(1, 3)
+	if err != nil {
+		t.Fatalf("NewEngine seed=1: %v", err)
+	}
+	e2, err := poly.NewEngine(2, 3)
+	if err != nil {
+		t.Fatalf("NewEngine seed=2: %v", err)
+	}
+	enc1, _, err := e1.EncodePayload(original)
+	if err != nil {
+		t.Fatalf("EncodePayload seed=1: %v", err)
+	}
+	enc2, _, err := e2.EncodePayload(original)
+	if err != nil {
+		t.Fatalf("EncodePayload seed=2: %v", err)
+	}
+	if bytes.Equal(enc1, enc2) {
+		t.Error("different seeds produced identical encoded output")
 	}
 }
