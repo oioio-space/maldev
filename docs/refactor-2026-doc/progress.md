@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-05-05
-reflects_commit: 3c84531
+last_reviewed: 2026-05-07
+reflects_commit: 8771e95
 ---
 
 # Documentation refactor — progress tracker
@@ -58,6 +58,7 @@ reflects_commit: 3c84531
 | 5 — transversal guides | ✅ done | `d64d554, 9b9a45f` | mitre.md updated (T1016, T1027.007, T1068, T1078, T1134.001/002/004 enrichment). getting-started.md detection scale aligned to canonical 5-level. architecture.md per-package quick-reference fixed (kernel/driver/rtcore64 row, privesc → new tech md links, persistence/service+lnk+account rows added). testing.md polished (Opener/Creator pair, 7 new LNK rows incl. WriteVia + Hotkey parser). coverage-workflow.md flagged with [!NOTE] callout pointing readers to testing.md for post-2026-04-22 infra (win/com.Error, stealthopen.Creator, LNK three-sink); a re-baseline run is deferred to a separate VM session. |
 | 6 — final cross-link + breadcrumb + dead-link audit | ✅ done | `d1ff2d7..a705c32, 6b` | Repo-wide dead-link sweep (8 broken refs fixed) + repo-wide front-matter pass: 45 `docs/**.md` pages now carry `last_reviewed: 2026-04-27 / reflects_commit: a705c32`. Every `docs/` page now has uniform front-matter — index entries, by-role pages, area docs, transversal guides, technique md, examples. |
 | 3b — gh-pages mdBook deploy | ✅ done | `40cdcd9` | Live at <https://oioio-space.github.io/maldev/>. `book.toml` + `docs/SUMMARY.md` (176 entries) + `.github/workflows/mdbook.yml`. CI installs mdBook 0.4.40 + mdbook-mermaid 0.14.0 on push to `master`, strips YAML front-matter from copied md, rewrites `../README.md` → absolute GitHub URL, deploys to GitHub Pages via `actions/deploy-pages@v4`. Pages enabled with `gh api -X POST repos/.../pages -f build_type=workflow`. First successful deploy: workflow run 25037092496, build 12s + deploy 11s. |
+| Phase 1e packer — UPX-style in-place transform | ✅ shipped v0.61.0 | `8771e95` | E2E green: packed Go static-PIE runs to clean exit. In-place .text encryption + polymorphic CALL+POP+ADD-prologue decoder stub + single-binary output. Six architectural bugs from v0.59.0/v0.60.0 resolved (see KNOWN-ISSUES-1e.md). |
 
 ## Phase 4 progress
 

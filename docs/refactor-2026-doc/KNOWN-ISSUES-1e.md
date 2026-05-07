@@ -1,20 +1,19 @@
 ---
 last_reviewed: 2026-05-07
-reflects_commit: b0e08ff
-severity: critical
+reflects_commit: 8771e95
+severity: resolved
 ---
 
 # Phase 1e-A & 1e-B — architectural gap (runtime broken)
 
-> **Status: critical.** Phase 1e-A (`v0.59.0`) and Phase 1e-B
-> (`v0.60.0`) ship code that produces byte-shape-correct host
-> binaries (`debug/pe`, `debug/elf` parse them cleanly) but those
-> binaries **do not execute** — they crash on the first decoder
-> loop iteration. Both tags are misleadingly aggressive; the
-> shipped feature is not yet operational.
+> **Status: RESOLVED in v0.61.0.** Phase 1e-A (`v0.59.0`) and Phase
+> 1e-B (`v0.60.0`) shipped code that produced byte-shape-correct host
+> binaries but those binaries **did not execute** — they crashed on
+> the first decoder loop iteration. The architectural gap is closed by
+> the UPX-style in-place transform (commit `8771e95`). See the
+> **Resolution summary** section at the end of this document.
 >
-> This doc records the findings, the regression guard, and the
-> proposed fix path so the next session can prioritise it.
+> The historical narrative below is preserved for post-mortem reference.
 
 ## How the gap was discovered
 
@@ -235,7 +234,37 @@ needs follow-up work.
 
 - `docs/superpowers/specs/2026-05-07-phase-1e-a-polymorphic-packer-stub-design.md`
 - `docs/superpowers/specs/2026-05-07-phase-1e-b-linux-elf-host-design.md`
-- `pe/packer/packer_e2e_linux_test.go` — the regression guard
-- `pe/packer/stubgen/stage1/round.go` — where the final JMP must be added
-- `pe/packer/stubgen/amd64/builder.go::setOperand` — where LEA RIP-relative emission is broken
-- `pe/srdi/` — Donut integration that Option C would reuse
+- `docs/superpowers/specs/2026-05-07-phase-1e-upx-rewrite-design.md` — the UPX-style rewrite spec
+- `pe/packer/packer_e2e_linux_test.go` — the ship-gate E2E test (now green)
+- `pe/packer/transform/` — PlanPE / PlanELF / InjectStubPE / InjectStubELF (the new in-place transform)
+- `pe/packer/stubgen/stage1/stub.go` — EmitStub: CALL+POP+ADD prologue + decoder loops + final JMP
+
+---
+
+## Resolution summary (v0.61.0)
+
+The architectural gap was closed by switching from the "host wrapper + stage 2 Go EXE" model to a
+**UPX-style in-place transform**. Rather than producing a two-stage binary, the packer now modifies
+the input binary directly:
+
+1. Encrypts the `.text` section with SGN polymorphic encoding (XOR/SUB-neg/ADD-complement rounds
+   with junk insertion).
+2. Appends a new read+write+exec section containing a compact polymorphic decoder stub.
+3. Rewrites the entry-point field to point at the new stub section.
+4. The kernel loads the single output binary normally; the stub decrypts `.text` in place and JMPs
+   to the original entry.
+
+The six bugs found during the Phase 1e-A/B investigation were resolved as follows:
+
+| Bug | Root cause | Resolution | Commit |
+|-----|-----------|------------|--------|
+| Bug 1 — LEA RIP-relative absolute | `golang-asm` `NAME_NONE + REG_NONE` emits SIB-absolute, not RIP-relative | Replaced LEA with CALL+POP+ADD prologue (PIC shellcode idiom); no RIP-relative needed | `b5c2f77` |
+| Bug 2 — no final JMP to stage 2 | `stubgen.Generate` never emitted a trailing jump | `EmitStub` in `stage1/stub.go` emits the final JMP to the now-decrypted entry | `b5c2f77` |
+| Bug 3 — file-vs-image layout mismatch | Stage 2 was a complete Go EXE; file offset ≠ RVA for multi-section binaries | Eliminated stage 2 entirely; kernel loads the single transformed binary, resolving the layout gap | `e647e61` + `94fc595` |
+| Bug 4 — segment-vs-section for Go static-PIE | `PlanELF` used PT_LOAD extent for `.text` bounds; Go PIEs have a gap between text segment and section | `PlanELF` now reads the `.text` SHT entry directly for accurate byte range | `83cf34a` |
+| Bug 5 — XOR-over-SGN double-wrapping | Legacy `PackBinary` path applied an outer XOR layer on top of the SGN encoding | Outer XOR layer removed; stub decodes raw SGN output | `8771e95` |
+| Bug 6 — PatchTextDisplacement formula | CALL+POP reference point calculation was off by the size of the CALL instruction itself | Fixed offset arithmetic in `PatchTextDisplacement` so stub correctly computes the target address | `8771e95` |
+
+Ship gate met at commit `8771e95`: `TestPackBinary_LinuxELF_E2E` runs a packed Go static-PIE fixture
+through to `"hello from packer"` and exit 0 under
+`go test -count=1 -tags=maldev_packer_run_e2e -run TestPackBinary_LinuxELF_E2E ./pe/packer/`.

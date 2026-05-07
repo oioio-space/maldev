@@ -20,6 +20,21 @@
 //     (PNG-shaped 32-byte header so first-bytes scanners don't
 //     fire), [EntropyCoverHexAlphabet] (each byte → 2 alphabet
 //     bytes, apparent entropy ≤ 4 bits/byte).
+//   - 1e (v0.61.0) — UPX-style in-place transform via [PackBinary]:
+//     encrypts the input binary's .text section with SGN polymorphic
+//     encoding (XOR/SUB/ADD rounds with register randomisation and
+//     junk insertion), appends a compact polymorphic decoder stub as a
+//     new R+W+X section (CALL+POP+ADD prologue for position-independent
+//     address recovery, N decoder loops, final JMP to original entry),
+//     and rewrites the entry-point field. Output is a single
+//     self-contained binary — no stage 2, no reflective loader. The
+//     kernel loads the output normally; the stub decrypts in place.
+//     Supports [FormatWindowsExe] (PE32+) and [FormatLinuxELF]
+//     (ELF64 static-PIE). Detection is Medium-High: UPX-like
+//     single-binary packer patterns are well-known to AV/EDR; stub
+//     bytes differ per pack (polymorphic) which defeats hash-based
+//     batch detection, but the RWX new section and entry-point
+//     rewrite are heuristically suspicious.
 //
 // The full design (capability matrix, threat model, hard
 // constraints, phase plan) is at

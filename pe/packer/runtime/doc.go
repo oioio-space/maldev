@@ -30,14 +30,15 @@
 // with a clear rebuild hint. Stage F will eventually broaden
 // to full ld.so emulation for libc-using binaries.
 //
-// Phase 1e-A and 1e-B compose on top of the runtime: pe/packer.PackBinary
-// produces a runnable host binary (Windows PE32+ via FormatWindowsExe,
-// or Linux ELF static-PIE via FormatLinuxELF) that, at execution,
-// peels a polymorphic SGN-encoded stage-1 decoder loop and JMPs into
-// an embedded stage-2 (a pre-built Go EXE that consumes this runtime
-// via runtime.LoadPE). The runtime needs no changes for either
-// phase — it's the unchanged second stage of the new packed-binary
-// flow on both platforms.
+// NOTE (v0.61.0): the Phase 1e UPX-style packer does NOT use this reflective
+// loader runtime. pe/packer.PackBinary (FormatWindowsExe / FormatLinuxELF)
+// performs an in-place .text encryption + appended decoder stub transform;
+// the kernel loads the single output binary normally and the stub decrypts
+// .text in place before jumping to the original entry point. No reflective
+// loading is involved in that path. This runtime package remains the
+// operator-facing reflective loader for code that wants to load a packed
+// blob into the current process's memory space (pe/packer.Pack +
+// runtime.LoadPE pipeline).
 //
 // Out of scope (rejected at parse time or surfaced as resolution
 // failures): DLLs (calling DllMain), TLS callbacks, x86,

@@ -1,6 +1,6 @@
 ---
-last_reviewed: 2026-05-06
-status: design + Phase 1a + 1b shipped (v0.50.0 + v0.51.0); Phase 1c+ in progress
+last_reviewed: 2026-05-07
+status: Phase 1a–1e shipped; Phase 1e v0.61.0 UPX-style in-place transform, E2E green
 ---
 
 # `pe/packer` design — scope, threat model, phases
@@ -333,7 +333,7 @@ ratio. Stack with HexAlphabet (or accept the 50% size cost of
 | **1c** | **Composability pipeline** — `Options.Pipeline []PipelineStep` + integration with `crypto/*` (cipher, permutation). | ⏳ next |
 | 1c.5 | Compression in pipeline — flate + gzip (stdlib) ship first; aPLib / LZMA / zstd / LZ4 reserved | ✅ v0.53.0 |
 | **1d** | **Anti-entropy** — `OpEntropyCover` step with three algorithms: `EntropyCoverInterleave` (low-entropy padding spliced between ciphertext chunks; default 33% padding lands at ~7.4 bits/byte; stack with HexAlphabet for <5), `EntropyCoverCarrier` (PNG-shaped 32-byte prefix), `EntropyCoverHexAlphabet` (byte → 2-byte code-like alphabet pair; apparent entropy ≤ 4 bits/byte). | ✅ this commit |
-| 1e | Polymorphic stub generation + multi-format output. **Stage 1e-A** ✅ Windows EXE polymorphic stage-1 (v0.59.0). **Stage 1e-B** ✅ this commit: Linux ELF static-PIE host (mirror of 1e-A). Phase 1e-C (Windows DLL), 1e-D (BOF), 1e-E (.NET) staged separately. | 🟡 Stages A+B |
+| 1e | UPX-style in-place transform (v0.61.0). Architectural pivot from host-wrapper + stage-2 Go EXE (v0.59.0/v0.60.0, broken) to single-binary in-place encryption: `.text` encrypted with SGN polymorphic encoding, polymorphic CALL+POP+ADD-prologue decoder stub appended as a new R+W+X section, entry-point rewritten. Kernel loads the output normally. Ship gate: `TestPackBinary_LinuxELF_E2E` green (commit `8771e95`). Phase 1e-C (Windows DLL), 1e-D (BOF), 1e-E (.NET) staged separately. | ✅ v0.61.0 |
 | 1f | Linux ELF reflective loader for any self-contained static-PIE (Stage A: parser + dispatch; Stage B: mmap + RELATIVE; Stage C+D: Go static-PIE gate + Run() jump-to-entry; Stage E: broadened gate to non-Go static-PIE — hand-rolled asm, C/Rust built with -static-pie — gated by structural ET_DYN + no DT_NEEDED + ≥1 PT_LOAD). Stage F (full ld.so emulation for libc-using binaries) out of scope. | ✅ Stages A+B+C+D+E |
 | 2 | Section shuffle + IAT scramble (host PE) | deferred |
 | 3 | Junk sections + stub control-flow obfuscation | deferred |
