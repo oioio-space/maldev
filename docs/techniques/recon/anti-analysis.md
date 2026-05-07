@@ -460,6 +460,70 @@ for the timing). No syscall, no kernel transition.
 (zero report, falls back to `Detect`/`DetectAll` for the
 registry/file/NIC dimensions).
 
+#### `func SIDT() (base uint64, limit uint16)` / `SGDT()` / `SLDT() uint16`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#SIDT)
+
+Joanna Rutkowska's 2004 "Red Pill" primitives. Each instruction
+is unprivileged in CPL3 (user mode) and stores the kernel
+descriptor-table register at a caller-supplied buffer; a guest
+sandbox that relocates its IDT/GDT outside the canonical
+kernel-half range (`0xffff8000_00000000` upward) leaks itself
+through the read-back base.
+
+**Returns:** the descriptor-table base + limit (`SIDT`/`SGDT`)
+or the LDT segment selector (`SLDT`).
+
+**Side effects:** none — pure CPU op, no syscall, no allocation.
+
+**OPSEC:** invisible at the Win32 / NT API surface; behavioural
+EDRs do not hook descriptor-table reads. Some kernels enable
+`CR4.UMIP` (Linux ≥ 5.4 and recent Windows server SKUs), which
+turns the instruction into a `#GP` for userland — operators
+should defensively recover from a panic.
+
+**Required privileges:** none.
+
+**Platform:** amd64 only. Returns 0 on every other architecture.
+Largely historical against modern VT-x / AMD-V guests; pair with
+[Hypervisor] for a stronger composite signal.
+
+#### `type RedpillReport struct { ... }` + `func Probe() RedpillReport`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#Probe)
+
+Aggregates the [SIDT] + [SGDT] + [SLDT] readings into a single
+`RedpillReport`:
+
+```go
+type RedpillReport struct {
+    IDTBase, GDTBase                          uint64
+    IDTLimit, GDTLimit, LDT                   uint16
+    IDTSuspect, GDTSuspect, LDTSuspect, LikelyVM bool
+}
+```
+
+`LikelyVM` is the OR of the three suspect flags. The IDT/GDT
+flags fire when the base falls outside the canonical kernel
+half; the LDT flag fires on any non-zero selector (modern Windows
+/ Linux leave LDT empty).
+
+**Returns:** the populated report. Zero-valued (all fields 0,
+`LikelyVM=false`) on non-amd64.
+
+**Side effects:** three user-mode CPU ops, no syscall.
+
+**OPSEC:** invisible — same surface as the underlying
+SIDT/SGDT/SLDT primitives.
+
+**Required privileges:** none.
+
+**Platform:** amd64 only behaviour; safe to call on any GOARCH.
+Largely historical against modern HVM; the recommended use is
+to OR `Probe().LikelyVM` into the same bail-out as
+`Hypervisor().LikelyVM` (catches the rare "old emulator" case
+where CPUID looks bare-metal but the descriptor tables don't).
+
 ## Examples
 
 ### Quick start — startup bail-out triplet
