@@ -491,3 +491,53 @@ The diagnostic also confirmed the worktree's transform/ changes don't break
 the Windows side: `go run ./cmd/vmtest windows ./pe/packer/...
 TestPackBinary_WindowsPE_PackTimeMultiSeed` exits 0 cleanly. Default-path
 E2E gates remain green on both platforms.
+
+### C3-stage-2 attempt 2 — diagnostic narrows scope (2026-05-09)
+
+New diagnostic `pe/packer/stubgen/stage1/lz4_inflate_sgn_chain_linux_test.go`
+(build-gated `maldev_packer_lz4_diagnose` so it doesn't take down the default
+suite via SIGSEGV).
+
+**Steps confirmed working in the chain:**
+
+| Step | Result |
+|---|---|
+| 1. Read 498161-byte .text from `hello_static_pie` | ✅ |
+| 2. LZ4 compress to 336565 bytes (67.6% ratio) via pierrec/lz4 | ✅ |
+| 3. Build payload `[1970 zero bytes][336565 compressed bytes]` | ✅ |
+| 4. SGN encode + Go-side decode round-trip on payload | ✅ identity confirmed |
+| 5. Assert decoded layout = `[zeros][compressed]` byte-by-byte | ✅ |
+| 6. Run asm LZ4 decoder on `decoded[safetyMargin:]` via mmap | ❌ **SIGSEGV** |
+
+**Critical narrowing:**
+
+- A standalone harness that LZ4-compresses then directly LZ4-inflates the
+  full 498161-byte `.text` via the asm decoder works for ALL sizes from
+  65536 up to 498161 (`/tmp/lz4_largetext.go`). The decoder is NOT the bug.
+- A standalone harness that LZ4-compresses, places the bytes inside a larger
+  buffer at `payload[safetyMargin:]`, and runs the decoder on that slice —
+  works (`/tmp/lz4_slice.go`). The slice/buffer layout is NOT the bug.
+- Only the SGN-encode + SGN-decode + asm-LZ4-decode pipeline crashes, even
+  though the SGN round-trip is byte-equality-confirmed against the input.
+
+**Hypothesis (not yet confirmed):** the SGN engine's Go-side `Subst.Decode`
+function and the asm-emitted SGN decoder produce different byte sequences
+in some pathological case. The Go-side check uses `Subst.Decode` to verify
+SGN round-trip; but C3-stage-2 does NOT use Go-side decode at runtime — it
+emits asm round-trip via `EmitStub`. If those two paths diverge for a
+specific input byte pattern, the test's "SGN OK" check passes but the
+runtime stub produces garbage compressed bytes that SIGSEGV the LZ4 decoder.
+
+**Recommended next step:** patch the asm-emitted SGN decoder bytes onto the
+SGN-encoded payload (not via mmap call, but by extracting the per-round
+decoder asm and running THAT on the encoded bytes). Compare to the Go-side
+`Subst.Decode` output. If they diverge, the bug is the asm vs Go SGN
+mismatch — fix `EmitDecoder` in poly/substitution.go.
+
+If they agree, the bug is somewhere even deeper (kernel scheduler
+interaction, memory ordering with concurrent GC, etc.).
+
+**Build-gated diagnostic test added at `lz4_inflate_sgn_chain_linux_test.go`.**
+Run with `go test -tags='linux maldev_packer_lz4_diagnose' ...` — expects
+SIGSEGV in step 6, kills the test process. Useful for the next debugging
+session as a reproduction harness.
