@@ -177,6 +177,87 @@ func TestEmitStub_AllSubsts(t *testing.T) {
 	}
 }
 
+// TestEmitStub_Compress_Default verifies that the zero-value EmitOptions
+// (Compress=false) does NOT include any LZ4 inflate bytes. The first three
+// bytes of the LZ4 decoder (49 89 C2 = MOV R10, RAX — the emit_entry
+// initialisation) must be absent so the non-compress path is unchanged.
+func TestEmitStub_Compress_Default(t *testing.T) {
+	b, err := amd64.New()
+	if err != nil {
+		t.Fatalf("amd64.New: %v", err)
+	}
+	if err := stage1.EmitStub(b, stdPlan, makeRounds(1), stage1.EmitOptions{}); err != nil {
+		t.Fatalf("EmitStub: %v", err)
+	}
+	out, err := b.Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	// First three bytes of the LZ4 decoder: MOV R10, RAX (49 89 C2).
+	// These must NOT appear when Compress=false.
+	lz4Sig := []byte{0x49, 0x89, 0xC2}
+	if bytes.Contains(out, lz4Sig) {
+		t.Error("stub without Compress=true contains LZ4 decoder signature bytes (49 89 C2)")
+	}
+}
+
+// TestEmitStub_Compress_AsmAssembles verifies that EmitOptions{Compress:true}
+// assembles without error and that the emitted bytes contain both the LZ4
+// register-setup sequence (MOV RAX, R15 = 4C 89 F8) and the opening bytes of
+// the LZ4 block decoder (MOV R10, RAX = 49 89 C2) placed immediately after.
+func TestEmitStub_Compress_AsmAssembles(t *testing.T) {
+	b, err := amd64.New()
+	if err != nil {
+		t.Fatalf("amd64.New: %v", err)
+	}
+	opts := stage1.EmitOptions{
+		Compress:       true,
+		SafetyMargin:   64,
+		CompressedSize: 512,
+	}
+	if err := stage1.EmitStub(b, stdPlan, makeRounds(1), opts); err != nil {
+		t.Fatalf("EmitStub Compress=true: %v", err)
+	}
+	out, err := b.Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+
+	// MOV RAX, R15 — the first instruction of the 4-insn register setup.
+	// Encoding: REX.WRB + MOV r/m64,r64 = 4C 89 F8.
+	setupSig := []byte{0x4C, 0x89, 0xF8}
+	if !bytes.Contains(out, setupSig) {
+		t.Errorf("stub missing LZ4 register-setup MOV RAX,R15 (4C 89 F8) — got %d bytes", len(out))
+	}
+
+	// First three bytes of the LZ4 decoder: emit_entry MOV R10,RAX = 49 89 C2.
+	lz4Sig := []byte{0x49, 0x89, 0xC2}
+	if !bytes.Contains(out, lz4Sig) {
+		t.Errorf("stub missing LZ4 decoder signature (49 89 C2 = MOV R10,RAX)")
+	}
+}
+
+// TestEmitStub_Compress_RejectsZeroMargin verifies that Compress=true with
+// SafetyMargin=0 or CompressedSize=0 returns an error (the decoder would
+// read from the wrong address or loop indefinitely).
+func TestEmitStub_Compress_RejectsZeroMargin(t *testing.T) {
+	cases := []stage1.EmitOptions{
+		{Compress: true, SafetyMargin: 0, CompressedSize: 512},
+		{Compress: true, SafetyMargin: 64, CompressedSize: 0},
+		{Compress: true, SafetyMargin: 0, CompressedSize: 0},
+	}
+	for _, opts := range cases {
+		b, err := amd64.New()
+		if err != nil {
+			t.Fatalf("amd64.New: %v", err)
+		}
+		if err := stage1.EmitStub(b, stdPlan, makeRounds(1), opts); err == nil {
+			t.Errorf("SafetyMargin=%d CompressedSize=%d: expected error, got nil",
+				opts.SafetyMargin, opts.CompressedSize)
+		}
+	}
+}
+
 // TestPatchTextDisplacement_HappyPath verifies that PatchTextDisplacement
 // finds the sentinel 0xCAFEBABE in a hand-crafted byte slice and replaces
 // it with the expected signed displacement.

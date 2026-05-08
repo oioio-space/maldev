@@ -26,6 +26,29 @@ type EmitOptions struct {
 	// bytes. Only effective for Windows PE stubs; ELF stubs ignore the
 	// flag.
 	AntiDebug bool
+
+	// Compress, when true, appends a 22-byte register-setup sequence
+	// followed by the 136-byte LZ4 block-format inflate decoder
+	// BETWEEN the last SGN round and the OEP-jump epilogue.
+	//
+	// After all SGN rounds have run, R15 points to the start of .text
+	// in memory. The safety-margin prefix [R15, R15+SafetyMargin) is
+	// zero (SGN-decoded zeros), and the compressed payload lives at
+	// [R15+SafetyMargin, R15+SafetyMargin+CompressedSize). The decoder
+	// inflates in-place: output starts at R15 (overwriting the zero
+	// prefix first), advancing forward; the source pointer stays
+	// SafetyMargin bytes ahead at all times (LZ4 spec guarantee: each
+	// compressed byte expands to ≤255 output bytes; safety_margin =
+	// ⌈CompressedSize/255⌉+16 ensures dst never catches src).
+	//
+	// After inflate, [R15, R15+OriginalTextSize) holds the original
+	// .text bytes, and the epilogue ADD+JMP lands at OEP normally.
+	//
+	// SafetyMargin and CompressedSize must both be non-zero when Compress
+	// is true; EmitStub returns an error otherwise.
+	Compress       bool
+	SafetyMargin   uint32 // byte offset of compressed data from R15
+	CompressedSize uint32 // length of the LZ4 block in bytes
 }
 
 // baseReg is the callee-saved register the prologue loads with the
@@ -146,6 +169,47 @@ func EmitStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round, opts E
 		}
 		if err := b.JNZ(loopLbl); err != nil {
 			return fmt.Errorf("stage1: round %d JNZ: %w", i, err)
+		}
+	}
+
+	// LZ4 inflate decoder — runs after all SGN rounds have peeled the encoding.
+	// At this point R15 = text base:
+	//   [R15,                      R15+SafetyMargin)  = zero bytes (SGN-decoded zeros)
+	//   [R15+SafetyMargin,         R15+SafetyMargin+CompressedSize) = LZ4 block
+	//
+	// Go register ABI (Go 1.17+, amd64): RAX=src, RBX=dst, RCX=src_size.
+	// We set up:
+	//   RAX = R15 + SafetyMargin   (compressed data pointer)
+	//   RBX = R15                  (decompressed output = text base)
+	//   RCX = CompressedSize
+	// Then inline the 136-byte LZ4 block decoder from EmitLZ4Inflate.
+	// After the decoder returns (RET at offset +135), execution falls through
+	// to the OEP epilogue below — [R15, R15+OriginalSize) now holds plaintext.
+	if opts.Compress {
+		if opts.SafetyMargin == 0 || opts.CompressedSize == 0 {
+			return fmt.Errorf("stage1: EmitStub Compress=true but SafetyMargin=%d CompressedSize=%d",
+				opts.SafetyMargin, opts.CompressedSize)
+		}
+		// RAX = R15 (text base)
+		if err := b.MOV(amd64.RAX, baseReg); err != nil {
+			return fmt.Errorf("stage1: lz4 setup MOV RAX,R15: %w", err)
+		}
+		// RAX += SafetyMargin → points to compressed data
+		if err := b.ADD(amd64.RAX, amd64.Imm(int64(opts.SafetyMargin))); err != nil {
+			return fmt.Errorf("stage1: lz4 setup ADD RAX,SafetyMargin: %w", err)
+		}
+		// RBX = R15 → output buffer at text base
+		if err := b.MOV(amd64.RBX, baseReg); err != nil {
+			return fmt.Errorf("stage1: lz4 setup MOV RBX,R15: %w", err)
+		}
+		// RCX = CompressedSize
+		if err := b.MOV(amd64.RCX, amd64.Imm(int64(opts.CompressedSize))); err != nil {
+			return fmt.Errorf("stage1: lz4 setup MOV RCX,CompressedSize: %w", err)
+		}
+		// Inline the LZ4 block decoder. The decoder ends with RET (0xC3); execution
+		// resumes at the next instruction after the raw bytes — the OEP epilogue.
+		if err := EmitLZ4Inflate(b); err != nil {
+			return fmt.Errorf("stage1: lz4 inflate: %w", err)
 		}
 	}
 
