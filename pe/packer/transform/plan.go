@@ -59,6 +59,14 @@ type Plan struct {
 	StubRVA     uint32 // RVA of the new stub section (= new entry point)
 	StubFileOff uint32 // file offset where stub bytes are written
 	StubMaxSize uint32 // pre-reserved bytes for the stub
+
+	// TextMemSize, when non-zero and greater than TextSize, requests that
+	// the .text section's virtual memory size (VirtualSize in PE, p_memsz
+	// in ELF) be set larger than the on-disk file size. The kernel maps the
+	// gap between filesz and memsz as zero bytes. C3 compression uses this
+	// to reserve decompression workspace: the compressed bytes occupy
+	// [filesz), and the decompressed output expands into [0, memsz).
+	TextMemSize uint32
 }
 
 // Sentinels surfaced by PlanPE / PlanELF / InjectStubPE / InjectStubELF.
