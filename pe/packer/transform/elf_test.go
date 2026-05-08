@@ -236,6 +236,91 @@ func TestInjectStubELF_RejectsStubTooLarge(t *testing.T) {
 	}
 }
 
+// TestInjectStubELF_HonoursTextMemSize verifies that setting Plan.TextMemSize >
+// Plan.TextSize causes InjectStubELF to widen p_memsz in the executable PT_LOAD
+// while leaving p_filesz at the original (compressed) size. The kernel
+// zero-fills [p_filesz, p_memsz) at load time — the workspace the in-place LZ4
+// inflate decoder expands into.
+func TestInjectStubELF_HonoursTextMemSize(t *testing.T) {
+	const textSize = 0x200
+	input := buildMinimalELF(t, minimalELFOpts{TextSize: textSize, TextEntry: 0x1010})
+	plan, err := transform.PlanELF(input, 4096)
+	if err != nil {
+		t.Fatalf("PlanELF: %v", err)
+	}
+
+	plan.TextMemSize = plan.TextSize * 2 // double the virtual window
+
+	encryptedText := bytes.Repeat([]byte{0xAA}, int(plan.TextSize))
+	stubBytes := []byte{0x90, 0xC3}
+
+	out, err := transform.InjectStubELF(input, encryptedText, stubBytes, plan)
+	if err != nil {
+		t.Fatalf("InjectStubELF: %v", err)
+	}
+
+	// Parse with debug/elf to confirm the output is well-formed.
+	f, err := elf.NewFile(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("debug/elf rejected output: %v", err)
+	}
+	defer f.Close()
+
+	// Find the executable PT_LOAD and verify p_memsz was widened.
+	for _, prog := range f.Progs {
+		if prog.Type != elf.PT_LOAD || prog.Flags&elf.PF_X == 0 {
+			continue
+		}
+		if uint32(prog.Memsz) != plan.TextMemSize {
+			t.Errorf("executable PT_LOAD p_memsz = %#x, want TextMemSize %#x",
+				prog.Memsz, plan.TextMemSize)
+		}
+		// p_filesz must remain at the original size (on-disk compressed payload).
+		if uint32(prog.Filesz) != plan.TextSize {
+			t.Errorf("executable PT_LOAD p_filesz = %#x, want TextSize %#x",
+				prog.Filesz, plan.TextSize)
+		}
+		return
+	}
+	t.Error("no executable PT_LOAD found in output")
+}
+
+// TestInjectStubELF_TextMemSizeIgnoredWhenSmall confirms that Plan.TextMemSize
+// <= Plan.TextSize is a no-op: p_memsz in the output equals the original p_memsz.
+func TestInjectStubELF_TextMemSizeIgnoredWhenSmall(t *testing.T) {
+	const textSize = 0x200
+	input := buildMinimalELF(t, minimalELFOpts{TextSize: textSize, TextEntry: 0x1010})
+
+	for _, memSize := range []uint32{0, textSize} {
+		plan, err := transform.PlanELF(input, 4096)
+		if err != nil {
+			t.Fatalf("PlanELF: %v", err)
+		}
+		plan.TextMemSize = memSize
+
+		encryptedText := bytes.Repeat([]byte{0xAA}, int(plan.TextSize))
+		out, err := transform.InjectStubELF(input, encryptedText, []byte{0x90, 0xC3}, plan)
+		if err != nil {
+			t.Fatalf("TextMemSize=%d InjectStubELF: %v", memSize, err)
+		}
+
+		f, err := elf.NewFile(bytes.NewReader(out))
+		if err != nil {
+			t.Fatalf("debug/elf rejected: %v", err)
+		}
+		for _, prog := range f.Progs {
+			if prog.Type == elf.PT_LOAD && prog.Flags&elf.PF_X != 0 {
+				if uint32(prog.Memsz) != textSize {
+					t.Errorf("TextMemSize=%d: p_memsz=%#x, want %#x",
+						memSize, prog.Memsz, textSize)
+				}
+				break
+			}
+		}
+		f.Close()
+	}
+}
+
 // ---- new tests for the SHT-based .text lookup (Bug 1 fix) ------------------
 
 // TestPlanELF_GoStaticPIEFixture confirms that PlanELF uses the .text

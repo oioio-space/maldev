@@ -222,6 +222,19 @@ func InjectStubELF(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, e
 	flags |= elfPF_W
 	binary.LittleEndian.PutUint32(out[textPhdrOff+elfPhdrFlagsOffset:textPhdrOff+elfPhdrFlagsOffset+4], flags)
 
+	// When compression is active TextMemSize > TextSize: p_filesz stays at the
+	// compressed size but p_memsz is widened so the kernel maps enough virtual
+	// memory for the in-place LZ4 inflate decoder to expand into. The kernel
+	// zero-fills the [p_filesz, p_memsz) window at load time — exactly the
+	// workspace the decoder writes into. p_filesz is left unchanged so the
+	// kernel reads only the compressed bytes from disk.
+	if plan.TextMemSize > plan.TextSize {
+		binary.LittleEndian.PutUint64(
+			out[textPhdrOff+elfPhdrMemSzOffset:textPhdrOff+elfPhdrMemSzOffset+8],
+			uint64(plan.TextMemSize),
+		)
+	}
+
 	// 3. Append new PT_LOAD R+E for stub after existing phdrs.
 	// The input must have at least one phdr slot of slack between the
 	// phdr table and the first PT_LOAD's file offset; real Go static-PIE
