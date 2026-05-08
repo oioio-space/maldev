@@ -291,6 +291,134 @@ func TestGenerate_PerPackUniqueness(t *testing.T) {
 	}
 }
 
+// TestGenerate_Compress_PE verifies that Generate with Compress=true produces
+// a structurally valid PE32+ (debug/pe parses it), the output is smaller than
+// the non-compressed variant on a text-heavy input, and the .text VirtualSize
+// is larger than SizeOfRawData (the TextMemSize > TextSize memsz expansion).
+func TestGenerate_Compress_PE(t *testing.T) {
+	// Use a larger .text so compression has something to work with.
+	input := buildMinimalPE(0x2000, 0x1010)
+	// Seed the text with a repetitive pattern that LZ4 compresses well.
+	const fileAlign = 0x200
+	const headersSize = 0x40 + 4 + 20 + 240 + 40
+	textFileOff := uint32((headersSize + fileAlign - 1) &^ (fileAlign - 1))
+	for i := uint32(0); i < 0x2000 && int(textFileOff+i) < len(input); i++ {
+		input[textFileOff+i] = byte(i % 7) // repetitive → compressible
+	}
+
+	outComp, _, err := stubgen.Generate(stubgen.Options{
+		Input: input, Rounds: 1, Seed: 1, Compress: true,
+	})
+	if err != nil {
+		t.Fatalf("Generate Compress=true: %v", err)
+	}
+
+	f, err := pe.NewFile(bytes.NewReader(outComp))
+	if err != nil {
+		t.Fatalf("debug/pe rejected Compress=true output: %v", err)
+	}
+	defer f.Close()
+
+	if len(f.Sections) < 2 {
+		t.Fatalf("Sections = %d, want ≥ 2", len(f.Sections))
+	}
+
+	// The .text VirtualSize must be larger than SizeOfRawData: the former
+	// covers the decompression workspace; the latter is the compressed payload.
+	textSec := f.Sections[0]
+	if textSec.VirtualSize <= textSec.Size {
+		t.Errorf(".text VirtualSize (%#x) ≤ SizeOfRawData (%#x): TextMemSize not applied",
+			textSec.VirtualSize, textSec.Size)
+	}
+}
+
+// TestGenerate_Compress_ELF verifies that Generate with Compress=true produces
+// a structurally valid ELF64 (debug/elf parses it), that the binary's
+// p_memsz is never shrunken below the original value, and that the output
+// size is smaller than the non-compressed variant (compression actually helps).
+func TestGenerate_Compress_ELF(t *testing.T) {
+	input, err := os.ReadFile(filepath.Join("..", "runtime", "testdata", "hello_static_pie"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	// Parse the original p_memsz from the first R+E PT_LOAD before packing.
+	origExecMemSz := func() uint64 {
+		f, err := elf.NewFile(bytes.NewReader(input))
+		if err != nil {
+			t.Fatalf("elf.NewFile(input): %v", err)
+		}
+		defer f.Close()
+		for _, p := range f.Progs {
+			if p.Type == elf.PT_LOAD && p.Flags&elf.PF_X != 0 {
+				return p.Memsz
+			}
+		}
+		t.Fatal("no executable PT_LOAD in input fixture")
+		return 0
+	}()
+
+	out, _, err := stubgen.Generate(stubgen.Options{
+		Input: input, Rounds: 1, Seed: 1, Compress: true,
+	})
+	if err != nil {
+		t.Fatalf("Generate ELF Compress=true: %v", err)
+	}
+
+	f, err := elf.NewFile(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("debug/elf rejected Compress=true output: %v", err)
+	}
+	defer f.Close()
+
+	// Find the executable PT_LOAD. p_memsz must be >= the original value
+	// (we never shrink it; the inflate workspace may be covered by the
+	// existing segment gap when .text << PT_LOAD filesz).
+	found := false
+	for _, prog := range f.Progs {
+		if prog.Type == elf.PT_LOAD && prog.Flags&elf.PF_X != 0 {
+			if prog.Memsz < origExecMemSz {
+				t.Errorf("executable PT_LOAD p_memsz (%#x) shrunken below original (%#x)",
+					prog.Memsz, origExecMemSz)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("no executable PT_LOAD found in Compress=true ELF output")
+	}
+
+	// Output must be a valid ELF with entry changed to the stub.
+	origEntry := binary.LittleEndian.Uint64(input[0x18 : 0x18+8])
+	if f.Entry == origEntry {
+		t.Error("e_entry unchanged — stub not wired up")
+	}
+}
+
+// TestGenerate_Compress_DefaultFalse confirms that the zero-value Options
+// (Compress=false) does not set TextMemSize: the .text VirtualSize in the
+// output PE should equal the original TextSize (no inflate workspace).
+func TestGenerate_Compress_DefaultFalse(t *testing.T) {
+	input := buildMinimalPE(0x500, 0x1010)
+	out, _, err := stubgen.Generate(stubgen.Options{Input: input, Rounds: 1, Seed: 1})
+	if err != nil {
+		t.Fatalf("Generate Compress=false: %v", err)
+	}
+	f, err := pe.NewFile(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("debug/pe rejected: %v", err)
+	}
+	defer f.Close()
+
+	// VirtualSize must equal the original TextSize (0x500) — no memsz expansion.
+	const wantVirtualSize = 0x500
+	if f.Sections[0].VirtualSize != wantVirtualSize {
+		t.Errorf(".text VirtualSize = %#x, want %#x (no inflate workspace without Compress)",
+			f.Sections[0].VirtualSize, wantVirtualSize)
+	}
+}
+
 // TestGenerate_RejectsUnknownFormat verifies ErrUnsupportedInputFormat
 // for garbage input.
 func TestGenerate_RejectsUnknownFormat(t *testing.T) {

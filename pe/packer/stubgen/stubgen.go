@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	lz4 "github.com/pierrec/lz4/v4"
+
 	"github.com/oioio-space/maldev/pe/packer/stubgen/amd64"
 	"github.com/oioio-space/maldev/pe/packer/stubgen/poly"
 	"github.com/oioio-space/maldev/pe/packer/stubgen/stage1"
@@ -21,7 +23,8 @@ type Options struct {
 	// Seed drives the poly engine. Zero = crypto-random.
 	Seed int64
 	// StubMaxSize is the pre-reserved byte count for the appended stub
-	// section. Zero defaults to 4096.
+	// section. Zero defaults to 8192 when Compress is true (the LZ4
+	// decoder adds ~160 bytes), 4096 otherwise.
 	StubMaxSize uint32
 	// CipherKey, when non-nil, is used as the XOR key for .text
 	// encryption. When nil a fresh 32-byte key is generated.
@@ -31,6 +34,12 @@ type Options struct {
 	// [stage1.EmitOptions.AntiDebug] for the full description. ELF stubs
 	// ignore this flag.
 	AntiDebug bool
+	// Compress, when true, LZ4-compresses the .text section before SGN
+	// encoding. The stub gains a register-setup sequence + the 136-byte
+	// LZ4 block inflate decoder between the last SGN round and the OEP
+	// JMP. Plan.TextMemSize is set so the loader maps enough virtual memory
+	// for the in-place inflate to expand into. Default false (conservative).
+	Compress bool
 }
 
 // Sentinels surfaced by Generate.
@@ -65,7 +74,13 @@ func Generate(opts Options) ([]byte, []byte, error) {
 	}
 	stubMaxSize := opts.StubMaxSize
 	if stubMaxSize == 0 {
-		stubMaxSize = 4096
+		// Compress adds ~160 bytes to the stub (4-insn setup + 136-byte LZ4
+		// decoder). 8192 gives comfortable headroom for 10 SGN rounds + decoder.
+		if opts.Compress {
+			stubMaxSize = 8192
+		} else {
+			stubMaxSize = 4096
+		}
 	}
 	seed := opts.Seed
 	if seed == 0 {
@@ -97,14 +112,75 @@ func Generate(opts Options) ([]byte, []byte, error) {
 	}
 
 	// 2. Extract .text bytes
-	textBytes := opts.Input[plan.TextFileOff : plan.TextFileOff+plan.TextSize]
+	originalTextBytes := opts.Input[plan.TextFileOff : plan.TextFileOff+plan.TextSize]
+	originalTextSize := plan.TextSize
 
-	// 3. SGN-encode the .text bytes directly. No outer XOR layer —
-	// the stub's decoder only undoes SGN rounds, so any wrapping
-	// cipher would be left in place at runtime and corrupt OEP. The
-	// SGN engine itself produces non-plaintext output; if Phase 1c+
-	// AES-GCM integration is added later, the stub must gain the
-	// matching outer-layer decoder before that wrapping is enabled.
+	// 3. Optionally LZ4-compress .text before SGN encoding.
+	//
+	// Layout after compression:
+	//   payload = [zero_prefix (safetyMargin bytes)] + [lz4_block (compressedSize bytes)]
+	//
+	// The SGN engine encodes the entire payload (prefix + compressed block).
+	// At runtime, after all SGN rounds decode the payload back:
+	//   [0, safetyMargin)              = zero bytes   (SGN round decoded zeros)
+	//   [safetyMargin, safetyMargin+n) = LZ4 block    (the compressed .text)
+	//
+	// The stub then runs the LZ4 inflate decoder with:
+	//   src = textBase + safetyMargin   (compressed block)
+	//   dst = textBase                  (expand in-place; dst < src always)
+	//   srcSize = compressedSize
+	//
+	// safety_margin = ⌈compressedSize/255⌉ + 16 guarantees dst never catches
+	// src (LZ4 block spec: each compressed byte expands to ≤255 output bytes).
+	//
+	// plan.TextSize is updated to len(payload) so InjectStubPE/ELF writes the
+	// correct number of bytes on disk. plan.TextMemSize is set to safetyMargin
+	// + originalTextSize so the loader maps enough virtual memory for inflate.
+	var (
+		emitOpts       stage1.EmitOptions
+		encodePayload  []byte
+		safetyMargin   uint32
+		compressedSize uint32
+	)
+	emitOpts.AntiDebug = opts.AntiDebug
+
+	if opts.Compress {
+		dst := make([]byte, lz4.CompressBlockBound(len(originalTextBytes)))
+		var c lz4.Compressor
+		n, err := c.CompressBlock(originalTextBytes, dst)
+		if err != nil {
+			return nil, nil, fmt.Errorf("stubgen: lz4 compress: %w", err)
+		}
+		compressed := dst[:n]
+		compressedSize = uint32(n)
+
+		// safety_margin = ⌈compressedSize/255⌉ + 16, minimum 64.
+		margin := (compressedSize+254)/255 + 16
+		if margin < 64 {
+			margin = 64
+		}
+		safetyMargin = margin
+
+		// Build the on-disk payload: zero prefix + compressed block.
+		encodePayload = make([]byte, safetyMargin+compressedSize)
+		copy(encodePayload[safetyMargin:], compressed)
+
+		// Update plan so the transform functions know the on-disk and
+		// virtual sizes differ (memsz > filesz for the inflate workspace).
+		plan.TextSize = uint32(len(encodePayload))
+		plan.TextMemSize = safetyMargin + originalTextSize
+
+		emitOpts.Compress = true
+		emitOpts.SafetyMargin = safetyMargin
+		emitOpts.CompressedSize = compressedSize
+	} else {
+		// Non-compress path: encode the raw .text bytes directly.
+		encodePayload = originalTextBytes
+	}
+
+	// 3a. Key is unused in the SGN-only pipeline (no outer XOR cipher today).
+	// Retained for API compatibility — callers that pass a key still get it
+	// back as the second return value so PackBinary's signature is stable.
 	key := opts.CipherKey
 	if key == nil {
 		key = make([]byte, 32)
@@ -113,7 +189,7 @@ func Generate(opts Options) ([]byte, []byte, error) {
 		}
 	}
 
-	// 4. SGN-encode the .text bytes
+	// 4. SGN-encode the payload (raw text bytes or zero-prefix+compressed block).
 	eng, err := poly.NewEngine(seed, rounds)
 	if err != nil {
 		return nil, nil, fmt.Errorf("stubgen: NewEngine: %w", err)
@@ -125,7 +201,7 @@ func Generate(opts Options) ([]byte, []byte, error) {
 	// or counter register, the address would be clobbered → SIGSEGV
 	// on the first decoder dereference. Caught by the seed-3+
 	// regression test in stubgen_test.go.
-	finalEncoded, polyRounds, err := eng.EncodePayloadExcluding(textBytes, stage1.BaseReg)
+	finalEncoded, polyRounds, err := eng.EncodePayloadExcluding(encodePayload, stage1.BaseReg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("stubgen: EncodePayload: %w", err)
 	}
@@ -135,9 +211,10 @@ func Generate(opts Options) ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("stubgen: amd64.New: %w", err)
 	}
-	if err := stage1.EmitStub(b, plan, polyRounds, stage1.EmitOptions{AntiDebug: opts.AntiDebug}); err != nil {
+	if err := stage1.EmitStub(b, plan, polyRounds, emitOpts); err != nil {
 		return nil, nil, fmt.Errorf("stubgen: EmitStub: %w", err)
 	}
+
 	stubBytes, err := b.Encode()
 	if err != nil {
 		return nil, nil, fmt.Errorf("stubgen: amd64.Encode: %w", err)

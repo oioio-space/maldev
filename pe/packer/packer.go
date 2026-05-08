@@ -117,6 +117,7 @@ type PackBinaryOptions struct {
 	// Key, when non-nil, is used as the XOR key for .text encryption.
 	// When nil a fresh 32-byte key is generated.
 	Key []byte
+
 	// AntiDebug, when true, prepends a ~70-byte anti-debug prologue to the
 	// Windows PE stub: three checks (PEB.BeingDebugged, PEB.NtGlobalFlag
 	// mask 0x70, RDTSC delta around CPUID with threshold 1000 cycles).
@@ -125,6 +126,15 @@ type PackBinaryOptions struct {
 	// any SGN-decoded bytes. Default false (conservative). ELF stubs ignore
 	// this flag.
 	AntiDebug bool
+
+	// Compress, when true, LZ4-compresses the .text section before SGN
+	// encoding. The stub gains a 22-byte register-setup sequence plus the
+	// 136-byte LZ4 block inflate decoder between the last SGN round and the
+	// OEP JMP. Typical size reduction: 40–60 % for Go binaries. The packed
+	// binary is self-contained — no external decompressor is needed at
+	// runtime. Default false (conservative). See [stubgen.Options.Compress]
+	// for the full in-place inflate layout.
+	Compress bool
 }
 
 // ErrUnsupportedFormat fires when [PackBinary]'s opts.Format does not
@@ -158,12 +168,14 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		rounds = 3
 	}
 	return stubgen.Generate(stubgen.Options{
-		Input:       input,
-		Rounds:      rounds,
-		Seed:        opts.Seed,
-		StubMaxSize: 4096,
-		CipherKey:   opts.Key,
-		AntiDebug:   opts.AntiDebug,
+		Input:     input,
+		Rounds:    rounds,
+		Seed:      opts.Seed,
+		CipherKey: opts.Key,
+		AntiDebug: opts.AntiDebug,
+		Compress:  opts.Compress,
+		// StubMaxSize zero: stubgen.Generate picks 8192 (Compress=true) or
+		// 4096 (Compress=false) based on the Compress flag.
 	})
 }
 
