@@ -57,7 +57,7 @@ func TestEmitStub_BeginsWithCALL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("amd64.New: %v", err)
 	}
-	if err := stage1.EmitStub(b, stdPlan, rounds); err != nil {
+	if err := stage1.EmitStub(b, stdPlan, rounds, stage1.EmitOptions{}); err != nil {
 		t.Fatalf("EmitStub: %v", err)
 	}
 	out, err := b.Encode()
@@ -84,7 +84,7 @@ func TestEmitStub_EndsWithJMP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("amd64.New: %v", err)
 	}
-	if err := stage1.EmitStub(b, stdPlan, rounds); err != nil {
+	if err := stage1.EmitStub(b, stdPlan, rounds, stage1.EmitOptions{}); err != nil {
 		t.Fatalf("EmitStub: %v", err)
 	}
 	out, _ := b.Encode()
@@ -115,7 +115,7 @@ func TestEmitStub_RespectsRoundCount(t *testing.T) {
 			t.Fatalf("amd64.New (n=%d): %v", n, err)
 		}
 		rounds := makeRounds(n)
-		if err := stage1.EmitStub(b, stdPlan, rounds); err != nil {
+		if err := stage1.EmitStub(b, stdPlan, rounds, stage1.EmitOptions{}); err != nil {
 			t.Errorf("n=%d EmitStub: %v", n, err)
 			continue
 		}
@@ -136,7 +136,7 @@ func TestEmitStub_RejectsZeroRounds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("amd64.New: %v", err)
 	}
-	err = stage1.EmitStub(b, plan, []poly.Round{})
+	err = stage1.EmitStub(b, plan, []poly.Round{}, stage1.EmitOptions{})
 	if !errors.Is(err, stage1.ErrNoRounds) {
 		t.Errorf("got %v, want ErrNoRounds", err)
 	}
@@ -163,7 +163,7 @@ func TestEmitStub_AllSubsts(t *testing.T) {
 			if err != nil {
 				t.Fatalf("amd64.New: %v", err)
 			}
-			if err := stage1.EmitStub(b, stdPlan, []poly.Round{round}); err != nil {
+			if err := stage1.EmitStub(b, stdPlan, []poly.Round{round}, stage1.EmitOptions{}); err != nil {
 				t.Fatalf("EmitStub: %v", err)
 			}
 			out, err := b.Encode()
@@ -244,7 +244,7 @@ func TestPatchTextDisplacement_FullStub(t *testing.T) {
 	if err != nil {
 		t.Fatalf("amd64.New: %v", err)
 	}
-	if err := stage1.EmitStub(b, plan, makeRounds(2)); err != nil {
+	if err := stage1.EmitStub(b, plan, makeRounds(2), stage1.EmitOptions{}); err != nil {
 		t.Fatalf("EmitStub: %v", err)
 	}
 	out, err := b.Encode()

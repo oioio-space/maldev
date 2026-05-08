@@ -311,6 +311,18 @@ binaries that crashed at runtime. See
 - `opts.CipherKey` — currently informational only (the SGN
   layer is the encryption); reserved for future Phase 1c+ AES
   wrapping.
+- `opts.AntiDebug` — when `true`, prepends a ~70-byte anti-debug
+  prologue to the Windows PE stub before the CALL+POP+ADD PIC
+  prologue. Three checks run in order:
+  1. **PEB.BeingDebugged** — `gs:[0x60]` + byte at `PEB+2`.
+  2. **PEB.NtGlobalFlag** — DWORD at `PEB+0xBC` masked with
+     `0x70` (heap-validation triad set by WinDbg).
+  3. **RDTSC delta around CPUID** — delta above 1000 cycles
+     indicates a hooked dispatcher or sandbox.
+  Positive detection exits via `RET`; `ntdll!RtlUserThreadStart`'s
+  epilogue calls `ExitProcess(0)`. No SGN-decoded bytes are
+  ever revealed. Default `false` (conservative). ELF stubs
+  ignore this flag.
 
 **Returns:** `(packed, key, err)`. `packed` is a runnable
 single-binary; `key` is the seed-derived key material.

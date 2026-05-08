@@ -117,6 +117,14 @@ type PackBinaryOptions struct {
 	// Key, when non-nil, is used as the XOR key for .text encryption.
 	// When nil a fresh 32-byte key is generated.
 	Key []byte
+	// AntiDebug, when true, prepends a ~70-byte anti-debug prologue to the
+	// Windows PE stub: three checks (PEB.BeingDebugged, PEB.NtGlobalFlag
+	// mask 0x70, RDTSC delta around CPUID with threshold 1000 cycles).
+	// Positive detection exits via RET — ntdll!RtlUserThreadStart's epilogue
+	// calls ExitProcess(0), so the process exits cleanly without revealing
+	// any SGN-decoded bytes. Default false (conservative). ELF stubs ignore
+	// this flag.
+	AntiDebug bool
 }
 
 // ErrUnsupportedFormat fires when [PackBinary]'s opts.Format does not
@@ -155,6 +163,7 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		Seed:        opts.Seed,
 		StubMaxSize: 4096,
 		CipherKey:   opts.Key,
+		AntiDebug:   opts.AntiDebug,
 	})
 }
 

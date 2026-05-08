@@ -48,63 +48,67 @@ func TestPackBinary_WindowsPE_PackTimeMultiSeed(t *testing.T) {
 	preFile.Close()
 
 	seeds := []int64{1, 2, 3, 7, 42, 100, 1000, 2026}
-	for _, seed := range seeds {
-		t.Run("", func(t *testing.T) {
-			out, _, err := packerpkg.PackBinary(input, packerpkg.PackBinaryOptions{
-				Format:       packerpkg.FormatWindowsExe,
-				Stage1Rounds: 3,
-				Seed:         seed,
-			})
-			if err != nil {
-				t.Fatalf("seed=%d PackBinary: %v", seed, err)
-			}
+	for _, antiDebug := range []bool{false, true} {
+		for _, seed := range seeds {
+			seed, antiDebug := seed, antiDebug
+			t.Run("", func(t *testing.T) {
+				out, _, err := packerpkg.PackBinary(input, packerpkg.PackBinaryOptions{
+					Format:       packerpkg.FormatWindowsExe,
+					Stage1Rounds: 3,
+					Seed:         seed,
+					AntiDebug:    antiDebug,
+				})
+				if err != nil {
+					t.Fatalf("seed=%d antiDebug=%v PackBinary: %v", seed, antiDebug, err)
+				}
 
-			f, err := pe.NewFile(bytes.NewReader(out))
-			if err != nil {
-				t.Fatalf("seed=%d debug/pe rejected packed output: %v", seed, err)
-			}
-			gotSections := len(f.Sections)
-			f.Close()
+				f, err := pe.NewFile(bytes.NewReader(out))
+				if err != nil {
+					t.Fatalf("seed=%d antiDebug=%v debug/pe rejected packed output: %v", seed, antiDebug, err)
+				}
+				gotSections := len(f.Sections)
+				f.Close()
 
-			if gotSections != preSections+1 {
-				t.Errorf("seed=%d section count = %d, want %d (orig + stub)",
-					seed, gotSections, preSections+1)
-			}
+				if gotSections != preSections+1 {
+					t.Errorf("seed=%d antiDebug=%v section count = %d, want %d (orig + stub)",
+						seed, antiDebug, gotSections, preSections+1)
+				}
 
-			covered, err := packerpkg.ApplyDefaultCover(out, seed+1)
-			if err != nil {
-				t.Fatalf("seed=%d ApplyDefaultCover: %v", seed, err)
-			}
-			cf, err := pe.NewFile(bytes.NewReader(covered))
-			if err != nil {
-				t.Fatalf("seed=%d debug/pe rejected covered output: %v", seed, err)
-			}
-			coveredSections := len(cf.Sections)
+				covered, err := packerpkg.ApplyDefaultCover(out, seed+1)
+				if err != nil {
+					t.Fatalf("seed=%d antiDebug=%v ApplyDefaultCover: %v", seed, antiDebug, err)
+				}
+				cf, err := pe.NewFile(bytes.NewReader(covered))
+				if err != nil {
+					t.Fatalf("seed=%d antiDebug=%v debug/pe rejected covered output: %v", seed, antiDebug, err)
+				}
+				coveredSections := len(cf.Sections)
 
-			// DefaultCoverOptions adds 3 junk sections + 1 fake-imports section.
-			if coveredSections != preSections+1+3+1 {
-				t.Errorf("seed=%d covered section count = %d, want %d (orig + stub + 3 junk + .idata2)",
-					seed, coveredSections, preSections+1+3+1)
-			}
+				// DefaultCoverOptions adds 3 junk sections + 1 fake-imports section.
+				if coveredSections != preSections+1+3+1 {
+					t.Errorf("seed=%d antiDebug=%v covered section count = %d, want %d (orig + stub + 3 junk + .idata2)",
+						seed, antiDebug, coveredSections, preSections+1+3+1)
+				}
 
-			// Fake imports from DefaultFakeImports must appear in the symbol list.
-			syms, err := cf.ImportedSymbols()
-			cf.Close()
-			if err != nil {
-				t.Fatalf("seed=%d ImportedSymbols: %v", seed, err)
-			}
-			symSet := make(map[string]bool, len(syms))
-			for _, s := range syms {
-				symSet[s] = true
-			}
-			for _, fi := range packerpkg.DefaultFakeImports {
-				for _, fn := range fi.Functions {
-					key := fn + ":" + fi.DLL
-					if !symSet[key] {
-						t.Errorf("seed=%d fake symbol %q missing from ImportedSymbols", seed, key)
+				// Fake imports from DefaultFakeImports must appear in the symbol list.
+				syms, err := cf.ImportedSymbols()
+				cf.Close()
+				if err != nil {
+					t.Fatalf("seed=%d antiDebug=%v ImportedSymbols: %v", seed, antiDebug, err)
+				}
+				symSet := make(map[string]bool, len(syms))
+				for _, s := range syms {
+					symSet[s] = true
+				}
+				for _, fi := range packerpkg.DefaultFakeImports {
+					for _, fn := range fi.Functions {
+						key := fn + ":" + fi.DLL
+						if !symSet[key] {
+							t.Errorf("seed=%d antiDebug=%v fake symbol %q missing from ImportedSymbols", seed, antiDebug, key)
+						}
 					}
 				}
-			}
-		})
+			})
+		}
 	}
 }

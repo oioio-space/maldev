@@ -26,6 +26,11 @@ type Options struct {
 	// CipherKey, when non-nil, is used as the XOR key for .text
 	// encryption. When nil a fresh 32-byte key is generated.
 	CipherKey []byte
+	// AntiDebug, when true, prepends a ~70-byte anti-debug prologue to the
+	// Windows PE stub before the CALL+POP+ADD PIC prologue. See
+	// [stage1.EmitOptions.AntiDebug] for the full description. ELF stubs
+	// ignore this flag.
+	AntiDebug bool
 }
 
 // Sentinels surfaced by Generate.
@@ -130,7 +135,7 @@ func Generate(opts Options) ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("stubgen: amd64.New: %w", err)
 	}
-	if err := stage1.EmitStub(b, plan, polyRounds); err != nil {
+	if err := stage1.EmitStub(b, plan, polyRounds, stage1.EmitOptions{AntiDebug: opts.AntiDebug}); err != nil {
 		return nil, nil, fmt.Errorf("stubgen: EmitStub: %w", err)
 	}
 	stubBytes, err := b.Encode()

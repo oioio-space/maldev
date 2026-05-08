@@ -14,6 +14,20 @@ import (
 // ErrNoRounds fires when EmitStub is called with an empty rounds slice.
 var ErrNoRounds = errors.New("stage1: no rounds to emit")
 
+// EmitOptions carries optional flags for EmitStub. The zero value
+// disables all optional prologues (v0.64.x conservative default).
+type EmitOptions struct {
+	// AntiDebug, when true, prepends a ~70-byte anti-debug prologue
+	// BEFORE the CALL+POP+ADD PIC prologue. Three checks run in order:
+	// PEB.BeingDebugged, PEB.NtGlobalFlag (mask 0x70), and RDTSC delta
+	// around CPUID. Positive detection exits via RET — the caller's
+	// ntdll!RtlUserThreadStart epilogue calls ExitProcess(0), so the
+	// process exits cleanly (code 0) without revealing any SGN-decoded
+	// bytes. Only effective for Windows PE stubs; ELF stubs ignore the
+	// flag.
+	AntiDebug bool
+}
+
 // baseReg is the callee-saved register the prologue loads with the
 // runtime address of the encrypted .text section. R15 is chosen because:
 //   - It is not in the SGN engine's typical scratch allocation set,
@@ -67,9 +81,19 @@ const BaseReg = baseReg
 // CALL target IS the next instruction; the kernel pushes the return
 // address (= address of the POP) onto the stack, which is exactly what
 // the POP needs to read. See docs/refactor-2026-doc/KNOWN-ISSUES-1e.md §Bug 2.
-func EmitStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round) error {
+func EmitStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round, opts EmitOptions) error {
 	if len(rounds) == 0 {
 		return ErrNoRounds
+	}
+
+	// Anti-debug prologue runs BEFORE CALL+POP+ADD so positive detection
+	// bails without computing TextRVA into R15 — minimises the surface
+	// revealed under a debugger. ELF stubs skip it (emitAntiDebug is a
+	// no-op for FormatELF).
+	if opts.AntiDebug {
+		if err := emitAntiDebug(b, plan.Format); err != nil {
+			return fmt.Errorf("stage1: anti-debug prologue: %w", err)
+		}
 	}
 
 	// golang-asm cannot resolve a forward CALL to the immediately following
