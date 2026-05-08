@@ -101,6 +101,17 @@ func (d *libvirtDriver) WaitReady(ctx context.Context, vm *VMConfig) error {
 		if host != "" && tryDial(host, port, 2*time.Second) {
 			vm.SSHHost = host
 			fmt.Printf("SSH reachable at %s:%d\n", host, port)
+			// Windows guests revert from INIT snapshot with a stale clock,
+			// which breaks TLS cert validation when `go mod download` reaches
+			// out to proxy.golang.org. Sync the clock as a one-shot before
+			// any test work touches the network.
+			if vm.Platform == "windows" {
+				if key, kerr := resolveSSHKey(vm); kerr == nil {
+					if err := syncWindowsClock(ctx, vm, key, port); err != nil {
+						fmt.Printf("warning: clock sync on %s failed: %v (TLS-using tests may fail)\n", vm.LibvirtName, err)
+					}
+				}
+			}
 			return nil
 		}
 		select {
@@ -260,6 +271,51 @@ func pushWindows(ctx context.Context, vm *VMConfig, hostRoot, dst, key string, p
 	cmd := exec.CommandContext(ctx, "scp", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	// Snapshot-revert leaves the Windows guest with stale TLS roots, so
+	// `go mod download` against proxy.golang.org fails on cert validation.
+	// Push the host's already-warmed Go module cache to the guest's GOPATH
+	// and pair it with GOPROXY=off in Exec — the test runs strictly from
+	// the shipped cache, no network access required.
+	if err := pushModuleCache(ctx, vm, key, port); err != nil {
+		fmt.Printf("warn: module-cache push failed: %v (TLS-using test paths will fail)\n", err)
+	}
+	return nil
+}
+
+// pushModuleCache rsync-equivalent that scp's the host's
+// $GOPATH/pkg/mod/cache/download tree to the Windows guest's
+// %USERPROFILE%/go/pkg/mod/cache/download. Combined with
+// GOPROXY=off in Exec the guest's `go test` uses only the
+// shipped cache.
+//
+// Idempotent and skipped when the host has no warmed cache.
+func pushModuleCache(ctx context.Context, vm *VMConfig, key string, port int) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	src := filepath.Join(home, "go", "pkg", "mod", "cache", "download")
+	if _, err := os.Stat(src); err != nil {
+		return fmt.Errorf("module cache not warmed at %s: %w", src, err)
+	}
+	dst := fmt.Sprintf(`C:/Users/%s/go/pkg/mod/cache/download`, vm.User)
+	mkCmd := fmt.Sprintf(`cmd.exe /c "if not exist %s mkdir %s"`, strings.ReplaceAll(dst, "/", `\`), strings.ReplaceAll(dst, "/", `\`))
+	if err := sshRun(ctx, vm, key, port, mkCmd); err != nil {
+		return fmt.Errorf("mkdir module cache dir: %w", err)
+	}
+	target := fmt.Sprintf("%s@%s:%s", vm.User, vm.SSHHost, dst)
+	args := []string{
+		"-i", key, "-P", strconv.Itoa(port),
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-r", filepath.Clean(src) + string(filepath.Separator) + ".", target,
+	}
+	cmd := exec.CommandContext(ctx, "scp", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
@@ -298,7 +354,10 @@ func (d *libvirtDriver) Exec(ctx context.Context, vm *VMConfig, packages, flags 
 	case "windows":
 		// cmd.exe: set each env var then && go test. Quotes kept minimal so the
 		// outer `cmd.exe /c "..."` parses unambiguously.
-		setCmds := ""
+		// GOPROXY=off + GOFLAGS=-mod=mod paired with the Push-time module-cache
+		// upload defeats the stale-TLS-roots issue on snapshot-reverted guests:
+		// `go test` reads modules strictly from the cache, no network.
+		setCmds := "set GOPROXY=off&& set GOFLAGS=-mod=mod&& "
 		for _, kv := range envs {
 			setCmds += "set " + kv + "&& "
 		}
@@ -405,4 +464,19 @@ func shellQuote(s string) string {
 		return s
 	}
 	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+}
+
+// syncWindowsClock pushes the host's current UTC time into the
+// Windows guest. Snapshot reverts on the INIT image leave the
+// guest clock weeks-to-months behind real time, which breaks TLS
+// cert validation when `go mod download` reaches out to
+// proxy.golang.org during the test run.
+//
+// Format: ISO 8601 UTC fed to PowerShell's Set-Date — locale-
+// agnostic, unambiguous (the FR locale parses MM/DD as DD/MM,
+// US-format strings are unsafe).
+func syncWindowsClock(ctx context.Context, vm *VMConfig, key string, port int) error {
+	now := time.Now().UTC().Format("2006-01-02T15:04:05")
+	cmd := fmt.Sprintf(`powershell -c "Set-Date -Date ([datetime]::ParseExact('%s','yyyy-MM-ddTHH:mm:ss',$null))"`, now)
+	return sshRun(ctx, vm, key, port, cmd)
 }
