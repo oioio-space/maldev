@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-05-07
-reflects_commit: pending-v0.62.0
+reflects_commit: c38787f
 ---
 
 # Worked example — UPX-style packer + cover layer

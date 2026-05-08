@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/pe/packer
 last_reviewed: 2026-05-07
-reflects_commit: pending-v0.62.0
+reflects_commit: c38787f
 ---
 
 # PE Packer (Phase 1a–1e — encrypt/embed + reflective loader + UPX-style)
