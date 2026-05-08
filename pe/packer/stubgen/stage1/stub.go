@@ -206,10 +206,12 @@ func EmitStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round, opts E
 		if err := b.MOV(amd64.RCX, amd64.Imm(int64(opts.CompressedSize))); err != nil {
 			return fmt.Errorf("stage1: lz4 setup MOV RCX,CompressedSize: %w", err)
 		}
-		// Inline the LZ4 block decoder. The decoder ends with RET (0xC3); execution
-		// resumes at the next instruction after the raw bytes — the OEP epilogue.
-		if err := EmitLZ4Inflate(b); err != nil {
-			return fmt.Errorf("stage1: lz4 inflate: %w", err)
+		// Inline the LZ4 block decoder WITHOUT its terminal RET (0xC3).
+		// EmitLZ4Inflate ends with RET so it works as a standalone function;
+		// here we need fall-through into the OEP epilogue below, so we use
+		// EmitLZ4InflateInline (135 bytes, no RET).
+		if err := EmitLZ4InflateInline(b); err != nil {
+			return fmt.Errorf("stage1: lz4 inflate inline: %w", err)
 		}
 	}
 

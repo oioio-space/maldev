@@ -154,8 +154,19 @@ func Generate(opts Options) ([]byte, []byte, error) {
 		compressed := dst[:n]
 		compressedSize = uint32(n)
 
-		// safety_margin = ⌈compressedSize/255⌉ + 16, minimum 64.
-		margin := (compressedSize+254)/255 + 16
+		// safety_margin = ⌈originalTextSize/255⌉ + 16, minimum 64.
+		//
+		// For in-place LZ4 inflate with dst < src: the write pointer advances
+		// from textBase and the read pointer starts at textBase+safetyMargin.
+		// Each output byte was produced from at most 1/255 of an input byte
+		// (worst case: each 0xFF extension byte yields 255 literals). The gap
+		// between write and read shrinks by at most 1-(1/255) per output byte,
+		// so the total potential overshoot over the full decompression is
+		// ≤ originalSize/255. Using compressedSize/255 underestimates this
+		// (since compressedSize ≤ originalSize), which caused dst to overtake src
+		// midway through decompression. Correct bound: ⌈originalTextSize/255⌉.
+		origSz := uint32(len(originalTextBytes))
+		margin := (origSz+254)/255 + 16
 		if margin < 64 {
 			margin = 64
 		}

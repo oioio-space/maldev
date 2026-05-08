@@ -205,6 +205,8 @@ func TestEmitStub_Compress_Default(t *testing.T) {
 // assembles without error and that the emitted bytes contain both the LZ4
 // register-setup sequence (MOV RAX, R15 = 4C 89 F8) and the opening bytes of
 // the LZ4 block decoder (MOV R10, RAX = 49 89 C2) placed immediately after.
+// It also confirms the stub does NOT end with RET (0xC3) followed by nothing —
+// after the inline decoder the OEP epilogue JMP must follow.
 func TestEmitStub_Compress_AsmAssembles(t *testing.T) {
 	b, err := amd64.New()
 	if err != nil {
@@ -234,6 +236,62 @@ func TestEmitStub_Compress_AsmAssembles(t *testing.T) {
 	lz4Sig := []byte{0x49, 0x89, 0xC2}
 	if !bytes.Contains(out, lz4Sig) {
 		t.Errorf("stub missing LZ4 decoder signature (49 89 C2 = MOV R10,RAX)")
+	}
+
+	// The stub must NOT end with bare 0xC3 (standalone RET). The inline decoder
+	// omits the terminal RET so execution falls through to the JMP-OEP epilogue.
+	// The stub always ends with FF E7 (JMP R15) or FF D7 (JMP reg) — never C3.
+	last := out[len(out)-1]
+	if last == 0xC3 {
+		t.Errorf("stub last byte = 0xC3 (RET): inline LZ4 decoder was NOT used — must use EmitLZ4InflateInline")
+	}
+}
+
+// TestEmitLZ4InflateInline_NoRetByte verifies that EmitLZ4InflateInline emits
+// exactly one fewer byte than EmitLZ4Inflate and that the omitted byte is 0xC3
+// (the RET that terminates the standalone decoder).
+func TestEmitLZ4InflateInline_NoRetByte(t *testing.T) {
+	emitFull := func() []byte {
+		t.Helper()
+		b, err := amd64.New()
+		if err != nil {
+			t.Fatalf("amd64.New (full): %v", err)
+		}
+		if err := stage1.EmitLZ4Inflate(b); err != nil {
+			t.Fatalf("EmitLZ4Inflate: %v", err)
+		}
+		out, err := b.Encode()
+		if err != nil {
+			t.Fatalf("Encode (full): %v", err)
+		}
+		return out
+	}()
+
+	emitInline := func() []byte {
+		t.Helper()
+		b, err := amd64.New()
+		if err != nil {
+			t.Fatalf("amd64.New (inline): %v", err)
+		}
+		if err := stage1.EmitLZ4InflateInline(b); err != nil {
+			t.Fatalf("EmitLZ4InflateInline: %v", err)
+		}
+		out, err := b.Encode()
+		if err != nil {
+			t.Fatalf("Encode (inline): %v", err)
+		}
+		return out
+	}()
+
+	if len(emitInline) != len(emitFull)-1 {
+		t.Errorf("inline size = %d, want full size - 1 = %d", len(emitInline), len(emitFull)-1)
+	}
+	if emitFull[len(emitFull)-1] != 0xC3 {
+		t.Errorf("EmitLZ4Inflate last byte = %#x, want 0xC3 (RET)", emitFull[len(emitFull)-1])
+	}
+	// Inline bytes must be a prefix of the full bytes.
+	if !bytes.Equal(emitInline, emitFull[:len(emitInline)]) {
+		t.Error("EmitLZ4InflateInline bytes differ from EmitLZ4Inflate prefix")
 	}
 }
 

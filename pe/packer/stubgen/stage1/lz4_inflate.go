@@ -183,14 +183,31 @@ var lz4DecodeBytes = [...]byte{
 // Inputs are not bounds-checked; the caller must ensure the data is well-formed
 // LZ4 block format (https://lz4.org/lz4_Block_format.html).
 //
-// Decoder size: 136 bytes. The emitted bytes are tested in isolation via an
-// mmap'd executable page in lz4_inflate_test.go (TestEmitLZ4Inflate_*).
+// Decoder size: 136 bytes (including the terminal RET). The emitted bytes are
+// tested in isolation via an mmap'd executable page in lz4_inflate_test.go.
 //
-// This function ships in isolation — it is NOT yet wired into [EmitStub].
-// Wiring (Compress flag, memsz accounting) is the C3-stage-2 chantier.
+// Use [EmitLZ4InflateInline] when embedding inside a larger stub where the
+// terminal RET must be omitted so execution falls through to the next instruction.
 func EmitLZ4Inflate(b *amd64.Builder) error {
 	if err := b.RawBytes(lz4DecodeBytes[:]); err != nil {
 		return fmt.Errorf("stage1: EmitLZ4Inflate: %w", err)
+	}
+	return nil
+}
+
+// EmitLZ4InflateInline emits 135 bytes — the LZ4 block decoder without the
+// terminal RET (0xC3). Use this variant when inlining the decoder inside a
+// larger stub: after the decoder completes (all sequences exhausted, src ==
+// src_end), execution falls through to the immediately following instruction
+// rather than popping the stack and jumping away.
+//
+// The caller must ensure execution reaches this code only after the register
+// ABI has been set up (RAX=src, RBX=dst, RCX=src_size).
+func EmitLZ4InflateInline(b *amd64.Builder) error {
+	// lz4DecodeBytes is 136 bytes; the last byte is 0xC3 (RET).
+	// Emit only the first 135 bytes.
+	if err := b.RawBytes(lz4DecodeBytes[:len(lz4DecodeBytes)-1]); err != nil {
+		return fmt.Errorf("stage1: EmitLZ4InflateInline: %w", err)
 	}
 	return nil
 }

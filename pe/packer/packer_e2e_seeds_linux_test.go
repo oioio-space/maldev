@@ -99,6 +99,45 @@ func TestPackBinary_LinuxELF_MultiSeed_WithCover(t *testing.T) {
 	}
 }
 
+// TestPackBinary_LinuxELF_MultiSeed_WithCompress is the C3-stage-2 E2E gate.
+// It packs hello_static_pie with Compress=true across 8 seeds, executes each
+// packed binary, and asserts "hello from packer" appears in combined output
+// and the subprocess exits 0. A failure here means the LZ4 in-place inflate
+// is broken (wrong safety_margin, wrong register setup, or memsz < needed).
+//
+// CRITICAL GATE: if ANY seed fails, the C3 chantier is NOT shippable.
+func TestPackBinary_LinuxELF_MultiSeed_WithCompress(t *testing.T) {
+	fixturePath := filepath.Join("..", "..", "pe", "packer", "runtime",
+		"testdata", "hello_static_pie")
+	fixturePath, err := filepath.Abs(fixturePath)
+	if err != nil {
+		t.Fatalf("filepath.Abs: %v", err)
+	}
+	payload, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	seeds := []int64{1, 2, 3, 7, 42, 100, 1000, 2026}
+
+	for _, seed := range seeds {
+		seed := seed
+		t.Run("", func(t *testing.T) {
+			packed, _, err := packer.PackBinary(payload, packer.PackBinaryOptions{
+				Format:       packer.FormatLinuxELF,
+				Stage1Rounds: 3,
+				Seed:         seed,
+				Compress:     true,
+			})
+			if err != nil {
+				t.Fatalf("seed=%d PackBinary Compress=true: %v", seed, err)
+			}
+
+			runAndCheck(t, seed, "compress", packed)
+		})
+	}
+}
+
 // runAndCheck writes blob to a temp file, executes it, and asserts
 // "hello from packer" appears in combined stdout+stderr.
 func runAndCheck(t *testing.T, seed int64, label string, blob []byte) {
