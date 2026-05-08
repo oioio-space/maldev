@@ -182,6 +182,34 @@ func TestPipelineOpString(t *testing.T) {
 	}
 }
 
+// TestUnpackPipeline_CorruptTruncatedTable confirms a pipeline
+// blob whose step table is truncated past the body end surfaces
+// ErrCorruptBlob (not the misleading ErrBadMagic the sentinel
+// used to wrap before v0.63.x — structural-corruption errors
+// belong to a distinct sentinel from "wrong magic at offset 0").
+func TestUnpackPipeline_CorruptTruncatedTable(t *testing.T) {
+	steps := []packer.PipelineStep{
+		{Op: packer.OpCipher, Algo: uint8(packer.CipherAESGCM)},
+		{Op: packer.OpCipher, Algo: uint8(packer.CipherAESGCM)},
+		{Op: packer.OpCipher, Algo: uint8(packer.CipherAESGCM)},
+		{Op: packer.OpCipher, Algo: uint8(packer.CipherAESGCM)},
+	}
+	blob, keys, err := packer.PackPipeline([]byte("hello"), steps)
+	if err != nil {
+		t.Fatalf("PackPipeline: %v", err)
+	}
+	// Truncate to header + 1 byte: the v2 header (32 bytes)
+	// records NumSteps=4, so the step table claims 4*2=8 bytes
+	// past the header. The truncated blob has only 1 byte of
+	// table — tableEnd > len(packed) fires the structural-
+	// corruption check.
+	truncated := blob[:33]
+	_, err = packer.UnpackPipeline(truncated, keys)
+	if !errors.Is(err, packer.ErrCorruptBlob) {
+		t.Errorf("got %v, want ErrCorruptBlob", err)
+	}
+}
+
 func TestPermutationString(t *testing.T) {
 	cases := []struct {
 		p    packer.Permutation

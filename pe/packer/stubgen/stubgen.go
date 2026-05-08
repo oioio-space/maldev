@@ -2,7 +2,6 @@ package stubgen
 
 import (
 	"crypto/rand"
-	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -10,6 +9,7 @@ import (
 	"github.com/oioio-space/maldev/pe/packer/stubgen/poly"
 	"github.com/oioio-space/maldev/pe/packer/stubgen/stage1"
 	"github.com/oioio-space/maldev/pe/packer/transform"
+	"github.com/oioio-space/maldev/random"
 )
 
 // Options drives Generate.
@@ -64,11 +64,11 @@ func Generate(opts Options) ([]byte, []byte, error) {
 	}
 	seed := opts.Seed
 	if seed == 0 {
-		var buf [8]byte
-		if _, err := rand.Read(buf[:]); err != nil {
+		s, err := random.Int64()
+		if err != nil {
 			return nil, nil, fmt.Errorf("stubgen: seed: %w", err)
 		}
-		seed = int64(binary.LittleEndian.Uint64(buf[:]))
+		seed = s
 	}
 
 	// 1. Detect format + Plan

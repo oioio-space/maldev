@@ -1,12 +1,11 @@
 package poly
 
 import (
-	"crypto/rand"
-	"encoding/binary"
 	"fmt"
 	mrand "math/rand"
 
 	"github.com/oioio-space/maldev/pe/packer/stubgen/amd64"
+	"github.com/oioio-space/maldev/random"
 )
 
 // Engine drives N-round SGN-style polymorphic encoding.
@@ -33,11 +32,11 @@ func NewEngine(seed int64, rounds int) (*Engine, error) {
 		return nil, fmt.Errorf("poly: rounds %d out of range [1,10]", rounds)
 	}
 	if seed == 0 {
-		var buf [8]byte
-		if _, err := rand.Read(buf[:]); err != nil {
-			return nil, fmt.Errorf("poly: crypto/rand seed: %w", err)
+		s, err := random.Int64()
+		if err != nil {
+			return nil, fmt.Errorf("poly: seed: %w", err)
 		}
-		seed = int64(binary.LittleEndian.Uint64(buf[:]))
+		seed = s
 	}
 	return &Engine{rng: mrand.New(mrand.NewSource(seed)), rounds: rounds}, nil
 }

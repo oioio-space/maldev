@@ -201,7 +201,7 @@ func unmarshalHeaderV2(data []byte) (*headerV2, error) {
 			ErrUnsupportedVersion, h.Version, FormatVersionPipeline)
 	}
 	if h.NumSteps == 0 {
-		return nil, fmt.Errorf("%w: pipeline has zero steps", ErrBadMagic)
+		return nil, fmt.Errorf("%w: pipeline has zero steps", ErrCorruptBlob)
 	}
 	return h, nil
 }
@@ -230,4 +230,12 @@ var (
 	// ErrPayloadSizeMismatch fires when the header's PayloadSize
 	// disagrees with the actual byte count after the header.
 	ErrPayloadSizeMismatch = errors.New("packer: payload size mismatch")
+
+	// ErrCorruptBlob fires when the blob's structural metadata is
+	// internally inconsistent (e.g., pipeline table past the end of
+	// the blob, zero-step pipeline, descriptor offsets that overlap).
+	// Distinct from ErrBadMagic (wrong magic at offset 0) so callers
+	// can differentiate "this isn't even a maldev blob" from
+	// "this is a maldev blob whose internals are damaged".
+	ErrCorruptBlob = errors.New("packer: blob structure corrupt")
 )

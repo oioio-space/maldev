@@ -80,3 +80,37 @@ func TestDuration(t *testing.T) {
 		}
 	}
 }
+
+func TestInt64(t *testing.T) {
+	// Two consecutive calls should differ with overwhelming
+	// probability (2^-64 collision, treat collision as failure).
+	a, err := Int64()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := Int64()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == b {
+		t.Errorf("two consecutive Int64() calls returned %d twice — RNG broken or astronomically unlucky", a)
+	}
+	// Distribution sanity: across 100 samples, at least one
+	// should be negative and one positive (full int64 range).
+	var sawNeg, sawPos bool
+	for i := 0; i < 100; i++ {
+		v, err := Int64()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v < 0 {
+			sawNeg = true
+		}
+		if v >= 0 {
+			sawPos = true
+		}
+	}
+	if !sawNeg || !sawPos {
+		t.Errorf("Int64 distribution skewed: sawNeg=%v sawPos=%v across 100 samples", sawNeg, sawPos)
+	}
+}

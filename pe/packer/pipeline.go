@@ -163,7 +163,7 @@ func UnpackPipeline(packed []byte, keys PipelineKeys) ([]byte, error) {
 
 	tableEnd := headerSizeV2 + 2*int(h.NumSteps)
 	if tableEnd > len(packed) {
-		return nil, fmt.Errorf("%w: pipeline table past end of blob", ErrBadMagic)
+		return nil, fmt.Errorf("%w: pipeline table past end of blob", ErrCorruptBlob)
 	}
 	body := packed[tableEnd:]
 	if uint64(len(body)) != h.PayloadSize {
