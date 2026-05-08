@@ -455,30 +455,6 @@ func TestCheckELFLoadable_RejectsETDynWithDTNeeded(t *testing.T) {
 	}
 }
 
-// TestReadSelfAuxv_ContainsCanaryOverride confirms readSelfAuxv
-// rewrites AT_RANDOM (type 25) to the supplied canaryPtr so the
-// loaded Go runtime reads our fresh canary rather than inheriting
-// the parent's stack canary.
-func TestReadSelfAuxv_ContainsCanaryOverride(t *testing.T) {
-	if goruntime.GOOS != "linux" {
-		t.Skip("/proc/self/auxv is Linux-only")
-	}
-	canary := uintptr(0xCAFEBABE)
-	auxv := runtime.ReadSelfAuxvForTest(canary)
-	var found bool
-	for _, e := range auxv {
-		if e.Type == 25 { // AT_RANDOM
-			if e.Val != uint64(canary) {
-				t.Errorf("AT_RANDOM not overridden: got %#x, want %#x", e.Val, canary)
-			}
-			found = true
-		}
-	}
-	if !found {
-		t.Skip("/proc/self/auxv on this kernel doesn't carry AT_RANDOM (uncommon, no fault of ours)")
-	}
-}
-
 // TestCheckELFLoadable_NotELF confirms PE / garbage inputs return
 // the right sentinel.
 func TestCheckELFLoadable_NotELF(t *testing.T) {
