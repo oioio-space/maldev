@@ -41,6 +41,20 @@ import (
 //
 // Byte count: 136 bytes (fits the ≤200 byte budget).
 var lz4DecodeBytes = [...]byte{
+	// Save callee-saved registers (Go register ABI — RBX, R12, R13, R14, R15
+	// must be preserved across calls). The decoder body uses RBX (scratch
+	// for literal_length / match_length) and R12 (dst cursor); R13 isn't
+	// used. R14 (G pointer) and R15 are not touched. PUSH/POP wraps the
+	// whole body so a Go-runtime caller (test harness or stub-side caller)
+	// gets clean register state on return.
+	//
+	// Without this save, mid-decode GC scans see a clobbered R12 and
+	// dereference garbage. Caught while debugging C3-stage-2's SGN+LZ4
+	// chain: standalone (`go run`) calls don't trigger GC and pass; tests
+	// running under `go test` (concurrent GC) crash inside scanstack.
+	// See docs/refactor-2026-doc/KNOWN-ISSUES-1e.md C3-stage-2 attempts.
+	0x53,             // push rbx
+	0x41, 0x54,       // push r12
 	// emit_entry:
 	//   mov   r10, rax      ; r10 = src
 	//   add   r10, rcx      ; r10 = src_end
@@ -158,11 +172,15 @@ var lz4DecodeBytes = [...]byte{
 	0xeb, 0xeb,              // jmp -21 → mat_copy
 
 	// decode_loop_jmp: (trampoline — jmp mat_copy falls here when ebx==0)
-	//   jmp decode_loop
+	//   jmp decode_loop. The 3-byte PUSH prologue shifted both the JMP
+	//   source and the decode_loop target forward equally, so the rel8
+	//   displacement is unchanged.
 	0xeb, 0x85, // jmp -123 → decode_loop
 
 	// done:
-	0xc3, // ret
+	0x41, 0x5c, // pop r12
+	0x5b,       // pop rbx
+	0xc3,       // ret
 }
 
 // EmitLZ4Inflate appends the LZ4 block-format inflate decoder to b as raw bytes.

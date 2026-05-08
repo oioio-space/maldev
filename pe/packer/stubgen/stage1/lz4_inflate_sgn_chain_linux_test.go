@@ -112,6 +112,14 @@ func TestLZ4Inflate_SGNChain_RoundTrip(t *testing.T) {
 	}
 	t.Log("decoded layout matches expected (zero prefix + compressed)")
 
+	// Diagnostic: feed compressed (NOT decoded[safetyMargin:]) to the asm
+	// decoder. If this works but the decoded path crashes, the issue is
+	// pointer-aliasing or memory-location-dependent.
+	t.Logf("compressed[0:8] = %x", compressed[:8])
+	t.Logf("decoded[safetyMargin:safetyMargin+8] = %x", decoded[safetyMargin:safetyMargin+8])
+	t.Logf("compressed last 8 = %x", compressed[len(compressed)-8:])
+	t.Logf("decoded last 8 = %x", decoded[len(decoded)-8:])
+
 	// Step 6: run the asm LZ4 decoder on the decoded[safetyMargin:] bytes.
 	// Use the same harness pattern as TestEmitLZ4Inflate_RoundTrip_*.
 	b, err := amd64.New()
@@ -132,7 +140,10 @@ func TestLZ4Inflate_SGNChain_RoundTrip(t *testing.T) {
 	// dst is a fresh buffer (NOT in-place). This isolates the LZ4 decoder behavior
 	// from any in-place layout concerns.
 	out := make([]byte, originalSize)
-	decodeFn(unsafe.Pointer(&decoded[safetyMargin]), unsafe.Pointer(&out[0]), uint64(compressedSize))
+	// Pad the source with 64 trailing zeros to absorb potential decoder over-read.
+	padded := make([]byte, int(compressedSize)+64)
+	copy(padded, decoded[safetyMargin:])
+	decodeFn(unsafe.Pointer(&padded[0]), unsafe.Pointer(&out[0]), uint64(compressedSize))
 
 	if !bytes.Equal(out, originalText) {
 		t.Errorf("asm LZ4 inflate of SGN-decoded bytes != original .text — chain semantics broken")
