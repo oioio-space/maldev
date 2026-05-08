@@ -78,14 +78,21 @@ type JunkSection struct {
 	Fill JunkFill
 }
 
-// CoverOptions bundles the cover-layer configuration. Reserved for
-// future expansion (fake imports, fake exports, bogus reloc table)
-// once Phase 3 grows beyond junk sections.
+// CoverOptions bundles the cover-layer configuration.
 type CoverOptions struct {
 	// JunkSections is the ordered list of sections to append.
 	// Each section contributes Size bytes of file growth (rounded
 	// to FileAlignment).
 	JunkSections []JunkSection
+
+	// FakeImports is the list of DLL+function tuples to add as fake
+	// IMAGE_IMPORT_DESCRIPTOR entries (PE only; ignored for ELF).
+	// When non-nil, AddCoverPE chains AddFakeImportsPE after appending
+	// junk sections. Every DLL name and function name must be a real
+	// export on the target Windows version — the kernel rejects
+	// unresolvable imports at load time.
+	// Leave nil (the zero value) to skip the fake-imports step.
+	FakeImports []FakeImport
 }
 
 // ErrCoverInvalidOptions signals an empty / malformed CoverOptions.
@@ -224,6 +231,15 @@ func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error) {
 	// Bump SizeOfImage to cover the new RVAs.
 	if rvaCursor > sizeOfImage {
 		binary.LittleEndian.PutUint32(out[optOff+transform.OptSizeOfImageOffset:optOff+transform.OptSizeOfImageOffset+4], rvaCursor)
+	}
+
+	// Chain fake-imports step when requested (PE only; ELF ignores FakeImports).
+	if len(opts.FakeImports) > 0 {
+		var fakeErr error
+		out, fakeErr = AddFakeImportsPE(out, opts.FakeImports)
+		if fakeErr != nil {
+			return nil, fmt.Errorf("packer/cover: fake imports: %w", fakeErr)
+		}
 	}
 
 	return out, nil

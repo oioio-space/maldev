@@ -28,7 +28,9 @@ import (
 //     differently-sized cover output via the RNG).
 //   - PlanPE → InjectStubPE round-trip (entry-point rewrite to
 //     stub RVA; section-count growth from 8 → 9).
-//   - AddCoverPE round-trip (12 sections after default cover).
+//   - AddCoverPE round-trip (orig + stub + 3 junk + .idata2 after cover).
+//   - AddFakeImportsPE chained by ApplyDefaultCover: ImportedSymbols
+//     grows after cover (fakes from DefaultFakeImports appear).
 //   - The R15-clobber regression (caught at commit ce7c4ab) cannot
 //     reproduce on Windows packs either: every seed succeeds.
 func TestPackBinary_WindowsPE_PackTimeMultiSeed(t *testing.T) {
@@ -78,11 +80,30 @@ func TestPackBinary_WindowsPE_PackTimeMultiSeed(t *testing.T) {
 				t.Fatalf("seed=%d debug/pe rejected covered output: %v", seed, err)
 			}
 			coveredSections := len(cf.Sections)
-			cf.Close()
 
-			if coveredSections != preSections+1+3 {
-				t.Errorf("seed=%d covered section count = %d, want %d (orig + stub + 3 cover)",
-					seed, coveredSections, preSections+1+3)
+			// DefaultCoverOptions adds 3 junk sections + 1 fake-imports section.
+			if coveredSections != preSections+1+3+1 {
+				t.Errorf("seed=%d covered section count = %d, want %d (orig + stub + 3 junk + .idata2)",
+					seed, coveredSections, preSections+1+3+1)
+			}
+
+			// Fake imports from DefaultFakeImports must appear in the symbol list.
+			syms, err := cf.ImportedSymbols()
+			cf.Close()
+			if err != nil {
+				t.Fatalf("seed=%d ImportedSymbols: %v", seed, err)
+			}
+			symSet := make(map[string]bool, len(syms))
+			for _, s := range syms {
+				symSet[s] = true
+			}
+			for _, fi := range packerpkg.DefaultFakeImports {
+				for _, fn := range fi.Functions {
+					key := fn + ":" + fi.DLL
+					if !symSet[key] {
+						t.Errorf("seed=%d fake symbol %q missing from ImportedSymbols", seed, key)
+					}
+				}
 			}
 		})
 	}

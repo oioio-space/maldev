@@ -32,6 +32,9 @@ func DefaultCoverOptions(seed int64) CoverOptions {
 			{Name: pick(), Size: uint32(0x800 + r.Intn(0x800)), Fill: JunkFillPattern},
 			{Name: pick(), Size: uint32(0x2000 + r.Intn(0x2000)), Fill: JunkFillZero},
 		},
+		// DefaultFakeImports uses real Windows 10 1809+ exports so
+		// the kernel resolves them cleanly on all supported targets.
+		FakeImports: DefaultFakeImports,
 	}
 }
 

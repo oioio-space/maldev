@@ -78,9 +78,9 @@ func TestApplyDefaultCover_DispatchesToPE(t *testing.T) {
 		t.Fatalf("debug/pe rejected output: %v", err)
 	}
 	defer f.Close()
-	// Original .text + 3 cover sections from defaults.
-	if got := len(f.Sections); got != 4 {
-		t.Errorf("section count = %d, want 4 (.text + 3 cover)", got)
+	// Original .text + 3 junk sections + 1 fake-imports section from defaults.
+	if got := len(f.Sections); got != 5 {
+		t.Errorf("section count = %d, want 5 (.text + 3 junk + .idata2)", got)
 	}
 }
 

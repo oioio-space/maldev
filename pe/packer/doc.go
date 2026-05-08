@@ -47,6 +47,12 @@
 //     fingerprints that match on exact section count + offset.
 //     [DefaultCoverOptions] picks 3 reasonable sections and is
 //     exposed via [ApplyDefaultCover] for one-liner integration.
+//     v0.63.0 extends the PE cover layer with fake imports via
+//     [AddFakeImportsPE] / [DefaultFakeImports]: a new `.idata2`
+//     section holds merged IMAGE_IMPORT_DESCRIPTOR entries for
+//     kernel32, user32, shell32, and ole32. The kernel resolves
+//     all entries at load time; [DefaultCoverOptions] / [ApplyDefaultCover]
+//     chain this step automatically for PE32+ inputs.
 //
 // The full design (capability matrix, threat model, hard
 // constraints, phase plan) is at

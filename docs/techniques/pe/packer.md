@@ -474,6 +474,80 @@ bytes and dispatches to [AddCoverPE] / [AddCoverELF] with
 
 **Platform:** cross-platform pack-time.
 
+### `type FakeImport struct`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#FakeImport)
+
+Describes one DLL and its function list for a fake import entry.
+
+```go
+type FakeImport struct {
+    DLL       string   // e.g. "kernel32.dll"
+    Functions []string // e.g. ["Sleep", "GetCurrentThreadId"]
+}
+```
+
+Both `DLL` and every element of `Functions` must be a real export
+on the target Windows version — the kernel rejects unresolvable
+imports at load time.
+
+### `var DefaultFakeImports []FakeImport`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#DefaultFakeImports)
+
+Ready-to-use list of real Windows 10 1809+ / Server 2019+ imports
+(kernel32, user32, shell32, ole32 with stable function names
+verified against Microsoft public symbol tables). Used automatically
+by [DefaultCoverOptions] / [ApplyDefaultCover] for PE32+ inputs.
+
+### `func AddFakeImportsPE(input []byte, fakes []FakeImport) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#AddFakeImportsPE)
+
+Appends fake `IMAGE_IMPORT_DESCRIPTOR` entries (PE/COFF Spec Rev
+12.0 § 6.4) to a packed PE32+. The merged Import Directory —
+original entries followed by one entry per `FakeImport`, terminated
+by a zero descriptor — is placed in a new R-only `.idata2` section.
+`DataDirectory[1]` is patched to point at the new section.
+
+**Self-containment:** `debug/pe.ImportedSymbols()` (and the Windows
+loader) resolves ILT/name RVAs relative to the section containing
+`DataDirectory[1]`. The new section is fully self-contained: existing
+entries' ILTs and DLL name strings are copied in, and
+`OriginalFirstThunk` is rewritten to point into the new section.
+`FirstThunk` is preserved verbatim — the loader patches IAT via
+`FirstThunk` at load time, and the binary's code references those
+addresses.
+
+**Parameters:**
+
+- `input` — packed PE32+ bytes (output of [PackBinary] or
+  [AddCoverPE]).
+- `fakes` — list of DLL+function tuples to inject; must be
+  non-empty. See [DefaultFakeImports] for a ready-made list.
+
+**Returns:** new buffer with the fake import section appended;
+`NumberOfSections`, `SizeOfImage`, and `DataDirectory[1]` updated.
+
+**Sentinels:**
+
+- `ErrCoverInvalidOptions` — `fakes` is empty or input is not PE32+.
+- `ErrCoverSectionTableFull` — no section-header slot available.
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform pack-time; output runs on Windows.
+
+**Example:**
+
+```go
+packed, _, _ := packer.PackBinary(input, packer.PackBinaryOptions{
+    Format: packer.FormatWindowsExe, Stage1Rounds: 3, Seed: 1,
+})
+out, err := packer.AddFakeImportsPE(packed, packer.DefaultFakeImports)
+// out now has kernel32/user32/shell32/ole32 entries in its import table
+```
+
 ## OPSEC & Detection
 
 | Artefact | Where defenders look |
@@ -519,9 +593,12 @@ bytes and dispatches to [AddCoverPE] / [AddCoverELF] with
   returned `ErrCoverSectionTableFull`. The cover layer now relocates
   the PHT to file-end and preserves all four ELF spec invariants;
   `ErrCoverSectionTableFull` is no longer returned for these inputs.
-- **Cover-layer fake imports not yet shipped.** Only junk
-  sections / PT_LOADs ship today; the v2 will add a benign-DLL
-  Import Directory + IAT for static-analysis cover.
+- **Fake imports shipped (v0.63.0).** `AddFakeImportsPE` /
+  `DefaultFakeImports` add benign-DLL `IMAGE_IMPORT_DESCRIPTOR`
+  entries (kernel32, user32, shell32, ole32) to the packed PE.
+  `ApplyDefaultCover` chains the step automatically for PE32+
+  inputs. The kernel resolves all entries at load time; the IAT
+  slots are populated but the binary's code never references them.
 - **`Pack` (Phase 1a) magic at offset 0.** Trivially
   fingerprinted; use `PackBinary` (Phase 1e) for binary output
   or `PackPipeline` (Phase 1c) for blob output where the magic

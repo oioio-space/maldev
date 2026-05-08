@@ -191,11 +191,11 @@ Honest reading of where this technique **stops working**:
   shape. Detection-engineering signal: medium-high. Per-build
   variance comes from the SGN engine (substitution + register +
   junk insertion), but the structural shape is constant.
-- **No fake imports yet.** Cover layer adds junk *sections*;
-  it does **not** add fake Import Directory entries. A static
-  analyzer that walks `DataDirectory[1]` will see only the
-  original imports, which may suffice for fingerprinting.
-  Queued as cover-layer v2.
+- **Fake imports shipped (v0.63.0).** `ApplyDefaultCover` now
+  chains `AddFakeImportsPE` for PE32+ inputs, adding
+  kernel32/user32/shell32/ole32 `IMAGE_IMPORT_DESCRIPTOR` entries.
+  A static analyzer walking `DataDirectory[1]` sees the full
+  merged import table including the fakes.
 
 ## See also
 
