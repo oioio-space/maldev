@@ -31,12 +31,14 @@ func TestAddCoverELF_RejectsNonELF(t *testing.T) {
 	}
 }
 
-// TestAddCoverELF_RejectsNoSlack confirms the cover layer reports
-// ErrCoverSectionTableFull when the input is a Go static-PIE
-// (first PT_LOAD covers file offset 0 → no PHT slack). This is
-// the documented limitation; the chantier-v2 follow-up relocates
-// the PHT to file-end to lift it.
-func TestAddCoverELF_RejectsNoSlack(t *testing.T) {
+// TestAddCoverELF_RelocatesPHTOnGoStaticPIE_Smoke confirms that the
+// cover layer now succeeds for Go static-PIE inputs (first PT_LOAD at
+// file offset 0 → no PHT slack). v0.62.0 lifted the previous
+// ErrCoverSectionTableFull limitation by relocating the PHT to
+// file-end. The full assertion (PT_LOAD count, e_phoff change,
+// debug/elf parse) lives in cover_elf_reloc_test.go; this test only
+// confirms the function no longer returns an error.
+func TestAddCoverELF_RelocatesPHTOnGoStaticPIE_Smoke(t *testing.T) {
 	input, err := os.ReadFile(filepath.Join("runtime", "testdata", "hello_static_pie"))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
@@ -44,8 +46,8 @@ func TestAddCoverELF_RejectsNoSlack(t *testing.T) {
 	_, err = packerpkg.AddCoverELF(input, packerpkg.CoverOptions{
 		JunkSections: []packerpkg.JunkSection{{Size: 0x100, Fill: packerpkg.JunkFillZero}},
 	})
-	if !errors.Is(err, packerpkg.ErrCoverSectionTableFull) {
-		t.Errorf("got %v, want ErrCoverSectionTableFull on Go static-PIE", err)
+	if err != nil {
+		t.Errorf("AddCoverELF on Go static-PIE returned error: %v (want nil — PHT relocation should succeed)", err)
 	}
 }
 

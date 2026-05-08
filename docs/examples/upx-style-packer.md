@@ -1,6 +1,6 @@
 ---
 last_reviewed: 2026-05-07
-reflects_commit: 9f49a7e
+reflects_commit: pending-v0.62.0
 ---
 
 # Worked example — UPX-style packer + cover layer
@@ -95,9 +95,11 @@ func main() {
     }
 
     // 2. Cover layer — three junk sections at randomized names +
-    //    mixed entropy fills. ELF static-PIE inputs return
-    //    ErrCoverSectionTableFull (PHT slack limitation) — degrade
-    //    gracefully and ship the bare PackBinary output.
+    //    mixed entropy fills. v0.62.0 lifted the Go static-PIE
+    //    limitation: ApplyDefaultCover now succeeds for ELF inputs
+    //    by relocating the PHT to file-end when no in-place slack
+    //    exists. The graceful-degrade fallback handles any
+    //    unexpected edge-cases.
     out := packed
     if covered, err := packer.ApplyDefaultCover(packed, time.Now().UnixNano()); err == nil {
         out = covered
@@ -179,11 +181,11 @@ Honest reading of where this technique **stops working**:
 - **TLS callbacks reject.** The transform refuses inputs with
   a populated TLS Data Directory because TLS callbacks run
   before OEP and would touch encrypted bytes.
-- **ELF cover layer needs PHT slack.** Go static-PIE binaries
-  have first PT_LOAD at file offset 0 → `AddCoverELF` /
-  `ApplyDefaultCover` return `ErrCoverSectionTableFull`. The
-  bare `PackBinary` output still ships fine; only the cover
-  layer is bypassed. Lift queued for v2 (PHT relocation).
+- **ELF cover layer PHT-slack constraint lifted (v0.62.0).** Go
+  static-PIE binaries (first PT_LOAD at file offset 0) previously
+  caused `AddCoverELF` / `ApplyDefaultCover` to return
+  `ErrCoverSectionTableFull`. The cover layer now relocates the
+  PHT to file-end; the packed binary still runs to clean exit.
 - **UPX-like single-binary signature.** The CALL+POP+ADD
   prologue + small entry-rewriting stub matches a well-known
   shape. Detection-engineering signal: medium-high. Per-build

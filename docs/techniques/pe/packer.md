@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/pe/packer
-last_reviewed: 2026-05-08
-reflects_commit: c5ee850
+last_reviewed: 2026-05-07
+reflects_commit: pending-v0.62.0
 ---
 
 # PE Packer (Phase 1a–1e — encrypt/embed + reflective loader + UPX-style)
@@ -392,14 +392,15 @@ body bytes are byte-identical.
 ELF64 mirror of [AddCoverPE]. Each `JunkSection` becomes a new
 `PT_LOAD` program-header entry with `PF_R` only.
 
-**Limitation — Go static-PIE:** the input must have PHT slack
-between the program-header-table end and the first PT_LOAD's
-file offset. Go static-PIE binaries place the first PT_LOAD at
-file offset 0 → returns `ErrCoverSectionTableFull`. The v2
-follow-up will relocate the PHT to file-end and update
-`e_phoff`. Until then, operators packing Go binaries should
-chain only `AddCoverPE` (target-Windows) or accept the limitation
-on the ELF side.
+**Go static-PIE support (v0.62.0):** Go static-PIE binaries place
+the first PT_LOAD at file offset 0 (the PHT lives inside the
+segment). When no in-place slack is available, `AddCoverELF` now
+relocates the PHT to file-end inside a new R-only PT_LOAD whose
+vaddr satisfies the kernel's `AT_PHDR = first_load_vaddr + e_phoff`
+invariant. The four ELF spec invariants are preserved: AT_PHDR math,
+PT_PHDR first in PHT, PT_LOAD ascending vaddr order, page-aligned
+placement. `ErrCoverSectionTableFull` is no longer returned for
+Go static-PIE inputs.
 
 **Section header table (SHT):** cover layer adds entries to the
 PHT only — the SHT is left untouched, so a stripped binary
@@ -410,6 +411,12 @@ stays stripped.
 **Required privileges:** unprivileged.
 
 **Platform:** cross-platform pack-time; output runs on Linux.
+
+**E2E ship gate:** `TestPackBinary_LinuxELF_MultiSeed_WithCover`
+(gated behind `-tags=maldev_packer_run_e2e`) packs
+`hello_static_pie` with each of 8 seeds, chains
+`ApplyDefaultCover`, and asserts each resulting binary runs to
+clean exit with `"hello from packer"` output.
 
 ### `func DefaultCoverOptions(seed int64) CoverOptions`
 
@@ -507,10 +514,11 @@ bytes and dispatches to [AddCoverPE] / [AddCoverELF] with
 - **`PackBinary` rejects TLS callbacks.** TLS callbacks run
   before OEP and would touch encrypted bytes. Inputs with a
   non-empty TLS Data Directory return `ErrTLSCallbacks`.
-- **`AddCoverELF` requires PHT slack.** Go static-PIE binaries
-  (first PT_LOAD at file offset 0) return
-  `ErrCoverSectionTableFull`. PHT relocation to file-end is the
-  v2 follow-up.
+- **`AddCoverELF` PHT-slack constraint lifted (v0.62.0).** Go
+  static-PIE binaries (first PT_LOAD at file offset 0) previously
+  returned `ErrCoverSectionTableFull`. The cover layer now relocates
+  the PHT to file-end and preserves all four ELF spec invariants;
+  `ErrCoverSectionTableFull` is no longer returned for these inputs.
 - **Cover-layer fake imports not yet shipped.** Only junk
   sections / PT_LOADs ship today; the v2 will add a benign-DLL
   Import Directory + IAT for static-analysis cover.

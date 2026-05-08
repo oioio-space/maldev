@@ -75,10 +75,15 @@ func AddCoverELF(input []byte, opts CoverOptions) ([]byte, error) {
 		}
 	}
 
-	// Verify the PHT has slack for the new entries.
+	// Verify the PHT has slack for the new entries. Go static-PIE
+	// binaries place the first PT_LOAD at file offset 0 (PHT lives
+	// inside the segment) — the in-place grow path can never succeed
+	// for them. Delegate to the relocation path instead of returning
+	// ErrCoverSectionTableFull (see cover_elf_reloc.go).
 	newTableEnd := phoff + uint64(uint16(phnum)+uint16(len(opts.JunkSections)))*uint64(phentsize)
 	if newTableEnd > firstPTLoadFileOff {
-		return nil, ErrCoverSectionTableFull
+		return relocateAndCoverELF(input, opts, phoff, phentsize, phnum,
+			maxVEnd, maxFEnd)
 	}
 
 	// Plan the new PT_LOADs. Bodies are filled directly into the
