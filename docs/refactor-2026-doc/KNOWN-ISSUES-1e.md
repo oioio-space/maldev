@@ -445,3 +445,49 @@ The C3-stage-1 LZ4 decoder (commit `a336bbc`) round-trips correctly against
 asm.
 
 **Status:** test skipped; master green for all default paths (Compress=false).
+
+### C3-stage-2 attempt 2 — diagnostic confirmation (2026-05-09)
+
+Empirical test: bumped `safety_margin` to 65536 (64KB, 33× larger than the
+LZ4-official `(srcSize >> 8) + 32` bound for our 336565-byte compressed
+payload). **The SIGSEGV persists on all 8 seeds**.
+
+**Conclusion: the bug is NOT in the safety_margin formula.** Whatever is
+causing the LZ4 in-place inflate to crash, it isn't the margin sizing.
+That eliminates a whole class of hypotheses.
+
+The remaining candidates:
+
+1. **SGN+LZ4 round-trip semantics break under in-place layout.** The SGN
+   decoder modifies bytes [R15, R15+TextSize) in place. Maybe a subtle
+   round-trip issue when the SGN-encoded bytes happen to start with a
+   pattern that LZ4 misinterprets. Standalone test: SGN-encode the
+   compressed payload, SGN-decode it, then LZ4-inflate. Compare to direct
+   LZ4 inflate of the original compressed bytes. If different, that's the
+   bug.
+
+2. **The on-disk encoded bytes don't match what stubgen.Generate produced.**
+   Could be an off-by-one in InjectStubELF's `copy(out[plan.TextFileOff:
+   plan.TextFileOff+plan.TextSize], encryptedText)` if `encryptedText`
+   has the wrong layout. Verify by hex-dumping the packed binary's .text
+   region and comparing to the in-memory encryptedText buffer at pack time.
+
+3. **Kernel mapping issue with RWX segment.** The InjectStubELF code sets
+   PF_W on the executable PT_LOAD. Modern Linux kernels with PaX-style
+   protections may refuse RWX mappings or emulate them differently.
+   Possibly the segment is being mapped without write permission silently.
+
+4. **The decoder's call instruction sequence has a bug under the actual
+   in-binary layout.** The C3-stage-1 isolation test runs the decoder
+   from a freshly mmap'd RX page. Maybe execution from .text (which has
+   different page protections post-load) behaves subtly differently.
+
+**Recommended next debugging step:** write a Go test that takes the packed
+binary, simulates the SGN decoder in Go, then runs the LZ4 decoder asm via
+mmap on the SGN-decoded bytes. If that round-trips, the issue is hypothesis
+3 or 4. If it crashes too, the issue is hypothesis 1 or 2.
+
+The diagnostic also confirmed the worktree's transform/ changes don't break
+the Windows side: `go run ./cmd/vmtest windows ./pe/packer/...
+TestPackBinary_WindowsPE_PackTimeMultiSeed` exits 0 cleanly. Default-path
+E2E gates remain green on both platforms.
