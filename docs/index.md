@@ -57,7 +57,7 @@ OPSEC / MITRE / Limitations / See also).
 | [T1016](https://attack.mitre.org/techniques/T1016/) | [`recon/network`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/network) · [`win/domain`](https://pkg.go.dev/github.com/oioio-space/maldev/win/domain) |
 | [T1021.002](https://attack.mitre.org/techniques/T1021/002/) | [`c2/transport/namedpipe`](https://pkg.go.dev/github.com/oioio-space/maldev/c2/transport/namedpipe) |
 | [T1027](https://attack.mitre.org/techniques/T1027/) | [`crypto`](https://pkg.go.dev/github.com/oioio-space/maldev/crypto) · [`encode`](https://pkg.go.dev/github.com/oioio-space/maldev/encode) · [`evasion/hook/shellcode`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/hook/shellcode) · [`evasion/sleepmask`](https://pkg.go.dev/github.com/oioio-space/maldev/evasion/sleepmask) · [`win/api`](https://pkg.go.dev/github.com/oioio-space/maldev/win/api) |
-| [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | [`pe`](https://pkg.go.dev/github.com/oioio-space/maldev/pe) · [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) · [`pe/packer`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer) · [`pe/packer/runtime`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/runtime) · [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) · [`pe/strip`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip) |
+| [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | [`pe`](https://pkg.go.dev/github.com/oioio-space/maldev/pe) · [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) · [`pe/packer`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer) · [`pe/packer/runtime`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/runtime) · [`pe/packer/stubgen`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/stubgen) · [`pe/packer/stubgen/amd64`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/stubgen/amd64) · [`pe/packer/stubgen/poly`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/stubgen/poly) · [`pe/packer/stubgen/stage1`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/stubgen/stage1) · [`pe/packer/transform`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/transform) · [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) · [`pe/strip`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip) |
 | [T1027.005](https://attack.mitre.org/techniques/T1027/005/) | [`pe/strip`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip) · [`process/tamper/herpaderping`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/herpaderping) · [`process/tamper/hideprocess`](https://pkg.go.dev/github.com/oioio-space/maldev/process/tamper/hideprocess) · [`recon/hwbp`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/hwbp) |
 | [T1027.007](https://attack.mitre.org/techniques/T1027/007/) | [`win/syscall`](https://pkg.go.dev/github.com/oioio-space/maldev/win/syscall) |
 | [T1027.013](https://attack.mitre.org/techniques/T1027/013/) | [`crypto`](https://pkg.go.dev/github.com/oioio-space/maldev/crypto) |
@@ -206,7 +206,7 @@ _Each area is collapsed by default — click to expand. Detection level is the c
 
 </details>
 
-<details><summary><strong>PE manipulation — `pe/*`</strong> — 13 packages</summary>
+<details><summary><strong>PE manipulation — `pe/*`</strong> — 19 packages</summary>
 
 | Package | Detection | Summary |
 |---|---|---|
@@ -219,7 +219,13 @@ _Each area is collapsed by default — click to expand. Detection level is the c
 | [`pe/masquerade/preset`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/preset) | — | _(no doc.go summary)_ |
 | [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) | moderate | mutates UPX-packed PE headers so automatic unpackers fail to recognise the input |
 | [`pe/packer`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer) | moderate | is maldev's custom PE/ELF packer |
+| [`pe/packer/internal/elfgate`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/internal/elfgate) | — | implements the Z-scope pre-flight check for Go static-PIE ELF inputs: ET_DYN + .go.buildinfo present + no DT_NEEDED |
 | [`pe/packer/runtime`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/runtime) | noisy | is the consumer side of [pe/packer]: takes a packed blob + key and reflectively loads the original PE into the current process's memory |
+| [`pe/packer/stubgen`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/stubgen) | noisy | drives the UPX-style transform pipeline for Phase 1e |
+| [`pe/packer/stubgen/amd64`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/stubgen/amd64) | quiet | wraps github.com/twitchyliquid64/golang-asm into a focused builder API for the polymorphic stage-1 decoder Phase 1e (v0.61.x) emits |
+| [`pe/packer/stubgen/poly`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/stubgen/poly) | quiet | implements the SGN-style metamorphic engine the Phase 1e (v0.61.x) packer uses to generate polymorphic stage-1 decoders |
+| [`pe/packer/stubgen/stage1`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/stubgen/stage1) | moderate | emits the polymorphic stub the UPX-style packer places in a new section of the modified host binary |
+| [`pe/packer/transform`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/transform) | noisy | implements UPX-style in-place modification of input PE/ELF binaries |
 | [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) | very-quiet | provides PE file parsing and modification utilities |
 | [`pe/srdi`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi) | moderate | converts PE / .NET / script payloads into position-independent shellcode via the Donut framework (github.com/Binject/go-donut) |
 | [`pe/strip`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/strip) | quiet | sanitises Go-built PE binaries by removing toolchain artefacts that fingerprint the producer |
