@@ -233,14 +233,13 @@ func InjectStubELF(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, e
 	// We take the max to never shrink the segment — shrinking would cause the
 	// kernel to refuse to map bytes the binary's code expects to be present.
 	if plan.TextMemSize > plan.TextSize {
+		// Never shrink the segment: the PT_LOAD may cover more than .text (e.g. .plt
+		// follows immediately), so plan.TextMemSize could be smaller than the original
+		// p_memsz. Use max() to only ever widen, never shrink.
 		origMemSz := binary.LittleEndian.Uint64(input[textPhdrOff+elfPhdrMemSzOffset : textPhdrOff+elfPhdrMemSzOffset+8])
-		newMemSz := uint64(plan.TextMemSize)
-		if origMemSz > newMemSz {
-			newMemSz = origMemSz
-		}
 		binary.LittleEndian.PutUint64(
 			out[textPhdrOff+elfPhdrMemSzOffset:textPhdrOff+elfPhdrMemSzOffset+8],
-			newMemSz,
+			max(origMemSz, uint64(plan.TextMemSize)),
 		)
 	}
 

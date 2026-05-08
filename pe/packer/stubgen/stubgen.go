@@ -111,8 +111,9 @@ func Generate(opts Options) ([]byte, []byte, error) {
 		return nil, nil, transform.ErrUnsupportedInputFormat
 	}
 
-	// 2. Extract .text bytes
+	// 2. Extract .text bytes (slice; plan.TextSize may be mutated below when Compress=true)
 	originalTextBytes := opts.Input[plan.TextFileOff : plan.TextFileOff+plan.TextSize]
+	// originalTextSize captures plan.TextSize before the optional mutation in step 3.
 	originalTextSize := plan.TextSize
 
 	// 3. Optionally LZ4-compress .text before SGN encoding.
@@ -156,17 +157,13 @@ func Generate(opts Options) ([]byte, []byte, error) {
 
 		// safety_margin = ⌈originalTextSize/255⌉ + 16, minimum 64.
 		//
-		// For in-place LZ4 inflate with dst < src: the write pointer advances
-		// from textBase and the read pointer starts at textBase+safetyMargin.
+		// For in-place LZ4 inflate (dst < src), the write pointer advances
+		// from textBase and the read pointer starts safetyMargin bytes ahead.
 		// Each output byte was produced from at most 1/255 of an input byte
-		// (worst case: each 0xFF extension byte yields 255 literals). The gap
-		// between write and read shrinks by at most 1-(1/255) per output byte,
-		// so the total potential overshoot over the full decompression is
-		// ≤ originalSize/255. Using compressedSize/255 underestimates this
-		// (since compressedSize ≤ originalSize), which caused dst to overtake src
-		// midway through decompression. Correct bound: ⌈originalTextSize/255⌉.
-		origSz := uint32(len(originalTextBytes))
-		margin := (origSz+254)/255 + 16
+		// (worst case: 0xFF extension bytes each yield 255 literals). Total
+		// potential overshoot is ≤ originalTextSize/255. Using compressedSize/255
+		// underestimates because compressedSize ≤ originalTextSize.
+		margin := (originalTextSize+254)/255 + 16
 		if margin < 64 {
 			margin = 64
 		}

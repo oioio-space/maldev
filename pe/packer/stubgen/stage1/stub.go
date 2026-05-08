@@ -178,38 +178,25 @@ func EmitStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round, opts E
 	//   [R15+SafetyMargin,         R15+SafetyMargin+CompressedSize) = LZ4 block
 	//
 	// Go register ABI (Go 1.17+, amd64): RAX=src, RBX=dst, RCX=src_size.
-	// We set up:
-	//   RAX = R15 + SafetyMargin   (compressed data pointer)
-	//   RBX = R15                  (decompressed output = text base)
-	//   RCX = CompressedSize
-	// Then inline the 136-byte LZ4 block decoder from EmitLZ4Inflate.
-	// After the decoder returns (RET at offset +135), execution falls through
-	// to the OEP epilogue below — [R15, R15+OriginalSize) now holds plaintext.
+	// EmitLZ4InflateInline is used (no terminal RET) so execution falls through
+	// to the OEP epilogue — [R15, R15+OriginalSize) holds plaintext after inflate.
 	if opts.Compress {
 		if opts.SafetyMargin == 0 || opts.CompressedSize == 0 {
 			return fmt.Errorf("stage1: EmitStub Compress=true but SafetyMargin=%d CompressedSize=%d",
 				opts.SafetyMargin, opts.CompressedSize)
 		}
-		// RAX = R15 (text base)
 		if err := b.MOV(amd64.RAX, baseReg); err != nil {
 			return fmt.Errorf("stage1: lz4 setup MOV RAX,R15: %w", err)
 		}
-		// RAX += SafetyMargin → points to compressed data
 		if err := b.ADD(amd64.RAX, amd64.Imm(int64(opts.SafetyMargin))); err != nil {
 			return fmt.Errorf("stage1: lz4 setup ADD RAX,SafetyMargin: %w", err)
 		}
-		// RBX = R15 → output buffer at text base
 		if err := b.MOV(amd64.RBX, baseReg); err != nil {
 			return fmt.Errorf("stage1: lz4 setup MOV RBX,R15: %w", err)
 		}
-		// RCX = CompressedSize
 		if err := b.MOV(amd64.RCX, amd64.Imm(int64(opts.CompressedSize))); err != nil {
 			return fmt.Errorf("stage1: lz4 setup MOV RCX,CompressedSize: %w", err)
 		}
-		// Inline the LZ4 block decoder WITHOUT its terminal RET (0xC3).
-		// EmitLZ4Inflate ends with RET so it works as a standalone function;
-		// here we need fall-through into the OEP epilogue below, so we use
-		// EmitLZ4InflateInline (135 bytes, no RET).
 		if err := EmitLZ4InflateInline(b); err != nil {
 			return fmt.Errorf("stage1: lz4 inflate inline: %w", err)
 		}
