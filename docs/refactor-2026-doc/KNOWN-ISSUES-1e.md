@@ -268,3 +268,46 @@ The six bugs found during the Phase 1e-A/B investigation were resolved as follow
 Ship gate met at commit `8771e95`: `TestPackBinary_LinuxELF_E2E` runs a packed Go static-PIE fixture
 through to `"hello from packer"` and exit 0 under
 `go test -count=1 -tags=maldev_packer_run_e2e -run TestPackBinary_LinuxELF_E2E ./pe/packer/`.
+
+---
+
+## C3 LZ4 compression — attempt 1 (deferred 2026-05-08)
+
+**Status: not shipped.** Tried 2026-05-08 against v0.65.0 base. Plan: see
+[2026-05-08-packer-improvements.md § Chantier 3](../superpowers/plans/2026-05-08-packer-improvements.md).
+
+Architecture attempted:
+- Pack-time: LZ4-compress `.text` bytes, then SGN-encode the compressed output.
+- Stub: SGN-decode → LZ4-inflate (in-place via `safety_margin = compressed_size/255 + 16` zero
+  bytes prefixed in the `.text` section) → JMP to OEP.
+- New `PackBinaryOptions.Compress bool` (opt-in, default false).
+- `transform.InjectStubPE` / `InjectStubELF` extended with a `memSize uint32` parameter so the
+  loader maps a larger virtual region than the on-disk file size.
+- Hand-rolled amd64 LZ4 inflate decoder in `pe/packer/stubgen/stage1/lz4_inflate.go` (~250 bytes
+  asm).
+
+Two failures observed in the smoke test:
+
+1. **Compress=true output crashed at runtime.** The packed Linux ELF SIGSEGV'd on the first
+   instruction after the inflate path. Cause not isolated — likely either an LZ4 decoder asm bug
+   (overflow in the match-copy loop, wrong register convention) or a section-layout mismatch
+   (`memsz` vs `filesz` not propagated correctly through the PT_LOAD entry).
+2. **No size win on the Go static-PIE fixture.** `hello_static_pie` (1.30 MB) compressed to
+   1.31 MB output (+0.3%) — the safety_margin overhead exceeded the LZ4 savings on this input.
+   Go's `.text` is mostly already-compact runtime code; LZ4 has little to find.
+
+Per the plan's "do NOT push a broken ship" gate, the attempt was reverted to v0.65.0 (master at
+`346afad`). The work-in-progress diff (15 files modified + 4 new) was discarded.
+
+When this is reattempted, the iteration order should be:
+
+- Build a smaller debug fixture (e.g., a 4 KiB Go static-PIE that spends most of its bytes in
+  `.rodata`) so size shrinkage is observable before debugging the runtime path.
+- Round-trip-test the inflate decoder asm in isolation against `pierrec/lz4` BEFORE wiring it
+  into the stub. The plan called for this but the API-error mid-flight cut it short.
+- Verify `memsz > filesz` propagation by reading the output binary back via `readelf -lW` and
+  asserting the `MemSiz` column reflects the original-size + safety_margin total.
+- Win VM E2E first on the simplest case (Compress=true + Stage1Rounds=1 + AntiDebug=false), then
+  scale up.
+
+Plan rows C3 + C6 remain open. C1, C2, C4, C5, C7 all shipped (v0.62.0–v0.65.0).
