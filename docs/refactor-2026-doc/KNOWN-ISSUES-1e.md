@@ -323,19 +323,67 @@ Plan rows C3 + C6 remain open. C1, C2, C4, C5, C7 all shipped (v0.62.0–v0.65.0
     0/1/15/16/4095/65535/65536) — all green.
   - **NOT wired into the stub.** The decoder ships as a library helper.
 
-- **C3-stage-2 — wire into stub** still pending. Attempted 2026-05-08
-  but the implementing subagent ran out of usage mid-flight; partial
-  changes (4 files modified, build broken) were reverted. Master stays
-  at the post-stage-1 line.
+- **C3-stage-2 — wire into stub** — PARTIAL IMPLEMENTATION (2026-05-08,
+  commits da86504..09de872 on worktree branch). The unit-test stack is
+  complete and green; the Linux E2E gate (`TestPackBinary_LinuxELF_MultiSeed_WithCompress`)
+  crashes on all 8 seeds with SIGSEGV. Root cause diagnosed, fix attempted
+  twice, third iteration still crashes. Master NOT updated.
 
-  When reattempted, the chantier must:
-  - Add `Compress bool` to `PackBinaryOptions` (opt-in, default false).
-  - Add the safety_margin layout: pack-time prepends N zero bytes
-    to the SGN-encoded compressed payload; stub computes
-    `src = R15 + safety_margin`, `dst = R15` before the inflate call.
-  - Extend `InjectStubPE` / `InjectStubELF` with a `memSize uint32`
-    parameter so the section's memsz > filesz when Compress=true. All
-    existing call sites pass 0 for backward compatibility.
-  - Pass safety_margin to the SGN per-round emit so the decoder src
-    pointer skips the zero prefix.
-  - Win VM E2E gate before tagging.
+  **What was shipped (unit-test-complete, E2E-failing):**
+  - `Plan.TextMemSize` field + `InjectStubPE`/`InjectStubELF` honour it (Steps A–C) ✅
+  - `EmitOptions.{Compress,SafetyMargin,CompressedSize}` + `EmitLZ4InflateInline`
+    (no-RET variant for inlining) + `EmitStub` Compress path (Steps D) ✅
+  - `stubgen.Generate` + `packer.PackBinaryOptions.Compress` (Step E) ✅
+  - E2E test `TestPackBinary_LinuxELF_MultiSeed_WithCompress` added (Step F) ✅ (but fails)
+
+  **Root cause of SIGSEGV (diagnosed via GDB):**
+  The LZ4 in-place inflate is crashing inside the match-copy loop because
+  the dst pointer (write cursor) overtakes the src pointer (read cursor).
+  Two bugs were fixed during the session but the crash persists:
+
+  Fix 1: `EmitLZ4Inflate` ends with RET (0xC3). When inlined in the stub,
+  RET pops the stack and jumps to garbage. Fixed by adding
+  `EmitLZ4InflateInline` (135 bytes, no RET) and calling it from `EmitStub`.
+
+  Fix 2: The safety_margin formula was `ceil(compressedSize/255)+16` but
+  the correct bound for in-place inflate (dst < src) requires
+  `ceil(originalTextSize/255)+16` because the worst-case output-to-input
+  ratio is bounded by `originalSize/255`, not `compressedSize/255`.
+
+  **Remaining gap (still crashing after both fixes):**
+  After applying both fixes, the GDB crash trace still shows dst overtaking
+  src in the match-copy loop with `RCX = 0xCCCC` (a garbage match_offset
+  value). This means the u16 match_offset field being read from the
+  compressed stream is corrupted — the src pointer is reading already-
+  overwritten output bytes instead of the original compressed data.
+
+  Possible causes for the next session to investigate:
+  1. **The safety_margin arithmetic still has an off-by-one or wrong bound.**
+     Verify with a standalone test: extract the packed binary's compressed
+     block, inflate it with the asm decoder via mmap (as in lz4_inflate_test.go),
+     confirm it succeeds; then confirm the same bytes at `[R15+safetyMargin,
+     R15+safetyMargin+compressedSize)` at runtime are those compressed bytes.
+  2. **The SGN decode counter uses the compressed payload size, but the
+     on-disk bytes may span a different range.** Confirm `plan.TextFileOff`
+     points to exactly where the compressed payload was written, and that
+     `p_filesz` matches `plan.TextSize` (not the original text size).
+  3. **The `p_filesz` of the executable PT_LOAD was NOT updated.** Currently
+     only `p_memsz` is conditionally updated in `InjectStubELF`. If `p_filesz`
+     still equals the original segment filesz (0x7AA10) but only
+     `plan.TextSize = 0x527ed` bytes were written into the .text slot,
+     the kernel maps the TAIL `[0x401000+0x527ed, 0x7AA10)` bytes from the
+     ORIGINAL binary, not zeros. Those original bytes would then be read
+     by the LZ4 decoder as compressed data → garbage tokens → crash.
+     **THIS IS THE MOST LIKELY REMAINING BUG.**
+
+  **Recommended next step:**
+  In `InjectStubELF`, also update `p_filesz` for the executable PT_LOAD
+  when `Compress=true`. The new `p_filesz` should be
+  `max(original_text_file_end_within_segment, safetyMargin+compressedSize_rounded_up)`.
+  The kernel will then zero-fill `[p_filesz, p_memsz)` at load time instead
+  of reading stale bytes from the original binary tail.
+
+  Alternatively: zero-fill the tail `[plan.TextFileOff+plan.TextSize,
+  plan.TextFileOff+originalTextSize)` bytes in the output buffer inside
+  `InjectStubELF` when `plan.TextMemSize > plan.TextSize`. This is simpler
+  and more robust (doesn't require p_filesz accounting).
