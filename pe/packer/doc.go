@@ -60,44 +60,58 @@
 //
 // # Detection level
 //
-// very-quiet (Phase 1a–1d)
+// moderate.
 //
-// Pure pack-time pipeline — no syscalls, no network, no runtime
-// artefacts. The blob bytes themselves carry a [Magic] prefix
-// that defenders fingerprint trivially today; this is acceptable
-// because the blob is never deployed alone (it's wrapped in a
-// runnable PE host by Phase 1b which obscures the magic).
+// The pack-time pipeline (Phases 1a / 1c / 1d / 3a) is pure-Go
+// offline byte manipulation — no syscalls, no network, no
+// runtime artefacts. Detection of those layers is purely static:
+// the blob's [Magic] prefix is fingerprintable when the blob is
+// shipped raw, but in practice it travels inside a host binary
+// that obscures it.
 //
-// Stack [EntropyCoverInterleave] + [EntropyCoverHexAlphabet] as
-// the last pipeline steps to drop apparent histogram entropy
-// below 4 bits/byte — defeats Shannon-based AV scanners.
+// Phase 1e ([PackBinary]) emits a runnable PE/ELF whose
+// CALL+POP+ADD prologue + new R+W+X section + entry-point
+// rewrite is heuristically suspicious to AV/EDR static scans.
+// Per-pack stub-byte uniqueness from the SGN engine defeats
+// hash-based batch detection, but the structural shape is
+// well-known. Pair with [AddCoverPE] / [AddCoverELF] /
+// [ApplyDefaultCover] to inflate the static surface and
+// frustrate fingerprints that match on exact section count +
+// offset, plus [EntropyCoverInterleave] / [EntropyCoverHexAlphabet]
+// in the [PackPipeline] path to drop apparent histogram entropy
+// below 4 bits/byte.
 //
 // # Required privileges
 //
-// unprivileged. [Pack] is pure-Go offline byte manipulation;
-// [Unpack] is symmetric.
+// unprivileged. The packer is pack-time only; runtime artefacts
+// are produced by the loader (kernel for [PackBinary] outputs,
+// [github.com/oioio-space/maldev/pe/packer/runtime] for
+// reflective loads).
 //
 // # Platform
 //
-// Cross-platform (emitter side). The blob format is
-// architecture-neutral. Phase 1b's reflective loader will be
-// per-target (Windows PE32+, Linux ELF64).
+// Cross-platform pack-time. [PackBinary] outputs are per-target
+// ([FormatWindowsExe] PE32+ runs on Windows; [FormatLinuxELF]
+// runs on Linux). [Pack] / [PackPipeline] outputs are
+// architecture-neutral blobs. The reflective loader
+// ([github.com/oioio-space/maldev/pe/packer/runtime]) ships for
+// Windows x64 and Linux ELF64 (Phase 1f Stages A–E).
 //
 // # Example
 //
-//	import "github.com/oioio-space/maldev/pe/packer"
+// See [Example] suite in [packer_example_test.go]:
+// [ExamplePack], [ExamplePackBinary], [ExampleAddCoverPE],
+// [ExampleApplyDefaultCover].
 //
-//	// Pack: returns the blob + the AEAD key.
-//	blob, key, err := packer.Pack(payloadBytes, packer.Options{
-//	    Cipher:     packer.CipherAESGCM,
-//	    Compressor: packer.CompressorNone,
+// One-liner Phase 1e + cover for Linux ELF input:
+//
+//	out, _, err := packer.PackBinary(payload, packer.PackBinaryOptions{
+//	    Format: packer.FormatLinuxELF, Stage1Rounds: 3, Seed: 1,
 //	})
 //	if err != nil { /* … */ }
-//
-//	// Round-trip: decrypts back to the original payload.
-//	orig, err := packer.Unpack(blob, key)
-//	if err != nil { /* … */ }
-//	_ = orig
+//	if covered, err := packer.ApplyDefaultCover(out, 2); err == nil {
+//	    out = covered
+//	}
 //
 // # See also
 //

@@ -1,5 +1,5 @@
 // Package amd64 wraps github.com/twitchyliquid64/golang-asm into a
-// focused builder API for the polymorphic stage-1 decoder Phase 1e-A
+// focused builder API for the polymorphic stage-1 decoder Phase 1e (v0.61.x)
 // emits. Only the instruction subset the SGN algorithm uses is
 // exposed: MOV / LEA / XOR / SUB / ADD / JMP / Jcc / DEC / CALL /
 // RET / NOP. Operands are typed (Reg / Imm / MemOp) rather than
@@ -12,12 +12,37 @@
 // runtime_linux_amd64.s, evasion/callstack/spoof_windows_amd64.s,
 // etc.). Used in production by simdjson-go and ebpf-go.
 //
+// # MITRE ATT&CK
+//
+//   - T1027.002 (Obfuscated Files or Information: Software Packing) —
+//     instruction emitter for the parent
+//     [github.com/oioio-space/maldev/pe/packer] package's stage-1
+//     decoder.
+//
 // # Detection level
 //
-// N/A — pure-Go pack-time encoder, never runs on a target.
+// quiet.
+//
+// Pure-Go pack-time encoder — never runs on a target. Detection
+// profile of the emitted bytes is owned by the calling
+// [github.com/oioio-space/maldev/pe/packer/stubgen/stage1] package.
+//
+// # Required privileges
+//
+// unprivileged.
+//
+// # Platform
+//
+// Cross-platform pack-time; output is amd64-only.
+//
+// # Example
+//
+// See builder_test.go (TestBuilder_RoundTrips* / TestEncode_*).
 //
 // # See also
 //
-//   - github.com/twitchyliquid64/golang-asm — the encoder backend
-//   - golang.org/x/arch/x86/x86asm — the disassembler we cross-check against in tests
+//   - [github.com/twitchyliquid64/golang-asm] — encoder backend
+//   - [golang.org/x/arch/x86/x86asm] — disassembler used in tests
+//   - [github.com/oioio-space/maldev/pe/packer/stubgen/stage1] — direct
+//     consumer
 package amd64

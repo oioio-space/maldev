@@ -218,7 +218,7 @@ _Each area is collapsed by default — click to expand. Detection level is the c
 | [`pe/masquerade/donors`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/donors) | very-quiet | lists the reference (donor) PE files the pe/masquerade preset generator and the cmd/cert-snapshot tool share |
 | [`pe/masquerade/preset`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade/preset) | — | _(no doc.go summary)_ |
 | [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) | moderate | mutates UPX-packed PE headers so automatic unpackers fail to recognise the input |
-| [`pe/packer`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer) | very-quiet | is maldev's custom PE/ELF packer |
+| [`pe/packer`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer) | moderate | is maldev's custom PE/ELF packer |
 | [`pe/packer/runtime`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/runtime) | noisy | is the consumer side of [pe/packer]: takes a packed blob + key and reflectively loads the original PE into the current process's memory |
 | [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) | very-quiet | provides PE file parsing and modification utilities |
 | [`pe/srdi`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi) | moderate | converts PE / .NET / script payloads into position-independent shellcode via the Donut framework (github.com/Binject/go-donut) |

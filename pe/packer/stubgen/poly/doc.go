@@ -1,5 +1,5 @@
 // Package poly implements the SGN-style metamorphic engine the
-// Phase 1e-A packer uses to generate polymorphic stage-1
+// Phase 1e (v0.61.x) packer uses to generate polymorphic stage-1
 // decoders.
 //
 // Reference: Ege Balci, "Shikata Ga Nai (Encoder Still) Ain't Got
@@ -17,7 +17,42 @@
 //   - junk.go — NOP variants + dead-op insertion
 //   - engine.go — N-round chained encoder driver
 //
+// # MITRE ATT&CK
+//
+//   - T1027.002 (Obfuscated Files or Information: Software Packing) —
+//     polymorphism layer for the parent
+//     [github.com/oioio-space/maldev/pe/packer] package's stage-1
+//     decoder.
+//
 // # Detection level
 //
-// N/A — pack-time only.
+// quiet.
+//
+// Pure pack-time package — emits machine-code bytes only. No
+// runtime presence. Each pack produces unique decoder bytes so
+// hash-based AV signatures don't transfer between packs; pattern-
+// based EDR rules that match on SGN-shape decoders (counter
+// register + per-byte XOR + RET-walk) still fire.
+//
+// # Required privileges
+//
+// unprivileged.
+//
+// # Platform
+//
+// Cross-platform pack-time. Generated decoders are amd64-only
+// (the package emits AMD64 instruction byte sequences).
+//
+// # Example
+//
+// See round-trip tests in poly_test.go
+// (TestEngine_EncodeDecodeRoundTrip / _RoundTripPerSubst).
+//
+// # See also
+//
+//   - [github.com/oioio-space/maldev/pe/packer/stubgen/stage1] — consumer
+//     of poly.Round descriptors
+//   - [github.com/oioio-space/maldev/pe/packer/stubgen/amd64] —
+//     instruction emitter under the engine
+//   - docs/techniques/pe/packer.md
 package poly

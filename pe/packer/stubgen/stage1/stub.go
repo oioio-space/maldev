@@ -55,7 +55,7 @@ const BaseReg = baseReg
 //	  JMP  r15
 //
 // Using CALL+POP+ADD instead of LEA RIP-relative addresses Bug #1 from
-// the broken Phase 1e-A/B architecture: golang-asm's RIP-relative LEA
+// the broken pre-v0.61 architecture (Phase 1e-A/B): golang-asm's RIP-relative LEA
 // without a linker symbol emits an absolute address, not a RIP-relative
 // displacement, producing stubs that crash on any load address other than
 // the pack-time value. See docs/refactor-2026-doc/KNOWN-ISSUES-1e.md §Bug 1.

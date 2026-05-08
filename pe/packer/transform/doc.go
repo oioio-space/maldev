@@ -20,16 +20,44 @@
 //   - InjectStubPE / InjectStubELF apply the planned mutations
 //     given the encrypted-text bytes and the emitted stub bytes.
 //
+// # MITRE ATT&CK
+//
+//   - T1027.002 (Obfuscated Files or Information: Software Packing) —
+//     transform is the in-place mutation engine the parent
+//     [github.com/oioio-space/maldev/pe/packer] package drives.
+//
 // # Detection level
 //
-// N/A — pack-time only. The modified binary at runtime is "loud"
-// (RWX section, new entry point not in the original code section).
-// Pair with evasion/sleepmask + evasion/preset for memory-side cover.
+// noisy.
+//
+// Pure pack-time package — no syscalls, no runtime artefacts. The
+// modified output is "loud" at runtime (RWX section, entry point
+// rewritten outside the original code section); pair with
+// [github.com/oioio-space/maldev/evasion/sleepmask] +
+// [github.com/oioio-space/maldev/evasion/preset] for memory-side
+// cover.
+//
+// # Required privileges
+//
+// unprivileged.
+//
+// # Platform
+//
+// Cross-platform pack-time. Output binaries run on Windows
+// (FormatPE) or Linux (FormatELF).
+//
+// # Example
+//
+// See [Example] suite in transform's `*_test.go` files (PlanPE_HappyPath,
+// InjectStubELF_DebugELFParses) for round-trip patterns.
 //
 // # See also
 //
-//   - pe/morph — low-level section-header byte manipulation
-//   - pe/strip — in-place PE byte mutation primitives
+//   - [github.com/oioio-space/maldev/pe/morph] — low-level section-header
+//     byte manipulation
+//   - [github.com/oioio-space/maldev/pe/strip] — in-place PE byte mutation
+//     primitives
 //   - Microsoft PE/COFF Specification Rev 12.0
 //   - System V ABI AMD64 Rev 1.0
+//   - docs/techniques/pe/packer.md — operator-facing tech md
 package transform

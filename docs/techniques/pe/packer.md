@@ -1,7 +1,7 @@
 ---
 package: github.com/oioio-space/maldev/pe/packer
-last_reviewed: 2026-05-07
-reflects_commit: 7284426
+last_reviewed: 2026-05-08
+reflects_commit: c5ee850
 ---
 
 # PE Packer (Phase 1a–1e — encrypt/embed + reflective loader + UPX-style)
@@ -410,6 +410,62 @@ stays stripped.
 **Required privileges:** unprivileged.
 
 **Platform:** cross-platform pack-time; output runs on Linux.
+
+### `func DefaultCoverOptions(seed int64) CoverOptions`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#DefaultCoverOptions)
+
+Returns a 3-section `CoverOptions` tuned for general-purpose
+cover. Names cycle through a pool of legitimate-looking
+candidates (`.rsrc`, `.rdata2`, `.pdata`, `.tls`, `.reloc2`,
+`.CRT`); sizes mix in the 0x1000–0x4000 range; fills span
+`JunkFillRandom` (~8 KB random), `JunkFillPattern` (~4 KB
+machine-code-shape histogram), `JunkFillZero` (~16 KB
+flat-entropy padding).
+
+**Parameters:** `seed` — controls the deterministic pick. Same
+seed produces byte-identical output (reproducible builds);
+varying per pack gives operational variance.
+
+**Returns:** populated `CoverOptions` ready to feed
+[AddCoverPE] / [AddCoverELF].
+
+**Side effects:** none — pure-math helper.
+
+**OPSEC:** see the underlying [AddCoverPE] / [AddCoverELF]
+entries.
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform.
+
+### `func ApplyDefaultCover(input []byte, seed int64) ([]byte, error)`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#ApplyDefaultCover)
+
+One-liner cover layer. Auto-detects PE32+ vs ELF64 via magic
+bytes and dispatches to [AddCoverPE] / [AddCoverELF] with
+[DefaultCoverOptions]`(seed)`.
+
+**Parameters:**
+
+- `input` — packed PE32+ or ELF64 bytes.
+- `seed` — RNG seed for the option picker.
+
+**Returns:** new buffer with the cover applied.
+
+**Sentinels:**
+
+- `ErrCoverInvalidOptions` — input is neither a PE nor an ELF.
+- `ErrCoverSectionTableFull` — propagated unchanged from
+  `AddCoverELF` for Go static-PIE inputs (PHT slack
+  limitation; v2 will lift it via PHT relocation).
+
+**OPSEC:** see [AddCoverPE] / [AddCoverELF].
+
+**Required privileges:** unprivileged.
+
+**Platform:** cross-platform pack-time.
 
 ## OPSEC & Detection
 

@@ -21,9 +21,43 @@
 // no post-emit patching beyond a single sentinel-replace pass
 // (PatchTextDisplacement) on the prologue ADD's imm32.
 //
+// # MITRE ATT&CK
+//
+//   - T1027.002 (Obfuscated Files or Information: Software Packing) —
+//     stub emitter for the parent
+//     [github.com/oioio-space/maldev/pe/packer] package.
+//
 // # Detection level
 //
-// N/A — the stub itself is generated at pack-time. Per-pack
-// uniqueness comes from poly.Engine's SGN randomization (key /
-// register / substitution / junk) plus the pack-time random seed.
+// moderate.
+//
+// The stub itself is generated at pack-time. Per-pack uniqueness
+// comes from
+// [github.com/oioio-space/maldev/pe/packer/stubgen/poly]'s SGN
+// randomization (key / register / substitution / junk) plus the
+// pack-time random seed; structurally the CALL+POP+ADD prologue
+// is well-known. The new RWX section + entry-point rewrite are
+// heuristically suspicious to AV/EDR static scans; pair with the
+// cover layer in pe/packer for static-side camouflage.
+//
+// # Required privileges
+//
+// unprivileged.
+//
+// # Platform
+//
+// Cross-platform pack-time. Emitted stub is amd64-only.
+//
+// # Example
+//
+// See round-trip tests in stub_test.go (TestEmitStub_*).
+//
+// # See also
+//
+//   - [github.com/oioio-space/maldev/pe/packer/stubgen/poly] — round
+//     descriptor producer
+//   - [github.com/oioio-space/maldev/pe/packer/stubgen/amd64] —
+//     instruction encoder
+//   - docs/refactor-2026-doc/KNOWN-ISSUES-1e.md — historical Bug 1/2
+//     post-mortem
 package stage1

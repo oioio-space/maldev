@@ -52,7 +52,7 @@ func (bb *Builder) Label(name string) LabelRef {
 // MOV emits a MOV instruction. dst is the destination operand,
 // src is the source.
 //
-// Phase 1e-A only needs MOV reg, imm and MOV reg, mem and
+// Phase 1e (v0.61.x) only needs MOV reg, imm and MOV reg, mem and
 // MOV mem, reg — the SGN decoder loop reads/writes one byte at a
 // time and loads constants.
 func (bb *Builder) MOV(dst, src Op) error {

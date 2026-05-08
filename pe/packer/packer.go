@@ -1,7 +1,7 @@
 // Package packer is maldev's custom PE/ELF packer.
 //
 // [Pack] / [Unpack] handle the encrypt-only pipeline (Phase 1c+).
-// [PackBinary] is the operator-facing entry point added in Phase 1e-A/B:
+// [PackBinary] is the operator-facing entry point added in Phase 1e (v0.61.x):
 // it wraps a payload in a runnable host binary (Windows PE32+ via
 // [FormatWindowsExe] or Linux ELF64 static-PIE via [FormatLinuxELF])
 // containing a polymorphic SGN-style stage-1 decoder and a reflective
@@ -84,8 +84,8 @@ type Format uint8
 
 const (
 	FormatUnknown    Format = iota // zero value; rejected by PackBinary
-	FormatWindowsExe               // Phase 1e-A: PE32+ Windows executable
-	FormatLinuxELF                 // Phase 1e-B: ELF64 Linux static-PIE
+	FormatWindowsExe               // Phase 1e (v0.61.x): PE32+ Windows executable
+	FormatLinuxELF                 // Phase 1e (v0.61.x): ELF64 Linux static-PIE
 )
 
 // String returns the canonical lowercase format name.

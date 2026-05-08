@@ -8,6 +8,24 @@ import (
 	"github.com/oioio-space/maldev/pe/packer"
 )
 
+// ExamplePack is the Simple-tier round-trip via the blob
+// pipeline (Phase 1a). Caller supplies a payload, gets back
+// (blob, key); Unpack with the same key recovers the original.
+func ExamplePack() {
+	payload := []byte("hello packer")
+	blob, key, err := packer.Pack(payload, packer.Options{
+		Cipher: packer.CipherAESGCM,
+	})
+	if err != nil {
+		return
+	}
+	got, err := packer.Unpack(blob, key)
+	if err != nil {
+		return
+	}
+	_ = got
+}
+
 // ExamplePackBinary shows the v0.61.0 UPX-style transform on a
 // Linux ELF input. Output is single-binary; the kernel handles
 // loading. Stage1Rounds=3 is the ship-tested baseline.
