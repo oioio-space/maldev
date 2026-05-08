@@ -186,6 +186,83 @@ func TestInjectStubPE_DebugPEParses(t *testing.T) {
 	}
 }
 
+// TestInjectStubPE_HonoursTextMemSize verifies that setting Plan.TextMemSize >
+// Plan.TextSize causes InjectStubPE to widen the .text VirtualSize in the output
+// PE section header. The on-disk SizeOfRawData stays at the original TextSize —
+// only the virtual window expands, giving the kernel-mapped zero gap that the
+// in-place LZ4 inflate decoder needs as its decompression workspace.
+func TestInjectStubPE_HonoursTextMemSize(t *testing.T) {
+	const textSize = 0x500
+	input := buildMinimalPE(t, minimalPEOpts{TextSize: textSize, OEPRVA: 0x1010})
+	plan, err := transform.PlanPE(input, 4096)
+	if err != nil {
+		t.Fatalf("PlanPE: %v", err)
+	}
+
+	// Request double the on-disk size as virtual memory — simulates the
+	// safety margin for LZ4 in-place inflate.
+	plan.TextMemSize = plan.TextSize * 2
+
+	encryptedText := bytes.Repeat([]byte{0xAA}, int(plan.TextSize))
+	stubBytes := []byte{0x90, 0x90, 0xC3}
+
+	out, err := transform.InjectStubPE(input, encryptedText, stubBytes, plan)
+	if err != nil {
+		t.Fatalf("InjectStubPE: %v", err)
+	}
+
+	f, err := pe.NewFile(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("debug/pe rejected output: %v", err)
+	}
+	defer f.Close()
+
+	textSec := f.Sections[0]
+	if textSec.VirtualSize != plan.TextMemSize {
+		t.Errorf(".text VirtualSize = %#x, want TextMemSize %#x", textSec.VirtualSize, plan.TextMemSize)
+	}
+	// SizeOfRawData must stay at the file-aligned original text size — the
+	// compressed payload is what lives on disk; the expanded virtual window
+	// is kernel-zero-filled. PE spec §6.2: SizeOfRawData is rounded up to
+	// FileAlignment (0x200 in the synthetic PE).
+	const fileAlign = 0x200
+	wantRaw := alignUp(textSize, fileAlign)
+	if textSec.Size != wantRaw {
+		t.Errorf(".text SizeOfRawData = %#x, want file-aligned TextSize %#x", textSec.Size, wantRaw)
+	}
+}
+
+// TestInjectStubPE_TextMemSizeIgnoredWhenSmall confirms that setting
+// Plan.TextMemSize <= Plan.TextSize is a no-op: the VirtualSize in the output
+// section header is unchanged from the original input value.
+func TestInjectStubPE_TextMemSizeIgnoredWhenSmall(t *testing.T) {
+	const textSize = 0x500
+	input := buildMinimalPE(t, minimalPEOpts{TextSize: textSize, OEPRVA: 0x1010})
+	plan, err := transform.PlanPE(input, 4096)
+	if err != nil {
+		t.Fatalf("PlanPE: %v", err)
+	}
+	// Zero (default) and a value equal to TextSize must both be no-ops.
+	for _, memSize := range []uint32{0, plan.TextSize} {
+		plan.TextMemSize = memSize
+		encryptedText := bytes.Repeat([]byte{0xAA}, int(plan.TextSize))
+		stubBytes := []byte{0x90, 0xC3}
+		out, err := transform.InjectStubPE(input, encryptedText, stubBytes, plan)
+		if err != nil {
+			t.Fatalf("TextMemSize=%d InjectStubPE: %v", memSize, err)
+		}
+		f, err := pe.NewFile(bytes.NewReader(out))
+		if err != nil {
+			t.Fatalf("debug/pe rejected: %v", err)
+		}
+		if f.Sections[0].VirtualSize != textSize {
+			t.Errorf("TextMemSize=%d: VirtualSize=%#x, want original %#x",
+				memSize, f.Sections[0].VirtualSize, textSize)
+		}
+		f.Close()
+	}
+}
+
 func TestInjectStubPE_RejectsStubTooLarge(t *testing.T) {
 	input := buildMinimalPE(t, minimalPEOpts{})
 	plan, _ := transform.PlanPE(input, 16) // tiny budget

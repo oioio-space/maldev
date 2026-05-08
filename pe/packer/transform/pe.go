@@ -193,6 +193,19 @@ func InjectStubPE(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, er
 	textChars |= scnMemWrite
 	binary.LittleEndian.PutUint32(out[textHdrOff+secCharacteristicsOffset:textHdrOff+secCharacteristicsOffset+4], textChars)
 
+	// When compression is active TextMemSize > TextSize: the on-disk payload is the
+	// compressed bytes (filesz = TextSize) but the section needs more virtual memory
+	// so the in-place inflate has room to expand. VirtualSize controls the mapped
+	// window; SizeOfRawData (TextSize) controls how many bytes the kernel reads from
+	// disk. The difference is mapped as zeroes by the kernel — exactly the workspace
+	// the LZ4 inflate decoder needs.
+	if plan.TextMemSize > plan.TextSize {
+		binary.LittleEndian.PutUint32(
+			out[textHdrOff+secVirtualSizeOffset:textHdrOff+secVirtualSizeOffset+4],
+			plan.TextMemSize,
+		)
+	}
+
 	// Append a new stub section header immediately after the existing table.
 	// make([]byte, totalSize) guarantees zero bytes in the new-header slot.
 	newHdrOff := secTableOff + uint32(numSections)*peSectionHdrSize
