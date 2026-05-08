@@ -2,6 +2,7 @@ package stage1
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -83,7 +84,7 @@ func EmitStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round) error 
 	}
 	// 0xCAFEBABE is a sentinel replaced by PatchTextDisplacement once
 	// Encode() has fixed the byte layout and we know the imm32 file offset.
-	if err := b.ADD(baseReg, amd64.Imm(0xCAFEBABE)); err != nil {
+	if err := b.ADD(baseReg, amd64.Imm(int64(prologueSentinel))); err != nil {
 		return fmt.Errorf("stage1: prologue ADD sentinel: %w", err)
 	}
 
@@ -155,11 +156,15 @@ func EmitStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round) error 
 //
 // Returns the number of patches applied. A well-formed stub has exactly
 // one sentinel; the function returns an error for zero or more than one.
-// callPopSentinel is the little-endian encoding of 0xCAFEBABE — the imm32
-// EmitStub places in the prologue ADD so PatchTextDisplacement can locate it.
-// bytes.Index on this 4-byte sequence is the same SIMD-accelerated pattern
-// the rest of the stubgen tree uses (see stubgen.go:findSentinel).
-var callPopSentinel = []byte{0xBE, 0xBA, 0xFE, 0xCA}
+// prologueSentinel is the imm32 placeholder EmitStub bakes into
+// the prologue ADD so PatchTextDisplacement can find and replace
+// it with the real text-relative displacement after Encode().
+// callPopSentinel is its little-endian byte form for bytes.Index
+// scanning. The init derives one from the other so they cannot
+// silently drift between what's emitted and what's searched for.
+const prologueSentinel uint32 = 0xCAFEBABE
+
+var callPopSentinel = binary.LittleEndian.AppendUint32(nil, prologueSentinel)
 
 func PatchTextDisplacement(stubBytes []byte, plan transform.Plan) (int, error) {
 	i := bytes.Index(stubBytes, callPopSentinel)

@@ -35,6 +35,7 @@ import (
 	"os"
 
 	"github.com/oioio-space/maldev/pe/packer"
+	"github.com/oioio-space/maldev/pe/packer/transform"
 )
 
 func main() {
@@ -120,7 +121,7 @@ func runPack(args []string) int {
 // ELF inputs are pre-flight validated against Stage C+D's Z-scope
 // gate so a misconfigured build fails at pack time, not at deploy.
 func runPackBlob(data []byte, out, keyHex, keyOut string) int {
-	if len(data) >= 4 && data[0] == 0x7F && data[1] == 'E' && data[2] == 'L' && data[3] == 'F' {
+	if transform.DetectFormat(data) == transform.FormatELF {
 		if err := packer.ValidateELF(data); err != nil {
 			fmt.Fprintf(os.Stderr, "packer: input is not a loadable Go static-PIE: %v\n", err)
 			fmt.Fprintln(os.Stderr, "rebuild with: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildmode=pie -ldflags='-s -w' -o <out> <pkg>")

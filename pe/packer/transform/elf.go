@@ -24,8 +24,10 @@ const (
 	elfPhdrFlagsOffset  = 0x04
 	elfPhdrOffsetOffset = 0x08
 	elfPhdrVAddrOffset  = 0x10
+	elfPhdrPAddrOffset  = 0x18
 	elfPhdrFileSzOffset = 0x20
 	elfPhdrMemSzOffset  = 0x28
+	elfPhdrAlignOffset  = 0x30
 
 	elfPF_X    = 1
 	elfPF_W    = 2
@@ -232,10 +234,10 @@ func InjectStubELF(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, e
 	binary.LittleEndian.PutUint32(out[newPhdrOff+elfPhdrFlagsOffset:newPhdrOff+elfPhdrFlagsOffset+4], elfPF_R|elfPF_X)
 	binary.LittleEndian.PutUint64(out[newPhdrOff+elfPhdrOffsetOffset:newPhdrOff+elfPhdrOffsetOffset+8], uint64(plan.StubFileOff))
 	binary.LittleEndian.PutUint64(out[newPhdrOff+elfPhdrVAddrOffset:newPhdrOff+elfPhdrVAddrOffset+8], uint64(plan.StubRVA))
-	binary.LittleEndian.PutUint64(out[newPhdrOff+0x18:newPhdrOff+0x20], uint64(plan.StubRVA)) // p_paddr = vaddr
+	binary.LittleEndian.PutUint64(out[newPhdrOff+elfPhdrPAddrOffset:newPhdrOff+elfPhdrPAddrOffset+8], uint64(plan.StubRVA)) // p_paddr = vaddr
 	binary.LittleEndian.PutUint64(out[newPhdrOff+elfPhdrFileSzOffset:newPhdrOff+elfPhdrFileSzOffset+8], uint64(plan.StubMaxSize))
 	binary.LittleEndian.PutUint64(out[newPhdrOff+elfPhdrMemSzOffset:newPhdrOff+elfPhdrMemSzOffset+8], uint64(plan.StubMaxSize))
-	binary.LittleEndian.PutUint64(out[newPhdrOff+0x30:newPhdrOff+0x38], elfPageSize)
+	binary.LittleEndian.PutUint64(out[newPhdrOff+elfPhdrAlignOffset:newPhdrOff+elfPhdrAlignOffset+8], elfPageSize)
 
 	// 4. Bump e_phnum to include the new stub phdr.
 	binary.LittleEndian.PutUint16(out[elfPhnumOffset:elfPhnumOffset+2], phnum+1)

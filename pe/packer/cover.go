@@ -243,8 +243,17 @@ func writeJunkBody(dst []byte, fill JunkFill) error {
 	case JunkFillZero:
 		// make([]byte, …) zeroed dst already.
 	case JunkFillPattern:
-		for i := range dst {
-			dst[i] = frequencyOrderedPattern[i%len(frequencyOrderedPattern)]
+		// Doubling-copy: seed the first chunk, then copy the
+		// already-filled prefix forward in O(log N) iterations.
+		// Avoids the per-byte modulo + branch that the previous
+		// `i % len(pattern)` loop generated for every byte.
+		if len(dst) == 0 {
+			return nil
+		}
+		seed := frequencyOrderedPattern[:]
+		n := copy(dst, seed)
+		for n < len(dst) {
+			n += copy(dst[n:], dst[:n])
 		}
 	default:
 		return fmt.Errorf("%w: unknown JunkFill %d", ErrCoverInvalidOptions, fill)

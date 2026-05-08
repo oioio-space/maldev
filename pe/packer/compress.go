@@ -37,8 +37,13 @@ const compressionPrefixSize = 4
 // pipeline's per-step key slot is uniformly populated even for
 // keyless steps (the empty slice signals "no key needed").
 func applyCompression(c Compressor, data []byte) (out []byte, _ []byte, err error) {
-	var buf bytes.Buffer
-	// Reserve 4 bytes for the original-size prefix.
+	// Pre-grow to the worst-case compressed size (input + prefix).
+	// Eliminates the doubling-realloc churn that bytes.Buffer's
+	// default 64-byte starting capacity inflicts on MB-scale .text
+	// sections. Real compression usually shrinks the output well
+	// below this; the over-allocation is freed on return.
+	buf := bytes.Buffer{}
+	buf.Grow(compressionPrefixSize + len(data))
 	if err := binary.Write(&buf, binary.LittleEndian, uint32(len(data))); err != nil {
 		return nil, nil, err
 	}
@@ -79,30 +84,32 @@ func reverseCompression(c Compressor, data []byte) ([]byte, error) {
 	wantSize := binary.LittleEndian.Uint32(data[:compressionPrefixSize])
 	body := data[compressionPrefixSize:]
 
-	var (
-		out []byte
-		err error
-	)
+	var out []byte
 	switch c {
 	case CompressorNone:
 		out = body
 	case CompressorFlate:
 		r := flate.NewReader(bytes.NewReader(body))
 		defer r.Close()
-		out, err = io.ReadAll(r)
-		if err != nil {
+		// Pre-allocate to wantSize so io.ReadAll's doubling
+		// strategy doesn't churn through log2(size/512) reallocs
+		// on multi-MB payloads.
+		buf := bytes.NewBuffer(make([]byte, 0, wantSize))
+		if _, err := io.Copy(buf, r); err != nil {
 			return nil, fmt.Errorf("packer: flate decompress: %w", err)
 		}
+		out = buf.Bytes()
 	case CompressorGzip:
 		r, err := gzip.NewReader(bytes.NewReader(body))
 		if err != nil {
 			return nil, fmt.Errorf("packer: gzip header: %w", err)
 		}
 		defer r.Close()
-		out, err = io.ReadAll(r)
-		if err != nil {
+		buf := bytes.NewBuffer(make([]byte, 0, wantSize))
+		if _, err := io.Copy(buf, r); err != nil {
 			return nil, fmt.Errorf("packer: gzip decompress: %w", err)
 		}
+		out = buf.Bytes()
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedCompressor, c)
 	}

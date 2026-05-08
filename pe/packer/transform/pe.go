@@ -1,6 +1,7 @@
 package transform
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -92,22 +93,26 @@ func PlanPE(input []byte, stubMaxSize uint32) (Plan, error) {
 		textRVA       uint32
 		textFileOff   uint32
 		textSize      uint32
+		textHdrOff    uint32
 		textFound     bool
 		lastSecEndRVA uint32
 		lastSecEndOff uint32
 	)
+	textPrefix := []byte(".text")
 	for i := uint16(0); i < numSections; i++ {
 		hdrOff := secTableOff + uint32(i)*peSectionHdrSize
-		name := string(input[hdrOff : hdrOff+8])
 		va := binary.LittleEndian.Uint32(input[hdrOff+secVirtualAddressOffset : hdrOff+secVirtualAddressOffset+4])
 		vs := binary.LittleEndian.Uint32(input[hdrOff+secVirtualSizeOffset : hdrOff+secVirtualSizeOffset+4])
 		rs := binary.LittleEndian.Uint32(input[hdrOff+secSizeOfRawDataOffset : hdrOff+secSizeOfRawDataOffset+4])
 		pf := binary.LittleEndian.Uint32(input[hdrOff+secPointerToRawDataOffset : hdrOff+secPointerToRawDataOffset+4])
 
-		if !textFound && name[:5] == ".text" {
+		// bytes.HasPrefix avoids the per-iteration string() heap
+		// alloc that the previous string(input[...]) did.
+		if !textFound && bytes.HasPrefix(input[hdrOff:hdrOff+8], textPrefix) {
 			textRVA = va
 			textFileOff = pf
 			textSize = vs
+			textHdrOff = hdrOff
 			textFound = true
 		}
 		end := alignUpU32(va+vs, sectionAlign)
@@ -136,6 +141,7 @@ func PlanPE(input []byte, stubMaxSize uint32) (Plan, error) {
 		TextRVA:     textRVA,
 		TextFileOff: textFileOff,
 		TextSize:    textSize,
+		TextHdrOff:  textHdrOff,
 		OEPRVA:      oepRVA,
 		StubRVA:     stubRVA,
 		StubFileOff: stubFileOff,
@@ -176,15 +182,10 @@ func InjectStubPE(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, er
 	secTableOff := optOff + uint32(sizeOfOptHdr)
 	numSections := binary.LittleEndian.Uint16(out[coffOff+coffNumSectionsOffset : coffOff+coffNumSectionsOffset+2])
 
-	textHdrOff := uint32(0)
-	for i := uint16(0); i < numSections; i++ {
-		hdrOff := secTableOff + uint32(i)*peSectionHdrSize
-		name := string(out[hdrOff : hdrOff+8])
-		if name[:5] == ".text" {
-			textHdrOff = hdrOff
-			break
-		}
-	}
+	// Plan.TextHdrOff is set by PlanPE so InjectStubPE skips the
+	// re-walk of the section table and the per-iteration string()
+	// allocation that used to back the comparison.
+	textHdrOff := plan.TextHdrOff
 	if textHdrOff == 0 {
 		return nil, ErrNoTextSection
 	}

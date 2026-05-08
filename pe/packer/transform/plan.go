@@ -54,6 +54,7 @@ type Plan struct {
 	TextRVA     uint32 // RVA of the section that gets encrypted
 	TextFileOff uint32 // file offset where encrypted bytes are written
 	TextSize    uint32 // bytes to encrypt + decrypt at runtime
+	TextHdrOff  uint32 // PE only: file offset of the .text section header (unused for ELF)
 	OEPRVA      uint32 // original entry point — JMP target after decrypt
 	StubRVA     uint32 // RVA of the new stub section (= new entry point)
 	StubFileOff uint32 // file offset where stub bytes are written

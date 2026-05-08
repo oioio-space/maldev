@@ -13,6 +13,8 @@ import (
 	"crypto/rand"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/oioio-space/maldev/pe/packer/transform"
 )
 
 // Linux x86_64 relocation types — see /usr/include/elf.h.
@@ -330,9 +332,10 @@ func protFromPF(flags uint32) int {
 	return prot
 }
 
-// alignUp rounds `v` up to a multiple of `align`. `align` must
-// be a power of two — pageSize on Linux always is.
-func alignUp(v, align uint64) uint64 { return (v + align - 1) &^ (align - 1) }
+// alignUp delegates to [transform.AlignUpU64]. Kept as an
+// in-package alias so the PHT-walk call sites stay short. align
+// must be a power of two — pageSize on Linux always is.
+func alignUp(v, align uint64) uint64 { return transform.AlignUpU64(v, align) }
 
 // alignDown rounds `v` down to a multiple of `align`. `align`
 // must be a power of two (page sizes always are).
