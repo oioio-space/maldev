@@ -311,3 +311,31 @@ When this is reattempted, the iteration order should be:
   scale up.
 
 Plan rows C3 + C6 remain open. C1, C2, C4, C5, C7 all shipped (v0.62.0–v0.65.0).
+
+### C3 progress as of 2026-05-08
+
+- **C3-stage-1 — decoder asm in isolation** ✅ shipped at commit `a336bbc`.
+  - `pe/packer/stubgen/stage1.EmitLZ4Inflate(b *amd64.Builder)` — 136-byte
+    LZ4 block-format inflate decoder using **Go register ABI**
+    (RAX=src, RBX=dst, RCX=src_size).
+  - 5 round-trip tests against `github.com/pierrec/lz4/v4` (all-zero,
+    all-random, RLE offset=1, real `.text` fragment, edge sizes
+    0/1/15/16/4095/65535/65536) — all green.
+  - **NOT wired into the stub.** The decoder ships as a library helper.
+
+- **C3-stage-2 — wire into stub** still pending. Attempted 2026-05-08
+  but the implementing subagent ran out of usage mid-flight; partial
+  changes (4 files modified, build broken) were reverted. Master stays
+  at the post-stage-1 line.
+
+  When reattempted, the chantier must:
+  - Add `Compress bool` to `PackBinaryOptions` (opt-in, default false).
+  - Add the safety_margin layout: pack-time prepends N zero bytes
+    to the SGN-encoded compressed payload; stub computes
+    `src = R15 + safety_margin`, `dst = R15` before the inflate call.
+  - Extend `InjectStubPE` / `InjectStubELF` with a `memSize uint32`
+    parameter so the section's memsz > filesz when Compress=true. All
+    existing call sites pass 0 for backward compatibility.
+  - Pass safety_margin to the SGN per-round emit so the decoder src
+    pointer skips the zero prefix.
+  - Win VM E2E gate before tagging.
