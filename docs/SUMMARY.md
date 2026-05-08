@@ -103,6 +103,8 @@
   - [Certificate theft](techniques/pe/certificate-theft.md)
   - [PE → shellcode](techniques/pe/pe-to-shellcode.md)
   - [DLL proxy generator](techniques/pe/dll-proxy.md)
+  - [Packer (Phase 1a–1e)](techniques/pe/packer.md)
+  - [Catalog signing](techniques/pe/catalog-signing.md)
 
 - [Persistence](techniques/persistence/README.md)
   - [Registry](techniques/persistence/registry.md)
