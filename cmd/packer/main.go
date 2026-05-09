@@ -86,6 +86,7 @@ Usage:
   packer bundle -out <file> -pl <spec> [-pl <spec> ...]
                 [-fallback exit|crash|first]
   packer bundle -inspect <bundle>
+  packer bundle -match   <bundle>
 
 Formats:
   blob         (default) AES-GCM encrypted bytes; key printed as 64-char hex
@@ -104,8 +105,11 @@ Bundle spec syntax (-pl):
        -pl fallback.exe:*:*-*
   Fallback behaviour: exit (silent), crash (loud), first (always payload 0).
   Note: the runtime stub-side fingerprint evaluator is C6-P3/P4 work;
-  until it ships, the bundle is a build-host artefact you can inspect
-  with: packer bundle -inspect <bundle>
+  until it ships, the bundle is a build-host artefact you can:
+    - inspect:   packer bundle -inspect <bundle>
+    - dry-run:   packer bundle -match   <bundle>
+                 (reads host CPUID + Windows build, prints which
+                  payload would fire — same logic the stub will run)
 `)
 }
 
@@ -292,6 +296,7 @@ func runBundle(args []string) int {
 	out := fs.String("out", "", "output bundle blob path")
 	fallback := fs.String("fallback", "exit", "no-match behaviour: exit | crash | first")
 	inspect := fs.String("inspect", "", "inspect an existing bundle blob and exit (path)")
+	match := fs.String("match", "", "report which payload would fire on this host and exit (path)")
 	var pls stringSliceFlag
 	fs.Var(&pls, "pl", "payload spec: <file>:<vendor>:<min>-<max>; repeatable")
 	if err := fs.Parse(args); err != nil {
@@ -301,6 +306,9 @@ func runBundle(args []string) int {
 
 	if *inspect != "" {
 		return runBundleInspect(*inspect)
+	}
+	if *match != "" {
+		return runBundleMatch(*match)
 	}
 	if *out == "" || len(pls) == 0 {
 		fmt.Fprintln(os.Stderr, "bundle: -out and at least one -pl required (or use -inspect)")
@@ -404,6 +412,33 @@ func parseBundleSpec(spec string) (packer.BundlePayload, error) {
 		pred.PredicateType = packer.PTMatchAll
 	}
 	return packer.BundlePayload{Binary: bin, Fingerprint: pred}, nil
+}
+
+// runBundleMatch loads a bundle blob and reports which entry would fire
+// on the current host (CPUID vendor + Windows build, via
+// [packer.MatchBundleHost]). Exits 0 with the matched index on stdout
+// when a match is found; exits 0 with "no-match" when nothing matches
+// (operator can pair this with the `-fallback` build-time choice);
+// exits 1 on parse / IO errors.
+func runBundleMatch(path string) int {
+	blob, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bundle match:", err)
+		return 1
+	}
+	idx, err := packer.MatchBundleHost(blob)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bundle match:", err)
+		return 1
+	}
+	vendor := packer.HostCPUIDVendor()
+	v := strings.TrimRight(string(vendor[:]), "\x00")
+	if idx < 0 {
+		fmt.Printf("no-match host-vendor=%q\n", v)
+		return 0
+	}
+	fmt.Printf("match index=%d host-vendor=%q\n", idx, v)
+	return 0
 }
 
 // runBundleInspect walks a bundle blob and prints its header + per-entry
