@@ -61,6 +61,21 @@ verify:
 install-garble:
 	go install mvdan.cc/garble@latest
 
+# Packer elevation tour — single-command demo of every shipped wrap
+# variant. Builds the 12-byte exit42 fixture, packs it 4 ways (raw
+# min-ELF, all-asm bundle wrap, Go launcher default, Go launcher
+# reflective), runs each, prints sizes + average entropy + exit codes.
+#
+# Operationally pedagogical: see every variant in one shell session.
+# See docs/examples/packer-elevation-tour.md for the prose
+# walk-through.
+.PHONY: packer-demo
+packer-demo:
+	@if [ "$$(uname)" != "Linux" ]; then \
+	  echo "packer-demo: Linux-only (uses memfd / static-PIE)."; exit 1; \
+	fi
+	@bash scripts/packer-demo.sh
+
 # Clean
 .PHONY: clean
 clean:
