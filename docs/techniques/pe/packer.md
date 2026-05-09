@@ -1,166 +1,94 @@
 ---
 package: github.com/oioio-space/maldev/pe/packer
-last_reviewed: 2026-05-07
-reflects_commit: c38787f
+last_reviewed: 2026-05-09
 ---
 
-# PE Packer (Phase 1a–1e — encrypt/embed + reflective loader + UPX-style)
+# PE Packer
 
 [← pe index](README.md) · [docs/index](../../index.md)
 
+A pure-Go packer for PE/ELF binaries and shellcode. Produces a
+self-contained executable that decrypts itself at startup and runs
+the payload — no separate loader, no second stage, no operator-side
+unpacking step. Single-target packing (one payload, in-place
+encryption) and multi-target bundling (N payloads, runtime CPUID
+dispatch) are both first-class.
+
+**MITRE ATT&CK:** [T1027.002 — Software Packing](https://attack.mitre.org/techniques/T1027/002/) ·
+[T1140 — Deobfuscate/Decode Files or Information](https://attack.mitre.org/techniques/T1140/)
+
+**Detection level:** Medium-High. Stub bytes are polymorphic per
+pack; magic bytes are operator-secret-derived per build. The
+structural shape of the produced binary (single-PT_LOAD-RWX ELF for
+the all-asm path; appended `.mldv` section for `PackBinary`) remains
+yara-able regardless.
+
+---
+
 ## TL;DR
 
-Encrypt + embed any byte buffer (PE / shellcode / config) into a
-self-describing maldev-format blob, then **reflectively load the
-original PE into the current process's memory** at runtime. Two
-sub-packages compose the full pipeline:
-
-| You want to… | Use | Notes |
+| You want… | Use | Output size (typical) |
 |---|---|---|
-| Encrypt a payload + carry it as a blob (single AES-GCM) | [`packer.Pack`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#Pack) | Phase 1a; returns blob + AEAD key |
-| Recover the original bytes from a blob | [`packer.Unpack`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#Unpack) | Phase 1a; needs the key Pack returned |
-| **Stack multiple ciphers + permutations** (composability) | [`packer.PackPipeline`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#PackPipeline) | Phase 1c; returns blob + per-step keys |
-| Reverse a pipeline-packed blob | [`packer.UnpackPipeline`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#UnpackPipeline) | Phase 1c; needs the per-step keys |
-| Reflectively load a packed PE in-process (Windows x64) | [`runtime.LoadPE`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/runtime#LoadPE) | Phase 1b; Unpack + map + relocate + resolve imports + set protections |
-| Inspect the loaded image without running it | [`runtime.Prepare`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/runtime#Prepare) | Tests + diagnostics |
-| Pack/unpack from the shell | `cmd/packer pack` / `cmd/packer unpack` | Thin wrapper (single-AES-GCM only — pipeline CLI lands later) |
+| **Pack a single PE/ELF that runs natively** | `packer.PackBinary` | Input + ~1-8 KiB stub |
+| **Pack a payload that fingerprints the host first** (multi-target) | `packer.PackBinaryBundle` + the `cmd/bundle-launcher` runtime | ~5 MB (Go runtime) |
+| **Same, but tiny single-file** | `packer.PackBinaryBundle` + `packer.WrapBundleAsExecutableLinux` | ~470 B |
+| **Encrypt arbitrary bytes into a blob (no exec)** | `packer.Pack` / `packer.Unpack` | Input + 32 B header + AES-GCM tag |
+| **Compose multiple ciphers + permutations** | `packer.PackPipeline` | Same |
+| **Inspect / extract a maldev artefact** (defender) | `cmd/packerscope` | n/a |
+| **Visualise entropy + bundle structure** | `cmd/packer-vis` | n/a |
 
-### Pipeline composability example (Phase 1c + 1c.5)
+---
 
-Stack compression + permutation + cipher — canonical
-"compress-then-encrypt" order:
+## Mental model
 
-```go
-import "github.com/oioio-space/maldev/pe/packer"
+Two pipelines, orthogonal:
 
-blob, keys, err := packer.PackPipeline(payload, []packer.PipelineStep{
-    {Op: packer.OpCompress, Algo: uint8(packer.CompressorFlate)},
-    {Op: packer.OpPermute,  Algo: uint8(packer.PermutationSBox)},
-    {Op: packer.OpCipher,   Algo: uint8(packer.CipherAESGCM)},
-})
-// keys[0] is nil (compression has no secret); keys[1] / keys[2]
-// are the per-step keys for the SBox + AES-GCM stages. Transport
-// them to the implant.
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Single-target pipeline                                      │
+│                                                              │
+│   payload.exe ──[PackBinary]──► packed.exe                   │
+│   (real PE/ELF)                  │                           │
+│                                  └─ kernel loads → SGN stub  │
+│                                     decrypts .text in place  │
+│                                     → JMP original entry     │
+└─────────────────────────────────────────────────────────────┘
 
-// At unpack time:
-recovered, err := packer.UnpackPipeline(blob, keys)
+┌─────────────────────────────────────────────────────────────┐
+│  Multi-target pipeline                                       │
+│                                                              │
+│   payload-A ──┐                                              │
+│   payload-B ──┼─[PackBinaryBundle]──► bundle blob            │
+│   payload-C ──┘                       │                      │
+│              + FingerprintPredicate   │                      │
+│              for each                 ▼                      │
+│                                  ┌─[Wrap…]──► single .exe    │
+│                                  │             (Go launcher  │
+│                                  │              or all-asm)  │
+│                                  ▼                           │
+│                          runtime: read CPUID + Win build,    │
+│                          match predicates, decrypt the ONE   │
+│                          matching payload, dispatch.         │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-Pack runs the steps in order; Unpack reverses. The wire format
-records each step's Op + Algo so the implant knows what to
-reverse, but keys travel separately.
+Both pipelines are pure Go, no cgo. Both produce a runnable
+executable on disk that the kernel loads normally — there is no
+operator-side "unpack first then run" step.
 
-**Compression caveat**: always compress BEFORE encryption.
-Encrypted bytes are near-uniform entropy and don't compress.
-Phase 1c.5 ships `CompressorFlate` (raw DEFLATE — smallest
-output overhead, ~98% reduction observed on highly-repetitive
-input) and `CompressorGzip` (DEFLATE + framing). aPLib / LZMA
-/ zstd / LZ4 are reserved constants and return
-`ErrUnsupportedCompressor` until implemented.
+---
 
-⚠ **`runtime.PreparedImage.Run` is gated by `MALDEV_PACKER_RUN_E2E=1`**
-so `go test` against unmodified binaries doesn't hand control
-to arbitrary payloads.
+## Quick start
 
-⚠ **Known limitation (Phase 1b):** PEs depending on SxS-redirected
-ordinal imports (e.g. `notepad.exe` imports COMCTL32 by ordinal,
-which Windows redirects via activation context) fail at import
-resolution. Activation-context support lands in Phase 1c.
-Verified working on simpler EXEs (xcopy.exe, where.exe) which
-use the modern api-ms-win-core-* import set.
+### Single-target
 
-What this DOES achieve (today, Phase 1a):
-
-- Self-describing blob format with version field — future
-  format bumps fail loudly via `ErrUnsupportedVersion`
-  instead of misinterpreting bytes.
-- AES-GCM AEAD — tampering / wrong-key both rejected by the
-  auth tag.
-- Polymorphic ciphertext per pack (random nonce) — same
-  input → different output bytes every call.
-- Round-trip-tested across input sizes (empty / 1 byte /
-  page / multi-page).
-
-What this does NOT achieve (today):
-
-- **Doesn't compress.** `CompressorNone` is the only shipped
-  option; aPLib / LZMA / zstd / LZ4 land in a follow-up.
-- **Doesn't ship ChaCha20 / RC4** despite reserved constants.
-  AES-GCM only.
-- **Doesn't auto-build a host PE around the blob.** Operators
-  manually wire the `runtime.LoadPE` call in their implant's
-  Go program. Phase 1d's polymorphic stub generation will
-  produce the host PE automatically.
-- **DLLs not yet supported.** EXEs only — DLLs need DllMain
-  calling + HINSTANCE. Loader returns `runtime.ErrNotEXE`.
-- **TLS callbacks not yet supported.** Many production binaries
-  use them; loader rejects with `runtime.ErrTLSCallbacks`.
-- **x64 only.** x86 + ARM64 rejected with `runtime.ErrUnsupportedArch`.
-- **Linux ELF not yet supported.** Phase 1c.
-- **SxS-redirected ordinal imports fail.** notepad.exe (COMCTL32
-  v6 via activation context) hits `GetProcAddressByOrdinal`
-  failure. Verified working on simpler EXEs (xcopy, where, find)
-  with the modern api-ms-win-core-* import set.
-
-For the full design (3 phases, threat model, polymorphism via
-compile-time templating, cross-platform Linux ELF, multi-target
-bundle, anti-debug, AMSI silence, cert graft), see
-[`docs/refactor-2026-doc/packer-design.md`](../../refactor-2026-doc/packer-design.md).
-
-## Primer — vocabulary
-
-Five terms recur on this page:
-
-> **AEAD** (Authenticated Encryption with Associated Data) —
-> cipher mode that produces both ciphertext AND an
-> authentication tag. Decrypt with wrong key OR tampered
-> ciphertext → tag mismatch → decrypt fails loudly. AES-GCM
-> is the AEAD shipped here.
->
-> **Nonce** — single-use random bytes mixed into the cipher
-> so the same key + plaintext produces different ciphertext
-> on every call. AES-GCM uses 12 bytes; never reuse a nonce
-> with the same key (catastrophic break).
->
-> **Magic** — fixed 4-byte prefix at the start of every
-> packed blob (`MLDV`). Lets `Unpack` distinguish a maldev
-> blob from random bytes / a different format. Trivially
-> fingerprinted today; Phase 1b wraps the blob in a host PE
-> so the magic is no longer at file offset 0.
->
-> **FormatVersion** — uint16 in the header. Bumps on
-> backwards-incompatible layout changes. Old `Unpack` reading
-> a new blob fails with `ErrUnsupportedVersion`.
->
-> **Reflective loader stub** — code that executes at the
-> start of the packed binary, locates the encrypted payload,
-> decrypts it, allocates RWX memory, applies relocations,
-> resolves imports, and jumps to the original entry point —
-> all from inside the running process. Phase 1b ships this.
-
-## How It Works
-
-```mermaid
-flowchart LR
-    IN[input bytes] --> COMP[Compressor pass<br>Phase 1a: passthrough]
-    COMP --> ENC[AES-GCM encrypt<br>+ random 12-byte nonce]
-    ENC --> HDR[Prepend 32-byte header<br>magic + version + cipher +<br>compressor + sizes + nonce size]
-    HDR --> OUT[blob bytes]
-    OUT --> UH[Unpack: parse header]
-    UH --> UD[AES-GCM decrypt<br>verify auth tag]
-    UD --> UC[Decompress<br>Phase 1a: passthrough]
-    UC --> RECOVERED[input bytes recovered]
-```
-
-## Examples
-
-### Quick start — round-trip a payload
+You have a real PE or ELF binary; you want a packed version that
+runs directly:
 
 ```go
 package main
 
 import (
-    "fmt"
     "log"
     "os"
 
@@ -168,747 +96,791 @@ import (
 )
 
 func main() {
-    payload, err := os.ReadFile("notepad.exe")
+    payload, err := os.ReadFile("payload.exe")
     if err != nil { log.Fatal(err) }
 
-    // Step 1: pack. Default options = AES-GCM, no compression,
-    //         freshly-generated 32-byte key.
-    blob, key, err := packer.Pack(payload, packer.Options{})
+    packed, _, err := packer.PackBinary(payload, packer.PackBinaryOptions{
+        Format:       packer.FormatWindowsExe,
+        Stage1Rounds: 3,        // SGN polymorphic decoder rounds
+        Compress:     true,     // LZ4 .text before SGN
+        AntiDebug:    true,     // PEB.BeingDebugged + RDTSC delta probe
+    })
     if err != nil { log.Fatal(err) }
-    fmt.Printf("packed %d bytes → %d-byte blob\n", len(payload), len(blob))
 
-    // Step 2: ship the blob + key separately. The blob alone is
-    //         opaque AEAD ciphertext.
-    _ = os.WriteFile("payload.bin", blob, 0o644)
-    fmt.Printf("KEY (save it!): %x\n", key)
-
-    // Step 3 (much later): unpack on the build host that has
-    //         the key.
-    recovered, err := packer.Unpack(blob, key)
-    if err != nil { log.Fatal(err) }
-    fmt.Printf("recovered %d bytes\n", len(recovered))
+    if err := os.WriteFile("packed.exe", packed, 0o755); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
-### CLI usage
+CLI equivalent:
 
 ```bash
-# Pack: prints the AEAD key to stdout as 64-char hex.
-$ go run ./cmd/packer pack -in payload.exe -out payload.bin
-packed 184320 bytes → payload.bin (184380 bytes)
-b3a2c1d4e5f6...      # save this, you need it for unpack
-
-# Unpack: needs the key.
-$ go run ./cmd/packer unpack -in payload.bin -out recovered.exe -key b3a2c1d4e5f6...
-unpacked → recovered.exe (184320 bytes)
-
-# Or write the key to a file (more script-friendly).
-$ go run ./cmd/packer pack -in payload.exe -out payload.bin -keyout key.hex
-$ go run ./cmd/packer unpack -in payload.bin -out recovered.exe -key "$(cat key.hex)"
+$ packer pack -in payload.exe -out packed.exe -format windows-exe \
+    -rounds 3 -compress -antidebug
 ```
 
-### Multi-target bundle (v0.67.0-alpha.1, C6)
+The packed binary runs directly: `./packed.exe`. The kernel maps it,
+the appended stub takes over at the new entry point, peels the SGN
+encoding off the `.text` section in place, optionally LZ4-decompresses,
+then jumps to the original entry point. The payload sees a normal
+process — its imports are resolved by the kernel (not by us), its TLS
+callbacks fire, its language runtime initialises, etc.
 
-Pack one binary per target environment, then ship a single blob that
-selects the right payload at runtime via CPUID + PEB fingerprinting.
-Phase P1 ships the host-side primitives:
+### Multi-target — operator workflow
+
+You have three distinct payloads, each tuned for a different target
+environment, and you want a single shippable file that picks the
+right one at runtime:
+
+```bash
+# Pick a fresh per-deployment secret. Store it; you'll need it for
+# the launcher build.
+SECRET="ops-2026-05-09-target-A"
+
+# Build per-target payloads. These can be packer.PackBinary outputs
+# (single-target packed binaries), regular ELF/PE binaries, or raw
+# shellcode — depends on the runtime model you pick below.
+$ build-payload-w11.sh
+$ build-payload-w10.sh
+$ build-fallback.sh
+
+# Pack the bundle. -secret derives a per-build BundleMagic + footer
+# magic via SHA-256 so two operators using different secrets ship
+# byte-distinct bundles.
+$ packer bundle -out bundle.bin -secret "$SECRET" \
+    -pl payload-w11.exe:intel:22000-99999 \
+    -pl payload-w10.exe:amd:10000-19999   \
+    -pl fallback.exe:*:*-*
+
+# Two ways to turn the bundle into a runnable executable. Pick one:
+
+# OPTION A — Go-runtime launcher (~5 MB, full feature set)
+$ go build -ldflags "-X main.bundleSecret=$SECRET" \
+    -o bundle-launcher ./cmd/bundle-launcher
+$ packer bundle -wrap bundle-launcher -bundle bundle.bin \
+    -secret "$SECRET" -out app
+
+# OPTION B — All-asm tiny ELF (~470 B for vendor-aware 1-payload)
+# Requires: payload bytes are raw position-independent shellcode,
+# NOT a packed PE/ELF. The stub jumps directly into the bytes.
+$ # programmatic only:
+$ go run path/to/your-build-program.go    # uses
+                                          # WrapBundleAsExecutableLinux
+
+# Ship app. It dispatches at runtime.
+$ ./app
+```
+
+Programmatic equivalent:
 
 ```go
 intel := [12]byte{'G','e','n','u','i','n','e','I','n','t','e','l'}
 amd   := [12]byte{'A','u','t','h','e','n','t','i','c','A','M','D'}
 
-bundle, err := packer.PackBinaryBundle([]packer.BundlePayload{
-    {Binary: intelW11Payload, Fingerprint: packer.FingerprintPredicate{
-        PredicateType: packer.PTCPUIDVendor | packer.PTWinBuild,
-        VendorString:  intel,
-        BuildMin:      22000, BuildMax: 99999,
-    }},
-    {Binary: amdW10Payload, Fingerprint: packer.FingerprintPredicate{
-        PredicateType: packer.PTCPUIDVendor | packer.PTWinBuild,
-        VendorString:  amd,
-        BuildMin:      10000, BuildMax: 19999,
-    }},
-    // Catch-all fallback.
-    {Binary: fallbackPayload, Fingerprint: packer.FingerprintPredicate{
-        PredicateType: packer.PTMatchAll,
-    }},
-}, packer.BundleOptions{FallbackBehaviour: packer.BundleFallbackExit})
+profile := packer.DeriveBundleProfile([]byte("ops-2026-05-09-target-A"))
 
-// On the build host, preview which entry would fire for a target:
-idx, _ := packer.SelectPayload(bundle, intel, 22631)  // → 0
-plain, _ := packer.UnpackBundle(bundle, idx)          // recovers payload
-```
-
-The runtime stub-side fingerprint evaluator + container wrapping
-(C6-P3, C6-P4) ship in subsequent phases. Until then, the bundle blob
-is a build-host artefact only.
-
-### Custom key (key-derivation pipelines)
-
-When the key comes from elsewhere — host fingerprint, KDF over a
-shared secret, server-fetched after sandbox check — supply it
-explicitly:
-
-```go
-import (
-    "crypto/sha256"
-
-    "github.com/oioio-space/maldev/pe/packer"
+bundle, err := packer.PackBinaryBundle(
+    []packer.BundlePayload{
+        {Binary: w11Payload, Fingerprint: packer.FingerprintPredicate{
+            PredicateType: packer.PTCPUIDVendor | packer.PTWinBuild,
+            VendorString:  intel,
+            BuildMin:      22000, BuildMax: 99999,
+        }},
+        {Binary: w10Payload, Fingerprint: packer.FingerprintPredicate{
+            PredicateType: packer.PTCPUIDVendor | packer.PTWinBuild,
+            VendorString:  amd,
+            BuildMin:      10000, BuildMax: 19999,
+        }},
+        {Binary: fallbackPayload, Fingerprint: packer.FingerprintPredicate{
+            PredicateType: packer.PTMatchAll,
+        }},
+    },
+    packer.BundleOptions{Profile: profile},
 )
-
-// Derive a 32-byte key from anything (here: hostname + magic word).
-shared := sha256.Sum256([]byte("operator-codename:" + getHostname()))
-
-blob, _, err := packer.Pack(payload, packer.Options{Key: shared[:]})
-// Same key on the build host = round-trip works.
 ```
 
-## API Reference
+---
 
-### `func Pack(data []byte, opts Options) (packed []byte, key []byte, err error)`
+## Operation modes
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#Pack)
+### Mode 1 — `Pack` / `Unpack` (blob, no exec)
 
-Encrypt + embed `data` into a maldev-format blob.
-
-**Parameters:**
-
-- `data` — arbitrary bytes (PE / ELF / shellcode / anything).
-- `opts.Cipher` — `CipherAESGCM` (default; only ship in Phase 1a).
-- `opts.Compressor` — `CompressorNone` (default; only ship in Phase 1a).
-- `opts.Key` — 16/24/32 bytes for AES-GCM; nil → fresh random 32 bytes.
-
-**Returns:** `(blob, key, err)`. The key is the only material
-needed to call `Unpack` later.
-
-**OPSEC:** the blob carries the `MLDV` magic at offset 0. Phase
-1a is intentionally fingerprintable — Phase 1b wraps it.
-
-**Required privileges:** unprivileged.
-
-**Platform:** cross-platform.
-
-### `func Unpack(packed []byte, key []byte) ([]byte, error)`
-
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#Unpack)
-
-Reverse `Pack`. Returns the original `data` bytes.
-
-**Sentinels** (use `errors.Is`):
-
-- `ErrShortBlob` — input shorter than 32-byte header.
-- `ErrBadMagic` — input doesn't start with `MLDV`.
-- `ErrUnsupportedVersion` — blob's version field unknown.
-- `ErrUnsupportedCipher` — blob references a cipher this build
-  doesn't implement.
-- `ErrUnsupportedCompressor` — same for compressors.
-- `ErrPayloadSizeMismatch` — header sizes inconsistent (truncated
-  blob).
-
-Wrong key OR tampered ciphertext both surface as the underlying
-AEAD `cipher: message authentication failed` error (no maldev
-sentinel — match on the unwrapped error if needed).
-
-**Required privileges:** unprivileged.
-
-**Platform:** cross-platform.
-
-### `type Options struct`, `type Cipher`, `type Compressor`
-
-See package godoc for full constant lists. Phase 1a only
-implements `CipherAESGCM` + `CompressorNone`; other constants
-are reserved for Phase 1b/1c.
-
-### `func PackBinary(input []byte, opts PackBinaryOptions) (out []byte, key []byte, err error)`
-
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#PackBinary)
-
-**v0.61.0 — Phase 1e UPX-style packer.** Modifies an input
-PE32+ or ELF64 in place: encrypts the `.text` section with the
-SGN polymorphic encoder, appends a small CALL+POP+ADD-prologue
-decoder stub as a new section, rewrites the entry point. Output
-is a single self-contained binary the kernel loads normally; no
-secondary stage 2.
-
-This replaces the broken `v0.59.0` / `v0.60.0` architecture
-(host wrapper + stage 2 Go EXE) which produced byte-shape-correct
-binaries that crashed at runtime. See
-`docs/refactor-2026-doc/KNOWN-ISSUES-1e.md` for the post-mortem.
-
-**Parameters:**
-
-- `input` — full PE32+ or ELF64 binary bytes.
-- `opts.Format` — `FormatWindowsExe` or `FormatLinuxELF`.
-- `opts.Stage1Rounds` — number of SGN decoder rounds (3 is the
-  ship-tested baseline; higher = larger stub + longer decrypt).
-- `opts.Seed` — RNG seed for the polymorphic engine. Same seed
-  + same input + same rounds = byte-identical output (useful
-  for tests; vary per pack in production).
-- `opts.CipherKey` — currently informational only (the SGN
-  layer is the encryption); reserved for future Phase 1c+ AES
-  wrapping.
-- `opts.Compress` — when `true`, LZ4-compresses `.text` before SGN
-  encoding. The stub gains a 136-byte hand-rolled asm inflate
-  decoder + 30-byte setup/copy plumbing; inflate runs non-in-place
-  into a scratch buffer placed in the stub segment's BSS slack.
-  `StubMaxSize` auto-promotes to 8 KiB. Saves ~33 % on a Go
-  static-PIE `.text`. Default `false` (conservative). Example:
-
-      ```go
-      packed, _, err := packer.PackBinary(input, packer.PackBinaryOptions{
-          Format:       packer.FormatLinuxELF,
-          Stage1Rounds: 3,
-          Seed:         seed,
-          Compress:     true, // v0.66.0 — LZ4 + non-in-place inflate
-      })
-      ```
-
-- `opts.AntiDebug` — when `true`, prepends a ~70-byte anti-debug
-  prologue to the Windows PE stub before the CALL+POP+ADD PIC
-  prologue. Three checks run in order:
-  1. **PEB.BeingDebugged** — `gs:[0x60]` + byte at `PEB+2`.
-  2. **PEB.NtGlobalFlag** — DWORD at `PEB+0xBC` masked with
-     `0x70` (heap-validation triad set by WinDbg).
-  3. **RDTSC delta around CPUID** — delta above 1000 cycles
-     indicates a hooked dispatcher or sandbox.
-  Positive detection exits via `RET`; `ntdll!RtlUserThreadStart`'s
-  epilogue calls `ExitProcess(0)`. No SGN-decoded bytes are
-  ever revealed. Default `false` (conservative). ELF stubs
-  ignore this flag.
-
-**Returns:** `(packed, key, err)`. `packed` is a runnable
-single-binary; `key` is the seed-derived key material.
-
-**Sentinels** (use `errors.Is`):
-
-- `transform.ErrUnsupportedInputFormat` — magic bytes don't
-  match the requested `Format`.
-- `transform.ErrNoTextSection` — input lacks an executable
-  `.text` section.
-- `transform.ErrOEPOutsideText` — original entry point falls
-  outside the `.text` section.
-- `transform.ErrTLSCallbacks` — input has TLS callbacks (would
-  run before OEP and touch encrypted bytes).
-- `transform.ErrStubTooLarge` — stub exceeded `StubMaxSize`.
-
-**Side effects:** none — pure-Go byte manipulation.
-
-**OPSEC:** the output PE/ELF carries an extra section (named
-randomly per pack) and a slightly elevated entropy footprint.
-Pair with [AddCoverPE]/[AddCoverELF] to inflate the static
-surface and frustrate naive packer fingerprints.
-
-**Required privileges:** unprivileged.
-
-**Platform:** cross-platform — pack-time behaviour is identical
-on linux/windows/darwin. Output runs on Windows (PE) or Linux
-(ELF).
-
-**E2E ship gate:** `TestPackBinary_LinuxELF_E2E` (gated behind
-`-tags=maldev_packer_run_e2e`) packs the
-`pe/packer/runtime/testdata/hello_static_pie` fixture and
-asserts the subprocess runs to clean exit with the payload's
-`"hello from packer"` output captured.
-
-### `func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error)`
-
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#AddCoverPE)
-
-Anti-static-unpacker primitive (P3.1 Phase 3a). Appends junk
-sections to a packed PE32+ produced by [PackBinary]. Each
-section carries `MEM_READ` only (no W, no X) — the kernel maps
-them but never executes; the runtime path is unchanged.
-
-**Parameters:**
-
-- `input` — packed PE32+ bytes.
-- `opts.JunkSections` — ordered list of `JunkSection{Name, Size,
-  Fill}`. `Name` is the 8-byte section name; common cover
-  choices: `.rsrc`, `.rdata2`, `.pdata`, `.tls`. Empty defaults
-  to `.rdata`.
-
-**Fill strategies (`JunkFill`):**
-
-| Constant | Body | Use |
-|---|---|---|
-| `JunkFillRandom` | `crypto/rand` bytes | ~8.0 bits/byte entropy — hide among legit `.rsrc` sections |
-| `JunkFillZero` | zeros | flatten the entropy curve to evade percentage thresholds |
-| `JunkFillPattern` | frequency-ordered byte alphabet (`0x00`, `0x48`, `0xC3`, `0xCC`, `0x90`, `0xFF`, `0xE8`, `0x55`) | mimics `.text` shape under casual entropy plots |
-
-**Returns:** new buffer with cover sections appended;
-`NumberOfSections` and `SizeOfImage` updated. Original `.text`
-body bytes are byte-identical.
-
-**Sentinels:**
-
-- `ErrCoverInvalidOptions` — empty `JunkSections` or non-PE input.
-- `ErrCoverSectionTableFull` — section header table cannot grow
-  (no slack between table and first section's file offset).
-
-**Required privileges:** unprivileged.
-
-**Platform:** cross-platform pack-time; output runs on Windows.
-
-### `func AddCoverELF(input []byte, opts CoverOptions) ([]byte, error)`
-
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#AddCoverELF)
-
-ELF64 mirror of [AddCoverPE]. Each `JunkSection` becomes a new
-`PT_LOAD` program-header entry with `PF_R` only.
-
-**Go static-PIE support (v0.62.0):** Go static-PIE binaries place
-the first PT_LOAD at file offset 0 (the PHT lives inside the
-segment). When no in-place slack is available, `AddCoverELF` now
-relocates the PHT to file-end inside a new R-only PT_LOAD whose
-vaddr satisfies the kernel's `AT_PHDR = first_load_vaddr + e_phoff`
-invariant. The four ELF spec invariants are preserved: AT_PHDR math,
-PT_PHDR first in PHT, PT_LOAD ascending vaddr order, page-aligned
-placement. `ErrCoverSectionTableFull` is no longer returned for
-Go static-PIE inputs.
-
-**Section header table (SHT):** cover layer adds entries to the
-PHT only — the SHT is left untouched, so a stripped binary
-stays stripped.
-
-**Parameters / Returns / Sentinels:** same shape as `AddCoverPE`.
-
-**Required privileges:** unprivileged.
-
-**Platform:** cross-platform pack-time; output runs on Linux.
-
-**E2E ship gate:** `TestPackBinary_LinuxELF_MultiSeed_WithCover`
-(gated behind `-tags=maldev_packer_run_e2e`) packs
-`hello_static_pie` with each of 8 seeds, chains
-`ApplyDefaultCover`, and asserts each resulting binary runs to
-clean exit with `"hello from packer"` output.
-
-### `func DefaultCoverOptions(seed int64) CoverOptions`
-
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#DefaultCoverOptions)
-
-Returns a 3-section `CoverOptions` tuned for general-purpose
-cover. Names cycle through a pool of legitimate-looking
-candidates (`.rsrc`, `.rdata2`, `.pdata`, `.tls`, `.reloc2`,
-`.CRT`); sizes mix in the 0x1000–0x4000 range; fills span
-`JunkFillRandom` (~8 KB random), `JunkFillPattern` (~4 KB
-machine-code-shape histogram), `JunkFillZero` (~16 KB
-flat-entropy padding).
-
-**Parameters:** `seed` — controls the deterministic pick. Same
-seed produces byte-identical output (reproducible builds);
-varying per pack gives operational variance.
-
-**Returns:** populated `CoverOptions` ready to feed
-[AddCoverPE] / [AddCoverELF].
-
-**Side effects:** none — pure-math helper.
-
-**OPSEC:** see the underlying [AddCoverPE] / [AddCoverELF]
-entries.
-
-**Required privileges:** unprivileged.
-
-**Platform:** cross-platform.
-
-### `func ApplyDefaultCover(input []byte, seed int64) ([]byte, error)`
-
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#ApplyDefaultCover)
-
-One-liner cover layer. Auto-detects PE32+ vs ELF64 via magic
-bytes and dispatches to [AddCoverPE] / [AddCoverELF] with
-[DefaultCoverOptions]`(seed)`.
-
-**Parameters:**
-
-- `input` — packed PE32+ or ELF64 bytes.
-- `seed` — RNG seed for the option picker.
-
-**Returns:** new buffer with the cover applied.
-
-**Sentinels:**
-
-- `ErrCoverInvalidOptions` — input is neither a PE nor an ELF.
-- `ErrCoverSectionTableFull` — propagated unchanged from
-  `AddCoverELF` for Go static-PIE inputs (PHT slack
-  limitation; v2 will lift it via PHT relocation).
-
-**OPSEC:** see [AddCoverPE] / [AddCoverELF].
-
-**Required privileges:** unprivileged.
-
-**Platform:** cross-platform pack-time.
-
-### `type FakeImport struct`
-
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#FakeImport)
-
-Describes one DLL and its function list for a fake import entry.
+The simplest layer. Encrypts arbitrary bytes into a self-describing
+maldev-format blob. **The blob is data, not an executable.** Use this
+when the operator's chain reads the blob and passes the plaintext
+into another step (an injector, a custom loader, a separate
+decryption pipeline, etc.).
 
 ```go
-type FakeImport struct {
-    DLL       string   // e.g. "kernel32.dll"
-    Functions []string // e.g. ["Sleep", "GetCurrentThreadId"]
+blob, key, err := packer.Pack(payload, packer.Options{})
+recovered, err := packer.Unpack(blob, key)
+```
+
+| Property | Value |
+|---|---|
+| Output | `MLDV…` blob, ~payload size + 32 B header + AEAD tag |
+| Encryption | AES-GCM (default). ChaCha20 / RC4 reserved. |
+| Runs by itself? | **No** — it's a blob, not an exe |
+| Key handling | Returned to caller; ship via separate channel |
+
+**Avantages:** smallest output. Works on any byte stream — PE, ELF,
+shellcode, JSON config, anything. Good as a building block inside a
+larger chain.
+
+**Inconvénients:** the operator (or their loader code) needs the key.
+The blob has a `MLDV` magic at offset 0 — trivially yara-able. Use
+`PackBinary` or wrap the blob in a host PE if you need to ship the
+blob standalone.
+
+### Mode 2 — `PackPipeline` / `UnpackPipeline` (composed blob)
+
+Stack multiple ciphers / compressors / permutations. Each stage is
+keyed independently; the operator gets back a `[]Step` slice they
+need to replay (in reverse) to unpack.
+
+```go
+pipeline := []packer.Step{
+    {Op: packer.OpCompress, Algo: uint8(packer.CompressorFlate)},
+    {Op: packer.OpEncrypt,  Algo: uint8(packer.CipherAESGCM)},
 }
+blob, steps, err := packer.PackPipeline(payload, pipeline)
+recovered, err := packer.UnpackPipeline(blob, steps)
 ```
 
-Both `DLL` and every element of `Functions` must be a real export
-on the target Windows version — the kernel rejects unresolvable
-imports at load time.
+Same shape as `Pack`; just stronger obfuscation when the operator
+has somewhere to store multiple keys.
 
-### `var DefaultFakeImports []FakeImport`
+### Mode 3 — `PackBinary` (single-target, runs directly)
 
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#DefaultFakeImports)
-
-Ready-to-use list of real Windows 10 1809+ / Server 2019+ imports
-(kernel32, user32, shell32, ole32 with stable function names
-verified against Microsoft public symbol tables). Used automatically
-by [DefaultCoverOptions] / [ApplyDefaultCover] for PE32+ inputs.
-
-### `func AddFakeImportsPE(input []byte, fakes []FakeImport) ([]byte, error)`
-
-[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#AddFakeImportsPE)
-
-Appends fake `IMAGE_IMPORT_DESCRIPTOR` entries (PE/COFF Spec Rev
-12.0 § 6.4) to a packed PE32+. The merged Import Directory —
-original entries followed by one entry per `FakeImport`, terminated
-by a zero descriptor — is placed in a new R-only `.idata2` section.
-`DataDirectory[1]` is patched to point at the new section.
-
-**Self-containment:** `debug/pe.ImportedSymbols()` (and the Windows
-loader) resolves ILT/name RVAs relative to the section containing
-`DataDirectory[1]`. The new section is fully self-contained: existing
-entries' ILTs and DLL name strings are copied in, and
-`OriginalFirstThunk` is rewritten to point into the new section.
-`FirstThunk` is preserved verbatim — the loader patches IAT via
-`FirstThunk` at load time, and the binary's code references those
-addresses.
-
-**Parameters:**
-
-- `input` — packed PE32+ bytes (output of [PackBinary] or
-  [AddCoverPE]).
-- `fakes` — list of DLL+function tuples to inject; must be
-  non-empty. See [DefaultFakeImports] for a ready-made list.
-
-**Returns:** new buffer with the fake import section appended;
-`NumberOfSections`, `SizeOfImage`, and `DataDirectory[1]` updated.
-
-**Sentinels:**
-
-- `ErrCoverInvalidOptions` — `fakes` is empty or input is not PE32+.
-- `ErrCoverSectionTableFull` — no section-header slot available.
-
-**Required privileges:** unprivileged.
-
-**Platform:** cross-platform pack-time; output runs on Windows.
-
-**Example:**
+This is what most operators actually want when they have ONE
+payload. Modifies the input PE/ELF in place: encrypts the `.text`
+section with an SGN polymorphic encoder, appends a small CALL+POP+ADD
+decoder stub as a new section, rewrites the entry point. Output is a
+**single self-contained binary the kernel loads normally**. Imports
+are resolved by the kernel — the loader is the OS, not us. No second
+stage. No operator-side unpack.
 
 ```go
-packed, _, _ := packer.PackBinary(input, packer.PackBinaryOptions{
-    Format: packer.FormatWindowsExe, Stage1Rounds: 3, Seed: 1,
+packed, _, err := packer.PackBinary(input, packer.PackBinaryOptions{
+    Format:       packer.FormatWindowsExe,  // or FormatLinuxELF
+    Stage1Rounds: 3,
+    Seed:         0,                        // 0 = crypto-random per pack
+    Compress:     true,
+    AntiDebug:    true,
 })
-out, err := packer.AddFakeImportsPE(packed, packer.DefaultFakeImports)
-// out now has kernel32/user32/shell32/ole32 entries in its import table
 ```
 
-## Kerckhoffs's principle — per-build IOCs (v0.73.0)
+| Property | Value |
+|---|---|
+| Output | Real PE32+ / ELF64 — `./packed.exe` runs |
+| Encryption | SGN polymorphic encoder (per-round register-randomised) |
+| Compression | LZ4 (optional, `-compress` flag) |
+| Anti-debug | Optional PEB + RDTSC probe (Windows only) |
+| Runs by itself? | **Yes** |
+| Process tree | One binary (the kernel does the load) |
+| Stub size | ~1 KB without `-compress`, ~8 KB with |
 
-The bundle wire format is **public**; the per-build IOC bytes are
-**operator-secret**. Algorithm = the spec at
-`docs/superpowers/specs/2026-05-08-packer-multi-target-bundle.md`.
-Secret = a 16+ byte string the operator picks per ship cycle, which
-derives via SHA-256 to:
+**Avantages:**
+- Drop-in replacement: takes a real binary in, produces a real
+  binary out, runs natively.
+- Stub is polymorphic per pack (different bytes for each call).
+- No Go runtime, no separate loader file, no operator-side decrypt
+  step.
+- Works for both Windows PE and Linux static-PIE ELF.
 
-- A unique `BundleMagic` (4 bytes at offset 0 of the bundle blob).
-- A unique `AppendBundle` footer magic (8 bytes at the very end of
-  the wrapped binary).
+**Inconvénients:**
+- The `.text` section is now RWX (the stub mutates it during decrypt).
+  Loud signal for any EDR worth its salt.
+- Imports/exports/resources of the input binary are visible in the
+  packed output (only `.text` is encrypted). For full IAT scrambling
+  you'd compose with `pe/morph` upstream.
+- TLS callbacks are not supported (would run before our stub got a
+  chance to decrypt) — surfaced as `transform.ErrTLSCallbacks`.
 
-Both default to canonical bytes (`MLDV` / `MLDV-END`) when no secret
-is supplied — back-compat preserved, but operators shipping anything
-they care about should set one.
-
-**Workflow** (CLI):
+#### CLI
 
 ```bash
-# Pick any secret — store it; you'll reuse it for the launcher build.
-SECRET="ops-2026-05-09-target-A"
-
-# Pack with -secret.
-$ packer bundle -out bundle.bin -secret "$SECRET" \
-    -pl payload-w11.exe:intel:22000-99999 \
-    -pl payload-w10.exe:amd:10000-19999
-
-# Build a launcher with the matching ldflags injection.
-$ go build -ldflags "-X main.bundleSecret=$SECRET" \
-    -o bundle-launcher ./cmd/bundle-launcher
-
-# Wrap. The CLI prints the launcher build line as a hint when given -secret.
-$ packer bundle -wrap bundle-launcher -bundle bundle.bin -secret "$SECRET" -out app
-
-# Ship app — its on-disk magic is the SHA-256-derived per-build value;
-# yara writers cannot cluster this binary with other operators' deployments
-# without the secret in hand.
+$ packer pack -in input.exe -out packed.exe -format windows-exe \
+    -rounds 3 -compress -antidebug
 ```
 
-**Library** (Go):
+### Mode 4 — `PackBinaryBundle` + Go-runtime launcher
+
+You have N payloads, each meant for a different target environment.
+Ship them all in one binary; let the runtime pick.
 
 ```go
-profile := packer.DeriveBundleProfile([]byte(secret))
-bundle, _ := packer.PackBinaryBundle(payloads, packer.BundleOptions{Profile: profile})
-wrapped := packer.AppendBundleWith(launcherBytes, bundle, profile)
+bundle, err := packer.PackBinaryBundle(payloads, packer.BundleOptions{
+    FallbackBehaviour: packer.BundleFallbackExit,
+    Profile:           packer.DeriveBundleProfile([]byte(secret)),
+})
+
+// Concatenate the bundle onto a pre-built launcher binary.
+launcher, _ := os.ReadFile("bundle-launcher")
+wrapped := packer.AppendBundleWith(launcher, bundle, profile)
+os.WriteFile("app", wrapped, 0o755)
 ```
 
-**What this protects against:**
+The launcher reads its own binary at startup, locates the embedded
+bundle via a trailing 16-byte footer (`bundleStartOffset:8` +
+`FooterMagic:8`), reads the host's CPUID vendor and Windows build
+number, walks the FingerprintEntry table for a match, decrypts the
+matched payload, and dispatches.
 
-- Static signature pivots across deployments — yara rules keyed on
-  the canonical `MLDV` magic match nothing on a `-secret`-built
-  binary.
-- IOC sharing between operators / between ops cycles — every secret
-  yields a distinct (Magic, FooterMagic) pair (collision-resistant
-  via SHA-256).
-- **Stub byte signatures across packs** (v0.74.0). Each call to
-  `WrapBundleAsExecutableLinux` splices a fresh batch of Intel
-  multi-byte NOPs into the stub at slot A (between the PIC
-  trampoline and the CPUID prologue). Two packs of the same bundle
-  produce distinct stub byte sequences. Same property holds on the
-  Go-launcher path via the `-secret` ldflags injection.
+Two dispatch paths exposed via `MALDEV_REFLECTIVE` env var:
+
+| Path | Mechanism | Process tree | Disk artefact |
+|---|---|---|---|
+| Default | `memfd_create` + `execve` (Linux) / temp file + `CreateProcess` (Windows) | 2 binaries | Linux: none; Windows: TMP/* |
+| `MALDEV_REFLECTIVE=1` | In-process load via `pe/packer/runtime.Prepare` | **1 binary** | none (anonymous mappings) |
+
+| Property | Default | Reflective |
+|---|---|---|
+| Total size | ~5 MB | ~5 MB |
+| Stub | Go runtime | Go + asm trampoline |
+| Predicate evaluator | full (CPUID + Win build + Negate flag) | full |
+| Payload format | PE/ELF (gets exec'd) | static-PIE ELF (gets mapped in-process) |
+
+**Avantages:**
+- Full FingerprintPredicate evaluator including PT_WIN_BUILD ranges
+  and the Negate flag.
+- Three fallback modes (`Exit` / `First` / `Crash`) for no-match.
+- Reflective path has zero on-disk plaintext for the matched payload.
+
+**Inconvénients:**
+- Total size is dominated by the Go runtime (~5 MB minimum). Pay
+  this once; subsequent packs of the same launcher reuse the size.
+- Reflective load expects the payload to be a kernel-loadable
+  static-PIE ELF — not raw shellcode (use Mode 5 for that).
+
+### Mode 5 — `PackBinaryBundle` + all-asm wrap (tiny)
+
+Same bundle wire format as Mode 4, but the runtime is a hand-rolled
+~160-byte asm stub wrapped in a minimal hand-written ELF (Brian
+Raiter shape: `Ehdr + 1 PT_LOAD + stub + bundle blob`). No Go
+runtime. The stub does CPUID dispatch and JMPs into the matched
+payload bytes directly.
+
+```go
+bundle, _ := packer.PackBinaryBundle(payloads, packer.BundleOptions{Profile: profile})
+out, err := packer.WrapBundleAsExecutableLinuxWith(bundle, profile)
+os.WriteFile("app", out, 0o755)
+```
+
+| Property | Value |
+|---|---|
+| Total size | **~470 B** (1-payload PTMatchAll) → **~550 B** (2-payload vendor-aware) |
+| Stub | 160 B hand-rolled x86-64 + Intel multi-byte NOP polymorphism |
+| Predicate evaluator | PT_MATCH_ALL + PT_CPUID_VENDOR (12-byte compare, all-zero = wildcard) |
+| Payload format | **Raw shellcode only** — stub JMPs into the bytes |
+| Process tree | 1 binary (no fork, no execve) |
+| Disk artefact | none |
+
+**Avantages:**
+- Smallest possible runnable bundle: a 2-payload Intel-vs-AMD
+  dispatcher fits in ~550 bytes.
+- Per-pack polymorphism via Intel-recommended multi-byte NOPs spliced
+  at a safe slot — two packs of the same bundle produce distinct
+  byte sequences.
+- No Go runtime fingerprint.
+
+**Inconvénients:**
+- Linux only (Windows symmetry queue-d).
+- Payload must be raw position-independent shellcode (the stub jumps
+  directly into the decrypted bytes). PE/ELF payloads need Mode 4.
+- Predicate evaluator does not (yet) honour the `Negate` flag or
+  `PT_WIN_BUILD` (the host-side `SelectPayload` does — operators
+  using both modes should test the all-asm path with their actual
+  fingerprint set).
+
+---
+
+## Per-build IOC randomisation — Kerckhoffs
+
+Per Kerckhoffs's principle: the algorithm is public; only the secret
+is the operator's. The wire format spec is in
+`docs/superpowers/specs/2026-05-08-packer-multi-target-bundle.md` —
+reproducible by anyone. The **per-build secret** (any string the
+operator picks per deployment) derives via SHA-256 to:
+
+| IOC byte layer | What it is | Derivation |
+|---|---|---|
+| `BundleMagic` (4 B at offset 0) | Bundle blob magic | `sha256(secret)[0:4]` |
+| `FooterMagic` (8 B at end of wrap) | Launcher trailer sentinel | `sha256(secret)[4:12]` |
+| `BundleVersion` (2 B at offset 4) | Wire format version field | `sha256(secret)[12:14] | 0x8000` |
+| `Vaddr` (8 B in p_vaddr/p_paddr) | All-asm ELF load address | `sha256(secret)[14:22]` (page-aligned, user-space half) |
+
+A defender writing yara on canonical builds matches "MLDV at offset
+0", "version field == 1", "PT_LOAD at vaddr 0x400000". A
+defender facing per-build artefacts matches none of those without
+the secret in hand.
+
+```go
+profile := packer.DeriveBundleProfile([]byte("op-2026-05-09-targetA"))
+// profile.Magic, .FooterMagic, .Version, .Vaddr all set.
+
+bundle, _ := packer.PackBinaryBundle(payloads, packer.BundleOptions{Profile: profile})
+wrapped := packer.AppendBundleWith(launcher, bundle, profile)
+```
+
+The launcher needs the SAME secret at build time:
+
+```bash
+$ go build -ldflags "-X main.bundleSecret=op-2026-05-09-targetA" \
+    -o bundle-launcher ./cmd/bundle-launcher
+```
+
+`packer bundle -wrap` prints this build line as a hint when given
+`-secret`.
+
+**What this protects against:**
+- Static signature pivots across deployments.
+- IOC sharing between operators / between ops cycles.
+- Stub byte signatures across packs (per-pack NOP polymorphism is
+  independent of the secret — every pack is unique even within a
+  single deployment).
 
 **What this does NOT protect against:**
+- An analyst who has the secret. The wire format is documented;
+  recovery is mechanical via the *With variants of the parser API
+  or via `cmd/packerscope -secret`.
+- Yara rules keyed on the **structural shape** of the produced
+  binary (single-PT_LOAD-RWX ELF for the all-asm path; appended
+  `.mldv` section for PackBinary). Defenders writing shape rules
+  match every build regardless of secret.
 
-- An analyst with the secret string in hand. The wire format is
-  documented; recovery is mechanical via `packer.InspectBundleWith`.
-- Yara rules keyed on the **structure** (32-byte header, 48-byte
-  fingerprint entry, 32-byte payload entry, RWX single-PT_LOAD ELF).
-  These remain regardless of secret.
-- Yara writers can still match the **structural shape** of the
-  emitted ELF: single PT_LOAD R+W+X at vaddr 0x400000, file ≤ 1 KB,
-  no PT_INTERP. That tuple is a fingerprint regardless of bytes.
-  An operator wanting to defeat shape-rules needs a different
-  format wrap (e.g. legitimate-looking Go binary host) — out of
-  scope for the all-asm path.
+---
 
-**Operator best practice:** treat the secret like a deployment key —
-fresh per ship cycle, never reused, stored alongside whatever build
-log records WHICH binaries went WHERE.
+## Defender pair — `cmd/packerscope`
 
-## Composability with the rest of maldev
+Symmetric companion: detect, dump, and extract maldev artefacts.
+Algorithm is public, so this tool exists.
 
-The packer is intentionally narrow — it produces a runnable binary
-from a payload. Operators wanting a richer workflow chain other
-maldev packages around it:
+```bash
+# Identify what kind of artefact a file is.
+$ packerscope detect ./suspect.bin
+kind: launcher-wrapped
+  - MLDV-END-style footer at end of file
 
-| Hook point | maldev package | What you get |
+# Dump the wire-format structure.
+$ packerscope dump ./bundle.bin
+artefact: raw-bundle (139 bytes)
+bundle:   magic=0x56444c4d version=0x1 count=1 fallback=0
+  [0] pred=0x08 vendor="*"          build=[0, 0] data=0x70..+27
+
+# Extract decrypted payload(s) to disk.
+$ packerscope extract ./bundle.bin -out ./extracted/
+payload 00: 27 bytes → ./extracted/payload-00.bin
+```
+
+For per-build artefacts, pass the operator's secret:
+
+```bash
+$ packerscope detect -secret "op-2026-05-09-targetA" ./mystery.bin
+kind: launcher-wrapped
+  - MLDV-END-style footer at end of file
+```
+
+Without the secret, per-build artefacts return `kind: unknown` plus
+a structural-hint line ("looks like a tiny single-PT_LOAD-RWX ELF
+(suggestive); -secret may be needed").
+
+Use cases:
+- Blue team confirming an extracted suspect is one of theirs (e.g.,
+  red-team operator's bundle that escaped scope).
+- Operator sanity-checking their own build before shipping.
+- Integration-test ground truth for yara rules.
+
+---
+
+## Visualisation — `cmd/packer-vis`
+
+Terminal art for understanding what the packer does. No TUI
+framework, pure stdlib + ANSI 256 colours.
+
+```bash
+# Shannon entropy heatmap, 256-byte windows. Cool blue = code/ASCII;
+# hot red = encrypted/compressed. Run before+after `packer pack`
+# to see the .text region flip.
+$ packer-vis entropy ./input.exe
+
+# Side-by-side, with average-entropy delta:
+$ packer-vis compare ./input.exe ./packed.exe
+  delta:  size +1832 bytes  entropy +2.43 bits/byte
+                            ← strong randomness gain (encryption/compression)
+
+# Bundle wire-format viz — boxed ASCII art, one box per entry,
+# offsets + sizes annotated.
+$ packer-vis bundle ./bundle.bin
+  bundle.bin
+  124 bytes | magic=0x56444c4d version=0x1 count=2 fallback=0
+
+  ┌─ BundleHeader ─────────────────────────────────────┐
+  │ 0x00..0x20  magic + version + count + offsets      │
+  │            fpTable=0x20   plTable=0x80   data=0xc0 │
+  └────────────────────────────────────────────────────┘
+
+  ┌─ [0] FingerprintEntry @ 0x20 ────────────────────┐
+  │ predType=0x01  vendor="GenuineIntel"  build=[22000, 99999] │
+  └────────────────────────────────────────────────────┘
+  …
+```
+
+Pedagogical: an operator (or a code reviewer) sees the structure
+described in this doc as a thing on screen, not just a byte table.
+
+---
+
+## CLI Reference — `cmd/packer`
+
+```
+packer pack    -in <file> -out <file> [-format blob|windows-exe|linux-elf]
+                                      [-rounds 3] [-seed N] [-compress]
+                                      [-antidebug] [-keyout <file>]
+packer unpack  -in <file> -out <file> -key <hex32>
+packer bundle  -out <file> -pl <spec> [-pl <spec> ...]
+                                      [-fallback exit|crash|first]
+                                      [-secret <s>]
+packer bundle  -inspect <bundle>
+packer bundle  -match   <bundle>
+packer bundle  -wrap    <launcher> -bundle <bundle> -out <exe>
+                                      [-secret <s>]
+```
+
+Bundle spec syntax (`-pl`):
+
+```
+<file>:<vendor>:<min>-<max>
+  vendor ∈ {intel | amd | *}        (* = any vendor)
+  min/max = Windows build number    (use * for "no bound")
+
+  e.g. -pl payload-w11.exe:intel:22000-99999
+       -pl payload-w10.exe:amd:10000-19999
+       -pl fallback.exe:*:*-*
+```
+
+`-fallback` controls what the launcher does when no predicate matches:
+- `exit` — silent clean exit (default)
+- `first` — select payload 0 unconditionally (defeats per-host secrecy)
+- `crash` — deliberate fault → SIGSEGV (sandbox alert)
+
+---
+
+## Library API Reference
+
+### Single-target
+
+#### `func PackBinary(input []byte, opts PackBinaryOptions) (out []byte, key []byte, err error)`
+
+Modifies a PE32+ or ELF64 in place: encrypts `.text` with the SGN
+polymorphic encoder, appends a small decoder stub as a new section,
+rewrites the entry point. Output is a runnable binary.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `Format` | `Format` | (required) | `FormatWindowsExe` / `FormatLinuxELF` |
+| `Stage1Rounds` | `int` | 3 | SGN decoder rounds; 1..10 |
+| `Seed` | `int64` | 0 (= random) | Same seed + input + rounds = byte-identical output |
+| `Compress` | `bool` | false | LZ4 `.text` before SGN |
+| `AntiDebug` | `bool` | false | Windows-only: PEB + RDTSC probe |
+| `CipherKey` | `[]byte` | nil | Reserved for future AES wrapping |
+
+**Sentinels** (use `errors.Is`):
+
+- `transform.ErrUnsupportedInputFormat` — magic doesn't match `Format`.
+- `transform.ErrNoTextSection` — input lacks executable section.
+- `transform.ErrOEPOutsideText` — OEP not in `.text`.
+- `transform.ErrTLSCallbacks` — input has TLS callbacks (would run
+  before stub).
+- `transform.ErrStubTooLarge` — stub exceeded `StubMaxSize`.
+
+#### `func Pack(data []byte, opts Options) ([]byte, []byte, error)`
+
+Encrypt arbitrary bytes into an `MLDV…` blob. Returns `(blob, key, err)`.
+
+#### `func Unpack(packed []byte, key []byte) ([]byte, error)`
+
+Reverse `Pack`. Sentinels: `ErrShortBlob`, `ErrBadMagic`,
+`ErrUnsupportedVersion`, `ErrUnsupportedCipher`,
+`ErrUnsupportedCompressor`, `ErrPayloadSizeMismatch`. Wrong key surfaces
+as the underlying AEAD authentication error.
+
+#### `func PackPipeline(data []byte, pipeline []Step) ([]byte, []Step, error)`
+
+Multi-stage `Pack` — compose ciphers, compressors, permutations.
+Returns the blob plus the per-step keys (caller must store all of
+them to invert via `UnpackPipeline`).
+
+### Multi-target bundle
+
+#### `func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, error)`
+
+Serialise N payloads into a single bundle blob. Each payload is XOR-encrypted
+with a fresh random 16-byte rolling key. Wire format: 32 B `BundleHeader` +
+N × 48 B `FingerprintEntry` + N × 32 B `PayloadEntry` + concatenated
+encrypted data.
+
+| `BundleOptions` field | Notes |
+|---|---|
+| `FallbackBehaviour` | `BundleFallbackExit` / `…First` / `…Crash` |
+| `FixedKey` | Test determinism only — defeats per-payload secrecy |
+| `Profile` | Per-build IOC overrides; see `DeriveBundleProfile` |
+
+Sentinels: `ErrEmptyBundle`, `ErrBundleTooLarge` (>255 payloads).
+
+#### `func DeriveBundleProfile(secret []byte) BundleProfile`
+
+SHA-256 derives `BundleProfile{Magic, Version, FooterMagic, Vaddr}`
+from a per-deployment secret. Empty secret returns the canonical
+wire-format defaults.
+
+#### `func InspectBundle(bundle []byte) (BundleInfo, error)`
+#### `func InspectBundleWith(bundle []byte, profile BundleProfile) (BundleInfo, error)`
+
+Parse a bundle blob into typed `BundleInfo` + `BundleEntryInfo` slice.
+The `*With` variant validates against the operator's per-build
+`profile.Magic` instead of the canonical `BundleMagic`.
+
+Sentinels: `ErrBundleTruncated`, `ErrBundleBadMagic`,
+`ErrBundleOutOfRange`.
+
+#### `func SelectPayload(bundle []byte, hostVendor [12]byte, hostBuild uint32) (int, error)`
+#### `func SelectPayloadWith(bundle []byte, profile BundleProfile, hostVendor [12]byte, hostBuild uint32) (int, error)`
+
+Pure-Go reference implementation of the runtime predicate match. Returns
+the matched payload index, or -1 on no match.
+
+#### `func UnpackBundle(bundle []byte, idx int) ([]byte, error)`
+#### `func UnpackBundleWith(bundle []byte, idx int, profile BundleProfile) ([]byte, error)`
+
+Build-host helper: decrypt one payload by index. The runtime stub
+re-implements the same logic in asm and never exposes keys to memory
+unless its predicate matched.
+
+#### `func MatchBundleHost(bundle []byte) (int, error)`
+#### `func MatchBundleHostWith(bundle []byte, profile BundleProfile) (int, error)`
+
+`SelectPayload` + reads host vendor/build automatically (`HostCPUIDVendor`
++ `RtlGetVersion` on Windows / 0 on Linux).
+
+#### `func AppendBundle(launcher, bundle []byte) []byte`
+#### `func AppendBundleWith(launcher, bundle []byte, profile BundleProfile) []byte`
+#### `func ExtractBundle(wrapped []byte) ([]byte, error)`
+#### `func ExtractBundleWith(wrapped []byte, profile BundleProfile) ([]byte, error)`
+
+Concatenate / extract a bundle to/from a pre-built launcher binary.
+Layout: `[ launcher | bundle | bundleStartOffset:8 LE | FooterMagic:8 ]`.
+
+#### `func WrapBundleAsExecutableLinux(bundle []byte) ([]byte, error)`
+#### `func WrapBundleAsExecutableLinuxWith(bundle []byte, profile BundleProfile) ([]byte, error)`
+#### `func WrapBundleAsExecutableLinuxWithSeed(bundle []byte, profile BundleProfile, seed int64) ([]byte, error)`
+
+All-asm wrap path. The hand-rolled stub (~160 B) + minimal-ELF
+container (~120 B) + bundle bytes = a runnable Linux ELF in
+~470 B. The `*WithSeed` variant exposes deterministic stub
+polymorphism for reproducible builds; the standard variant draws a
+fresh `crypto/rand` seed.
+
+### Cover layer
+
+The cover layer adds plausible-looking structural noise to packed
+binaries to frustrate naive packer fingerprints. Orthogonal to the
+bundle path — applies to any PE/ELF.
+
+#### `func AddCoverPE(input []byte, opts CoverOptions) ([]byte, error)`
+#### `func AddCoverELF(input []byte, opts CoverOptions) ([]byte, error)`
+
+Append junk sections (PE) / PT_LOADs (ELF) filled per `CoverOptions.Fill`
+(`JunkRandom` / `JunkZero` / `JunkPattern`). All sections are
+`MEM_READ`-only on PE and `PF_R`-only on ELF — the cover never adds
+executable surface.
+
+#### `func DefaultCoverOptions(seed int64) CoverOptions`
+#### `func ApplyDefaultCover(input []byte, seed int64) ([]byte, error)`
+
+Convenience: a sensible default `CoverOptions` (5-7 sections,
+`JunkPattern` fill, frequency-ordered byte alphabet) plus the
+all-in-one wrapper that auto-detects PE vs ELF.
+
+#### `func AddFakeImportsPE(input []byte, fakes []FakeImport) ([]byte, error)`
+#### `var DefaultFakeImports []FakeImport`
+
+Append benign-DLL `IMAGE_IMPORT_DESCRIPTOR` entries (kernel32, user32,
+shell32, ole32) so the packed PE's IAT looks normal. The kernel
+resolves these at load time; the binary's actual code never references
+them. Companion to `AddCoverPE`.
+
+### Runtime — `pe/packer/runtime`
+
+#### `func Prepare(input []byte) (*PreparedImage, error)`
+#### `func (p *PreparedImage) Run() error`
+#### `func (p *PreparedImage) Free() error`
+
+Reflective in-process loader. Parses the input PE/ELF, mmaps PT_LOADs
+(or PE sections), applies relocations, mprotects per-segment, patches
+auxv, and jumps to entry on a fake kernel stack. Used by
+`cmd/bundle-launcher`'s `MALDEV_REFLECTIVE=1` path.
+
+`Run()` requires `MALDEV_PACKER_RUN_E2E=1` in the environment — explicit
+operator opt-in so the runtime can't fire by accident in processes
+that happen to import the package.
+
+---
+
+## OPSEC & Detection
+
+### What defenders see
+
+| Artefact | Where defenders look | Mitigation |
 |---|---|---|
-| **Pre-pack payload preparation** | [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) | Section rename / reorder before packing — hides Go pclntab strings the SGN encoder leaks otherwise. |
-| **Pre-pack masquerade** | [`pe/masquerade`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade) | Authenticode forge + `pe/donors` icon/version-info graft. The packed binary inherits the legitimate-looking shell. |
-| **Stronger payload encryption** | [`crypto/aesgcm`](https://pkg.go.dev/github.com/oioio-space/maldev/crypto), [`crypto/chacha20`](https://pkg.go.dev/github.com/oioio-space/maldev/crypto) | The bundle ships XOR-rolling today; operators with a separate decrypt key can pre-encrypt the payload before bundling and use XOR as a thin obfuscation layer over real AEAD. |
-| **Sandbox bail before payload reveal** | [`recon/antivm.Hypervisor()`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#Hypervisor), [`recon/sandbox`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox) | Wrap the launcher with a recon prologue — exit cleanly when the host is a known sandbox before any payload byte gets touched. The Go-launcher path can call these directly; the all-asm path would need a sandbox-detect asm primitive (queue-d). |
-| **In-process injection** | [`inject/*`](https://pkg.go.dev/github.com/oioio-space/maldev/inject) | The bundle's payload can BE the shellcode that an operator injects into another process. Pack→bundle→inject = three orthogonal layers. |
-| **Custom matching predicates** | [`hash/apihash`](https://pkg.go.dev/github.com/oioio-space/maldev/hash#APIHash), [`recon/antivm.CPUVendor`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#CPUVendor) | Operator extends `FingerprintPredicate` with their own host-fingerprint logic; the runtime evaluator (Go launcher) can call any maldev recon helper before deciding to dispatch. |
-| **Persistence after dispatch** | [`persistence/*`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence) | A dispatched payload can install itself via Run/RunOnce / scheduled task / service. The packer is one stage of a larger chain. |
-| **Cleanup after dispatch** | [`cleanup/selfdelete`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/selfdelete), [`cleanup/timestomp`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/timestomp) | The wrapped binary can self-delete after its payload finishes — typical operator pattern. |
+| `MLDV` magic at file offset 0 (raw blob) | Static signature scanner | `Pack` is a byte stream, not an exe — wrap in a host PE before shipping |
+| Appended `.mldv` section in `PackBinary` output | PE section-name scan | Rename via `pe/morph` upstream |
+| Single-PT_LOAD-RWX ELF (all-asm wrap) | yara structural rule | Irreducible without changing the container |
+| Bundle wire format (magic + 32 B header + 48 B entries) | Static rule keyed on the structure | `-secret` randomises the magic + version + footer + ELF vaddr; structural offsets remain |
+| Stub byte signatures across packs | yara rule on opcode sequence | Per-pack NOP polymorphism (Intel multi-byte NOPs spliced at slot A) breaks naive byte signatures |
+| `.text` RWX in `PackBinary` output | Memory-permissions audit | The stub mprotects on entry so `.text` is RWX for a few cycles only — but it IS RWX for that window |
+| Imports / exports / TLS / resources of the input | They survive packing | Use `pe/morph` / `pe/imports` upstream |
+
+### Process-tree visibility
+
+| Mode | Process tree |
+|---|---|
+| `PackBinary` packed exe | One process — kernel does the load |
+| `cmd/bundle-launcher` default | Two processes (launcher → execve payload) |
+| `cmd/bundle-launcher` reflective (`MALDEV_REFLECTIVE=1`) | One process |
+| All-asm wrap | One process |
+
+### D3FEND counters
+
+- [D3-FCA](https://d3fend.mitre.org/technique/d3f:FileContentAnalysis/)
+  — magic-byte fingerprinting catches canonical builds; per-build
+  randomisation defeats it.
+- [D3-PA](https://d3fend.mitre.org/technique/d3f:ProcessAnalysis/)
+  — RWX `.text` and high-entropy regions look anomalous to memory
+  scanners.
+
+### Operator hardening
+
+- Pair every `PackBinary` with `pe/morph.UPXMorph` + `pe/strip` to
+  remove pclntab strings / Go BuildID that survive `.text` encryption.
+- Run `cmd/packer-vis compare` before+after pack to confirm the
+  expected entropy gain (typical `+2.0..+3.0` bits/byte on a Go
+  static-PIE).
+- For multi-target deployments, pick a fresh `-secret` per ship cycle.
+  Reusing secrets defeats the per-build property.
+- The reflective launcher path leaves no on-disk plaintext for the
+  matched payload — prefer it over `memfd+execve` on hosts with
+  aggressive auditd / EDR file-write monitoring.
+- `cmd/packerscope` against your own build is a sanity check —
+  if the tool can identify your binary's wire format, the operator
+  can too.
+
+---
+
+## Composability with other maldev packages
+
+The packer is intentionally narrow — it produces a runnable binary.
+Wider operator workflows chain other maldev packages around it.
+
+| Hook point | Package | What you get |
+|---|---|---|
+| Pre-pack section / IAT scramble | `pe/morph`, `pe/strip` | Section rename, Go pclntab strip — hides strings the SGN encoder otherwise leaks |
+| Pre-pack masquerade | `pe/masquerade`, `pe/donors`, `pe/cert` | Authenticode forge, icon graft, version-info swap — packed binary inherits the legitimate-looking shell |
+| Stronger payload encryption | `crypto/aesgcm`, `crypto/chacha20` | The bundle's per-payload cipher is XOR-rolling today; pre-encrypt the payload before bundling for a real AEAD layer |
+| Sandbox bail before reveal | `recon/antivm.Hypervisor`, `recon/sandbox` | Wrap the launcher so it exits cleanly on a known sandbox before any payload byte gets touched |
+| In-process injection | `inject/*` | The bundle's payload can BE the shellcode an operator injects elsewhere; pack→bundle→inject = three orthogonal layers |
+| Custom predicates | `hash/apihash`, `recon/antivm.CPUVendor` | Extend `FingerprintPredicate` with operator host-fingerprint logic |
+| Persistence after dispatch | `persistence/*` | Dispatched payload installs itself via Run/RunOnce / scheduled task / service |
+| Cleanup after dispatch | `cleanup/selfdelete`, `cleanup/timestomp` | Self-delete after payload finishes — typical operator pattern |
 
 The `cmd/bundle-launcher` Go-runtime path is where these compose
 naturally — it's pure Go, and any maldev import works at the call
 site of `executePayload`. The all-asm path is intentionally minimal
 (no Go runtime, ~470 B); operators wanting a recon prologue there
-need a corresponding asm primitive (which `pe/packer/stubgen/stage1`
-already houses for CPUID/PEB; sandbox / hypervisor primitives could
-be added the same way).
+need a corresponding asm primitive (`pe/packer/stubgen/stage1` already
+houses CPUID/PEB; sandbox / hypervisor primitives can be added the
+same way).
+
+---
 
 ## Asm tooling — golang-asm vs alternatives
 
-The packer relies on `pe/packer/stubgen/amd64.Builder`, a thin wrapper
+The packer uses `pe/packer/stubgen/amd64.Builder`, a thin wrapper
 around [`golang-asm`](https://github.com/twitchyliquid64/golang-asm)
-(the same encoder Go's compiler uses internally for its plan9 asm
-sources). `Builder` exposes a small, hand-curated subset of x86-64
-operations (MOV / LEA / XOR / SUB / ADD / MOVZX / MOVB / DEC / POP /
-JMP / JNZ / JE / CALL / RET / NOP / RawBytes / labels). The remaining
-encodings — CMP / TEST / SHL / IMUL / SETZ / multi-byte NOPs — are
-emitted via `RawBytes` with hand-encoded ModRM bytes.
+(the encoder Go's compiler uses for plan9 asm). `Builder` exposes a
+small hand-curated subset (MOV / LEA / XOR / SUB / ADD / MOVZX / MOVB
+/ DEC / POP / JMP / JNZ / JE / CALL / RET / NOP / RawBytes / labels);
+the remaining x86-64 encodings (CMP / TEST / SHL / IMUL / SETZ /
+multi-byte NOPs) ride on `RawBytes` with hand-encoded ModRM.
 
-**Why not `mmcloughlin/avo`?** [`avo`](https://github.com/mmcloughlin/avo)
-is a higher-level Go-program-generates-asm DSL: you write idiomatic
-Go that EMITS a `.s` file, which the Go toolchain assembles. It's
-excellent for multi-architecture math kernels (mmcloughlin uses it
-in `chacha20`, `blake2b`, `simd`) where the asm sits in a normal Go
-package consumed via `func DoStuff()` calls.
+**Why not [`mmcloughlin/avo`](https://github.com/mmcloughlin/avo)?**
+Avo generates `.s` files at build time that Go assembles into the
+calling binary. Excellent for multi-arch math kernels (chacha20,
+blake2b). Wrong direction for our use case: we EMIT raw bytes at
+PACK time into a dynamically sized stub embedded in someone else's
+binary. golang-asm gives us the JIT-style "encode bytes into a
+buffer" API we need; avo gives us a `.o` linked into the packer
+itself.
 
-It's a poor fit for our use case: we don't compile asm into our binary
-at build time — we EMIT raw bytes at PACK time, into a dynamically
-sized stub embedded in someone else's binary. Avo's output goes
-through Go's assembler producing a `.o` linked into the packer
-itself, which is the opposite direction. golang-asm gives us the
-JIT-style "encode bytes into a buffer" API we need.
+**Where the hand-encoded bytes hurt.** The stub's scan loop, vendor
+compare, decrypt loop are 100-200 byte sequences with rel8
+displacements computed by hand and cross-checked via
+offset-trace comments. Eight wrong displacements were caught while
+shipping the vendor-aware dispatch. A targeted refactor extending
+`amd64.Builder` with CMP / TEST / Jcc-suite / SHL would let the stub
+become a chain of `b.CMP(...) ; b.JGE(.label)` calls with golang-asm
+computing displacements at link time. ~200-LOC extension. Not
+blocking; tracked.
 
-**Where the hand-encoded bytes hurt.** Several blocks in
-`pe/packer/bundle_stub.go` — the scan loop, vendor compare, decrypt
-loop — are 100-200 byte sequences with rel8 displacements that I
-hand-computed and cross-checked via offset-trace comments. This
-cost real bugs (8 wrong displacements caught in the v0.71 → v0.72
-work). A future refactor could:
-
-1. Extend `amd64.Builder` with the missing CMP / TEST / Jcc-suite /
-   SHL operations so the stub becomes a chain of `b.CMP(...) ;
-   b.JGE(...)` calls with named labels — golang-asm computes the
-   displacements at link time.
-2. Then drop `RawBytes` for everything except the truly raw blocks
-   (CPUID, syscall, cpuid).
-
-That's a bounded ~200-LOC builder extension, but every Jcc call site
-in `bundle_stub.go` would shrink from 5+ commented bytes to one line.
-Tracked as a follow-up; not blocking today's ship.
-
-## OPSEC & Detection
-
-| Artefact | Where defenders look |
-|---|---|
-| `MLDV` magic at file offset 0 | Static signature scanners — trivially flagged in canonical builds; **mitigated by `-secret` per-build randomisation (v0.73.0)**. |
-| AES-GCM ciphertext entropy profile | High-entropy regions are common in legitimate signed binaries (compressed resources, embedded certs) — high entropy alone is weak signal. |
-| Round number sizes (header is exactly 32 bytes) | Possible but weak; many file formats have round headers. |
-
-**D3FEND counters:**
-
-- [D3-FCA](https://d3fend.mitre.org/technique/d3f:FileContentAnalysis/)
-  — magic-byte fingerprinting catches Phase 1a output.
-
-**Hardening for the operator:**
-
-- Don't ship the Phase 1a blob standalone — wait for Phase 1b
-  to wrap it.
-- Carry the AEAD key in a separate channel (config / second-stage
-  fetch / host fingerprint derivation).
-- Use [`crypto`](../crypto/payload-encryption.md) layered
-  permutation (S-Box / XOR) BEFORE Pack to scramble the
-  high-entropy ciphertext profile.
-
-## MITRE ATT&CK
-
-| T-ID | Name | Sub-coverage |
-|---|---|---|
-| [T1027.002](https://attack.mitre.org/techniques/T1027/002/) | Obfuscated Files or Information: Software Packing | partial — Phase 1a is the encrypt side; full coverage when Phase 1b ships |
-| [T1620](https://attack.mitre.org/techniques/T1620/) | Reflective Code Loading | not yet — Phase 1b |
+---
 
 ## Limitations
 
-- **`PackBinary` (v0.61.0) requires `.text` to host OEP.** The
-  original entry point must lie inside the `.text` section so
-  the stub's final JMP lands on decrypted code. Binaries that
-  start in another section (custom linkers, packed-twice
-  inputs) return `ErrOEPOutsideText`.
-- **`PackBinary` rejects TLS callbacks.** TLS callbacks run
-  before OEP and would touch encrypted bytes. Inputs with a
-  non-empty TLS Data Directory return `ErrTLSCallbacks`.
-- **`AddCoverELF` PHT-slack constraint lifted (v0.62.0).** Go
-  static-PIE binaries (first PT_LOAD at file offset 0) previously
-  returned `ErrCoverSectionTableFull`. The cover layer now relocates
-  the PHT to file-end and preserves all four ELF spec invariants;
-  `ErrCoverSectionTableFull` is no longer returned for these inputs.
-- **All-asm bundle wrap shipped (v0.69.0)** — 318-byte runnable
-  bundle for the exit42 fixture, 15 957× smaller than the Go-launcher
-  path. [`packer.WrapBundleAsExecutableLinux`][asmwrap] composes a
-  hand-rolled 73-byte x86-64 stub (call/pop PIC + XOR-decrypt + JMP)
-  with [`transform.BuildMinimalELF64`][minelf] (a Brian-Raiter-shaped
-  120-byte tiny ELF). Today's limitation: always selects payload 0
-  regardless of fingerprint (equivalent to `BundleFallbackFirst`); the
-  full CPUID+PEB evaluator loop drops in transparently in a follow-up
-  minor without changing the public signature. Coexists with the
-  Go-runtime [`cmd/bundle-launcher`][lnch] path — operators pick by
-  trade-off (size vs feature set).
+- **Single PT_LOAD RWX in the all-asm path.** The stub mutates its
+  own page (the bundle data). The trade-off is documented; operators
+  needing R+X / R+W split should use Mode 3 (`PackBinary`) which
+  preserves segment-level permissions.
+- **All-asm wrap is Linux-only today.** The Windows symmetric path
+  (`BuildMinimalPE32Plus`) and the matching `PT_WIN_BUILD` predicate
+  in the stub asm are queue-d. The `cmd/bundle-launcher` path
+  supports Windows now via the Go runtime.
+- **All-asm stub does not honour the `Negate` predicate flag.** The
+  Go-side `SelectPayload` does. Operators using Negate-keyed
+  predicates should validate behaviour against
+  `cmd/bundle-launcher` (full evaluator) and avoid the all-asm path
+  for those entries.
+- **PT_WIN_BUILD predicates ignored on Linux.** The host-side build
+  number is 0 on non-Windows hosts; any entry with a non-zero
+  `BuildMin` will not match. Use `PT_CPUID_VENDOR` or `PT_MATCH_ALL`
+  for cross-platform predicates.
+- **TLS callbacks rejected by `PackBinary`.** The stub runs at the
+  rewritten entry point — TLS callbacks would fire BEFORE the stub
+  could decrypt. Surfaced as `transform.ErrTLSCallbacks`.
+- **OEP must lie inside `.text`.** The stub's final JMP targets the
+  decrypted region; binaries with custom-linker entry points outside
+  `.text` return `transform.ErrOEPOutsideText`.
+- **`cmd/bundle-launcher` reflective load expects static-PIE ELF.**
+  The reflective loader (`pe/packer/runtime`) understands
+  static-PIE-shaped input — not raw shellcode and not dynamically-linked
+  ELFs. Use the all-asm path for shellcode payloads or keep payloads
+  packaged via `PackBinary` upstream.
+- **Bundle predicates are AND-combined within an entry, OR across
+  entries.** No grouping operator. Express OR-of-AND by adding
+  multiple FingerprintEntry rows pointing at the same payload.
 
-[asmwrap]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#WrapBundleAsExecutableLinux
-[minelf]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/transform#BuildMinimalELF64
-
-- **Reflective bundle launch shipped (v0.68.0).** `MALDEV_REFLECTIVE=1`
-  flips the launcher's dispatch path from `memfd_create + execve` to
-  in-process loading via [`pe/packer/runtime.Prepare`][rtp]. Process
-  tree shows ONE binary; `/proc/self/maps` shows anonymous mappings
-  where the default path would show the payload's file path. E2E
-  gate: `TestLauncher_E2E_ReflectiveLoadsHello`.
-
-[rtp]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/runtime#Prepare
-
-- **C6 multi-target bundle ships runnable (v0.67.0).** The bundle path
-  now closes the loop: `packer bundle -wrap <launcher> -bundle <blob>
-  -out <exe>` concatenates a [bundle blob][pkg] onto a pre-built
-  [`cmd/bundle-launcher`][lnch] binary via [`AppendBundle`][app]. The
-  resulting single-file executable, at runtime: reads its own bytes
-  via `os.Executable()`, locates the bundle via the trailing
-  `MLDV-END` footer + 8-byte offset ([`ExtractBundle`][ext]), calls
-  [`MatchBundleHost`][mb] to dispatch on CPUID vendor + Windows build,
-  decrypts only the matching payload via [`UnpackBundle`][unp], and
-  executes it (`memfd_create` + `execve` on Linux, temp file +
-  `CreateProcess` on Windows). E2E ship gate
-  `TestLauncher_E2E_WrapAndRun` runs an `exit 42` shellcode payload
-  end-to-end through every layer. The all-asm runtime stub variant
-  (smaller binary, no Go runtime footprint) is reserved for a future
-  minor; the asm primitives [`EmitCPUIDVendorRead`],
-  [`EmitPEBBuildRead`], [`EmitVendorCompare`], [`EmitBuildRangeCheck`]
-  in `stubgen/stage1` are pre-positioned for that work.
-
-[pkg]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#PackBinaryBundle
-[lnch]: https://pkg.go.dev/github.com/oioio-space/maldev/cmd/bundle-launcher
-[app]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#AppendBundle
-[ext]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#ExtractBundle
-[mb]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#MatchBundleHost
-[unp]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#UnpackBundle
-
-- **C6 multi-target bundle build-host stack shipped (v0.67.0-alpha.2).**
-  `PackBinaryBundle` serialises N payloads into a single bundle blob
-  (BundleHeader + FingerprintEntry × N + PayloadEntry × N + encrypted
-  payload data) per
-  `docs/superpowers/specs/2026-05-08-packer-multi-target-bundle.md`.
-  Each payload gets an independent random 16-byte XOR-rolling key.
-  Three selection-side helpers ship today:
-    - `SelectPayload(bundle, vendor, build)` — pure-Go reference for
-      the spec §3.4 matching logic.
-    - `HostCPUIDVendor()` — runtime CPUID vendor read via mmap'd asm
-      trampoline (uses `EmitCPUIDVendorRead`).
-    - `MatchBundleHost(bundle)` — operator dry-run; reads host vendor
-      + Windows build, calls SelectPayload. Surfaced as
-      `packer bundle -match <bundle>` in the CLI.
-    - `InspectBundle(bundle)` — structured bundle parser returning
-      BundleInfo + per-entry BundleEntryInfo; used by `cmd/packer
-      bundle -inspect`.
-  Stub-side asm fingerprint evaluator (C6-P3) and Windows VM E2E
-  (C6-P4) ship in v0.67.0 final.
-- **`PackBinary` LZ4 compression shipped (v0.66.0).** Pass
-  `Compress: true` to `PackBinary` to LZ4-compress `.text`
-  before SGN encoding. The stub gains a 136-byte hand-rolled
-  asm inflate decoder + ~30 bytes of setup/copy plumbing
-  (`StubMaxSize` auto-promotes to 8 KiB when `Compress=true`).
-  Inflate runs non-in-place into a scratch buffer placed in
-  the stub segment's BSS slack, then memcpys the plaintext
-  back to `.text`. Saves ~33 % on a Go static-PIE `.text`.
-  Disabled by default (conservative).
-- **Fake imports shipped (v0.63.0).** `AddFakeImportsPE` /
-  `DefaultFakeImports` add benign-DLL `IMAGE_IMPORT_DESCRIPTOR`
-  entries (kernel32, user32, shell32, ole32) to the packed PE.
-  `ApplyDefaultCover` chains the step automatically for PE32+
-  inputs. The kernel resolves all entries at load time; the IAT
-  slots are populated but the binary's code never references them.
-- **`Pack` (Phase 1a) magic at offset 0.** Trivially
-  fingerprinted; use `PackBinary` (Phase 1e) for binary output
-  or `PackPipeline` (Phase 1c) for blob output where the magic
-  travels inside a wrapper.
-- **`Pack` compression not yet implemented.** `CompressorNone`
-  only on the single-step Pack path; the pipeline path
-  (`PackPipeline`) ships `CompressorFlate` + `CompressorGzip`.
-- **`Pack` AES-GCM only.** ChaCha20 + RC4 constants are
-  placeholders for future Cipher additions.
-- **Key management is the operator's problem.** All packers
-  return the key; how the operator transports it to Unpack at
-  the target / build-host is not handled here.
+---
 
 ## See also
 
-- [Packer design doc](../../refactor-2026-doc/packer-design.md)
-  — full 3-phase plan, capability matrix, threat model.
-- [`pe/morph`](morph.md) — UPX section rename (adjacent
-  technique; both ship, different problems).
-- [`pe/srdi`](pe-to-shellcode.md) — Donut shellcode
-  (alternative path; packer is "Donut for PEs on disk" — once
-  Phase 1b lands).
-- [`crypto`](../crypto/payload-encryption.md) — AEAD primitives
-  also usable directly for the same encrypt-then-embed pattern.
+- [`pe/packer/runtime`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/runtime) — reflective in-process loader
+- [`pe/packer/stubgen`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/stubgen) — SGN polymorphic encoder + per-stage asm primitives
+- [`pe/packer/transform`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/transform) — section-aware PE/ELF emit + minimal-ELF writer
+- [`cmd/packer`](https://pkg.go.dev/github.com/oioio-space/maldev/cmd/packer) — pack / unpack / bundle / wrap CLI
+- [`cmd/bundle-launcher`](https://pkg.go.dev/github.com/oioio-space/maldev/cmd/bundle-launcher) — Go-runtime bundle launcher
+- [`cmd/packerscope`](https://pkg.go.dev/github.com/oioio-space/maldev/cmd/packerscope) — defender-side artefact analyser
+- [`cmd/packer-vis`](https://pkg.go.dev/github.com/oioio-space/maldev/cmd/packer-vis) — entropy + bundle visualiser
+- Worked example: [docs/examples/packer-elevation-tour.md](../../examples/packer-elevation-tour.md)
+- Worked example: [docs/examples/multi-target-bundle.md](../../examples/multi-target-bundle.md)
+- Operator playground: `make packer-demo`
+- Wire format spec: [docs/superpowers/specs/2026-05-08-packer-multi-target-bundle.md](../../superpowers/specs/2026-05-08-packer-multi-target-bundle.md)
