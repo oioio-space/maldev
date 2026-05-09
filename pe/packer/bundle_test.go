@@ -10,6 +10,27 @@ import (
 	"github.com/oioio-space/maldev/pe/packer"
 )
 
+// TestVendorConstants_Shape pins the canonical vendor-string byte
+// values exported by the package. Defenders / operators referencing
+// VendorIntel etc. expect these EXACT bytes — drift would silently
+// break every fingerprint predicate that depends on them.
+func TestVendorConstants_Shape(t *testing.T) {
+	cases := []struct {
+		name string
+		got  [12]byte
+		want string
+	}{
+		{"Intel", packer.VendorIntel, "GenuineIntel"},
+		{"AMD", packer.VendorAMD, "AuthenticAMD"},
+		{"Hygon", packer.VendorHygon, "HygonGenuine"},
+	}
+	for _, c := range cases {
+		if string(c.got[:]) != c.want {
+			t.Errorf("Vendor%s = %q, want %q", c.name, c.got, c.want)
+		}
+	}
+}
+
 // TestPackBinaryBundle_EmptyPayloads asserts the [packer.ErrEmptyBundle]
 // sentinel surfaces for nil + zero-length inputs.
 func TestPackBinaryBundle_EmptyPayloads(t *testing.T) {
@@ -78,7 +99,7 @@ func TestPackBinaryBundle_HeaderLayout(t *testing.T) {
 func TestPackBinaryBundle_FingerprintRoundTrip(t *testing.T) {
 	pred := packer.FingerprintPredicate{
 		PredicateType:     packer.PTCPUIDVendor | packer.PTWinBuild,
-		VendorString:      [12]byte{'G', 'e', 'n', 'u', 'i', 'n', 'e', 'I', 'n', 't', 'e', 'l'},
+		VendorString:      packer.VendorIntel,
 		BuildMin:          22000,
 		BuildMax:          22631,
 		CPUIDFeatureMask:  0xff,
@@ -180,7 +201,7 @@ func TestUnpackBundle_RejectsBadInputs(t *testing.T) {
 // TestInspectBundle_RoundTripsHeaderAndEntries verifies InspectBundle
 // extracts every wire-format field for a 2-payload bundle.
 func TestInspectBundle_RoundTripsHeaderAndEntries(t *testing.T) {
-	intel := [12]byte{'G', 'e', 'n', 'u', 'i', 'n', 'e', 'I', 'n', 't', 'e', 'l'}
+	intel := packer.VendorIntel
 	pls := []packer.BundlePayload{
 		{Binary: []byte("intel"), Fingerprint: packer.FingerprintPredicate{
 			PredicateType: packer.PTCPUIDVendor,
@@ -290,8 +311,8 @@ func TestInspectBundle_RejectsBadInputs(t *testing.T) {
 // semantics — PT_CPUID_VENDOR + PT_WIN_BUILD AND-combined; first-match
 // wins; PT_MATCH_ALL acts as a default; Negate inverts.
 func TestSelectPayload_PicksFirstMatch(t *testing.T) {
-	intel := [12]byte{'G', 'e', 'n', 'u', 'i', 'n', 'e', 'I', 'n', 't', 'e', 'l'}
-	amd := [12]byte{'A', 'u', 't', 'h', 'e', 'n', 't', 'i', 'c', 'A', 'M', 'D'}
+	intel := packer.VendorIntel
+	amd := packer.VendorAMD
 
 	pls := []packer.BundlePayload{
 		{Binary: []byte("intel-w11"), Fingerprint: packer.FingerprintPredicate{
@@ -342,7 +363,7 @@ func TestSelectPayload_PicksFirstMatch(t *testing.T) {
 // TestSelectPayload_NegateInverts asserts the Flags.Negate bit reverses
 // an entry's match outcome.
 func TestSelectPayload_NegateInverts(t *testing.T) {
-	intel := [12]byte{'G', 'e', 'n', 'u', 'i', 'n', 'e', 'I', 'n', 't', 'e', 'l'}
+	intel := packer.VendorIntel
 	pls := []packer.BundlePayload{
 		// Negated Intel: matches anything that is NOT Intel.
 		{Binary: []byte("non-intel"), Fingerprint: packer.FingerprintPredicate{
@@ -353,7 +374,7 @@ func TestSelectPayload_NegateInverts(t *testing.T) {
 	}
 	bundle, _ := packer.PackBinaryBundle(pls, packer.BundleOptions{})
 
-	idx, _ := packer.SelectPayload(bundle, [12]byte{'A', 'u', 't', 'h', 'e', 'n', 't', 'i', 'c', 'A', 'M', 'D'}, 0)
+	idx, _ := packer.SelectPayload(bundle, packer.VendorAMD, 0)
 	if idx != 0 {
 		t.Errorf("AMD against !Intel: got %d, want 0", idx)
 	}

@@ -104,6 +104,20 @@ const (
 	BundleMaxPayloads = 255
 )
 
+// Canonical CPUID vendor strings published as exported constants so
+// callers don't re-spell them as `[12]byte{'G','e','n',...}` literals
+// at every site. The values come from the Intel SDM Vol. 2A — every
+// x86 CPU returns one of these (or a vendor-specific override).
+//
+// Use in tests, CLI parser, and any operator-side fingerprint
+// authoring path. Keeping them as `[12]byte` matches
+// FingerprintPredicate.VendorString without conversion.
+var (
+	VendorIntel = [12]byte{'G', 'e', 'n', 'u', 'i', 'n', 'e', 'I', 'n', 't', 'e', 'l'}
+	VendorAMD   = [12]byte{'A', 'u', 't', 'h', 'e', 'n', 't', 'i', 'c', 'A', 'M', 'D'}
+	VendorHygon = [12]byte{'H', 'y', 'g', 'o', 'n', 'G', 'e', 'n', 'u', 'i', 'n', 'e'}
+)
+
 // PredicateType bitmask flags for FingerprintPredicate.PredicateType.
 //
 // Within a single FingerprintEntry, all enabled bits are ANDed: every

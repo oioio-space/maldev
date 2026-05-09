@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"math"
 	"testing"
+
+	"github.com/oioio-space/maldev/pe/packer"
 )
 
 // TestEntropy256_KnownInputs pins the Shannon entropy formula on
@@ -122,7 +124,7 @@ func TestVendorOrWildcard(t *testing.T) {
 	cases := []entry{
 		{predType: 0, want: "*"},
 		{predType: 0x02, want: "*"}, // PTWinBuild only
-		{predType: 0x01, vendor: [12]byte{'G', 'e', 'n', 'u', 'i', 'n', 'e', 'I', 'n', 't', 'e', 'l'}, want: "GenuineIntel"},
+		{predType: 0x01, vendor: packer.VendorIntel, want: "GenuineIntel"},
 	}
 	for _, c := range cases {
 		var info struct {
