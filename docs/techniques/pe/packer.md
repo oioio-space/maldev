@@ -667,6 +667,12 @@ wrapped := packer.AppendBundleWith(launcherBytes, bundle, profile)
 - IOC sharing between operators / between ops cycles — every secret
   yields a distinct (Magic, FooterMagic) pair (collision-resistant
   via SHA-256).
+- **Stub byte signatures across packs** (v0.74.0). Each call to
+  `WrapBundleAsExecutableLinux` splices a fresh batch of Intel
+  multi-byte NOPs into the stub at slot A (between the PIC
+  trampoline and the CPUID prologue). Two packs of the same bundle
+  produce distinct stub byte sequences. Same property holds on the
+  Go-launcher path via the `-secret` ldflags injection.
 
 **What this does NOT protect against:**
 
@@ -675,10 +681,12 @@ wrapped := packer.AppendBundleWith(launcherBytes, bundle, profile)
 - Yara rules keyed on the **structure** (32-byte header, 48-byte
   fingerprint entry, 32-byte payload entry, RWX single-PT_LOAD ELF).
   These remain regardless of secret.
-- Stub asm signatures — the 160-byte vendor-aware stub is
-  byte-identical across builds with or without `-secret`. Future
-  polymorphism (instruction substitution + junk insertion) closes
-  this gap; today the magic + footer are the only randomised IOCs.
+- Yara writers can still match the **structural shape** of the
+  emitted ELF: single PT_LOAD R+W+X at vaddr 0x400000, file ≤ 1 KB,
+  no PT_INTERP. That tuple is a fingerprint regardless of bytes.
+  An operator wanting to defeat shape-rules needs a different
+  format wrap (e.g. legitimate-looking Go binary host) — out of
+  scope for the all-asm path.
 
 **Operator best practice:** treat the secret like a deployment key —
 fresh per ship cycle, never reused, stored alongside whatever build
