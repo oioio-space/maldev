@@ -143,7 +143,41 @@ If you remove the catch-all entry and re-pack, the unknown
 target returns `idx == -1` — the runtime stub will fall back to
 the configured `-fallback` behaviour (clean exit, by default).
 
-## Step 5 — Decrypt one payload (build-host debugging)
+## Step 5 — Dry-run on the current host (CLI / Go API)
+
+v0.67.0-alpha.2 ships [`packer.MatchBundleHost`][match] — reads the
+host's CPUID vendor (via the same asm `EmitCPUIDVendorRead` the
+runtime stub uses) plus, on Windows, the build number from
+`RtlGetVersion`, and runs them through `SelectPayload`:
+
+```bash
+$ packer bundle -match payloads.bin
+match index=0 host-vendor="GenuineIntel"
+```
+
+Or in Go:
+
+```go
+idx, err := packer.MatchBundleHost(bundle)
+if err != nil { log.Fatal(err) }
+if idx < 0 {
+    log.Println("no payload matches this host — runtime stub will fall back")
+} else {
+    log.Printf("payload %d will fire", idx)
+}
+```
+
+This is the build-host preview of what the C6-P3 asm evaluator
+will do at runtime. Same SelectPayload logic, same byte order,
+same predicate semantics — useful for sanity-checking your
+`-pl` specs against the operator's actual fleet.
+
+`packer.HostCPUIDVendor()` is the lower-level primitive if you
+just want the 12-byte vendor string without bundle context.
+
+[match]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#MatchBundleHost
+
+## Step 6 — Decrypt one payload (build-host debugging)
 
 `UnpackBundle` is the inverse of the encryption pass. Use it on
 the build host to extract a specific payload for analysis or
