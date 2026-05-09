@@ -53,6 +53,7 @@ pe/packer/runtime/testdata/hello_static_pie_test*
 # Stray binaries from `go build ./cmd/...` without -o (Linux names, no
 # extension — *.exe already covers the Windows case above).
 /bof-runner
+/bundle-launcher
 /cert-snapshot
 /docgen
 /hashgen
