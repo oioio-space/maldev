@@ -40,22 +40,32 @@ linux/windows/darwin amd64.
 | Phase | Stage | Status | Commit | Tag |
 |-------|-------|--------|--------|-----|
 | 1 — Reflective launcher | 1.1 Investigate runtime API surface | ✅ | 5834d05 | — |
-| 1 — Reflective launcher | 1.2 Add reflective dispatch (`MALDEV_REFLECTIVE=1`) | ✅ | (this commit) | — |
-| 1 — Reflective launcher | 1.3 E2E test (linux) | ✅ | (this commit) | — |
-| 1 — Reflective launcher | 1.4 Tag v0.68.0 | ⏳ next | | |
+| 1 — Reflective launcher | 1.2 Add reflective dispatch (`MALDEV_REFLECTIVE=1`) | ✅ | 4d15ad2 | — |
+| 1 — Reflective launcher | 1.3 E2E test (linux) | ✅ | 4d15ad2 | — |
+| 1 — Reflective launcher | 1.4 Tag v0.68.0 | ✅ | — | **v0.68.0** |
 | 2 — All-asm stub | 2.1 Minimal ELF64 writer | ✅ | 69543cd | — |
-| 2 — All-asm stub | 2.2 Bundle stub asm — always-idx-0 baseline | ✅ | (this commit) | — |
-| 2 — All-asm stub | 2.3 Bundle stub container glue (`WrapBundleAsExecutableLinux`) | ✅ | (this commit) | — |
-| 2 — All-asm stub | 2.4 E2E linux + size assertion (< 4 KiB target — actual: 318 B) | ✅ | (this commit) | — |
-| 2 — All-asm stub | 2.5 Tag v0.69.0 | ⏳ next | | |
-| 2 — All-asm stub | 2.6 Bundle stub asm — scan loop (PT_MATCH_ALL only) | ✅ | c0b58ce | v0.71.0 |
-| 2 — All-asm stub | 2.7 Bundle stub asm — vendor-aware dispatch | ✅ | 873f365 | v0.72.0 |
+| 2 — All-asm stub | 2.2 Bundle stub asm — always-idx-0 baseline | ✅ | ddc2d56 | — |
+| 2 — All-asm stub | 2.3 Bundle stub container glue (`WrapBundleAsExecutableLinux`) | ✅ | ddc2d56 | — |
+| 2 — All-asm stub | 2.4 E2E linux + size assertion (< 4 KiB target — actual 318 B) | ✅ | ddc2d56 | — |
+| 2 — All-asm stub | 2.5 Tag v0.69.0 | ✅ | — | **v0.69.0** |
+| 2 — All-asm stub | 2.6 Bundle stub asm — scan loop (PT_MATCH_ALL only) | ✅ | c0b58ce | **v0.71.0** |
+| 2 — All-asm stub | 2.7 Bundle stub asm — vendor-aware dispatch | ✅ | 873f365 | **v0.72.0** |
 | 2 — All-asm stub | 2.8 Minimal PE32+ writer (Windows symmetry) | ⏳ | | |
 | 2 — All-asm stub | 2.9 PT_WIN_BUILD predicate in Windows stub | ⏳ | | |
-| 3 — packer-vis | 3.1 Entropy heatmap rendering | ✅ | (this commit) | — |
-| 3 — packer-vis | 3.3 Bundle wire-format viz | ✅ | (this commit) | — |
+| 3 — packer-vis | 3.1 Entropy heatmap rendering | ✅ | eab7429 | — |
+| 3 — packer-vis | 3.3 Bundle wire-format viz | ✅ | eab7429 | — |
 | 3 — packer-vis | 3.2 SGN round byte-diff display (deferred — needs hooks in poly engine) | ⏳ | | |
-| 3 — packer-vis | 3.4 Tag v0.70.0 | ⏳ next | | |
+| 3 — packer-vis | 3.4 Tag v0.70.0 | ✅ | — | **v0.70.0** |
+| 3 — packer-vis | 3.5 `compare` verb — side-by-side entropy + delta | ✅ | 764a29e | — |
+| 4 — Kerckhoffs | 4.1 Library: BundleProfile + 7 *With variants | ✅ | 6072eb4 | — |
+| 4 — Kerckhoffs | 4.2 Launcher + CLI: -secret end-to-end | ✅ | 3f61fb2 | **v0.73.0** |
+| 4 — Kerckhoffs | 4.3 All-asm WrapBundleAsExecutableLinuxWith | ✅ | 2c2a5c2 | — |
+| 5 — Polymorphism | 5.1 Intel multi-byte NOP injection in stub (per pack random) | ✅ | 655ccff | **v0.74.0** |
+| 5 — Polymorphism | 5.2 Negate flag in stub asm | ⏳ (Go-side covered; closes spec gap) | | |
+| 6 — Defender pair | 6.1 cmd/packerscope — detect/dump/extract | ✅ | f233c26 | **v0.75.0** |
+| 7 — Pedagogy | 7.1 Elevation tour worked example | ✅ | df2de82 | — |
+| 7 — Pedagogy | 7.2 README PE-row refresh | ✅ | 45a5dbc | — |
+| 7 — Pedagogy | 7.3 `make packer-demo` operator playground | ✅ | ec57c80 | — |
 
 **To resume on another machine:**
 
@@ -226,7 +236,23 @@ masked.
 
 ## Resumption notes
 
-(Leave empty unless something can't be inferred from git log; update
-when committing in-flight work.)
+— Phases 1-7 effectively complete on Linux x86-64. Eight tags shipped
+  (v0.68.0 → v0.75.0). Open work (all non-blocking):
 
-— None yet.
+  - **Stage 2.8** Minimal PE32+ writer — port BuildMinimalELF64 to
+    PE32+ for Windows symmetry. Without a Windows VM the runtime
+    exercise is limited to `debug/pe` roundtrip; full E2E queue-d
+    until VM time.
+  - **Stage 2.9** PT_WIN_BUILD predicate in stub — needs the Windows
+    stub variant first (depends on 2.8). The host-side primitive
+    `EmitPEBBuildRead` already exists in `pe/packer/stubgen/stage1`.
+  - **Stage 3.2** packer-vis SGN-diff view — needs hooks in
+    `pe/packer/stubgen/poly` to expose intermediate states.
+  - **Stage 5.2** Negate flag in stub asm — Go-side `SelectPayload`
+    supports it; the asm scan loop would need its per-entry test
+    refactored to compute a single match boolean before XORing the
+    negate flag. ~50 bytes of asm restructure, all displacements
+    move; risk-bounded by the existing E2E gate suite.
+
+— Repo is in a parfaitement résumable state at every commit.
+  `git pull` + read this file to continue.
