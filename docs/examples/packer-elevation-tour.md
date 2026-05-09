@@ -66,35 +66,40 @@ bundle, _ := packer.PackBinaryBundle(
 )
 out, _ := packer.WrapBundleAsExecutableLinux(bundle)
 os.WriteFile("v2-allasm", out, 0o755)
-// 318 bytes (varies a few bytes with key randomization).
+// v0.72.0: 441 bytes for 1-payload PTMatchAll, 548 bytes for a real
+// 2-payload Intel-vs-AMD vendor-aware dispatch.
 ```
 
 | Attribute | Value |
 |---|---|
-| Total size | **~318 B** |
-| Stub asm | 73 B hand-rolled (call/pop PIC + XOR-decrypt + JMP) |
+| Total size (1-payload) | **441 B** |
+| Total size (2-payload vendor-aware) | **548 B** |
+| Stub asm | 160 B hand-rolled (PIC + CPUID + scan loop + 12-B vendor compare + XOR-decrypt + JMP) |
 | Encryption | XOR rolling 16-byte key |
+| Predicate eval | PT_MATCH_ALL + PT_CPUID_VENDOR (with all-zero = wildcard) |
 | .text RWX | yes (single PT_LOAD) |
 | Process tree | 1 binary |
 | /proc/self/maps | one PT_LOAD |
-| Pedagogy | minimum viable polymorphic loader |
+| Pedagogy | real multi-target asm dispatch |
 
-The 318 bytes break down as:
+The 548-byte 2-payload bundle breaks down as:
 
 ```
   120 B  ELF header + lone PT_LOAD Phdr
-   73 B  stub asm
+  160 B  stub asm (PIC + CPUID + scan loop + decrypt + jmp)
    32 B  BundleHeader
-   48 B  FingerprintEntry  (PTMatchAll)
-   32 B  PayloadEntry      (DataRVA + DataSize + 16 B key)
-   12 B  encrypted shellcode
+   96 B  2 × FingerprintEntry (PTCPUIDVendor each)
+   64 B  2 × PayloadEntry     (DataRVA + DataSize + 16-byte key)
+   ~76 B  encrypted payload data + small struct alignment
   ─────
-  ~318 B
+  ~548 B
 ```
 
-That's ~24× smaller than the 7.6 KiB minimum for a bare `gcc -static -no-pie`
-hello-world. The trade-off: payload must be position-independent
-shellcode (the stub jumps directly into it; PE/ELF headers would crash).
+That's ~14× smaller than the 7.6 KiB minimum for a bare
+`gcc -static -no-pie` hello-world, while doing real CPUID dispatch
+across two target predicates. The trade-off: payload must be
+position-independent shellcode (the stub jumps directly into it;
+PE/ELF headers would crash).
 
 ## Variant 3 — `cmd/bundle-launcher` + `AppendBundle` (Go runtime)
 
@@ -138,8 +143,9 @@ and entered on a fake kernel stack. No fork, no execve, no temp file.
 | Variant | Size | Stub | Predicate | Proc tree | Disk artefact |
 |---------|-----:|------|-----------|-----------|---------------|
 | 1 — raw min-ELF | 132 B | none | none | 1 | none |
-| **2 — all-asm bundle** | **318 B** | 73 B asm | idx 0 only (today) | 1 | none |
-| 3 — Go launcher (default) | ~5 MB | Go | full | 2 | temp file |
+| **2 — all-asm bundle (1 entry)** | **441 B** | 160 B asm | PT_MATCH_ALL + PT_CPUID_VENDOR | 1 | none |
+| **2 — all-asm bundle (2 entries, vendor)** | **548 B** | 160 B asm | PT_MATCH_ALL + PT_CPUID_VENDOR | 1 | none |
+| 3 — Go launcher (default) | ~5 MB | Go | full (incl. PT_WIN_BUILD + Negate) | 2 | temp file |
 | 4 — Go launcher reflective | ~5 MB | Go + asm | full | **1** | none |
 
 Trade-off curve: variant 2 wins binary size and OPSEC at the cost of

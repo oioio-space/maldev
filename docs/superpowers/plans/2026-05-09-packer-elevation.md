@@ -48,8 +48,10 @@ linux/windows/darwin amd64.
 | 2 — All-asm stub | 2.3 Bundle stub container glue (`WrapBundleAsExecutableLinux`) | ✅ | (this commit) | — |
 | 2 — All-asm stub | 2.4 E2E linux + size assertion (< 4 KiB target — actual: 318 B) | ✅ | (this commit) | — |
 | 2 — All-asm stub | 2.5 Tag v0.69.0 | ⏳ next | | |
-| 2 — All-asm stub | 2.6 Bundle stub asm — full evaluator loop (post-tag) | ⏳ | | |
-| 2 — All-asm stub | 2.7 Minimal PE32+ writer (Windows symmetry, post-tag) | ⏳ | | |
+| 2 — All-asm stub | 2.6 Bundle stub asm — scan loop (PT_MATCH_ALL only) | ✅ | c0b58ce | v0.71.0 |
+| 2 — All-asm stub | 2.7 Bundle stub asm — vendor-aware dispatch | ✅ | 873f365 | v0.72.0 |
+| 2 — All-asm stub | 2.8 Minimal PE32+ writer (Windows symmetry) | ⏳ | | |
+| 2 — All-asm stub | 2.9 PT_WIN_BUILD predicate in Windows stub | ⏳ | | |
 | 3 — packer-vis | 3.1 Entropy heatmap rendering | ✅ | (this commit) | — |
 | 3 — packer-vis | 3.3 Bundle wire-format viz | ✅ | (this commit) | — |
 | 3 — packer-vis | 3.2 SGN round byte-diff display (deferred — needs hooks in poly engine) | ⏳ | | |
