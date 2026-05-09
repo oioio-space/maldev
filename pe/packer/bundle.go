@@ -1,6 +1,7 @@
 package packer
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -328,6 +329,61 @@ func InspectBundle(bundle []byte) (BundleInfo, error) {
 		}
 	}
 	return info, nil
+}
+
+// BundleFooterMagic is the 8-byte sentinel an [AppendBundle] launcher
+// writes at the very end of the wrapped binary so it can locate its
+// own bundle blob without scanning. Reads as "MLDV-END" in ASCII.
+var BundleFooterMagic = [8]byte{'M', 'L', 'D', 'V', '-', 'E', 'N', 'D'}
+
+// AppendBundle returns launcher bytes with `bundle` concatenated at
+// the end, followed by an 8-byte little-endian offset of the bundle's
+// first byte and the [BundleFooterMagic] sentinel:
+//
+//	[ launcher bytes        ]
+//	[ bundle blob           ]
+//	[ 8 BE: bundleStartOff  ]
+//	[ 8 BE: BundleFooterMagic ]
+//
+// Total 16-byte footer. The launcher reads its own binary at runtime,
+// inspects the last 16 bytes, validates the magic, slices back to the
+// bundle bytes, and proceeds with [MatchBundleHost] / [UnpackBundle].
+//
+// Returns a fresh slice; the input launcher slice is not modified.
+func AppendBundle(launcher []byte, bundle []byte) []byte {
+	bundleOff := uint64(len(launcher))
+	out := make([]byte, 0, len(launcher)+len(bundle)+16)
+	out = append(out, launcher...)
+	out = append(out, bundle...)
+	var off [8]byte
+	binary.LittleEndian.PutUint64(off[:], bundleOff)
+	out = append(out, off[:]...)
+	out = append(out, BundleFooterMagic[:]...)
+	return out
+}
+
+// ExtractBundle is the inverse of [AppendBundle]: given the full bytes
+// of an [AppendBundle]-wrapped launcher (typically read from
+// `/proc/self/exe` or `os.Executable()`), it returns a slice over the
+// embedded bundle. Errors when the footer magic is missing or the
+// declared offset escapes the blob.
+//
+// The returned slice references the input — caller must not mutate it
+// while the bundle is in use.
+func ExtractBundle(wrapped []byte) ([]byte, error) {
+	if len(wrapped) < 16 {
+		return nil, fmt.Errorf("%w: %d < 16-byte footer", ErrBundleTruncated, len(wrapped))
+	}
+	footer := wrapped[len(wrapped)-8:]
+	if !bytes.Equal(footer, BundleFooterMagic[:]) {
+		return nil, fmt.Errorf("%w: footer %q != %q", ErrBundleBadMagic, footer, BundleFooterMagic[:])
+	}
+	bundleOff := binary.LittleEndian.Uint64(wrapped[len(wrapped)-16 : len(wrapped)-8])
+	if bundleOff > uint64(len(wrapped)-16) {
+		return nil, fmt.Errorf("%w: bundleOff %d > footer-start %d",
+			ErrBundleOutOfRange, bundleOff, len(wrapped)-16)
+	}
+	return wrapped[bundleOff : len(wrapped)-16], nil
 }
 
 // SelectPayload is the pure-Go reference implementation of the bundle

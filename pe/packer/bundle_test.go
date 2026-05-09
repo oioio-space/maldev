@@ -381,6 +381,70 @@ func TestSelectPayload_NoMatchReturnsMinusOne(t *testing.T) {
 	}
 }
 
+// TestAppendBundle_RoundTripsViaExtract concatenates a synthetic
+// "launcher" prefix with a real bundle and asserts ExtractBundle
+// returns byte-equal bundle bytes.
+func TestAppendBundle_RoundTripsViaExtract(t *testing.T) {
+	launcher := bytes.Repeat([]byte{0x90}, 1024) // ELF/PE-shaped placeholder
+	bundle, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{Binary: []byte("payload")}},
+		packer.BundleOptions{FixedKey: make([]byte, 16)},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	wrapped := packer.AppendBundle(launcher, bundle)
+	if want := len(launcher) + len(bundle) + 16; len(wrapped) != want {
+		t.Errorf("len(wrapped) = %d, want %d (launcher + bundle + 16-byte footer)",
+			len(wrapped), want)
+	}
+
+	got, err := packer.ExtractBundle(wrapped)
+	if err != nil {
+		t.Fatalf("ExtractBundle: %v", err)
+	}
+	if !bytes.Equal(got, bundle) {
+		t.Errorf("extracted bundle != original (%d vs %d bytes)", len(got), len(bundle))
+	}
+
+	// Footer magic at the very end.
+	footer := wrapped[len(wrapped)-8:]
+	if !bytes.Equal(footer, packer.BundleFooterMagic[:]) {
+		t.Errorf("footer = %q, want %q", footer, packer.BundleFooterMagic[:])
+	}
+}
+
+// TestExtractBundle_RejectsBadInputs covers the three failure modes
+// surfaced by ExtractBundle: blob shorter than the 16-byte footer,
+// missing magic, declared offset escaping the blob.
+func TestExtractBundle_RejectsBadInputs(t *testing.T) {
+	t.Run("tooShort", func(t *testing.T) {
+		_, err := packer.ExtractBundle([]byte{0x01, 0x02})
+		if !errors.Is(err, packer.ErrBundleTruncated) {
+			t.Errorf("err = %v, want ErrBundleTruncated", err)
+		}
+	})
+	t.Run("badMagic", func(t *testing.T) {
+		bogus := bytes.Repeat([]byte{0x42}, 32)
+		_, err := packer.ExtractBundle(bogus)
+		if !errors.Is(err, packer.ErrBundleBadMagic) {
+			t.Errorf("err = %v, want ErrBundleBadMagic", err)
+		}
+	})
+	t.Run("offsetOutOfRange", func(t *testing.T) {
+		// Build a wrapped blob with the magic intact but a bogus huge offset.
+		blob := make([]byte, 32)
+		// offset = 999 (way past end-of-footer-start = 16)
+		binary.LittleEndian.PutUint64(blob[16:24], 999)
+		copy(blob[24:32], packer.BundleFooterMagic[:])
+		_, err := packer.ExtractBundle(blob)
+		if !errors.Is(err, packer.ErrBundleOutOfRange) {
+			t.Errorf("err = %v, want ErrBundleOutOfRange", err)
+		}
+	})
+}
+
 // TestPackBinaryBundle_PayloadKeysIndependent asserts that successive
 // packs without an explicit CipherKey yield distinct ciphertexts even
 // when the plaintexts are identical — confirming the per-payload key is

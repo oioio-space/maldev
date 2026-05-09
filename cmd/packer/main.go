@@ -87,6 +87,7 @@ Usage:
                 [-fallback exit|crash|first]
   packer bundle -inspect <bundle>
   packer bundle -match   <bundle>
+  packer bundle -wrap    <launcher> -bundle <bundle> -out <exe>
 
 Formats:
   blob         (default) AES-GCM encrypted bytes; key printed as 64-char hex
@@ -104,12 +105,17 @@ Bundle spec syntax (-pl):
        -pl payload-w10.exe:amd:10000-19999
        -pl fallback.exe:*:*-*
   Fallback behaviour: exit (silent), crash (loud), first (always payload 0).
-  Note: the runtime stub-side fingerprint evaluator is C6-P3/P4 work;
-  until it ships, the bundle is a build-host artefact you can:
+  Bundle workflows:
     - inspect:   packer bundle -inspect <bundle>
+                 (decode header + per-entry summary)
     - dry-run:   packer bundle -match   <bundle>
                  (reads host CPUID + Windows build, prints which
-                  payload would fire — same logic the stub will run)
+                  payload would fire on this host)
+    - wrap:      packer bundle -wrap <launcher> -bundle <bundle> -out <exe>
+                 (concatenate the bundle to a pre-built launcher
+                  binary — see cmd/bundle-launcher — producing a
+                  single-file runnable executable that dispatches
+                  via CPUID + Win build at runtime)
 `)
 }
 
@@ -297,6 +303,8 @@ func runBundle(args []string) int {
 	fallback := fs.String("fallback", "exit", "no-match behaviour: exit | crash | first")
 	inspect := fs.String("inspect", "", "inspect an existing bundle blob and exit (path)")
 	match := fs.String("match", "", "report which payload would fire on this host and exit (path)")
+	wrap := fs.String("wrap", "", "append a bundle blob to a launcher binary, producing a runnable executable (path to launcher)")
+	bundlePath := fs.String("bundle", "", "bundle blob to wrap (used with -wrap)")
 	var pls stringSliceFlag
 	fs.Var(&pls, "pl", "payload spec: <file>:<vendor>:<min>-<max>; repeatable")
 	if err := fs.Parse(args); err != nil {
@@ -309,6 +317,9 @@ func runBundle(args []string) int {
 	}
 	if *match != "" {
 		return runBundleMatch(*match)
+	}
+	if *wrap != "" {
+		return runBundleWrap(*wrap, *bundlePath, *out)
 	}
 	if *out == "" || len(pls) == 0 {
 		fmt.Fprintln(os.Stderr, "bundle: -out and at least one -pl required (or use -inspect)")
@@ -412,6 +423,40 @@ func parseBundleSpec(spec string) (packer.BundlePayload, error) {
 		pred.PredicateType = packer.PTMatchAll
 	}
 	return packer.BundlePayload{Binary: bin, Fingerprint: pred}, nil
+}
+
+// runBundleWrap concatenates a bundle blob onto a pre-built launcher
+// binary (typically `cmd/bundle-launcher`) via [packer.AppendBundle],
+// producing a single-file executable that dispatches at runtime via
+// CPUID + Win build fingerprinting. The output preserves the
+// launcher's executable bit on the file.
+func runBundleWrap(launcherPath, bundlePath, outPath string) int {
+	if launcherPath == "" || bundlePath == "" || outPath == "" {
+		fmt.Fprintln(os.Stderr, "bundle wrap: -wrap, -bundle, and -out are all required")
+		return 2
+	}
+	launcher, err := os.ReadFile(launcherPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bundle wrap: read launcher:", err)
+		return 1
+	}
+	bundle, err := os.ReadFile(bundlePath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bundle wrap: read bundle:", err)
+		return 1
+	}
+	if _, err := packer.InspectBundle(bundle); err != nil {
+		fmt.Fprintln(os.Stderr, "bundle wrap: bundle does not parse:", err)
+		return 1
+	}
+	wrapped := packer.AppendBundle(launcher, bundle)
+	if err := os.WriteFile(outPath, wrapped, 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "bundle wrap: write output:", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "bundle wrap: wrote %d bytes (%d launcher + %d bundle + 16-byte footer) to %s\n",
+		len(wrapped), len(launcher), len(bundle), outPath)
+	return 0
 }
 
 // runBundleMatch loads a bundle blob and reports which entry would fire
