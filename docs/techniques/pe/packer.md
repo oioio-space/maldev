@@ -657,6 +657,31 @@ out, err := packer.AddFakeImportsPE(packed, packer.DefaultFakeImports)
   returned `ErrCoverSectionTableFull`. The cover layer now relocates
   the PHT to file-end and preserves all four ELF spec invariants;
   `ErrCoverSectionTableFull` is no longer returned for these inputs.
+- **C6 multi-target bundle ships runnable (v0.67.0).** The bundle path
+  now closes the loop: `packer bundle -wrap <launcher> -bundle <blob>
+  -out <exe>` concatenates a [bundle blob][pkg] onto a pre-built
+  [`cmd/bundle-launcher`][lnch] binary via [`AppendBundle`][app]. The
+  resulting single-file executable, at runtime: reads its own bytes
+  via `os.Executable()`, locates the bundle via the trailing
+  `MLDV-END` footer + 8-byte offset ([`ExtractBundle`][ext]), calls
+  [`MatchBundleHost`][mb] to dispatch on CPUID vendor + Windows build,
+  decrypts only the matching payload via [`UnpackBundle`][unp], and
+  executes it (`memfd_create` + `execve` on Linux, temp file +
+  `CreateProcess` on Windows). E2E ship gate
+  `TestLauncher_E2E_WrapAndRun` runs an `exit 42` shellcode payload
+  end-to-end through every layer. The all-asm runtime stub variant
+  (smaller binary, no Go runtime footprint) is reserved for a future
+  minor; the asm primitives [`EmitCPUIDVendorRead`],
+  [`EmitPEBBuildRead`], [`EmitVendorCompare`], [`EmitBuildRangeCheck`]
+  in `stubgen/stage1` are pre-positioned for that work.
+
+[pkg]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#PackBinaryBundle
+[lnch]: https://pkg.go.dev/github.com/oioio-space/maldev/cmd/bundle-launcher
+[app]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#AppendBundle
+[ext]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#ExtractBundle
+[mb]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#MatchBundleHost
+[unp]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#UnpackBundle
+
 - **C6 multi-target bundle build-host stack shipped (v0.67.0-alpha.2).**
   `PackBinaryBundle` serialises N payloads into a single bundle blob
   (BundleHeader + FingerprintEntry × N + PayloadEntry × N + encrypted

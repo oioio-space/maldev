@@ -177,7 +177,47 @@ just want the 12-byte vendor string without bundle context.
 
 [match]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#MatchBundleHost
 
-## Step 6 — Decrypt one payload (build-host debugging)
+## Step 6 — Wrap into a runnable executable (v0.67.0)
+
+The bundle blob alone is not directly executable — it's just data.
+Pair it with the [`cmd/bundle-launcher`][lnch] binary to ship a
+single self-dispatching `.exe`:
+
+```bash
+# Build the launcher once (per OS/arch you target):
+$ go build -o bundle-launcher ./cmd/bundle-launcher
+
+# Wrap your bundle into the launcher:
+$ packer bundle -wrap bundle-launcher -bundle payloads.bin -out app
+bundle wrap: wrote 5 062 138 bytes (5 074 528 launcher + 287 bundle + 16-byte footer) to app
+$ chmod +x app
+
+# Ship app — it dispatches at runtime:
+$ ./app
+   # exec's the matched payload via memfd_create + execve (Linux)
+   # or temp file + CreateProcess (Windows)
+```
+
+Or in Go via [`packer.AppendBundle`][app]:
+
+```go
+launcher, _ := os.ReadFile("bundle-launcher")
+wrapped := packer.AppendBundle(launcher, bundle)
+os.WriteFile("app", wrapped, 0o755)
+```
+
+The launcher reads its own bytes at runtime via `os.Executable()`,
+locates the embedded bundle by scanning back from the `MLDV-END`
+footer ([`packer.ExtractBundle`][ext]), runs `MatchBundleHost`,
+decrypts only the matched payload, and execs it. No on-disk
+plaintext on Linux (`memfd_create`-backed FD passed directly to
+`execve`).
+
+[lnch]: https://pkg.go.dev/github.com/oioio-space/maldev/cmd/bundle-launcher
+[app]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#AppendBundle
+[ext]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#ExtractBundle
+
+## Step 7 — Decrypt one payload (build-host debugging)
 
 `UnpackBundle` is the inverse of the encryption pass. Use it on
 the build host to extract a specific payload for analysis or
