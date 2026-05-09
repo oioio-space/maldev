@@ -27,36 +27,41 @@ type EmitOptions struct {
 	// flag.
 	AntiDebug bool
 
-	// Compress, when true, appends a backward-memmove preamble + LZ4
-	// register-setup + inline LZ4 inflate decoder BETWEEN the last SGN
-	// round and the OEP-jump epilogue.
+	// Compress, when true, appends an LZ4 register-setup + inline LZ4
+	// inflate decoder + memcpy-back epilogue BETWEEN the last SGN round
+	// and the OEP-jump epilogue.
 	//
 	// Layout invariants when this branch runs:
-	//   * filesz = CompressedSize (only the compressed bytes ship on disk)
-	//   * memsz  = MemSize         (= originalTextSize + LZ4 intra-seq margin)
-	//   * After kernel load: [R15, R15+CompressedSize) = compressed bytes
-	//                        [R15+CompressedSize, R15+MemSize)  = BSS zero
-	//   * After SGN unwrap: same — SGN runs over filesz bytes only.
+	//   * .text segment filesz = CompressedSize, memsz = CompressedSize.
+	//     [R15, R15+CompressedSize) = SGN-decoded compressed bytes.
+	//   * The stub segment has memsz = StubMaxSize + originalTextSize,
+	//     filesz = StubMaxSize. Scratch buffer lives in the stub segment's
+	//     BSS slack at offset StubMaxSize from StubRVA. ScratchDispFromText
+	//     is its displacement from R15 (= TextRVA at runtime).
 	//
-	// The stub then:
-	//   1. Backward-memmoves compressed bytes to the END of the memsz region
-	//      (rep movsb with DF=1) so that LZ4's in-place decode invariant
-	//      `src ≥ dst + (M − N)` is satisfied. After the move:
-	//        [R15, R15+MemSize-CompressedSize)   = (now zero)
-	//        [R15+MemSize-CompressedSize, MemSize) = compressed bytes
-	//   2. Calls the inline LZ4 inflate with src = R15+MemSize-CompressedSize,
-	//      dst = R15, srcSize = CompressedSize.
-	//   3. After inflate, [R15, R15+OriginalTextSize) = plaintext .text;
-	//      epilogue ADD+JMP lands at OEP.
+	// Why scratch-in-stub-segment instead of in-place: Go static-PIE
+	// binaries pack PT_LOADs tightly — the .text segment can't grow past
+	// the next read-only segment's vaddr. The stub segment we append has
+	// no such constraint, so we put the inflate workspace there.
 	//
-	// SafetyMargin retained for diagnostic/back-compat (intra-sequence drift
-	// bound, ≈ originalTextSize/256 + 32). CompressedSize and MemSize must
-	// both be non-zero when Compress is true; EmitStub returns an error
-	// otherwise.
-	Compress       bool
-	SafetyMargin   uint32 // LZ4 intra-sequence drift bound (informational)
-	CompressedSize uint32 // length of the LZ4 block in bytes (= filesz)
-	MemSize        uint32 // virtual size of the .text region (= memsz)
+	// The stub:
+	//   1. Sets RAX=R15, RBX=R15+ScratchDispFromText, RCX=CompressedSize.
+	//   2. Calls inline LZ4 inflate (src=.text, dst=scratch, no overlap).
+	//   3. memcpy back: rep movsb from scratch to R15, count=OriginalSize.
+	//   4. Falls through to OEP-jump epilogue.
+	//
+	// CompressedSize, OriginalSize, and ScratchDispFromText must be
+	// non-zero when Compress is true; EmitStub returns an error otherwise.
+	// SafetyMargin retained as a diagnostic field (informational only).
+	Compress             bool
+	SafetyMargin         uint32 // (informational) LZ4 intra-seq drift bound
+	CompressedSize       uint32 // length of the LZ4 block in bytes
+	OriginalSize         uint32 // decompressed .text size (memcpy count)
+	ScratchDispFromText  int32  // signed displacement from R15 to scratch base
+
+	// MemSize is retained for back-compat with the previous in-place
+	// design but is no longer consulted; non-zero values are tolerated.
+	MemSize uint32
 }
 
 // baseReg is the callee-saved register the prologue loads with the
@@ -198,51 +203,48 @@ func EmitStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round, opts E
 	//
 	// After inflate: [R15, R15+OriginalTextSize) = plaintext .text.
 	if opts.Compress {
-		if opts.CompressedSize == 0 || opts.MemSize == 0 {
-			return fmt.Errorf("stage1: EmitStub Compress=true but CompressedSize=%d MemSize=%d",
-				opts.CompressedSize, opts.MemSize)
-		}
-		if opts.MemSize <= opts.CompressedSize {
-			return fmt.Errorf("stage1: EmitStub Compress=true requires MemSize(%d) > CompressedSize(%d)",
-				opts.MemSize, opts.CompressedSize)
+		if opts.CompressedSize == 0 || opts.OriginalSize == 0 || opts.ScratchDispFromText == 0 {
+			return fmt.Errorf("stage1: EmitStub Compress=true but CompressedSize=%d OriginalSize=%d ScratchDispFromText=%d",
+				opts.CompressedSize, opts.OriginalSize, opts.ScratchDispFromText)
 		}
 
-		// Step 1: backward memmove — std; lea rsi/rdi end-pointers; mov rcx, N;
-		// rep movsb; cld. STD/CLD/REP MOVSB have no Builder helpers; emit raw.
-		if err := b.RawBytes([]byte{0xfd}); err != nil { // std
-			return fmt.Errorf("stage1: lz4 memmove STD: %w", err)
+		// LZ4 register setup: src=.text, dst=scratch, srcSize=N. Disjoint
+		// regions, so no in-place gymnastics needed.
+		// RAX = R15
+		if err := b.MOV(amd64.RAX, baseReg); err != nil {
+			return fmt.Errorf("stage1: lz4 setup MOV RAX,R15: %w", err)
 		}
-		if err := b.LEA(amd64.RSI, amd64.MemOp{Base: amd64.R15, Disp: int32(opts.CompressedSize) - 1}); err != nil {
-			return fmt.Errorf("stage1: lz4 memmove LEA RSI: %w", err)
+		// RBX = R15 + ScratchDispFromText  -- scratch base in stub segment
+		if err := b.LEA(amd64.RBX, amd64.MemOp{Base: baseReg, Disp: opts.ScratchDispFromText}); err != nil {
+			return fmt.Errorf("stage1: lz4 setup LEA RBX,scratch: %w", err)
 		}
-		if err := b.LEA(amd64.RDI, amd64.MemOp{Base: amd64.R15, Disp: int32(opts.MemSize) - 1}); err != nil {
-			return fmt.Errorf("stage1: lz4 memmove LEA RDI: %w", err)
-		}
-		if err := b.MOV(amd64.RCX, amd64.Imm(int64(opts.CompressedSize))); err != nil {
-			return fmt.Errorf("stage1: lz4 memmove MOV RCX: %w", err)
-		}
-		if err := b.RawBytes([]byte{0xf3, 0xa4}); err != nil { // rep movsb
-			return fmt.Errorf("stage1: lz4 memmove REP MOVSB: %w", err)
-		}
-		if err := b.RawBytes([]byte{0xfc}); err != nil { // cld
-			return fmt.Errorf("stage1: lz4 memmove CLD: %w", err)
-		}
-
-		// Step 2: LZ4 register setup.
-		// RAX = R15 + (MemSize - CompressedSize)  -- src (compressed at end)
-		// RBX = R15                                -- dst (text base)
-		// RCX = CompressedSize                     -- srcSize
-		if err := b.LEA(amd64.RAX, amd64.MemOp{Base: amd64.R15, Disp: int32(opts.MemSize - opts.CompressedSize)}); err != nil {
-			return fmt.Errorf("stage1: lz4 setup LEA RAX: %w", err)
-		}
-		if err := b.MOV(amd64.RBX, baseReg); err != nil {
-			return fmt.Errorf("stage1: lz4 setup MOV RBX,R15: %w", err)
-		}
+		// RCX = CompressedSize
 		if err := b.MOV(amd64.RCX, amd64.Imm(int64(opts.CompressedSize))); err != nil {
 			return fmt.Errorf("stage1: lz4 setup MOV RCX,CompressedSize: %w", err)
 		}
 		if err := EmitLZ4InflateInline(b); err != nil {
 			return fmt.Errorf("stage1: lz4 inflate inline: %w", err)
+		}
+
+		// memcpy plaintext back to R15: cld; mov rsi, rbx (scratch saved
+		// across the asm via callee-saved push/pop); mov rdi, r15;
+		// mov rcx, OriginalSize; rep movsb. RBX holds scratch on entry
+		// to this block — verify by inspecting EmitLZ4Inflate's prologue
+		// (push rbx; push r12) and epilogue (pop r12; pop rbx).
+		if err := b.RawBytes([]byte{0xfc}); err != nil { // cld (DF=0)
+			return fmt.Errorf("stage1: memcpy CLD: %w", err)
+		}
+		if err := b.MOV(amd64.RSI, amd64.RBX); err != nil {
+			return fmt.Errorf("stage1: memcpy MOV RSI,RBX: %w", err)
+		}
+		if err := b.MOV(amd64.RDI, baseReg); err != nil {
+			return fmt.Errorf("stage1: memcpy MOV RDI,R15: %w", err)
+		}
+		if err := b.MOV(amd64.RCX, amd64.Imm(int64(opts.OriginalSize))); err != nil {
+			return fmt.Errorf("stage1: memcpy MOV RCX,OriginalSize: %w", err)
+		}
+		if err := b.RawBytes([]byte{0xf3, 0xa4}); err != nil { // rep movsb
+			return fmt.Errorf("stage1: memcpy REP MOVSB: %w", err)
 		}
 	}
 

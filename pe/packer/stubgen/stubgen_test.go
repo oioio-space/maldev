@@ -292,9 +292,9 @@ func TestGenerate_PerPackUniqueness(t *testing.T) {
 }
 
 // TestGenerate_Compress_PE verifies that Generate with Compress=true produces
-// a structurally valid PE32+ (debug/pe parses it), the output is smaller than
-// the non-compressed variant on a text-heavy input, and the .text VirtualSize
-// is larger than SizeOfRawData (the TextMemSize > TextSize memsz expansion).
+// a structurally valid PE32+ (debug/pe parses it) and that the stub section's
+// VirtualSize is larger than SizeOfRawData (StubScratchSize widening for
+// the non-in-place LZ4 inflate scratch buffer).
 func TestGenerate_Compress_PE(t *testing.T) {
 	// Use a larger .text so compression has something to work with.
 	input := buildMinimalPE(0x2000, 0x1010)
@@ -323,12 +323,13 @@ func TestGenerate_Compress_PE(t *testing.T) {
 		t.Fatalf("Sections = %d, want ≥ 2", len(f.Sections))
 	}
 
-	// The .text VirtualSize must be larger than SizeOfRawData: the former
-	// covers the decompression workspace; the latter is the compressed payload.
-	textSec := f.Sections[0]
-	if textSec.VirtualSize <= textSec.Size {
-		t.Errorf(".text VirtualSize (%#x) ≤ SizeOfRawData (%#x): TextMemSize not applied",
-			textSec.VirtualSize, textSec.Size)
+	// The stub section's VirtualSize must exceed its SizeOfRawData by the
+	// scratch-buffer size — the former covers the LZ4 inflate workspace
+	// (BSS slack), the latter is the on-disk stub code budget.
+	stubSec := f.Sections[len(f.Sections)-1]
+	if stubSec.VirtualSize <= stubSec.Size {
+		t.Errorf("stub VirtualSize (%#x) ≤ SizeOfRawData (%#x): StubScratchSize not applied",
+			stubSec.VirtualSize, stubSec.Size)
 	}
 }
 

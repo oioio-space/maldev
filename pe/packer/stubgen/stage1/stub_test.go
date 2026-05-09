@@ -213,10 +213,11 @@ func TestEmitStub_Compress_AsmAssembles(t *testing.T) {
 		t.Fatalf("amd64.New: %v", err)
 	}
 	opts := stage1.EmitOptions{
-		Compress:       true,
-		SafetyMargin:   64,
-		CompressedSize: 512,
-		MemSize:        4096, // > CompressedSize — triggers memmove preamble + LZ4
+		Compress:            true,
+		SafetyMargin:        64,
+		CompressedSize:      512,
+		OriginalSize:        4096,
+		ScratchDispFromText: 0x10000,
 	}
 	if err := stage1.EmitStub(b, stdPlan, makeRounds(1), opts); err != nil {
 		t.Fatalf("EmitStub Compress=true: %v", err)
@@ -226,11 +227,14 @@ func TestEmitStub_Compress_AsmAssembles(t *testing.T) {
 		t.Fatalf("Encode: %v", err)
 	}
 
-	// STD (0xFD) opens the backward-memmove preamble that relocates the
-	// SGN-decoded compressed bytes to the END of the memsz region before
-	// LZ4 inflates in place from there.
-	if !bytes.Contains(out, []byte{0xFD, 0x49, 0x8D}) {
-		t.Errorf("stub missing memmove preamble (FD 49 8D = STD; LEA RSI…)")
+	// MOV RAX, R15 (4C 89 F8) opens the LZ4 register-setup. The scratch-
+	// buffer dst (RBX = R15+disp) is set via LEA, then RCX = CompressedSize.
+	if !bytes.Contains(out, []byte{0x4C, 0x89, 0xF8}) {
+		t.Errorf("stub missing LZ4 setup MOV RAX,R15 (4C 89 F8)")
+	}
+	// CLD (FC) opens the post-inflate memcpy-back epilogue.
+	if !bytes.Contains(out, []byte{0xFC}) {
+		t.Errorf("stub missing memcpy-back CLD (0xFC)")
 	}
 
 	// First three bytes of the LZ4 decoder: emit_entry MOV R10,RAX = 49 89 C2.
@@ -301,11 +305,9 @@ func TestEmitLZ4InflateInline_NoRetByte(t *testing.T) {
 // error — these would either loop indefinitely or skip the memmove preamble.
 func TestEmitStub_Compress_RejectsZeroMargin(t *testing.T) {
 	cases := []stage1.EmitOptions{
-		{Compress: true, CompressedSize: 0, MemSize: 4096},
-		{Compress: true, CompressedSize: 512, MemSize: 0},
-		{Compress: true, CompressedSize: 0, MemSize: 0},
-		{Compress: true, CompressedSize: 4096, MemSize: 4096},  // Mem == Compressed (no slack)
-		{Compress: true, CompressedSize: 4096, MemSize: 1024},  // Mem < Compressed
+		{Compress: true, CompressedSize: 0, OriginalSize: 4096, ScratchDispFromText: 0x1000},
+		{Compress: true, CompressedSize: 512, OriginalSize: 0, ScratchDispFromText: 0x1000},
+		{Compress: true, CompressedSize: 512, OriginalSize: 4096, ScratchDispFromText: 0},
 	}
 	for _, opts := range cases {
 		b, err := amd64.New()
@@ -313,8 +315,8 @@ func TestEmitStub_Compress_RejectsZeroMargin(t *testing.T) {
 			t.Fatalf("amd64.New: %v", err)
 		}
 		if err := stage1.EmitStub(b, stdPlan, makeRounds(1), opts); err == nil {
-			t.Errorf("CompressedSize=%d MemSize=%d: expected error, got nil",
-				opts.CompressedSize, opts.MemSize)
+			t.Errorf("CompressedSize=%d OriginalSize=%d ScratchDispFromText=%d: expected error, got nil",
+				opts.CompressedSize, opts.OriginalSize, opts.ScratchDispFromText)
 		}
 	}
 }

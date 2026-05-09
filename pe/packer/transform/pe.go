@@ -213,7 +213,12 @@ func InjectStubPE(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, er
 		return nil, ErrSectionTableFull
 	}
 	copy(out[newHdrOff:newHdrOff+8], []byte(".mldv\x00\x00\x00"))
-	binary.LittleEndian.PutUint32(out[newHdrOff+secVirtualSizeOffset:newHdrOff+secVirtualSizeOffset+4], plan.StubMaxSize)
+	// VirtualSize includes the StubScratchSize trailing region — when set,
+	// the loader maps that gap as zero (BSS). C3 compression uses it as the
+	// scratch buffer for non-in-place LZ4 inflate, sidestepping the
+	// constraint that the .text section can't grow past the next mapped
+	// section.
+	binary.LittleEndian.PutUint32(out[newHdrOff+secVirtualSizeOffset:newHdrOff+secVirtualSizeOffset+4], plan.StubMaxSize+plan.StubScratchSize)
 	binary.LittleEndian.PutUint32(out[newHdrOff+secVirtualAddressOffset:newHdrOff+secVirtualAddressOffset+4], plan.StubRVA)
 	binary.LittleEndian.PutUint32(out[newHdrOff+secSizeOfRawDataOffset:newHdrOff+secSizeOfRawDataOffset+4], stubFileSize)
 	binary.LittleEndian.PutUint32(out[newHdrOff+secPointerToRawDataOffset:newHdrOff+secPointerToRawDataOffset+4], plan.StubFileOff)

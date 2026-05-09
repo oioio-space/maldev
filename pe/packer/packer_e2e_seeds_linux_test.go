@@ -107,19 +107,6 @@ func TestPackBinary_LinuxELF_MultiSeed_WithCover(t *testing.T) {
 //
 // CRITICAL GATE: if ANY seed fails, the C3 chantier is NOT shippable.
 func TestPackBinary_LinuxELF_MultiSeed_WithCompress(t *testing.T) {
-	// C3-stage-2 attempt 4 (2026-05-09): root-caused attempts 1-3 (LZ4
-	// in-place needs compressed-at-END layout). Stub now does backward
-	// memmove + in-place inflate from end. Standalone reproducer green.
-	//
-	// New blocker: .text PT_LOAD can't grow past the next read-only
-	// PT_LOAD. Go static-PIE packs segments tightly — segment 1 ends
-	// ~500 KB after R15 and segment 2 starts on the next page. We need
-	// ~2 KB of extra writable space past .text for the LZ4 margin.
-	//
-	// Next session: option 1 from KNOWN-ISSUES-1e.md attempt 4 — inflate
-	// into the STUB segment (our memsz is freely sized). Stub scratch
-	// buffer = stub.memsz BSS slack; ~30 extra stub bytes, no syscalls.
-	t.Skip("C3-stage-2 attempt 4: layout fix shipped; need scratch-buffer in stub segment. See KNOWN-ISSUES-1e.md attempt 4.")
 	fixturePath := filepath.Join("..", "..", "pe", "packer", "runtime",
 		"testdata", "hello_static_pie")
 	fixturePath, err := filepath.Abs(fixturePath)

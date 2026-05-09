@@ -63,10 +63,20 @@ type Plan struct {
 	// TextMemSize, when non-zero and greater than TextSize, requests that
 	// the .text section's virtual memory size (VirtualSize in PE, p_memsz
 	// in ELF) be set larger than the on-disk file size. The kernel maps the
-	// gap between filesz and memsz as zero bytes. C3 compression uses this
-	// to reserve decompression workspace: the compressed bytes occupy
-	// [filesz), and the decompressed output expands into [0, memsz).
+	// gap between filesz and memsz as zero bytes. Reserved for diagnostic
+	// use; the C3 compression scratch buffer now lives in the stub segment
+	// (see StubScratchSize) so .text memsz is no longer enlarged.
 	TextMemSize uint32
+
+	// StubScratchSize, when non-zero, requests that the stub segment's
+	// memsz extend StubScratchSize bytes past StubMaxSize. The kernel
+	// zero-fills that BSS region; C3 compression uses it as a non-in-place
+	// LZ4 inflate destination, sidestepping the ELF/PE constraint that the
+	// .text segment can't grow past adjacent read-only segments.
+	//
+	// Scratch RVA = StubRVA + StubMaxSize. Stub asm references it via
+	// LEA reg, [R15 + (StubRVA + StubMaxSize − TextRVA)].
+	StubScratchSize uint32
 }
 
 // Sentinels surfaced by PlanPE / PlanELF / InjectStubPE / InjectStubELF.

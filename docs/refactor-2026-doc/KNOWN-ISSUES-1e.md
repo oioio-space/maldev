@@ -806,3 +806,42 @@ sections. Avoid.
    stub_filesz + originalTextSize; rename plan.StubMaxSize handling
    so the "code budget" is separate from the "scratch budget".
 6. Re-run the 8-seed E2E gate — should be byte-perfect.
+
+---
+
+## C3-stage-2 RESOLVED (2026-05-09) — v0.66.0
+
+**Shipping fix:** scratch-buffer-in-stub-segment (option 1 from attempt 4).
+
+Production code now:
+- `transform/plan.go`: new `Plan.StubScratchSize uint32` field. Stub segment
+  memsz = StubMaxSize + StubScratchSize.
+- `transform/elf.go`: stub PT_LOAD `p_memsz = StubMaxSize + StubScratchSize`,
+  `p_filesz = StubMaxSize`. Kernel zero-fills scratch BSS region.
+- `transform/pe.go`: stub section `VirtualSize = StubMaxSize + StubScratchSize`,
+  `SizeOfRawData = StubMaxSize`.
+- `stubgen/stubgen.go`: when `Compress=true`, sets `plan.StubScratchSize =
+  originalTextSize`, computes `scratchDisp = (StubRVA + StubMaxSize) − TextRVA`,
+  passes to stage1 via `EmitOptions.OriginalSize` + `ScratchDispFromText`.
+- `stubgen/stage1/stub.go`: Compress branch now emits non-in-place LZ4:
+  - LZ4 setup: `MOV RAX,R15; LEA RBX,[R15+ScratchDispFromText]; MOV RCX,N`
+  - Inline LZ4 inflate (asm preserves RBX across via push/pop)
+  - Memcpy back: `CLD; MOV RSI,RBX; MOV RDI,R15; MOV RCX,OriginalSize; REP MOVSB`
+  No backward memmove, no in-place gymnastics.
+- `EmitOptions.MemSize` retained for back-compat (no longer consulted).
+- `Plan.TextMemSize` retained for diagnostic; .text memsz no longer enlarged.
+
+**Result:** 8/8 seeds in `TestPackBinary_LinuxELF_MultiSeed_WithCompress`
+exit 0 with "hello from packer" in stdout. Default suite + full E2E suite
+both green.
+
+**Stub size cost:** ~30 bytes additional (LZ4 setup MOV+LEA+MOV +
+EmitLZ4InflateInline + memcpy CLD+MOV×3+REP MOVSB). Well within the
+8 KB `StubMaxSize` budget for Compress=true.
+
+**Disk size impact:** stub section `SizeOfRawData/p_filesz` unchanged
+(scratch lives in BSS). Compressed payload occupies the .text section's
+file region (filesz = compressedSize, much smaller than originalSize).
+
+**Cross-platform:** works for both ELF and PE — both formats let us
+freely size the appended stub section's memsz vs filesz. No syscalls.

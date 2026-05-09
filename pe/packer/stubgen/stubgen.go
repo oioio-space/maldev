@@ -155,34 +155,39 @@ func Generate(opts Options) ([]byte, []byte, error) {
 		compressed := dst[:n]
 		compressedSize = uint32(n)
 
-		// LZ4 in-place inflate requires src to lead dst by ≥ (M − N) +
-		// intra-sequence drift. Since ELF/PE put file content at the START
-		// of a segment, we ship only the compressed bytes on disk
-		// (filesz = N) and rely on memsz > filesz BSS slack to provide the
-		// trailing zero region. The stub then runs a backward rep-movsb at
-		// runtime to relocate the SGN-decoded compressed bytes from
-		// [textBase, textBase+N) to [textBase+memsz-N, textBase+memsz)
-		// before calling LZ4 inflate.
+		// LZ4 inflate runs NON-IN-PLACE: src = R15 (compressed bytes after
+		// SGN unwrap), dst = scratch buffer in the stub segment's BSS slack.
+		// After inflate the stub memcpys plaintext back to R15.
 		//
-		// memsz = originalTextSize + intraSeqMargin (LZ4 spec bound).
-		// filesz = compressedSize.
-		intraSeqMargin := uint32(originalTextSize>>8) + 32
-		if intraSeqMargin < 64 {
-			intraSeqMargin = 64
+		// Avoids the .text segment-grow blocker (Go static-PIE packs PT_LOADs
+		// tightly — .text can't grow past the next read-only segment). The
+		// stub segment is appended by us; its memsz is freely sized.
+		//
+		// On disk: filesz = compressedSize (only compressed bytes ship).
+		// Stub segment: memsz = StubMaxSize + originalTextSize, filesz =
+		//               StubMaxSize (kernel zero-fills the scratch region).
+		// Scratch RVA = StubRVA + StubMaxSize.
+		safetyMargin = uint32(originalTextSize>>8) + 32 // informational only
+		if safetyMargin < 64 {
+			safetyMargin = 64
 		}
-		safetyMargin = intraSeqMargin
 
-		// On-disk payload is just the compressed bytes; the leading zero
-		// region in memory is BSS slack (kernel zero-fills [filesz, memsz)).
 		encodePayload = compressed
 
 		plan.TextSize = compressedSize
-		plan.TextMemSize = originalTextSize + intraSeqMargin
+		plan.TextMemSize = compressedSize // no longer needs slack — scratch lives in stub seg
+		plan.StubScratchSize = originalTextSize
+
+		// ScratchDispFromText = (StubRVA + StubMaxSize) − TextRVA.
+		// int32 fits any practical Go binary; PlanPE/PlanELF cap at 32-bit RVAs.
+		scratchRVA := plan.StubRVA + plan.StubMaxSize
+		scratchDisp := int32(scratchRVA) - int32(plan.TextRVA)
 
 		emitOpts.Compress = true
 		emitOpts.SafetyMargin = safetyMargin
 		emitOpts.CompressedSize = compressedSize
-		emitOpts.MemSize = plan.TextMemSize
+		emitOpts.OriginalSize = originalTextSize
+		emitOpts.ScratchDispFromText = scratchDisp
 	} else {
 		// Non-compress path: encode the raw .text bytes directly.
 		encodePayload = originalTextBytes

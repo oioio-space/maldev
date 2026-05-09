@@ -265,7 +265,12 @@ func InjectStubELF(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, e
 	binary.LittleEndian.PutUint64(out[newPhdrOff+elfPhdrVAddrOffset:newPhdrOff+elfPhdrVAddrOffset+8], uint64(plan.StubRVA))
 	binary.LittleEndian.PutUint64(out[newPhdrOff+elfPhdrPAddrOffset:newPhdrOff+elfPhdrPAddrOffset+8], uint64(plan.StubRVA)) // p_paddr = vaddr
 	binary.LittleEndian.PutUint64(out[newPhdrOff+elfPhdrFileSzOffset:newPhdrOff+elfPhdrFileSzOffset+8], uint64(plan.StubMaxSize))
-	binary.LittleEndian.PutUint64(out[newPhdrOff+elfPhdrMemSzOffset:newPhdrOff+elfPhdrMemSzOffset+8], uint64(plan.StubMaxSize))
+	// Stub p_memsz extends past p_filesz by StubScratchSize so the C3
+	// compression decompression buffer lives in BSS slack of THIS segment
+	// (kernel zero-fills [filesz, memsz)). We control this segment's memsz
+	// freely — unlike the .text PT_LOAD which is bounded by the next
+	// segment's vaddr.
+	binary.LittleEndian.PutUint64(out[newPhdrOff+elfPhdrMemSzOffset:newPhdrOff+elfPhdrMemSzOffset+8], uint64(plan.StubMaxSize)+uint64(plan.StubScratchSize))
 	binary.LittleEndian.PutUint64(out[newPhdrOff+elfPhdrAlignOffset:newPhdrOff+elfPhdrAlignOffset+8], elfPageSize)
 
 	// 4. Bump e_phnum to include the new stub phdr.
