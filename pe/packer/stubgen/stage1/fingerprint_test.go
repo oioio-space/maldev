@@ -163,6 +163,46 @@ func TestEmitVendorCompare_BytesShape(t *testing.T) {
 // bundle E2E (a packed binary running standalone, no Go test harness)
 // in C6-P4.
 
+// TestEmitBuildRangeCheck_BytesShape pins the 34-byte sequence. The
+// runtime contract (AL = 1 on pass, 0 on fail; clobbers R10) is
+// exercised via the C6-P4 packed-binary E2E rather than mmap'd here
+// because Go's runtime trips on async preemption inside foreign asm
+// (see C6-P3 EmitVendorCompare commit message for details).
+func TestEmitBuildRangeCheck_BytesShape(t *testing.T) {
+	b, err := amd64.New()
+	if err != nil {
+		t.Fatalf("amd64.New: %v", err)
+	}
+	if err := stage1.EmitBuildRangeCheck(b); err != nil {
+		t.Fatalf("EmitBuildRangeCheck: %v", err)
+	}
+	out, err := b.Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	want := []byte{
+		0xb0, 0x01,
+		0x44, 0x8b, 0x57, 0x10,
+		0x45, 0x85, 0xd2,
+		0x74, 0x06,
+		0x41, 0x39, 0xc2,
+		0x76, 0x02,
+		0xb0, 0x00,
+		0x44, 0x8b, 0x57, 0x14,
+		0x45, 0x85, 0xd2,
+		0x74, 0x06,
+		0x41, 0x39, 0xc2,
+		0x73, 0x02,
+		0xb0, 0x00,
+	}
+	if !bytes.Equal(out, want) {
+		t.Errorf("EmitBuildRangeCheck bytes = %x\nwant                       %x", out, want)
+	}
+	if got := len(out); got != 34 {
+		t.Errorf("EmitBuildRangeCheck length = %d, want 34", got)
+	}
+}
+
 // TestEmitPEBBuildRead_BytesShape pins the encoding. Runtime exercise
 // requires a Windows VM (PEB only exists on Windows x64) and is covered
 // by the bundle E2E in a later phase.

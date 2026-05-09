@@ -135,6 +135,71 @@ func EmitVendorCompare(b *amd64.Builder) error {
 	return nil
 }
 
+// buildRangeBytes is the 34-byte encoding for [EmitBuildRangeCheck].
+// Computes:
+//
+//	AL = ((BuildMin == 0) || (host >= BuildMin))
+//	     && ((BuildMax == 0) || (host <= BuildMax))
+//
+// Wire-format references (per spec §3.3):
+//
+//	[RDI + 16] = BuildMin (DWORD, little-endian; 0 = no lower bound)
+//	[RDI + 20] = BuildMax (DWORD, little-endian; 0 = no upper bound)
+//
+// Layout:
+//  1. AL = 1 (default pass).
+//  2. Load BuildMin → R10. If non-zero and host < min, AL = 0.
+//  3. Load BuildMax → R10. If non-zero and host > max, AL = 0.
+//
+// `cmp r10d, eax` followed by `jbe +N` jumps when r10d <= eax (i.e.
+// BuildMin <= host → in range). `jae +N` after the second cmp jumps
+// when r10d >= eax (BuildMax >= host → in range). Both branches skip
+// the AL=0 reset; falls through with AL unchanged.
+var buildRangeBytes = [...]byte{
+	0xb0, 0x01, //             mov al, 1                  (default pass)
+	0x44, 0x8b, 0x57, 0x10, // mov r10d, [rdi+16]         BuildMin
+	0x45, 0x85, 0xd2, //       test r10d, r10d
+	0x74, 0x06, //             je +6 → skip_min
+	0x41, 0x39, 0xc2, //       cmp r10d, eax              (min vs host)
+	0x76, 0x02, //             jbe +2 → skip_min          (min <= host → ok)
+	0xb0, 0x00, //             mov al, 0                  (host < min → fail)
+	// skip_min:
+	0x44, 0x8b, 0x57, 0x14, // mov r10d, [rdi+20]         BuildMax
+	0x45, 0x85, 0xd2, //       test r10d, r10d
+	0x74, 0x06, //             je +6 → done
+	0x41, 0x39, 0xc2, //       cmp r10d, eax              (max vs host)
+	0x73, 0x02, //             jae +2 → done              (max >= host → ok)
+	0xb0, 0x00, //             mov al, 0                  (host > max → fail)
+	// done:
+}
+
+// EmitBuildRangeCheck appends the 34-byte build-range check to b. The
+// emitted asm reads BuildMin from `[RDI + 16]` and BuildMax from
+// `[RDI + 20]`, both DWORDs, and compares them against EAX (the host
+// build number).
+//
+// Result: AL = 1 on pass (in range or unbounded), 0 on fail. The
+// caller composes this with [EmitVendorCompare] by ANDing the two
+// result flags, or branches via TEST AL,AL + Jcc.
+//
+// Register contract:
+//   - Input:  RDI = FingerprintEntry pointer, EAX = host build
+//   - Output: AL = 1 if the host build matches the entry range
+//   - Clobbers: R10, AL (caller-saved per Go ABI)
+//
+// Encoding pinned via [TestEmitBuildRangeCheck_BytesShape]; runtime
+// exercise via the C6-P4 packed-binary E2E.
+//
+// Phase P3 helper. The full fingerprint evaluator loop (which calls
+// this + EmitVendorCompare per entry, applies Negate, picks the first
+// match) ships in a follow-up commit.
+func EmitBuildRangeCheck(b *amd64.Builder) error {
+	if err := b.RawBytes(buildRangeBytes[:]); err != nil {
+		return fmt.Errorf("stage1: EmitBuildRangeCheck: %w", err)
+	}
+	return nil
+}
+
 // EmitPEBBuildRead appends the 15-byte PEB-OSBuildNumber reader to b.
 //
 // Register contract:
