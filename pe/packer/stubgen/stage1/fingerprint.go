@@ -19,7 +19,7 @@ import (
 // 12 contiguous bytes at [RDI]. Caller passes the destination pointer
 // in RDI and gets all 12 bytes written.
 //
-// Encoding (15 bytes):
+// Encoding (12 bytes):
 //
 //	xor eax, eax            ; 31 c0
 //	cpuid                   ; 0f a2
@@ -42,14 +42,10 @@ var cpuidVendorBytes = [...]byte{
 // returns it in EAX. The PEB is fetched from the GS segment register at
 // offset 0x60 (x64 NT convention).
 //
-// Encoding (10 bytes):
+// Encoding (15 bytes):
 //
 //	mov rax, gs:[0x60]      ; 65 48 8b 04 25 60 00 00 00
 //	mov eax, [rax + 0x120]  ; 8b 80 20 01 00 00
-//
-// Wait: gs-relative MOV with absolute disp encodes longer; using
-// gs:[disp32] is the standard form. Final encoding is 16 bytes (see
-// EmitPEBBuildRead doc).
 //
 // PEB offsets (Win10+, x64) confirmed against ReactOS + WinDbg dumps:
 //
@@ -61,7 +57,7 @@ var pebBuildBytes = [...]byte{
 	0x8b, 0x80, 0x20, 0x01, 0x00, 0x00, // mov eax, [rax+0x120]
 }
 
-// EmitCPUIDVendorRead appends the 13-byte CPUID-vendor reader to b.
+// EmitCPUIDVendorRead appends the 12-byte CPUID-vendor reader to b.
 //
 // Register contract:
 //   - Input:  RDI = 12-byte destination buffer (writable)
@@ -91,7 +87,7 @@ func EmitCPUIDVendorRead(b *amd64.Builder) error {
 // passes via JNE). On mismatch ZF=0 and execution falls through to the
 // caller; on match ZF=1.
 //
-// Encoding (15 bytes):
+// Encoding (16 bytes):
 //
 //	mov   r10, [rdi]            ; 4c 8b 17        — load entry-vendor low qword
 //	cmp   r10, [rsi]            ; 4c 3b 16        — vs host
@@ -188,11 +184,8 @@ var buildRangeBytes = [...]byte{
 //   - Clobbers: R10, AL (caller-saved per Go ABI)
 //
 // Encoding pinned via [TestEmitBuildRangeCheck_BytesShape]; runtime
-// exercise via the C6-P4 packed-binary E2E.
-//
-// Phase P3 helper. The full fingerprint evaluator loop (which calls
-// this + EmitVendorCompare per entry, applies Negate, picks the first
-// match) ships in a follow-up commit.
+// exercise via the bundle E2E (a packed binary running standalone, no
+// Go test harness).
 func EmitBuildRangeCheck(b *amd64.Builder) error {
 	if err := b.RawBytes(buildRangeBytes[:]); err != nil {
 		return fmt.Errorf("stage1: EmitBuildRangeCheck: %w", err)

@@ -14,15 +14,9 @@ import (
 // no trampoline, no GC traps. The runtime stub-side asm
 // ([stage1.EmitCPUIDVendorRead]) emits the same byte sequence inline
 // for self-contained binaries that can't link to the recon package.
-//
-// Returns the zero value if `antivm.CPUVendor()` is the empty string
-// (defensive — should not happen on supported amd64 platforms).
 func HostCPUIDVendor() [12]byte {
-	s := antivm.CPUVendor()
 	var out [12]byte
-	if len(s) == 12 {
-		copy(out[:], s)
-	}
+	copy(out[:], antivm.CPUVendor())
 	return out
 }
 

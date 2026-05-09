@@ -40,7 +40,7 @@ func TestPackBinaryBundle_HeaderLayout(t *testing.T) {
 		[]packer.BundlePayload{{Binary: []byte("hello")}},
 		packer.BundleOptions{
 			FallbackBehaviour: packer.BundleFallbackCrash,
-			CipherKey:         bytes.Repeat([]byte{0xAA}, 16),
+			FixedKey:         bytes.Repeat([]byte{0xAA}, 16),
 		},
 	)
 	if err != nil {
@@ -87,7 +87,7 @@ func TestPackBinaryBundle_FingerprintRoundTrip(t *testing.T) {
 	}
 	out, err := packer.PackBinaryBundle(
 		[]packer.BundlePayload{{Binary: []byte("p"), Fingerprint: pred}},
-		packer.BundleOptions{CipherKey: make([]byte, 16)},
+		packer.BundleOptions{FixedKey: make([]byte, 16)},
 	)
 	if err != nil {
 		t.Fatalf("PackBinaryBundle: %v", err)
@@ -147,7 +147,7 @@ func TestUnpackBundle_RoundTripsTwoPayloads(t *testing.T) {
 func TestUnpackBundle_RejectsBadInputs(t *testing.T) {
 	good, err := packer.PackBinaryBundle(
 		[]packer.BundlePayload{{Binary: []byte("x")}},
-		packer.BundleOptions{CipherKey: make([]byte, 16)},
+		packer.BundleOptions{FixedKey: make([]byte, 16)},
 	)
 	if err != nil {
 		t.Fatalf("PackBinaryBundle: %v", err)
@@ -256,7 +256,7 @@ func TestInspectBundle_RoundTripsHeaderAndEntries(t *testing.T) {
 func TestInspectBundle_RejectsBadInputs(t *testing.T) {
 	good, err := packer.PackBinaryBundle(
 		[]packer.BundlePayload{{Binary: []byte("x")}},
-		packer.BundleOptions{CipherKey: make([]byte, 16)},
+		packer.BundleOptions{FixedKey: make([]byte, 16)},
 	)
 	if err != nil {
 		t.Fatalf("PackBinaryBundle: %v", err)

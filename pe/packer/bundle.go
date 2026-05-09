@@ -108,11 +108,13 @@ type BundlePayload struct {
 type BundleOptions struct {
 	// FallbackBehaviour selects the action when no predicate matches.
 	FallbackBehaviour BundleFallbackBehaviour
-	// CipherKey is the per-payload XOR key. When nil, a fresh random
-	// 16-byte key is generated for each payload. The same key is reused
-	// across payloads when caller-supplied (test determinism only — in
-	// production let it stay nil for per-payload keys).
-	CipherKey []byte
+	// FixedKey, when non-nil, is the per-payload XOR key reused across
+	// every payload — defeats the per-payload-secrecy property the spec
+	// advertises and exists strictly for test determinism / reproducible
+	// pack output. Production callers MUST leave this nil so each
+	// payload gets a fresh random 16-byte key. Field is named to make
+	// the call site self-explain its intent.
+	FixedKey []byte
 }
 
 // Sentinels surfaced by [PackBinaryBundle].
@@ -133,10 +135,11 @@ var (
 )
 
 // PackBinaryBundle packs N payload binaries into a single multi-target
-// bundle blob. Phase P1 (v0.67.0-alpha.1): wire-format-only — the bundle
-// is a flat byte slice in spec layout, with each payload XOR-encrypted
-// with its own key. The stub-side fingerprint evaluator and PE/ELF
-// container injection ship in subsequent phases.
+// bundle blob. The bundle is a flat byte slice in spec layout, with
+// each payload XOR-encrypted under an independent random 16-byte key.
+// The runtime stub-side fingerprint evaluator and PE/ELF container
+// injection live in `pe/packer/stubgen/stage1` and `pe/packer/transform`
+// respectively (see [Limitations] for which pieces are shipping).
 //
 // Returns the serialised bundle bytes. The caller is responsible for
 // wrapping the bundle in a PE/ELF container — see [PackBinary] for the
@@ -144,7 +147,7 @@ var (
 // multi-payload entry point.
 //
 // Errors: [ErrEmptyBundle], [ErrBundleTooLarge], plus crypto/rand
-// failures wrapping when CipherKey is nil.
+// failures wrapping when FixedKey is nil.
 func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, error) {
 	if len(payloads) == 0 {
 		return nil, ErrEmptyBundle
@@ -166,11 +169,11 @@ func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, err
 		plain uint32
 	}
 	encs := make([]encrypted, count)
-	cursor := dataOff
+	totalSize := dataOff
 	for i, p := range payloads {
 		var key [16]byte
-		if opts.CipherKey != nil {
-			copy(key[:], opts.CipherKey)
+		if opts.FixedKey != nil {
+			copy(key[:], opts.FixedKey)
 		} else if _, err := rand.Read(key[:]); err != nil {
 			return nil, fmt.Errorf("packer: bundle key %d: %w", i, err)
 		}
@@ -179,10 +182,12 @@ func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, err
 			ct[j] = p.Binary[j] ^ key[j%16]
 		}
 		encs[i] = encrypted{bytes: ct, key: key, plain: uint32(len(p.Binary))}
-		cursor += uint32(len(ct))
+		totalSize += uint32(len(ct))
 	}
 
-	out := make([]byte, dataOff)
+	// Pre-size the output: header + tables + concatenated payload data.
+	// Avoids the (re)allocation churn of the previous append-in-loop form.
+	out := make([]byte, totalSize)
 
 	// BundleHeader (32 bytes).
 	binary.LittleEndian.PutUint32(out[0:4], BundleMagic)
@@ -209,7 +214,7 @@ func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, err
 		// Reserved2 [off+32:off+48] left zero.
 	}
 
-	// PayloadEntry × N.
+	// PayloadEntry × N + EncryptedPayloadData (in one pass).
 	dataCursor := dataOff
 	for i, e := range encs {
 		off := int(plTableOff) + i*BundlePayloadEntrySize
@@ -219,12 +224,8 @@ func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, err
 		out[off+12] = 1 // CipherType = XOR-rolling (16-byte key)
 		// off+13..off+16 reserved
 		copy(out[off+16:off+32], e.key[:])
+		copy(out[dataCursor:], e.bytes)
 		dataCursor += uint32(len(e.bytes))
-	}
-
-	// EncryptedPayloadData (concatenated).
-	for _, e := range encs {
-		out = append(out, e.bytes...)
 	}
 
 	return out, nil
@@ -346,21 +347,20 @@ func InspectBundle(bundle []byte) (BundleInfo, error) {
 //
 // On no match, the caller applies FallbackBehaviour from the header.
 //
-// The asm evaluator emitted in C6-P3 mirrors this logic byte-for-byte
-// (excepting the feature-mask branch). Tests in bundle_test.go assert
-// SelectPayload and the asm produce identical indices for matched
-// vendor/build combinations.
+// The runtime stub-side asm evaluator (in `pe/packer/stubgen/stage1`)
+// mirrors this logic byte-for-byte (excepting the feature-mask branch
+// not yet wired in either path).
 func SelectPayload(bundle []byte, hostVendor [12]byte, hostBuild uint32) (int, error) {
 	if len(bundle) < BundleHeaderSize {
-		return -1, fmt.Errorf("packer: bundle truncated (%d < %d)", len(bundle), BundleHeaderSize)
+		return -1, fmt.Errorf("%w: %d < %d", ErrBundleTruncated, len(bundle), BundleHeaderSize)
 	}
 	if magic := binary.LittleEndian.Uint32(bundle[0:4]); magic != BundleMagic {
-		return -1, fmt.Errorf("packer: bundle magic %#x != %#x", magic, BundleMagic)
+		return -1, fmt.Errorf("%w: %#x != %#x", ErrBundleBadMagic, magic, BundleMagic)
 	}
 	count := int(binary.LittleEndian.Uint16(bundle[6:8]))
 	fpTableOff := int(binary.LittleEndian.Uint32(bundle[8:12]))
 	if fpTableOff+count*BundleFingerprintEntrySize > len(bundle) {
-		return -1, fmt.Errorf("packer: fingerprint table outside blob")
+		return -1, fmt.Errorf("%w: fingerprint table outside blob", ErrBundleOutOfRange)
 	}
 
 	for i := 0; i < count; i++ {
@@ -419,15 +419,15 @@ func evaluateEntry(entry []byte, hostVendor [12]byte, hostBuild uint32) bool {
 // bundle blob, locates the payload at index `idx`, and decrypts it using
 // the on-disk key.
 //
-// This is a debugging / build-host helper. The runtime stub (shipped in
-// later phases) re-implements the same logic in asm and never exposes
-// keys to memory unless its predicate matched.
+// This is a debugging / build-host helper. The runtime stub
+// re-implements the same logic in asm and never exposes keys to memory
+// unless its predicate matched.
 func UnpackBundle(bundle []byte, idx int) ([]byte, error) {
 	if len(bundle) < BundleHeaderSize {
-		return nil, fmt.Errorf("packer: bundle truncated (%d < header %d)", len(bundle), BundleHeaderSize)
+		return nil, fmt.Errorf("%w: %d < header %d", ErrBundleTruncated, len(bundle), BundleHeaderSize)
 	}
 	if magic := binary.LittleEndian.Uint32(bundle[0:4]); magic != BundleMagic {
-		return nil, fmt.Errorf("packer: bundle magic %#x != %#x", magic, BundleMagic)
+		return nil, fmt.Errorf("%w: %#x != %#x", ErrBundleBadMagic, magic, BundleMagic)
 	}
 	count := binary.LittleEndian.Uint16(bundle[6:8])
 	if idx < 0 || idx >= int(count) {
@@ -436,12 +436,12 @@ func UnpackBundle(bundle []byte, idx int) ([]byte, error) {
 	plTableOff := binary.LittleEndian.Uint32(bundle[12:16])
 	entryOff := int(plTableOff) + idx*BundlePayloadEntrySize
 	if entryOff+BundlePayloadEntrySize > len(bundle) {
-		return nil, fmt.Errorf("packer: bundle PayloadEntry %d outside blob", idx)
+		return nil, fmt.Errorf("%w: PayloadEntry %d outside blob", ErrBundleOutOfRange, idx)
 	}
 	dataRVA := binary.LittleEndian.Uint32(bundle[entryOff : entryOff+4])
 	dataSize := binary.LittleEndian.Uint32(bundle[entryOff+4 : entryOff+8])
 	if int(dataRVA)+int(dataSize) > len(bundle) {
-		return nil, fmt.Errorf("packer: bundle payload %d data outside blob", idx)
+		return nil, fmt.Errorf("%w: payload %d data outside blob", ErrBundleOutOfRange, idx)
 	}
 	var key [16]byte
 	copy(key[:], bundle[entryOff+16:entryOff+32])
