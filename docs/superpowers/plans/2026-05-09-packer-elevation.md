@@ -43,12 +43,13 @@ linux/windows/darwin amd64.
 | 1 — Reflective launcher | 1.2 Add reflective dispatch (`MALDEV_REFLECTIVE=1`) | ✅ | (this commit) | — |
 | 1 — Reflective launcher | 1.3 E2E test (linux) | ✅ | (this commit) | — |
 | 1 — Reflective launcher | 1.4 Tag v0.68.0 | ⏳ next | | |
-| 2 — All-asm stub | 2.1 Bundle evaluator loop asm | ⏳ | | |
-| 2 — All-asm stub | 2.2 Minimal ELF64 writer | ⏳ | | |
-| 2 — All-asm stub | 2.3 Minimal PE32+ writer | ⏳ | | |
-| 2 — All-asm stub | 2.4 Bundle stub container glue | ⏳ | | |
-| 2 — All-asm stub | 2.5 E2E linux + size assertion | ⏳ | | |
-| 2 — All-asm stub | 2.6 Tag v0.69.0 | ⏳ | | |
+| 2 — All-asm stub | 2.1 Minimal ELF64 writer | ✅ | (this commit) | — |
+| 2 — All-asm stub | 2.2 Bundle stub asm — always-idx-0 baseline | ⏳ next | | |
+| 2 — All-asm stub | 2.3 Bundle stub asm — full evaluator loop | ⏳ | | |
+| 2 — All-asm stub | 2.4 Bundle stub container glue (`WrapBundleAsExecutable`) | ⏳ | | |
+| 2 — All-asm stub | 2.5 E2E linux + size assertion (target < 4 KiB) | ⏳ | | |
+| 2 — All-asm stub | 2.6 Minimal PE32+ writer (Windows symmetry) | ⏳ | | |
+| 2 — All-asm stub | 2.7 Tag v0.69.0 | ⏳ | | |
 | 3 — packer-vis | 3.1 Entropy heatmap rendering | ⏳ | | |
 | 3 — packer-vis | 3.2 SGN round byte-diff display | ⏳ | | |
 | 3 — packer-vis | 3.3 Bundle wire-format viz | ⏳ | | |
