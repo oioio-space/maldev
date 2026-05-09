@@ -541,3 +541,59 @@ interaction, memory ordering with concurrent GC, etc.).
 Run with `go test -tags='linux maldev_packer_lz4_diagnose' ...` — expects
 SIGSEGV in step 6, kills the test process. Useful for the next debugging
 session as a reproduction harness.
+
+### C3-stage-2 attempt 2 — SGN math ruled out (2026-05-09)
+
+Targeted probe of the SGN substitution path with seed=1, rounds=1 (the exact
+config the failing diagnostic test uses):
+
+```
+Round{Key=0xa2, KeyReg=R13, ByteReg=R11, SrcReg=R12, CntReg=RCX}
+Subst chosen: XorSubsts[2] = AddCpl
+emitDecoderAddCpl emits: 0x49 0x83 0xc5 0x5e  (ADD r13, +0x5e signed-imm8)
+
+Math:
+  encodeAddCpl(b, key=0xa2) = (b + 0xa2) mod 256
+  decodeAddCpl(b, key=0xa2) = (b - 0xa2) mod 256
+  asm ADD r13, 0x5e (signed) effectively does (b + 0x5e) mod 256
+                    = (b + (256 - 0xa2)) mod 256
+                    = (b - 0xa2) mod 256                         ✓ matches Go-side decode
+
+Go-side round-trip (encode then decode):
+  byte=0x00 → encode=0xa2 → decode=0x00 ✓
+  byte=0x42 → encode=0xe4 → decode=0x42 ✓
+  byte=0xff → encode=0xa1 → decode=0xff ✓
+```
+
+**SGN encode/decode is byte-perfect.** The SGN asm at runtime emits exactly the
+math-equivalent of Go's `Subst.Decode`. Both produce identical output for the
+same input. This eliminates the "asm SGN vs Go-side decode divergence"
+hypothesis.
+
+**Pivoted hypothesis (not yet confirmed):** the LZ4 inflate asm decoder
+itself has a context-sensitive bug — works in `go run` standalones across all
+sizes (65 KiB - 498 KiB), but crashes inside `go test`'s concurrent GC scanner
+when the goroutine that called the decoder later survives long enough for a
+GC sweep. The crash signature (`runtime.scanstack` derefing a small address
+like `0x118`) suggests the scanner is reading a Go pointer slot that the asm
+clobbered.
+
+The push/pop save of RBX + R12 (commit `3fa750e`) didn't fix the chain test —
+suggesting either the saves are in a frame the scanner doesn't trust, OR the
+real bug is unrelated to RBX/R12. Further investigation needed.
+
+**Two debugging avenues left untried:**
+
+1. Rewrite the LZ4 decoder to use ONLY Go caller-saved registers (RAX, RCX,
+   RDX, RDI, RSI, R8, R9, R10, R11). Avoids any callee-saved-register
+   coordination with Go's stack scanner.
+
+2. Inspect the disassembled stub bytes in the actual packed binary and
+   confirm `r10/r11` calculation matches expected at runtime. The earlier
+   GDB session showed `r10` (src_end) at a value 513 bytes shy of expected
+   (`safety_margin + compressed_size`) — that off-by-513 was unexplained at
+   the time and may be the actual bug.
+
+The diagnostic test `lz4_inflate_sgn_chain_linux_test.go` (build-gated
+`maldev_packer_lz4_diagnose`) is a faithful reproduction harness for the
+crash. Default suite stays green.
