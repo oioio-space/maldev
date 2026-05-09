@@ -38,8 +38,9 @@ type BundleProfile struct {
 // no -secret flag is wire-compatible with the public spec.
 //
 // A 16+ byte secret is recommended (operator's per-deployment GUID,
-// build timestamp + nonce, etc.). The output is 4 + 8 = 12 derived
-// bytes; the SHA-256 collision space is more than sufficient.
+// build timestamp + nonce, etc.). The output is 4 + 8 + 2 + 8 = 22
+// derived bytes (Magic + FooterMagic + Version + Vaddr); the
+// SHA-256 collision space is more than sufficient.
 func DeriveBundleProfile(secret []byte) BundleProfile {
 	if len(secret) == 0 {
 		return BundleProfile{
@@ -359,13 +360,21 @@ type BundleEntryInfo struct {
 // callers can compare against [ErrBundleTruncated] /
 // [ErrBundleBadMagic] / [ErrBundleOutOfRange] to differentiate.
 func InspectBundle(bundle []byte) (BundleInfo, error) {
+	return inspectBundleBody(bundle, BundleMagic)
+}
+
+// inspectBundleBody is the magic-parameterised parse the public
+// [InspectBundle] and [InspectBundleWith] both delegate to. Eliminates
+// the v0.73-era 'clone-and-patch-magic' trick that allocated a full
+// bundle copy on every per-build parse.
+func inspectBundleBody(bundle []byte, expectedMagic uint32) (BundleInfo, error) {
 	var info BundleInfo
 	if len(bundle) < BundleHeaderSize {
 		return info, fmt.Errorf("%w: %d < %d", ErrBundleTruncated, len(bundle), BundleHeaderSize)
 	}
 	info.Magic = binary.LittleEndian.Uint32(bundle[0:4])
-	if info.Magic != BundleMagic {
-		return info, fmt.Errorf("%w: %#x != %#x", ErrBundleBadMagic, info.Magic, BundleMagic)
+	if info.Magic != expectedMagic {
+		return info, fmt.Errorf("%w: %#x != %#x", ErrBundleBadMagic, info.Magic, expectedMagic)
 	}
 	info.Version = binary.LittleEndian.Uint16(bundle[4:6])
 	info.Count = binary.LittleEndian.Uint16(bundle[6:8])
@@ -476,15 +485,7 @@ func ExtractBundleWith(wrapped []byte, profile BundleProfile) ([]byte, error) {
 //
 // Returns a fresh slice; the input launcher slice is not modified.
 func AppendBundle(launcher []byte, bundle []byte) []byte {
-	bundleOff := uint64(len(launcher))
-	out := make([]byte, 0, len(launcher)+len(bundle)+16)
-	out = append(out, launcher...)
-	out = append(out, bundle...)
-	var off [8]byte
-	binary.LittleEndian.PutUint64(off[:], bundleOff)
-	out = append(out, off[:]...)
-	out = append(out, BundleFooterMagic[:]...)
-	return out
+	return AppendBundleWith(launcher, bundle, BundleProfile{})
 }
 
 // ExtractBundle is the inverse of [AppendBundle]: given the full bytes
@@ -496,19 +497,7 @@ func AppendBundle(launcher []byte, bundle []byte) []byte {
 // The returned slice references the input — caller must not mutate it
 // while the bundle is in use.
 func ExtractBundle(wrapped []byte) ([]byte, error) {
-	if len(wrapped) < 16 {
-		return nil, fmt.Errorf("%w: %d < 16-byte footer", ErrBundleTruncated, len(wrapped))
-	}
-	footer := wrapped[len(wrapped)-8:]
-	if !bytes.Equal(footer, BundleFooterMagic[:]) {
-		return nil, fmt.Errorf("%w: footer %q != %q", ErrBundleBadMagic, footer, BundleFooterMagic[:])
-	}
-	bundleOff := binary.LittleEndian.Uint64(wrapped[len(wrapped)-16 : len(wrapped)-8])
-	if bundleOff > uint64(len(wrapped)-16) {
-		return nil, fmt.Errorf("%w: bundleOff %d > footer-start %d",
-			ErrBundleOutOfRange, bundleOff, len(wrapped)-16)
-	}
-	return wrapped[bundleOff : len(wrapped)-16], nil
+	return ExtractBundleWith(wrapped, BundleProfile{})
 }
 
 // resolvedMagic returns the magic the parser should validate against:
@@ -525,56 +514,20 @@ func resolvedMagic(p BundleProfile) uint32 {
 // [InspectBundle]. Validates the magic against `profile.Magic`
 // (canonical default when zero) instead of [BundleMagic].
 func InspectBundleWith(bundle []byte, profile BundleProfile) (BundleInfo, error) {
-	var info BundleInfo
-	if len(bundle) < BundleHeaderSize {
-		return info, fmt.Errorf("%w: %d < %d", ErrBundleTruncated, len(bundle), BundleHeaderSize)
-	}
-	expected := resolvedMagic(profile)
-	if got := binary.LittleEndian.Uint32(bundle[0:4]); got != expected {
-		return info, fmt.Errorf("%w: %#x != %#x", ErrBundleBadMagic, got, expected)
-	}
-	// Past the magic, the rest of the parse is identical to InspectBundle.
-	// Re-parse via the canonical helper after temporarily patching the
-	// magic so we don't duplicate the body.
-	tmp := append([]byte(nil), bundle...)
-	binary.LittleEndian.PutUint32(tmp[0:4], BundleMagic)
-	info, err := InspectBundle(tmp)
-	if err != nil {
-		return info, err
-	}
-	info.Magic = expected
-	return info, nil
+	return inspectBundleBody(bundle, resolvedMagic(profile))
 }
 
 // SelectPayloadWith is the per-build-profile-aware variant of
 // [SelectPayload]. Same matching semantics; only the magic-validation
 // gate differs.
 func SelectPayloadWith(bundle []byte, profile BundleProfile, hostVendor [12]byte, hostBuild uint32) (int, error) {
-	if len(bundle) < BundleHeaderSize {
-		return -1, fmt.Errorf("%w: %d < %d", ErrBundleTruncated, len(bundle), BundleHeaderSize)
-	}
-	expected := resolvedMagic(profile)
-	if got := binary.LittleEndian.Uint32(bundle[0:4]); got != expected {
-		return -1, fmt.Errorf("%w: %#x != %#x", ErrBundleBadMagic, got, expected)
-	}
-	tmp := append([]byte(nil), bundle...)
-	binary.LittleEndian.PutUint32(tmp[0:4], BundleMagic)
-	return SelectPayload(tmp, hostVendor, hostBuild)
+	return selectPayloadBody(bundle, resolvedMagic(profile), hostVendor, hostBuild)
 }
 
 // UnpackBundleWith is the per-build-profile-aware variant of
 // [UnpackBundle].
 func UnpackBundleWith(bundle []byte, idx int, profile BundleProfile) ([]byte, error) {
-	if len(bundle) < BundleHeaderSize {
-		return nil, fmt.Errorf("%w: %d < header %d", ErrBundleTruncated, len(bundle), BundleHeaderSize)
-	}
-	expected := resolvedMagic(profile)
-	if got := binary.LittleEndian.Uint32(bundle[0:4]); got != expected {
-		return nil, fmt.Errorf("%w: %#x != %#x", ErrBundleBadMagic, got, expected)
-	}
-	tmp := append([]byte(nil), bundle...)
-	binary.LittleEndian.PutUint32(tmp[0:4], BundleMagic)
-	return UnpackBundle(tmp, idx)
+	return unpackBundleBody(bundle, idx, resolvedMagic(profile))
 }
 
 // SelectPayload is the pure-Go reference implementation of the bundle
@@ -598,11 +551,18 @@ func UnpackBundleWith(bundle []byte, idx int, profile BundleProfile) ([]byte, er
 // mirrors this logic byte-for-byte (excepting the feature-mask branch
 // not yet wired in either path).
 func SelectPayload(bundle []byte, hostVendor [12]byte, hostBuild uint32) (int, error) {
+	return selectPayloadBody(bundle, BundleMagic, hostVendor, hostBuild)
+}
+
+// selectPayloadBody is the magic-parameterised matcher both
+// [SelectPayload] and [SelectPayloadWith] delegate to. Eliminates the
+// per-build clone-and-patch dance from v0.73.
+func selectPayloadBody(bundle []byte, expectedMagic uint32, hostVendor [12]byte, hostBuild uint32) (int, error) {
 	if len(bundle) < BundleHeaderSize {
 		return -1, fmt.Errorf("%w: %d < %d", ErrBundleTruncated, len(bundle), BundleHeaderSize)
 	}
-	if magic := binary.LittleEndian.Uint32(bundle[0:4]); magic != BundleMagic {
-		return -1, fmt.Errorf("%w: %#x != %#x", ErrBundleBadMagic, magic, BundleMagic)
+	if magic := binary.LittleEndian.Uint32(bundle[0:4]); magic != expectedMagic {
+		return -1, fmt.Errorf("%w: %#x != %#x", ErrBundleBadMagic, magic, expectedMagic)
 	}
 	count := int(binary.LittleEndian.Uint16(bundle[6:8]))
 	fpTableOff := int(binary.LittleEndian.Uint32(bundle[8:12]))
@@ -670,11 +630,18 @@ func evaluateEntry(entry []byte, hostVendor [12]byte, hostBuild uint32) bool {
 // re-implements the same logic in asm and never exposes keys to memory
 // unless its predicate matched.
 func UnpackBundle(bundle []byte, idx int) ([]byte, error) {
+	return unpackBundleBody(bundle, idx, BundleMagic)
+}
+
+// unpackBundleBody is the magic-parameterised decryptor both
+// [UnpackBundle] and [UnpackBundleWith] delegate to. No clone of the
+// bundle blob — for multi-MB bundles this matters.
+func unpackBundleBody(bundle []byte, idx int, expectedMagic uint32) ([]byte, error) {
 	if len(bundle) < BundleHeaderSize {
 		return nil, fmt.Errorf("%w: %d < header %d", ErrBundleTruncated, len(bundle), BundleHeaderSize)
 	}
-	if magic := binary.LittleEndian.Uint32(bundle[0:4]); magic != BundleMagic {
-		return nil, fmt.Errorf("%w: %#x != %#x", ErrBundleBadMagic, magic, BundleMagic)
+	if magic := binary.LittleEndian.Uint32(bundle[0:4]); magic != expectedMagic {
+		return nil, fmt.Errorf("%w: %#x != %#x", ErrBundleBadMagic, magic, expectedMagic)
 	}
 	count := binary.LittleEndian.Uint16(bundle[6:8])
 	if idx < 0 || idx >= int(count) {

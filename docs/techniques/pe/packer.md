@@ -692,6 +692,74 @@ wrapped := packer.AppendBundleWith(launcherBytes, bundle, profile)
 fresh per ship cycle, never reused, stored alongside whatever build
 log records WHICH binaries went WHERE.
 
+## Composability with the rest of maldev
+
+The packer is intentionally narrow — it produces a runnable binary
+from a payload. Operators wanting a richer workflow chain other
+maldev packages around it:
+
+| Hook point | maldev package | What you get |
+|---|---|---|
+| **Pre-pack payload preparation** | [`pe/morph`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/morph) | Section rename / reorder before packing — hides Go pclntab strings the SGN encoder leaks otherwise. |
+| **Pre-pack masquerade** | [`pe/masquerade`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/masquerade) | Authenticode forge + `pe/donors` icon/version-info graft. The packed binary inherits the legitimate-looking shell. |
+| **Stronger payload encryption** | [`crypto/aesgcm`](https://pkg.go.dev/github.com/oioio-space/maldev/crypto), [`crypto/chacha20`](https://pkg.go.dev/github.com/oioio-space/maldev/crypto) | The bundle ships XOR-rolling today; operators with a separate decrypt key can pre-encrypt the payload before bundling and use XOR as a thin obfuscation layer over real AEAD. |
+| **Sandbox bail before payload reveal** | [`recon/antivm.Hypervisor()`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#Hypervisor), [`recon/sandbox`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/sandbox) | Wrap the launcher with a recon prologue — exit cleanly when the host is a known sandbox before any payload byte gets touched. The Go-launcher path can call these directly; the all-asm path would need a sandbox-detect asm primitive (queue-d). |
+| **In-process injection** | [`inject/*`](https://pkg.go.dev/github.com/oioio-space/maldev/inject) | The bundle's payload can BE the shellcode that an operator injects into another process. Pack→bundle→inject = three orthogonal layers. |
+| **Custom matching predicates** | [`hash/apihash`](https://pkg.go.dev/github.com/oioio-space/maldev/hash#APIHash), [`recon/antivm.CPUVendor`](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#CPUVendor) | Operator extends `FingerprintPredicate` with their own host-fingerprint logic; the runtime evaluator (Go launcher) can call any maldev recon helper before deciding to dispatch. |
+| **Persistence after dispatch** | [`persistence/*`](https://pkg.go.dev/github.com/oioio-space/maldev/persistence) | A dispatched payload can install itself via Run/RunOnce / scheduled task / service. The packer is one stage of a larger chain. |
+| **Cleanup after dispatch** | [`cleanup/selfdelete`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/selfdelete), [`cleanup/timestomp`](https://pkg.go.dev/github.com/oioio-space/maldev/cleanup/timestomp) | The wrapped binary can self-delete after its payload finishes — typical operator pattern. |
+
+The `cmd/bundle-launcher` Go-runtime path is where these compose
+naturally — it's pure Go, and any maldev import works at the call
+site of `executePayload`. The all-asm path is intentionally minimal
+(no Go runtime, ~470 B); operators wanting a recon prologue there
+need a corresponding asm primitive (which `pe/packer/stubgen/stage1`
+already houses for CPUID/PEB; sandbox / hypervisor primitives could
+be added the same way).
+
+## Asm tooling — golang-asm vs alternatives
+
+The packer relies on `pe/packer/stubgen/amd64.Builder`, a thin wrapper
+around [`golang-asm`](https://github.com/twitchyliquid64/golang-asm)
+(the same encoder Go's compiler uses internally for its plan9 asm
+sources). `Builder` exposes a small, hand-curated subset of x86-64
+operations (MOV / LEA / XOR / SUB / ADD / MOVZX / MOVB / DEC / POP /
+JMP / JNZ / JE / CALL / RET / NOP / RawBytes / labels). The remaining
+encodings — CMP / TEST / SHL / IMUL / SETZ / multi-byte NOPs — are
+emitted via `RawBytes` with hand-encoded ModRM bytes.
+
+**Why not `mmcloughlin/avo`?** [`avo`](https://github.com/mmcloughlin/avo)
+is a higher-level Go-program-generates-asm DSL: you write idiomatic
+Go that EMITS a `.s` file, which the Go toolchain assembles. It's
+excellent for multi-architecture math kernels (mmcloughlin uses it
+in `chacha20`, `blake2b`, `simd`) where the asm sits in a normal Go
+package consumed via `func DoStuff()` calls.
+
+It's a poor fit for our use case: we don't compile asm into our binary
+at build time — we EMIT raw bytes at PACK time, into a dynamically
+sized stub embedded in someone else's binary. Avo's output goes
+through Go's assembler producing a `.o` linked into the packer
+itself, which is the opposite direction. golang-asm gives us the
+JIT-style "encode bytes into a buffer" API we need.
+
+**Where the hand-encoded bytes hurt.** Several blocks in
+`pe/packer/bundle_stub.go` — the scan loop, vendor compare, decrypt
+loop — are 100-200 byte sequences with rel8 displacements that I
+hand-computed and cross-checked via offset-trace comments. This
+cost real bugs (8 wrong displacements caught in the v0.71 → v0.72
+work). A future refactor could:
+
+1. Extend `amd64.Builder` with the missing CMP / TEST / Jcc-suite /
+   SHL operations so the stub becomes a chain of `b.CMP(...) ;
+   b.JGE(...)` calls with named labels — golang-asm computes the
+   displacements at link time.
+2. Then drop `RawBytes` for everything except the truly raw blocks
+   (CPUID, syscall, cpuid).
+
+That's a bounded ~200-LOC builder extension, but every Jcc call site
+in `bundle_stub.go` would shrink from 5+ commented bytes to one line.
+Tracked as a follow-up; not blocking today's ship.
+
 ## OPSEC & Detection
 
 | Artefact | Where defenders look |
