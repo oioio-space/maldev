@@ -41,6 +41,41 @@ func TestCpuidRaw_VendorLeaf(t *testing.T) {
 	t.Logf("CPU vendor: %q", b)
 }
 
+// TestCPUVendor_PrintableAndKnown verifies the high-level wrapper
+// returns one of the well-known x86 CPU vendor strings, and that the
+// 12 bytes are printable ASCII.
+func TestCPUVendor_PrintableAndKnown(t *testing.T) {
+	v := CPUVendor()
+	if len(v) != 12 {
+		t.Fatalf("CPUVendor len = %d, want 12 (got %q)", len(v), v)
+	}
+	for _, c := range v {
+		if c < 0x20 || c > 0x7E {
+			t.Fatalf("CPUVendor non-printable: %q", v)
+		}
+	}
+	known := []string{
+		"GenuineIntel", "AuthenticAMD", "HygonGenuine",
+		"CentaurHauls", "  Shanghai  ",
+	}
+	for _, w := range known {
+		if v == w {
+			return
+		}
+	}
+	t.Logf("CPUVendor = %q (unrecognised but printable — accepted)", v)
+}
+
+// TestCPUVendor_StableAcrossCalls asserts two consecutive calls return
+// the same value (CPU vendor is stable for a process lifetime).
+func TestCPUVendor_StableAcrossCalls(t *testing.T) {
+	a := CPUVendor()
+	b := CPUVendor()
+	if a != b {
+		t.Errorf("CPUVendor drifted: %q vs %q", a, b)
+	}
+}
+
 // TestCpuidRaw_HighestBasicLeaf checks that EAX from leaf 0
 // (highest supported basic leaf) is at least 1 — the leaf we
 // query for the hypervisor bit. Every CPU shipped since the

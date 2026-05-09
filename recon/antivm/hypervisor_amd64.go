@@ -29,6 +29,33 @@ func HypervisorPresent() bool {
 	return ecx&(1<<31) != 0
 }
 
+// CPUVendor reads the 12-byte ASCII CPU vendor identification string
+// from CPUID leaf 0 (EBX → EDX → ECX, per Intel SDM Vol. 2A) and
+// returns it as a string. Stable across every x86-64 CPU and every
+// hypervisor (the host CPU passes its own vendor through to guests
+// that don't masquerade — VMware-tools "spoof CPUID" is the rare
+// exception, and operators detecting it through this primitive are
+// expected; that's the point).
+//
+// Common values:
+//
+//	"GenuineIntel" — Intel
+//	"AuthenticAMD" — AMD
+//	"CentaurHauls" — VIA / Centaur
+//	"HygonGenuine" — Hygon (AMD licensee, China)
+//
+// Returns the empty string on non-amd64 hosts. Unlike
+// [HypervisorVendor] this leaf is universal — every x86 CPU since the
+// original Pentium implements it.
+func CPUVendor() string {
+	_, ebx, ecx, edx := cpuidRaw(0, 0)
+	var b [12]byte
+	binary.LittleEndian.PutUint32(b[0:4], ebx)
+	binary.LittleEndian.PutUint32(b[4:8], edx)
+	binary.LittleEndian.PutUint32(b[8:12], ecx)
+	return string(b[:])
+}
+
 // HypervisorVendor reads the 12-byte ASCII vendor signature
 // hypervisors expose at `CPUID.40000000h` (EBX:ECX:EDX). Returns
 // the empty string when no hypervisor is present (bit clear), the

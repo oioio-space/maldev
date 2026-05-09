@@ -13,6 +13,11 @@ func HypervisorPresent() bool { return false }
 // builds. See [HypervisorPresent] for the rationale.
 func HypervisorVendor() string { return "" }
 
+// CPUVendor always returns the empty string on non-amd64 builds —
+// CPUID leaf 0 has no portable equivalent. Callers should treat the
+// empty return as "vendor unknown" and skip vendor-keyed branches.
+func CPUVendor() string { return "" }
+
 // HypervisorVendorName lives in hypervisor.go (no build tag) so the
 // friendly-name table is shared with the amd64 build.
 

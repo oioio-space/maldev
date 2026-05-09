@@ -2,24 +2,7 @@
 
 package packer
 
-import (
-	"unsafe"
-
-	"golang.org/x/sys/windows"
-)
-
-// mmapRX allocates a VirtualAlloc'd PAGE_EXECUTE_READWRITE region of
-// at least size bytes. Windows backend mirroring the Linux mmap
-// helper used by the bundle host-introspection asm trampoline.
-func mmapRX(size int) []byte {
-	addr, err := windows.VirtualAlloc(0, uintptr(size),
-		windows.MEM_COMMIT|windows.MEM_RESERVE,
-		windows.PAGE_EXECUTE_READWRITE)
-	if err != nil {
-		panic("packer: VirtualAlloc PAGE_EXECUTE_READWRITE: " + err.Error())
-	}
-	return unsafe.Slice((*byte)(unsafe.Pointer(addr)), size)
-}
+import "golang.org/x/sys/windows"
 
 // hostWinBuild returns the Windows build number via RtlGetVersion. The
 // API is documented to never fail (always STATUS_SUCCESS) and the Go
@@ -38,8 +21,3 @@ func hostWinBuild() uint32 {
 	}
 	return info.BuildNumber
 }
-
-// _ keeps unsafe imported in case future versions of the helper need
-// alignof/offsetof checks against [windows.OsVersionInfoEx]. Avoids a
-// churning import diff each time the OS-info API surface shifts.
-var _ = unsafe.Sizeof(windows.OsVersionInfoEx{})
