@@ -39,10 +39,10 @@ linux/windows/darwin amd64.
 
 | Phase | Stage | Status | Commit | Tag |
 |-------|-------|--------|--------|-----|
-| 1 — Reflective launcher | 1.1 Investigate runtime API surface | ✅ done | 5834d05 | — |
-| 1 — Reflective launcher | 1.2 Add `--reflective` mode | ⏳ next | | |
-| 1 — Reflective launcher | 1.3 E2E test (linux) | ⏳ | | |
-| 1 — Reflective launcher | 1.4 Tag v0.68.0 | ⏳ | | |
+| 1 — Reflective launcher | 1.1 Investigate runtime API surface | ✅ | 5834d05 | — |
+| 1 — Reflective launcher | 1.2 Add reflective dispatch (`MALDEV_REFLECTIVE=1`) | ✅ | (this commit) | — |
+| 1 — Reflective launcher | 1.3 E2E test (linux) | ✅ | (this commit) | — |
+| 1 — Reflective launcher | 1.4 Tag v0.68.0 | ⏳ next | | |
 | 2 — All-asm stub | 2.1 Bundle evaluator loop asm | ⏳ | | |
 | 2 — All-asm stub | 2.2 Minimal ELF64 writer | ⏳ | | |
 | 2 — All-asm stub | 2.3 Minimal PE32+ writer | ⏳ | | |

