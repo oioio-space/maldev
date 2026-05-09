@@ -52,6 +52,37 @@ func build4() []byte {
 	return out
 }
 
+// TestAverageEntropy_KnownInputs pins the windowed-average formula:
+// it should equal entropy256 of the whole input when the input fits
+// in a single 256-byte window, and stay strictly between min and max
+// per-window entropy for multi-window inputs.
+func TestAverageEntropy_KnownInputs(t *testing.T) {
+	if got := averageEntropy([]byte{}); got != 0 {
+		t.Errorf("averageEntropy(empty) = %f, want 0", got)
+	}
+
+	// Single 256-byte uniform window → exactly 8.0.
+	uniform := make([]byte, 256)
+	for i := range uniform {
+		uniform[i] = byte(i)
+	}
+	if got := averageEntropy(uniform); math.Abs(got-8.0) > 0.001 {
+		t.Errorf("averageEntropy(256 uniform) = %f, want 8.0", got)
+	}
+
+	// 1 KiB of zeros → 0.0 across all windows → average 0.0.
+	if got := averageEntropy(bytes.Repeat([]byte{0}, 1024)); got != 0 {
+		t.Errorf("averageEntropy(1 KiB zeros) = %f, want 0", got)
+	}
+
+	// Mix: half zeros, half uniform. Average must be ≈ 4.0
+	// (half windows at 0, half at 8).
+	mix := append(bytes.Repeat([]byte{0}, 256), uniform...)
+	if got := averageEntropy(mix); math.Abs(got-4.0) > 0.01 {
+		t.Errorf("averageEntropy(mix) = %f, want 4.0 ± 0.01", got)
+	}
+}
+
 // TestShadeFor_BoundaryBuckets pins the entropy → shade/color
 // mapping on edge values: anything below 0 clamps to bucket 0
 // (lightest shade, coolest color); anything ≥ 8 clamps to 7

@@ -28,15 +28,20 @@ import (
 const usage = `packer-vis — packer artefact introspection
 
 Usage:
-  packer-vis entropy <file>           Shannon entropy heatmap
-  packer-vis bundle  <bundle.bin>     Bundle wire-format viz
+  packer-vis entropy <file>             Shannon entropy heatmap
+  packer-vis compare <before> <after>   Two heatmaps stacked, with delta
+  packer-vis bundle  <bundle.bin>       Bundle wire-format viz
 
-Entropy heatmap reads <file> in 256-byte windows, computes Shannon
+Entropy heatmap reads each file in 256-byte windows, computes Shannon
 entropy in bits/byte (0 = perfectly redundant, 8 = perfectly random),
-and renders one row of 64 cells per chunk of file. Each cell is a
-Unicode shading character (▁▂▃▄▅▆▇█) plus an ANSI 256-color code:
-cool blue = low entropy (machine code, ASCII), hot red = high
-entropy (compressed / encrypted / random data).
+and renders one row of 64 cells per 16 KiB. Each cell is a Unicode
+shading character (▁▂▃▄▅▆▇█) plus an ANSI 256-color code: cool blue
+= low entropy (machine code, ASCII), hot red = high entropy
+(compressed / encrypted / random).
+
+Compare stacks two heatmaps and prints their average-entropy delta —
+the canonical "see what the packer did" view. Run before+after a
+PackBinary call to watch the .text region flip from blue to red.
 
 Bundle viz dumps a packer.BundleInfo as boxed ASCII art, one row
 per entry, with offset / size annotations.
@@ -54,6 +59,12 @@ func main() {
 			os.Exit(2)
 		}
 		os.Exit(runEntropy(os.Args[2]))
+	case "compare":
+		if len(os.Args) != 4 {
+			fmt.Fprint(os.Stderr, usage)
+			os.Exit(2)
+		}
+		os.Exit(runCompare(os.Args[2], os.Args[3]))
 	case "bundle":
 		if len(os.Args) != 3 {
 			fmt.Fprint(os.Stderr, usage)
@@ -121,14 +132,90 @@ func runEntropy(path string) int {
 		fmt.Fprintln(os.Stderr, "packer-vis entropy:", err)
 		return 1
 	}
+	fmt.Printf("\nfile: %s (%d bytes, avg entropy %.2f bits/byte)\n",
+		path, len(data), averageEntropy(data))
+	fmt.Println("entropy bits/byte — ▁ low (code/ASCII)   █ high (compressed/encrypted)")
+	fmt.Println()
+	renderHeatmap(data)
+	fmt.Println()
+	return 0
+}
+
+// runCompare renders two entropy heatmaps stacked, with file sizes
+// and average-entropy figures printed in the gutter. Pedagogical
+// payload: drop two paths in (e.g. an unpacked binary and its
+// `packer pack` output), see the .text region flip from cool to hot
+// while the file size grows by the stub overhead.
+func runCompare(pathA, pathB string) int {
+	a, err := os.ReadFile(pathA)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "packer-vis compare:", err)
+		return 1
+	}
+	b, err := os.ReadFile(pathB)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "packer-vis compare:", err)
+		return 1
+	}
+
+	avgA := averageEntropy(a)
+	avgB := averageEntropy(b)
+	delta := avgB - avgA
+
+	fmt.Println()
+	fmt.Printf("  \033[1m%s\033[0m  %d bytes  avg entropy %.2f bits/byte\n", pathA, len(a), avgA)
+	renderHeatmap(a)
+	fmt.Println()
+	fmt.Printf("  \033[1m%s\033[0m  %d bytes  avg entropy %.2f bits/byte\n", pathB, len(b), avgB)
+	renderHeatmap(b)
+	fmt.Println()
+
+	sizeDelta := len(b) - len(a)
+	fmt.Printf("  delta:  size %+d bytes  entropy %+.2f bits/byte", sizeDelta, delta)
+	switch {
+	case delta > 1.5:
+		fmt.Print("   \033[31m← strong randomness gain (encryption/compression)\033[0m")
+	case delta > 0.5:
+		fmt.Print("   \033[33m← moderate gain\033[0m")
+	case delta < -0.5:
+		fmt.Print("   \033[36m← gain (after path is more redundant — odd)\033[0m")
+	}
+	fmt.Println()
+	fmt.Println()
+	return 0
+}
+
+// averageEntropy returns the mean Shannon entropy across non-empty
+// 256-byte windows of the input — a single-number proxy for "how
+// random does this file look".
+func averageEntropy(data []byte) float64 {
+	const window = 256
+	if len(data) == 0 {
+		return 0
+	}
+	var sum float64
+	var n int
+	for off := 0; off < len(data); off += window {
+		end := off + window
+		if end > len(data) {
+			end = len(data)
+		}
+		sum += entropy256(data[off:end])
+		n++
+	}
+	if n == 0 {
+		return 0
+	}
+	return sum / float64(n)
+}
+
+// renderHeatmap is the entropy-heatmap rendering loop reused by both
+// `entropy` and `compare`. Outputs one row of 64 cells per 16 KiB of
+// input, prefixed with the file offset.
+func renderHeatmap(data []byte) {
 	const window = 256
 	const cellsPerRow = 64
 	bytesPerRow := window * cellsPerRow
-
-	fmt.Printf("\nfile: %s (%d bytes)\n", path, len(data))
-	fmt.Println("entropy bits/byte — ▁ low (code/ASCII)   █ high (compressed/encrypted)")
-	fmt.Println()
-
 	for off := 0; off < len(data); off += bytesPerRow {
 		end := off + bytesPerRow
 		if end > len(data) {
@@ -146,8 +233,6 @@ func runEntropy(path string) int {
 		}
 		fmt.Println()
 	}
-	fmt.Println()
-	return 0
 }
 
 func runBundleViz(path string) int {
