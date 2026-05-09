@@ -63,6 +63,94 @@ func buildExit42(t *testing.T) []byte {
 	return data
 }
 
+// TestLauncher_E2E_FallbackFirstSelectsIdx0 verifies BundleFallbackFirst:
+// when no predicate matches but FallbackBehaviour=BundleFallbackFirst,
+// the launcher executes payload 0 anyway. We force "no match" by giving
+// the only payload an impossible vendor predicate.
+func TestLauncher_E2E_FallbackFirstSelectsIdx0(t *testing.T) {
+	exit42 := buildExit42(t)
+
+	bogus := [12]byte{'N', 'o', 't', 'A', 'R', 'e', 'a', 'l', 'C', 'P', 'U', '!'}
+	bundle, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{
+			Binary: exit42,
+			Fingerprint: packer.FingerprintPredicate{
+				PredicateType: packer.PTCPUIDVendor,
+				VendorString:  bogus,
+			},
+		}},
+		packer.BundleOptions{FallbackBehaviour: packer.BundleFallbackFirst},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "bundle-launcher")
+	if out, err := exec.Command("go", "build", "-o", launcher,
+		"github.com/oioio-space/maldev/cmd/bundle-launcher").CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v: %s", err, out)
+	}
+	launcherBytes, _ := os.ReadFile(launcher)
+	wrapped := packer.AppendBundle(launcherBytes, bundle)
+	wrappedPath := filepath.Join(dir, "app")
+	if err := os.WriteFile(wrappedPath, wrapped, 0o755); err != nil {
+		t.Fatalf("write wrapped: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = exec.CommandContext(ctx, wrappedPath).Run()
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("exec: %v (not an ExitError)", err)
+	}
+	if got := exitErr.ExitCode(); got != 42 {
+		t.Errorf("FallbackFirst exit code = %d, want 42", got)
+	}
+}
+
+// TestLauncher_E2E_FallbackExitOnNoMatch verifies the default
+// BundleFallbackExit behaviour: no predicate match → silent exit 0,
+// no payload executed.
+func TestLauncher_E2E_FallbackExitOnNoMatch(t *testing.T) {
+	exit42 := buildExit42(t)
+
+	bogus := [12]byte{'N', 'o', 't', 'A', 'R', 'e', 'a', 'l', 'C', 'P', 'U', '!'}
+	bundle, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{
+			Binary: exit42,
+			Fingerprint: packer.FingerprintPredicate{
+				PredicateType: packer.PTCPUIDVendor,
+				VendorString:  bogus,
+			},
+		}},
+		packer.BundleOptions{FallbackBehaviour: packer.BundleFallbackExit},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "bundle-launcher")
+	if out, err := exec.Command("go", "build", "-o", launcher,
+		"github.com/oioio-space/maldev/cmd/bundle-launcher").CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v: %s", err, out)
+	}
+	launcherBytes, _ := os.ReadFile(launcher)
+	wrapped := packer.AppendBundle(launcherBytes, bundle)
+	wrappedPath := filepath.Join(dir, "app")
+	if err := os.WriteFile(wrappedPath, wrapped, 0o755); err != nil {
+		t.Fatalf("write wrapped: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := exec.CommandContext(ctx, wrappedPath).Run(); err != nil {
+		t.Errorf("FallbackExit: expected exit 0, got %v", err)
+	}
+}
+
 // TestLauncher_E2E_WrapAndRun is the C6 ship gate: builds the launcher,
 // packs a bundle around a tiny `exit 42` payload, wraps the bundle into
 // the launcher via packer.AppendBundle, executes the result, asserts

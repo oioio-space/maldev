@@ -64,11 +64,22 @@ func main() {
 		os.Exit(1)
 	}
 	if idx < 0 {
-		// No predicate matched — exit cleanly. The bundle's
-		// FallbackBehaviour bit could escalate this; keep simple for
-		// now (a real-world deployment can wrap MatchBundleHost +
-		// header inspection to honour BundleFallbackCrash etc.).
-		return
+		// Honour the bundle header's FallbackBehaviour field.
+		info, err := packer.InspectBundle(bundle)
+		if err != nil {
+			os.Exit(0)
+		}
+		switch info.FallbackBehaviour {
+		case packer.BundleFallbackFirst:
+			idx = 0
+		case packer.BundleFallbackCrash:
+			// Deliberate fault — surfaces a sandbox alert.
+			var nilPtr *byte
+			_ = *nilPtr
+			return
+		default: // BundleFallbackExit — silent clean exit.
+			return
+		}
 	}
 
 	plain, err := packer.UnpackBundle(bundle, idx)
