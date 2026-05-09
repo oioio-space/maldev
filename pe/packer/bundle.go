@@ -2,11 +2,12 @@ package packer
 
 import (
 	"bytes"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
+
+	"github.com/oioio-space/maldev/random"
 )
 
 // BundleProfile groups the per-build IOCs an operator can override
@@ -257,8 +258,12 @@ func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, err
 		var key [16]byte
 		if opts.FixedKey != nil {
 			copy(key[:], opts.FixedKey)
-		} else if _, err := rand.Read(key[:]); err != nil {
-			return nil, fmt.Errorf("packer: bundle key %d: %w", i, err)
+		} else {
+			b, err := random.Bytes(16)
+			if err != nil {
+				return nil, fmt.Errorf("packer: bundle key %d: %w", i, err)
+			}
+			copy(key[:], b)
 		}
 		ct := make([]byte, len(p.Binary))
 		for j := range p.Binary {

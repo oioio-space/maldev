@@ -1,12 +1,12 @@
 package packer
 
 import (
-	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	mathrand "math/rand"
 
 	"github.com/oioio-space/maldev/pe/packer/transform"
+	"github.com/oioio-space/maldev/random"
 )
 
 // Bundle-as-executable: minimal stub asm + minimal ELF wrapper. The
@@ -377,11 +377,10 @@ func WrapBundleAsExecutableLinux(bundle []byte) ([]byte, error) {
 // pack output (testing, reproducible builds) use
 // [WrapBundleAsExecutableLinuxWithSeed].
 func WrapBundleAsExecutableLinuxWith(bundle []byte, profile BundleProfile) ([]byte, error) {
-	var seedBytes [8]byte
-	if _, err := rand.Read(seedBytes[:]); err != nil {
+	seed, err := random.Int64()
+	if err != nil {
 		return nil, fmt.Errorf("packer: stub junk seed: %w", err)
 	}
-	seed := int64(binary.LittleEndian.Uint64(seedBytes[:]))
 	return WrapBundleAsExecutableLinuxWithSeed(bundle, profile, seed)
 }
 
