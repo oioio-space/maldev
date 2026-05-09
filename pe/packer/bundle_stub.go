@@ -670,5 +670,8 @@ func WrapBundleAsExecutableLinuxWithSeed(bundle []byte, profile BundleProfile, s
 	combined = append(combined, stub...)
 	combined = append(combined, bundle...)
 
-	return transform.BuildMinimalELF64(combined)
+	// Per-build Vaddr (when set) randomises the canonical 0x400000
+	// load address — yara'able as 'tiny ELF at standard ld base'.
+	// Zero falls back to MinimalELF64Vaddr inside BuildMinimalELF64WithVaddr.
+	return transform.BuildMinimalELF64WithVaddr(combined, profile.Vaddr)
 }

@@ -86,6 +86,70 @@ func TestBuildMinimalELF64_DebugELFParses(t *testing.T) {
 	}
 }
 
+// TestBuildMinimalELF64WithVaddr_HonoursVaddr verifies the per-build
+// vaddr override lands at the chosen address (not canonical 0x400000)
+// AND the binary still runs to exit 42 on Linux. Defenders matching
+// "single-PT_LOAD-RWX ELF at vaddr 0x400000" miss every operator
+// using a non-canonical vaddr.
+func TestBuildMinimalELF64WithVaddr_HonoursVaddr(t *testing.T) {
+	const customVaddr uint64 = 0x600000
+	out, err := transform.BuildMinimalELF64WithVaddr(exit42Shellcode, customVaddr)
+	if err != nil {
+		t.Fatalf("BuildMinimalELF64WithVaddr: %v", err)
+	}
+	f, err := elf.NewFile(bytesReader(out))
+	if err != nil {
+		t.Fatalf("debug/elf: %v", err)
+	}
+	defer f.Close()
+	if got := f.Progs[0].Vaddr; got != customVaddr {
+		t.Errorf("Vaddr = %#x, want %#x", got, customVaddr)
+	}
+	if want := customVaddr + uint64(transform.MinimalELF64HeadersSize); f.Entry != want {
+		t.Errorf("Entry = %#x, want %#x", f.Entry, want)
+	}
+
+	if runtime.GOOS != "linux" {
+		t.Skip("kernel ELF loader exercise — Linux only")
+	}
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "tiny-vaddr")
+	if err := os.WriteFile(exe, out, 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = exec.CommandContext(ctx, exe).Run()
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("run %q: %v", exe, err)
+	}
+	if got := exitErr.ExitCode(); got != 42 {
+		t.Errorf("exit code = %d, want 42", got)
+	}
+}
+
+// TestBuildMinimalELF64WithVaddr_RejectsBadVaddr pins the input
+// validation: non-page-aligned vaddr or kernel-half address must
+// error before producing bytes.
+func TestBuildMinimalELF64WithVaddr_RejectsBadVaddr(t *testing.T) {
+	cases := []struct {
+		name  string
+		vaddr uint64
+	}{
+		{"unaligned", 0x400123},
+		{"kernelHalf", 0xffff800000000000},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := transform.BuildMinimalELF64WithVaddr(exit42Shellcode, c.vaddr)
+			if err == nil {
+				t.Errorf("vaddr %#x: want error, got nil", c.vaddr)
+			}
+		})
+	}
+}
+
 // TestBuildMinimalELF64_RunsExit42 is the SHIP GATE: writes the
 // produced ELF to disk, executes it, asserts exit code 42. Validates
 // the kernel actually loads the binary and runs the embedded shellcode.

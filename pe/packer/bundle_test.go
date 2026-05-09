@@ -425,6 +425,31 @@ func TestDeriveBundleProfile_DifferentSecretsDistinct(t *testing.T) {
 	}
 }
 
+// TestPackBinaryBundle_HonoursProfileVersion asserts the
+// per-build Version byte at offset 4 of the bundle header is the
+// operator-chosen value (derived via SHA-256), not the canonical
+// 0x0001 — defenders matching "version field == 1" must miss
+// every -secret-built artefact.
+func TestPackBinaryBundle_HonoursProfileVersion(t *testing.T) {
+	profile := packer.DeriveBundleProfile([]byte("kerckhoffs-version"))
+	if profile.Version == packer.BundleVersion {
+		t.Fatalf("derived Version = canonical %#x — derivation broken", profile.Version)
+	}
+	out, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{Binary: []byte("p")}},
+		packer.BundleOptions{Profile: profile},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+	if got := binary.LittleEndian.Uint16(out[4:6]); got != profile.Version {
+		t.Errorf("version in blob = %#x, want %#x", got, profile.Version)
+	}
+	if got := binary.LittleEndian.Uint16(out[4:6]); got == packer.BundleVersion {
+		t.Errorf("blob still carries canonical version — profile.Version ignored")
+	}
+}
+
 // TestPackBinaryBundle_HonoursProfileMagic verifies the bundle blob
 // carries the operator-chosen Magic at offset 0 instead of the
 // canonical BundleMagic.

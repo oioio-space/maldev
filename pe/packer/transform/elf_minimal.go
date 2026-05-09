@@ -49,16 +49,44 @@ var ErrMinimalELFCodeEmpty = errors.New("transform: minimal ELF requires non-emp
 //
 // Returns the ELF bytes. Nothing is written to disk; caller decides
 // where the bytes go.
+//
+// Per-build operators looking to randomise the canonical 0x400000
+// load address (yara'able as 'tiny ELF at standard ld base') should
+// use [BuildMinimalELF64WithVaddr] with a per-deployment value.
 func BuildMinimalELF64(code []byte) ([]byte, error) {
+	return BuildMinimalELF64WithVaddr(code, MinimalELF64Vaddr)
+}
+
+// BuildMinimalELF64WithVaddr is the per-build-tunable variant of
+// [BuildMinimalELF64]. The lone PT_LOAD lands at `vaddr` instead of
+// the canonical 0x400000, randomising one more yara-able byte
+// pattern. vaddr MUST be page-aligned (4 KiB) and outside the kernel
+// half (under 0x800000_00000000); zero falls back to the canonical
+// MinimalELF64Vaddr.
+//
+// Picking vaddr from the operator's per-deployment secret (see
+// pe/packer.DeriveBundleProfile) makes every shipped binary land at
+// a different address, defeating yara rules keyed on
+// "single-PT_LOAD-RWX ELF at vaddr 0x400000".
+func BuildMinimalELF64WithVaddr(code []byte, vaddr uint64) ([]byte, error) {
 	if len(code) == 0 {
 		return nil, ErrMinimalELFCodeEmpty
+	}
+	if vaddr == 0 {
+		vaddr = MinimalELF64Vaddr
+	}
+	if vaddr&0xfff != 0 {
+		return nil, fmt.Errorf("transform: minimal ELF vaddr %#x not page-aligned", vaddr)
+	}
+	if vaddr >= 0x0000800000000000 {
+		return nil, fmt.Errorf("transform: minimal ELF vaddr %#x in kernel half", vaddr)
 	}
 
 	const ehdrSize = 64
 	const phdrSize = 56
 	const headersSize = ehdrSize + phdrSize
 	totalSize := uint64(headersSize + len(code))
-	entryVaddr := MinimalELF64Vaddr + uint64(headersSize)
+	entryVaddr := vaddr + uint64(headersSize)
 
 	out := make([]byte, totalSize)
 
@@ -110,15 +138,15 @@ func BuildMinimalELF64(code []byte) ([]byte, error) {
 	binary.LittleEndian.PutUint32(phdr[0x00:], 1)                  // PT_LOAD
 	binary.LittleEndian.PutUint32(phdr[0x04:], 7)                  // RWX
 	binary.LittleEndian.PutUint64(phdr[0x08:], 0)                  // p_offset
-	binary.LittleEndian.PutUint64(phdr[0x10:], MinimalELF64Vaddr)  // p_vaddr
-	binary.LittleEndian.PutUint64(phdr[0x18:], MinimalELF64Vaddr)  // p_paddr
+	binary.LittleEndian.PutUint64(phdr[0x10:], vaddr)              // p_vaddr
+	binary.LittleEndian.PutUint64(phdr[0x18:], vaddr)              // p_paddr
 	binary.LittleEndian.PutUint64(phdr[0x20:], totalSize)          // p_filesz
 	binary.LittleEndian.PutUint64(phdr[0x28:], totalSize)          // p_memsz
 	binary.LittleEndian.PutUint64(phdr[0x30:], 0x1000)             // p_align
 
 	copy(out[headersSize:], code)
 
-	if err := validateMinimalELF(out, len(code)); err != nil {
+	if err := validateMinimalELF(out, len(code), vaddr); err != nil {
 		return nil, fmt.Errorf("transform: minimal ELF self-check: %w", err)
 	}
 	return out, nil
@@ -127,7 +155,7 @@ func BuildMinimalELF64(code []byte) ([]byte, error) {
 // validateMinimalELF runs the structural invariants the kernel itself
 // will check on load. Catches off-by-ones at build time instead of as
 // SIGSEGVs at exec time.
-func validateMinimalELF(elf []byte, codeLen int) error {
+func validateMinimalELF(elf []byte, codeLen int, vaddr uint64) error {
 	const ehdrSize = 64
 	const phdrSize = 56
 	if len(elf) != ehdrSize+phdrSize+codeLen {
@@ -140,7 +168,7 @@ func validateMinimalELF(elf []byte, codeLen int) error {
 		return fmt.Errorf("bad e_ident class/data: %d %d", elf[4], elf[5])
 	}
 	entry := binary.LittleEndian.Uint64(elf[0x18:])
-	wantEntry := MinimalELF64Vaddr + ehdrSize + phdrSize
+	wantEntry := vaddr + ehdrSize + phdrSize
 	if entry != wantEntry {
 		return fmt.Errorf("e_entry %#x != %#x", entry, wantEntry)
 	}

@@ -12,16 +12,24 @@ import (
 // BundleProfile groups the per-build IOCs an operator can override
 // to randomise yara-able byte patterns across deployments. Per
 // Kerckhoffs's principle: the wire format stays public; only the
-// 4-byte BundleMagic and the 8-byte AppendBundle footer are the
-// per-build secrets. A defender can identify "this is a maldev
-// bundle" only with the operator's secret in hand.
+// 4-byte Magic, the 2-byte Version, and the 8-byte AppendBundle
+// FooterMagic are the per-build secrets. A defender can identify
+// "this is a maldev bundle" only with the operator's secret in hand.
 //
 // Use [DeriveBundleProfile] to get a deterministic profile from any
-// secret string; both fields zero means "use the canonical magics
+// secret string; all fields zero means "use the canonical bytes
 // from the wire-format spec" (back-compat default).
 type BundleProfile struct {
 	Magic       uint32
+	Version     uint16
 	FooterMagic [8]byte
+
+	// Vaddr is the per-build virtual base address the all-asm wrap
+	// path's lone PT_LOAD lands at — randomises the canonical
+	// 0x400000 yara surface ('tiny ELF at standard ld base'). Zero
+	// = canonical [transform.MinimalELF64Vaddr]. Page-aligned
+	// (4 KiB) under 0x800000_00000000 (kernel half).
+	Vaddr uint64
 }
 
 // DeriveBundleProfile returns a [BundleProfile] derived from secret
@@ -34,12 +42,29 @@ type BundleProfile struct {
 // bytes; the SHA-256 collision space is more than sufficient.
 func DeriveBundleProfile(secret []byte) BundleProfile {
 	if len(secret) == 0 {
-		return BundleProfile{Magic: BundleMagic, FooterMagic: BundleFooterMagic}
+		return BundleProfile{
+			Magic:       BundleMagic,
+			Version:     BundleVersion,
+			FooterMagic: BundleFooterMagic,
+		}
 	}
 	sum := sha256.Sum256(secret)
 	var p BundleProfile
 	p.Magic = binary.LittleEndian.Uint32(sum[:4])
 	copy(p.FooterMagic[:], sum[4:12])
+	// Derive Version from sum[12..14], OR-ing in 0x8000 to keep the
+	// derived value distinct from the canonical 0x0001 — defenders
+	// looking for "version field == 1" miss every per-build artefact.
+	p.Version = binary.LittleEndian.Uint16(sum[12:14]) | 0x8000
+	// Derive Vaddr from sum[14..22] (8 bytes). Page-align (mask off
+	// low 12 bits) and constrain to user-space half (mask off the
+	// kernel-half bit by ANDing with 0x0000_3FFF_FFFF_F000 — gives
+	// [0x0000_0000_0000_1000, 0x0000_3FFF_FFFF_F000] minus the alignment
+	// fragment). Then OR in 0x0000_0000_0040_0000 to anchor to the
+	// "user-space high half" range so vaddr stays comfortably above
+	// typical mmap anonymous targets and below the kernel half.
+	rawVaddr := binary.LittleEndian.Uint64(sum[14:22])
+	p.Vaddr = (rawVaddr & 0x00007FFFFFFFF000) | 0x0000000000400000
 	return p
 }
 
@@ -232,15 +257,19 @@ func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, err
 	// Avoids the (re)allocation churn of the previous append-in-loop form.
 	out := make([]byte, totalSize)
 
-	// BundleHeader (32 bytes). Magic resolves through opts.Profile —
-	// zero value = canonical [BundleMagic]; non-zero = operator's
-	// per-build IOC override.
+	// BundleHeader (32 bytes). Magic AND Version both resolve through
+	// opts.Profile — zero values = canonical wire-format bytes;
+	// non-zero = operator's per-build IOC overrides.
 	magic := opts.Profile.Magic
 	if magic == 0 {
 		magic = BundleMagic
 	}
+	version := opts.Profile.Version
+	if version == 0 {
+		version = BundleVersion
+	}
 	binary.LittleEndian.PutUint32(out[0:4], magic)
-	binary.LittleEndian.PutUint16(out[4:6], BundleVersion)
+	binary.LittleEndian.PutUint16(out[4:6], version)
 	binary.LittleEndian.PutUint16(out[6:8], count)
 	binary.LittleEndian.PutUint32(out[8:12], fpTableOff)
 	binary.LittleEndian.PutUint32(out[12:16], plTableOff)
