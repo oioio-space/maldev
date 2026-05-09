@@ -14,6 +14,11 @@ unpacking step. Single-target packing (one payload, in-place
 encryption) and multi-target bundling (N payloads, runtime CPUID
 dispatch) are both first-class.
 
+> **New here?** Skim the [Glossary](#glossary) at the bottom of the page —
+> jargon like *SGN*, *PIC*, *RWX*, *PEB*, *AEAD*, *yara*, *static-PIE*
+> gets defined there in plain language. The rest of the doc references
+> those terms freely.
+
 **MITRE ATT&CK:** [T1027.002 — Software Packing](https://attack.mitre.org/techniques/T1027/002/) ·
 [T1140 — Deobfuscate/Decode Files or Information](https://attack.mitre.org/techniques/T1140/)
 
@@ -837,14 +842,22 @@ blocking; tracked.
 
 ## Limitations
 
+A complete planned-improvements list with implementation breakdown
+lives at
+[docs/superpowers/plans/2026-05-09-windows-tiny-exe.md](../../superpowers/plans/2026-05-09-windows-tiny-exe.md)
+— it tracks every gap below as an actionable engineering ticket.
+Brief summary follows.
+
 - **Single PT_LOAD RWX in the all-asm path.** The stub mutates its
   own page (the bundle data). The trade-off is documented; operators
   needing R+X / R+W split should use Mode 3 (`PackBinary`) which
   preserves segment-level permissions.
 - **All-asm wrap is Linux-only today.** The Windows symmetric path
-  (`BuildMinimalPE32Plus`) and the matching `PT_WIN_BUILD` predicate
-  in the stub asm are queue-d. The `cmd/bundle-launcher` path
-  supports Windows now via the Go runtime.
+  (`BuildMinimalPE32Plus` + `WrapBundleAsExecutableWindows`) and the
+  matching `PT_WIN_BUILD` predicate wire-up in the stub asm are
+  planned — see the Windows-tiny-exe plan linked above for the
+  complete §1-§9 breakdown. The `cmd/bundle-launcher` path supports
+  Windows now via the Go runtime.
 - **All-asm stub does not honour the `Negate` predicate flag.** The
   Go-side `SelectPayload` does. Operators using Negate-keyed
   predicates should validate behaviour against
@@ -870,6 +883,134 @@ blocking; tracked.
   multiple FingerprintEntry rows pointing at the same payload.
 
 ---
+
+## Glossary
+
+Plain-language explanations of the jargon used throughout this doc.
+Listed in the order an operator typically encounters each term.
+
+**Payload.** The thing you actually want to run on the target — a real
+PE/ELF binary, a packed binary, raw shellcode, anything. The packer
+wraps a payload to make it harder to detect / fingerprint.
+
+**SGN (Shikata Ga Nai-style polymorphic encoder).** A self-decoding
+byte stream where each byte is XORed with a key, and the key itself
+rotates every round. "Polymorphic" means the *bytes of the decoder*
+are randomised per pack: the same input encoded twice produces two
+decoders that LOOK different but DO the same thing. Defeats yara
+rules keyed on a fixed decoder pattern.
+
+**Round.** One pass over the encoded payload, applying one
+substitution and one register choice. More rounds = harder to
+recognise but bigger stub. Ships 1..10; default 3.
+
+**PIC trampoline (`call .pic ; pop r15`).** Trick used by
+position-independent code to learn its own runtime address.
+The `call` instruction pushes the address of the instruction
+*after* it; the `pop` retrieves that address into a register.
+Now the code can compute "I'm running here, my data is at +N
+from here" without knowing where the kernel loaded it.
+
+**RWX.** Read + Write + Execute permissions on a memory page.
+Legitimate code is almost always Read+Execute (code) or Read+Write
+(data). RWX means the page can be modified AND run, which is what
+self-decrypting stubs need (decrypt the bytes, then run them).
+Loud signal for any EDR — they specifically watch for RWX
+allocations.
+
+**PE32+ / `.exe`.** Windows executable format. PE32+ is the 64-bit
+flavour. The kernel's loader reads this format directly when you
+run a `.exe`.
+
+**ELF / `.elf`.** Linux executable format. The kernel reads this when
+you run a `chmod +x` binary.
+
+**Static-PIE.** Position-Independent Executable that's also
+statically linked — no dependency on the dynamic linker (`ld.so`).
+Required for the reflective loader because we can't load the
+dynamic linker ourselves; the binary has to stand alone.
+
+**PT_LOAD.** ELF program header type meaning "loadable segment".
+The kernel `mmap`s these segments into memory at process start.
+A minimal ELF has one PT_LOAD covering everything.
+
+**Brian Raiter shape.** Reference to Raiter's 2002 article showing
+the smallest legal Linux ELF (45 bytes). Our minimal-ELF emitter
+follows that layout, slightly extended to host real code.
+
+**`rep movsb`.** x86 instruction that copies bytes from `[rsi]` to
+`[rdi]` exactly `rcx` times. The C `memmove` is one instruction in
+asm.
+
+**auxv (auxiliary vector).** Kernel-supplied data pushed onto the
+stack at process start: random canary, page size, AT_RANDOM, etc.
+The reflective loader rewrites it so the loaded payload sees its
+OWN values, not the launcher's.
+
+**OEP (Original Entry Point).** The address the binary's normal
+entry point was at *before* the packer rewrote it. The stub jumps
+to OEP after decrypting `.text`.
+
+**TLS callbacks.** Code that runs *before* the binary's entry point
+— per-thread initialisation. Packers reject inputs with TLS
+callbacks because they'd run before the stub got a chance to
+decrypt.
+
+**Imports / IAT.** External functions a PE/ELF needs from system
+DLLs (`kernel32.dll!CreateFile`, etc.). The Import Address Table
+holds the resolved addresses. The kernel fills these in when
+loading the binary.
+
+**CPUID.** x86 instruction that returns CPU information. Leaf 0
+returns the vendor string ("GenuineIntel" / "AuthenticAMD").
+Universal — every x86 CPU since the original Pentium implements it.
+
+**PEB (Process Environment Block).** Windows kernel-managed structure
+at a known offset (`gs:[0x60]` on x64) carrying process state — the
+loaded module list, command line, OS version, etc. Reading it
+doesn't require any API call.
+
+**yara.** File-pattern matching language used by AV / EDR for static
+signatures. "yara'able" means a defender can write a yara rule that
+matches the artefact.
+
+**Kerckhoffs's principle.** Auguste Kerckhoffs (1883): the security
+of a cipher must depend on the secrecy of the key, not the secrecy
+of the algorithm. Applied here: the bundle wire format is public;
+the per-build secret is the only thing varying between operators.
+
+**AEAD (Authenticated Encryption with Associated Data).** Encryption
+scheme that both encrypts the plaintext AND verifies the ciphertext
+hasn't been tampered with. AES-GCM is the canonical example —
+decryption fails (rather than producing garbage) if anyone modified
+a single byte.
+
+**memfd_create.** Linux syscall that creates an anonymous file
+descriptor backed by RAM (no on-disk inode). The bundle launcher
+uses it to write the decrypted payload into RAM and `execve` it
+straight from there — zero on-disk plaintext for the matched
+payload.
+
+**Reflective loading.** Loading a PE/ELF *into the current process's
+address space* and jumping to its entry — instead of asking the
+kernel to load it via `execve` / `CreateProcess`. Used to avoid
+showing a child process in the process tree.
+
+**rel8 displacement.** x86 short conditional jumps (`Jcc`) take a
+1-byte signed offset (-128 to +127) from the end of the jump
+instruction. Hand-encoding asm with rel8 displacements is where
+mistakes happen — every shift in the byte stream needs all rel8
+distances recomputed.
+
+**ROR-13 hash.** Rotate-Right-13 hash — common API-resolution trick
+in shellcode. Replaces literal API names like "ExitProcess" with a
+4-byte hash so the strings don't appear in the binary. Defeated by
+defenders who hash the API name themselves and compare.
+
+**ASLR (Address Space Layout Randomisation).** OS feature that
+randomises the address every binary lands at. Position-independent
+code (PIC) tolerates ASLR; non-PIC code crashes when its absolute
+addresses don't match the load address.
 
 ## See also
 
