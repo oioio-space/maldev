@@ -53,15 +53,11 @@ type EmitOptions struct {
 	// CompressedSize, OriginalSize, and ScratchDispFromText must be
 	// non-zero when Compress is true; EmitStub returns an error otherwise.
 	// SafetyMargin retained as a diagnostic field (informational only).
-	Compress             bool
-	SafetyMargin         uint32 // (informational) LZ4 intra-seq drift bound
-	CompressedSize       uint32 // length of the LZ4 block in bytes
-	OriginalSize         uint32 // decompressed .text size (memcpy count)
-	ScratchDispFromText  int32  // signed displacement from R15 to scratch base
-
-	// MemSize is retained for back-compat with the previous in-place
-	// design but is no longer consulted; non-zero values are tolerated.
-	MemSize uint32
+	Compress            bool
+	SafetyMargin        uint32 // (informational) LZ4 intra-seq drift bound
+	CompressedSize      uint32 // length of the LZ4 block in bytes
+	OriginalSize        uint32 // decompressed .text size (memcpy count)
+	ScratchDispFromText int32  // signed displacement from R15 to scratch base
 }
 
 // baseReg is the callee-saved register the prologue loads with the
@@ -188,7 +184,7 @@ func EmitStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round, opts E
 	// LZ4 inflate decoder — runs after all SGN rounds have peeled the encoding.
 	// At this point R15 = text base:
 	//   [R15,              R15+CompressedSize) = LZ4 block (SGN-decoded compressed)
-	//   [R15+CompressedSize, R15+MemSize)      = BSS-zero (filesz<memsz slack)
+	//   Scratch buffer at R15+ScratchDispFromText (in stub segment BSS slack)
 	//
 	// Step 1: backward rep-movsb relocates the compressed bytes to the END
 	// of the memsz region. Required because LZ4's in-place decode invariant

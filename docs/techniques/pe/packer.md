@@ -311,6 +311,22 @@ binaries that crashed at runtime. See
 - `opts.CipherKey` — currently informational only (the SGN
   layer is the encryption); reserved for future Phase 1c+ AES
   wrapping.
+- `opts.Compress` — when `true`, LZ4-compresses `.text` before SGN
+  encoding. The stub gains a 136-byte hand-rolled asm inflate
+  decoder + 30-byte setup/copy plumbing; inflate runs non-in-place
+  into a scratch buffer placed in the stub segment's BSS slack.
+  `StubMaxSize` auto-promotes to 8 KiB. Saves ~33 % on a Go
+  static-PIE `.text`. Default `false` (conservative). Example:
+
+      ```go
+      packed, _, err := packer.PackBinary(input, packer.PackBinaryOptions{
+          Format:       packer.FormatLinuxELF,
+          Stage1Rounds: 3,
+          Seed:         seed,
+          Compress:     true, // v0.66.0 — LZ4 + non-in-place inflate
+      })
+      ```
+
 - `opts.AntiDebug` — when `true`, prepends a ~70-byte anti-debug
   prologue to the Windows PE stub before the CALL+POP+ADD PIC
   prologue. Three checks run in order:
@@ -605,6 +621,15 @@ out, err := packer.AddFakeImportsPE(packed, packer.DefaultFakeImports)
   returned `ErrCoverSectionTableFull`. The cover layer now relocates
   the PHT to file-end and preserves all four ELF spec invariants;
   `ErrCoverSectionTableFull` is no longer returned for these inputs.
+- **`PackBinary` LZ4 compression shipped (v0.66.0).** Pass
+  `Compress: true` to `PackBinary` to LZ4-compress `.text`
+  before SGN encoding. The stub gains a 136-byte hand-rolled
+  asm inflate decoder + ~30 bytes of setup/copy plumbing
+  (`StubMaxSize` auto-promotes to 8 KiB when `Compress=true`).
+  Inflate runs non-in-place into a scratch buffer placed in
+  the stub segment's BSS slack, then memcpys the plaintext
+  back to `.text`. Saves ~33 % on a Go static-PIE `.text`.
+  Disabled by default (conservative).
 - **Fake imports shipped (v0.63.0).** `AddFakeImportsPE` /
   `DefaultFakeImports` add benign-DLL `IMAGE_IMPORT_DESCRIPTOR`
   entries (kernel32, user32, shell32, ole32) to the packed PE.

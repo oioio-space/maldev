@@ -301,7 +301,7 @@ func TestEmitLZ4InflateInline_NoRetByte(t *testing.T) {
 }
 
 // TestEmitStub_Compress_RejectsZeroMargin verifies that Compress=true with
-// CompressedSize=0 or MemSize=0 (or MemSize ≤ CompressedSize) returns an
+// any of CompressedSize, OriginalSize, ScratchDispFromText is zero returns an
 // error — these would either loop indefinitely or skip the memmove preamble.
 func TestEmitStub_Compress_RejectsZeroMargin(t *testing.T) {
 	cases := []stage1.EmitOptions{
