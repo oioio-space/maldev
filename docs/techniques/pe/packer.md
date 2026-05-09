@@ -612,11 +612,83 @@ out, err := packer.AddFakeImportsPE(packed, packer.DefaultFakeImports)
 // out now has kernel32/user32/shell32/ole32 entries in its import table
 ```
 
+## Kerckhoffs's principle — per-build IOCs (v0.73.0)
+
+The bundle wire format is **public**; the per-build IOC bytes are
+**operator-secret**. Algorithm = the spec at
+`docs/superpowers/specs/2026-05-08-packer-multi-target-bundle.md`.
+Secret = a 16+ byte string the operator picks per ship cycle, which
+derives via SHA-256 to:
+
+- A unique `BundleMagic` (4 bytes at offset 0 of the bundle blob).
+- A unique `AppendBundle` footer magic (8 bytes at the very end of
+  the wrapped binary).
+
+Both default to canonical bytes (`MLDV` / `MLDV-END`) when no secret
+is supplied — back-compat preserved, but operators shipping anything
+they care about should set one.
+
+**Workflow** (CLI):
+
+```bash
+# Pick any secret — store it; you'll reuse it for the launcher build.
+SECRET="ops-2026-05-09-target-A"
+
+# Pack with -secret.
+$ packer bundle -out bundle.bin -secret "$SECRET" \
+    -pl payload-w11.exe:intel:22000-99999 \
+    -pl payload-w10.exe:amd:10000-19999
+
+# Build a launcher with the matching ldflags injection.
+$ go build -ldflags "-X main.bundleSecret=$SECRET" \
+    -o bundle-launcher ./cmd/bundle-launcher
+
+# Wrap. The CLI prints the launcher build line as a hint when given -secret.
+$ packer bundle -wrap bundle-launcher -bundle bundle.bin -secret "$SECRET" -out app
+
+# Ship app — its on-disk magic is the SHA-256-derived per-build value;
+# yara writers cannot cluster this binary with other operators' deployments
+# without the secret in hand.
+```
+
+**Library** (Go):
+
+```go
+profile := packer.DeriveBundleProfile([]byte(secret))
+bundle, _ := packer.PackBinaryBundle(payloads, packer.BundleOptions{Profile: profile})
+wrapped := packer.AppendBundleWith(launcherBytes, bundle, profile)
+```
+
+**What this protects against:**
+
+- Static signature pivots across deployments — yara rules keyed on
+  the canonical `MLDV` magic match nothing on a `-secret`-built
+  binary.
+- IOC sharing between operators / between ops cycles — every secret
+  yields a distinct (Magic, FooterMagic) pair (collision-resistant
+  via SHA-256).
+
+**What this does NOT protect against:**
+
+- An analyst with the secret string in hand. The wire format is
+  documented; recovery is mechanical via `packer.InspectBundleWith`.
+- Yara rules keyed on the **structure** (32-byte header, 48-byte
+  fingerprint entry, 32-byte payload entry, RWX single-PT_LOAD ELF).
+  These remain regardless of secret.
+- Stub asm signatures — the 160-byte vendor-aware stub is
+  byte-identical across builds with or without `-secret`. Future
+  polymorphism (instruction substitution + junk insertion) closes
+  this gap; today the magic + footer are the only randomised IOCs.
+
+**Operator best practice:** treat the secret like a deployment key —
+fresh per ship cycle, never reused, stored alongside whatever build
+log records WHICH binaries went WHERE.
+
 ## OPSEC & Detection
 
 | Artefact | Where defenders look |
 |---|---|
-| `MLDV` magic at file offset 0 | Static signature scanners — trivially flagged. **Phase 1b removes this surface** by wrapping the blob in a host PE (magic moves to a non-zero offset inside a custom section). |
+| `MLDV` magic at file offset 0 | Static signature scanners — trivially flagged in canonical builds; **mitigated by `-secret` per-build randomisation (v0.73.0)**. |
 | AES-GCM ciphertext entropy profile | High-entropy regions are common in legitimate signed binaries (compressed resources, embedded certs) — high entropy alone is weak signal. |
 | Round number sizes (header is exactly 32 bytes) | Possible but weak; many file formats have round headers. |
 

@@ -217,6 +217,37 @@ plaintext on Linux (`memfd_create`-backed FD passed directly to
 [app]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#AppendBundle
 [ext]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#ExtractBundle
 
+## Step 6.5 — Per-build secret (Kerckhoffs, v0.73.0)
+
+The default workflow above ships every wrapped binary with the same
+canonical `MLDV` magic and `MLDV-END` footer — fine for tutorials,
+not fine for operations. The `-secret` flag derives a unique 4-byte
+`BundleMagic` + 8-byte footer pair via SHA-256 from any operator-
+chosen string, so each deployment ships with its own IOC bytes.
+
+```bash
+SECRET="my-op-2026-05-09-cycleA"
+
+# Pack with the secret.
+packer bundle -out bundle.bin -secret "$SECRET" -pl ...
+
+# Build the launcher with the matching ldflags injection.
+go build -ldflags "-X main.bundleSecret=$SECRET" \
+  -o bundle-launcher ./cmd/bundle-launcher
+
+# Wrap with the same secret. CLI prints the launcher build line as a hint.
+packer bundle -wrap bundle-launcher -bundle bundle.bin \
+  -secret "$SECRET" -out app
+```
+
+Wire format stays public (anyone can read the spec). Only the 12
+derived bytes are the per-deployment secret. Yara writers can spot
+"this is a maldev-style bundle" but cannot cluster individual
+operator builds without the secret in hand.
+
+The full Kerckhoffs treatment lives in
+[docs/techniques/pe/packer.md](../techniques/pe/packer.md#kerckhoffss-principle--per-build-iocs-v0730).
+
 ## Step 7 — Decrypt one payload (build-host debugging)
 
 `UnpackBundle` is the inverse of the encryption pass. Use it on
