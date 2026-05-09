@@ -62,15 +62,7 @@ func TestLauncher_E2E_ReflectiveLoadsHello(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	launcher := filepath.Join(dir, "bundle-launcher")
-	if out, err := exec.Command("go", "build", "-o", launcher,
-		"github.com/oioio-space/maldev/cmd/bundle-launcher").CombinedOutput(); err != nil {
-		t.Fatalf("go build launcher: %v: %s", err, out)
-	}
-	launcherBytes, err := os.ReadFile(launcher)
-	if err != nil {
-		t.Fatalf("read launcher: %v", err)
-	}
+	_, launcherBytes := sharedLauncher(t)
 	wrapped := packer.AppendBundle(launcherBytes, bundle)
 	wrappedPath := filepath.Join(dir, "app")
 	if err := os.WriteFile(wrappedPath, wrapped, 0o755); err != nil {
