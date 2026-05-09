@@ -207,6 +207,42 @@ $ go run ./cmd/packer pack -in payload.exe -out payload.bin -keyout key.hex
 $ go run ./cmd/packer unpack -in payload.bin -out recovered.exe -key "$(cat key.hex)"
 ```
 
+### Multi-target bundle (v0.67.0-alpha.1, C6)
+
+Pack one binary per target environment, then ship a single blob that
+selects the right payload at runtime via CPUID + PEB fingerprinting.
+Phase P1 ships the host-side primitives:
+
+```go
+intel := [12]byte{'G','e','n','u','i','n','e','I','n','t','e','l'}
+amd   := [12]byte{'A','u','t','h','e','n','t','i','c','A','M','D'}
+
+bundle, err := packer.PackBinaryBundle([]packer.BundlePayload{
+    {Binary: intelW11Payload, Fingerprint: packer.FingerprintPredicate{
+        PredicateType: packer.PTCPUIDVendor | packer.PTWinBuild,
+        VendorString:  intel,
+        BuildMin:      22000, BuildMax: 99999,
+    }},
+    {Binary: amdW10Payload, Fingerprint: packer.FingerprintPredicate{
+        PredicateType: packer.PTCPUIDVendor | packer.PTWinBuild,
+        VendorString:  amd,
+        BuildMin:      10000, BuildMax: 19999,
+    }},
+    // Catch-all fallback.
+    {Binary: fallbackPayload, Fingerprint: packer.FingerprintPredicate{
+        PredicateType: packer.PTMatchAll,
+    }},
+}, packer.BundleOptions{FallbackBehaviour: packer.BundleFallbackExit})
+
+// On the build host, preview which entry would fire for a target:
+idx, _ := packer.SelectPayload(bundle, intel, 22631)  // → 0
+plain, _ := packer.UnpackBundle(bundle, idx)          // recovers payload
+```
+
+The runtime stub-side fingerprint evaluator + container wrapping
+(C6-P3, C6-P4) ship in subsequent phases. Until then, the bundle blob
+is a build-host artefact only.
+
 ### Custom key (key-derivation pipelines)
 
 When the key comes from elsewhere — host fingerprint, KDF over a
@@ -621,6 +657,19 @@ out, err := packer.AddFakeImportsPE(packed, packer.DefaultFakeImports)
   returned `ErrCoverSectionTableFull`. The cover layer now relocates
   the PHT to file-end and preserves all four ELF spec invariants;
   `ErrCoverSectionTableFull` is no longer returned for these inputs.
+- **C6 multi-target bundle wire format shipped (v0.67.0-alpha.1).**
+  `PackBinaryBundle` serialises N payloads into a single bundle blob
+  (BundleHeader + FingerprintEntry × N + PayloadEntry × N + encrypted
+  payload data) per
+  `docs/superpowers/specs/2026-05-08-packer-multi-target-bundle.md`.
+  Each payload gets an independent random 16-byte XOR-rolling key.
+  `SelectPayload` is the host-side selection oracle (CPUID vendor +
+  Windows build-number predicates, AND-combined per entry, first-match
+  across entries, optional `Negate` flag). `EmitCPUIDVendorRead` /
+  `EmitPEBBuildRead` (in `stubgen/stage1`) emit the asm primitives the
+  runtime stub will use. Stub-side fingerprint evaluator + container
+  injection ship in C6 phases P3-P4. Operator-facing `cmd/packer`
+  bundle subcommand also deferred.
 - **`PackBinary` LZ4 compression shipped (v0.66.0).** Pass
   `Compress: true` to `PackBinary` to LZ4-compress `.text`
   before SGN encoding. The stub gains a 136-byte hand-rolled
