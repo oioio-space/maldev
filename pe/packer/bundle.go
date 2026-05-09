@@ -3,10 +3,45 @@ package packer
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
 )
+
+// BundleProfile groups the per-build IOCs an operator can override
+// to randomise yara-able byte patterns across deployments. Per
+// Kerckhoffs's principle: the wire format stays public; only the
+// 4-byte BundleMagic and the 8-byte AppendBundle footer are the
+// per-build secrets. A defender can identify "this is a maldev
+// bundle" only with the operator's secret in hand.
+//
+// Use [DeriveBundleProfile] to get a deterministic profile from any
+// secret string; both fields zero means "use the canonical magics
+// from the wire-format spec" (back-compat default).
+type BundleProfile struct {
+	Magic       uint32
+	FooterMagic [8]byte
+}
+
+// DeriveBundleProfile returns a [BundleProfile] derived from secret
+// via SHA-256. Same secret → same profile. Empty / nil secret yields
+// the canonical {BundleMagic, BundleFooterMagic} pair so a build with
+// no -secret flag is wire-compatible with the public spec.
+//
+// A 16+ byte secret is recommended (operator's per-deployment GUID,
+// build timestamp + nonce, etc.). The output is 4 + 8 = 12 derived
+// bytes; the SHA-256 collision space is more than sufficient.
+func DeriveBundleProfile(secret []byte) BundleProfile {
+	if len(secret) == 0 {
+		return BundleProfile{Magic: BundleMagic, FooterMagic: BundleFooterMagic}
+	}
+	sum := sha256.Sum256(secret)
+	var p BundleProfile
+	p.Magic = binary.LittleEndian.Uint32(sum[:4])
+	copy(p.FooterMagic[:], sum[4:12])
+	return p
+}
 
 // Bundle wire format constants.
 //
@@ -116,6 +151,13 @@ type BundleOptions struct {
 	// payload gets a fresh random 16-byte key. Field is named to make
 	// the call site self-explain its intent.
 	FixedKey []byte
+	// Profile carries the per-build IOC overrides (BundleMagic +
+	// AppendBundle footer). Zero value = canonical wire-format
+	// magics. Use [DeriveBundleProfile] to derive both from a
+	// per-deployment secret string. Operators MUST set a fresh
+	// secret per ship cycle to keep yara signatures from clustering
+	// across deployments — Kerckhoffs in practice.
+	Profile BundleProfile
 }
 
 // Sentinels surfaced by [PackBinaryBundle].
@@ -190,8 +232,14 @@ func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, err
 	// Avoids the (re)allocation churn of the previous append-in-loop form.
 	out := make([]byte, totalSize)
 
-	// BundleHeader (32 bytes).
-	binary.LittleEndian.PutUint32(out[0:4], BundleMagic)
+	// BundleHeader (32 bytes). Magic resolves through opts.Profile —
+	// zero value = canonical [BundleMagic]; non-zero = operator's
+	// per-build IOC override.
+	magic := opts.Profile.Magic
+	if magic == 0 {
+		magic = BundleMagic
+	}
+	binary.LittleEndian.PutUint32(out[0:4], magic)
 	binary.LittleEndian.PutUint16(out[4:6], BundleVersion)
 	binary.LittleEndian.PutUint16(out[6:8], count)
 	binary.LittleEndian.PutUint32(out[8:12], fpTableOff)
@@ -336,6 +384,54 @@ func InspectBundle(bundle []byte) (BundleInfo, error) {
 // own bundle blob without scanning. Reads as "MLDV-END" in ASCII.
 var BundleFooterMagic = [8]byte{'M', 'L', 'D', 'V', '-', 'E', 'N', 'D'}
 
+// AppendBundleWith is the per-build-profile-aware variant of
+// [AppendBundle]. The footer's 8-byte sentinel uses
+// `profile.FooterMagic` instead of the canonical
+// [BundleFooterMagic]. Operators wrapping with a custom
+// [BundleProfile] (typically derived from `-secret` via
+// [DeriveBundleProfile]) MUST use this variant; the matching
+// launcher must know the same FooterMagic at runtime
+// (typically injected via -ldflags -X). Caller-side parser is
+// [ExtractBundleWith].
+func AppendBundleWith(launcher []byte, bundle []byte, profile BundleProfile) []byte {
+	footer := profile.FooterMagic
+	if footer == ([8]byte{}) {
+		footer = BundleFooterMagic
+	}
+	bundleOff := uint64(len(launcher))
+	out := make([]byte, 0, len(launcher)+len(bundle)+16)
+	out = append(out, launcher...)
+	out = append(out, bundle...)
+	var off [8]byte
+	binary.LittleEndian.PutUint64(off[:], bundleOff)
+	out = append(out, off[:]...)
+	out = append(out, footer[:]...)
+	return out
+}
+
+// ExtractBundleWith is the per-build-profile-aware variant of
+// [ExtractBundle]. Validates the footer against `profile.FooterMagic`
+// instead of the canonical [BundleFooterMagic].
+func ExtractBundleWith(wrapped []byte, profile BundleProfile) ([]byte, error) {
+	expected := profile.FooterMagic
+	if expected == ([8]byte{}) {
+		expected = BundleFooterMagic
+	}
+	if len(wrapped) < 16 {
+		return nil, fmt.Errorf("%w: %d < 16-byte footer", ErrBundleTruncated, len(wrapped))
+	}
+	footer := wrapped[len(wrapped)-8:]
+	if !bytes.Equal(footer, expected[:]) {
+		return nil, fmt.Errorf("%w: footer %q != %q", ErrBundleBadMagic, footer, expected[:])
+	}
+	bundleOff := binary.LittleEndian.Uint64(wrapped[len(wrapped)-16 : len(wrapped)-8])
+	if bundleOff > uint64(len(wrapped)-16) {
+		return nil, fmt.Errorf("%w: bundleOff %d > footer-start %d",
+			ErrBundleOutOfRange, bundleOff, len(wrapped)-16)
+	}
+	return wrapped[bundleOff : len(wrapped)-16], nil
+}
+
 // AppendBundle returns launcher bytes with `bundle` concatenated at
 // the end, followed by an 8-byte little-endian offset of the bundle's
 // first byte and the [BundleFooterMagic] sentinel:
@@ -384,6 +480,72 @@ func ExtractBundle(wrapped []byte) ([]byte, error) {
 			ErrBundleOutOfRange, bundleOff, len(wrapped)-16)
 	}
 	return wrapped[bundleOff : len(wrapped)-16], nil
+}
+
+// resolvedMagic returns the magic the parser should validate against:
+// the operator's per-build override if non-zero, else the canonical
+// wire-format default. Centralised so every *With variant agrees.
+func resolvedMagic(p BundleProfile) uint32 {
+	if p.Magic != 0 {
+		return p.Magic
+	}
+	return BundleMagic
+}
+
+// InspectBundleWith is the per-build-profile-aware variant of
+// [InspectBundle]. Validates the magic against `profile.Magic`
+// (canonical default when zero) instead of [BundleMagic].
+func InspectBundleWith(bundle []byte, profile BundleProfile) (BundleInfo, error) {
+	var info BundleInfo
+	if len(bundle) < BundleHeaderSize {
+		return info, fmt.Errorf("%w: %d < %d", ErrBundleTruncated, len(bundle), BundleHeaderSize)
+	}
+	expected := resolvedMagic(profile)
+	if got := binary.LittleEndian.Uint32(bundle[0:4]); got != expected {
+		return info, fmt.Errorf("%w: %#x != %#x", ErrBundleBadMagic, got, expected)
+	}
+	// Past the magic, the rest of the parse is identical to InspectBundle.
+	// Re-parse via the canonical helper after temporarily patching the
+	// magic so we don't duplicate the body.
+	tmp := append([]byte(nil), bundle...)
+	binary.LittleEndian.PutUint32(tmp[0:4], BundleMagic)
+	info, err := InspectBundle(tmp)
+	if err != nil {
+		return info, err
+	}
+	info.Magic = expected
+	return info, nil
+}
+
+// SelectPayloadWith is the per-build-profile-aware variant of
+// [SelectPayload]. Same matching semantics; only the magic-validation
+// gate differs.
+func SelectPayloadWith(bundle []byte, profile BundleProfile, hostVendor [12]byte, hostBuild uint32) (int, error) {
+	if len(bundle) < BundleHeaderSize {
+		return -1, fmt.Errorf("%w: %d < %d", ErrBundleTruncated, len(bundle), BundleHeaderSize)
+	}
+	expected := resolvedMagic(profile)
+	if got := binary.LittleEndian.Uint32(bundle[0:4]); got != expected {
+		return -1, fmt.Errorf("%w: %#x != %#x", ErrBundleBadMagic, got, expected)
+	}
+	tmp := append([]byte(nil), bundle...)
+	binary.LittleEndian.PutUint32(tmp[0:4], BundleMagic)
+	return SelectPayload(tmp, hostVendor, hostBuild)
+}
+
+// UnpackBundleWith is the per-build-profile-aware variant of
+// [UnpackBundle].
+func UnpackBundleWith(bundle []byte, idx int, profile BundleProfile) ([]byte, error) {
+	if len(bundle) < BundleHeaderSize {
+		return nil, fmt.Errorf("%w: %d < header %d", ErrBundleTruncated, len(bundle), BundleHeaderSize)
+	}
+	expected := resolvedMagic(profile)
+	if got := binary.LittleEndian.Uint32(bundle[0:4]); got != expected {
+		return nil, fmt.Errorf("%w: %#x != %#x", ErrBundleBadMagic, got, expected)
+	}
+	tmp := append([]byte(nil), bundle...)
+	binary.LittleEndian.PutUint32(tmp[0:4], BundleMagic)
+	return UnpackBundle(tmp, idx)
 }
 
 // SelectPayload is the pure-Go reference implementation of the bundle

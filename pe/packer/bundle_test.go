@@ -381,6 +381,240 @@ func TestSelectPayload_NoMatchReturnsMinusOne(t *testing.T) {
 	}
 }
 
+// TestDeriveBundleProfile_Empty asserts the zero-secret case
+// returns the canonical magic + footer pair so existing callers
+// without a -secret flag stay wire-compatible with the spec.
+func TestDeriveBundleProfile_Empty(t *testing.T) {
+	for _, in := range [][]byte{nil, {}} {
+		p := packer.DeriveBundleProfile(in)
+		if p.Magic != packer.BundleMagic {
+			t.Errorf("DeriveBundleProfile(empty) Magic = %#x, want %#x", p.Magic, packer.BundleMagic)
+		}
+		if p.FooterMagic != packer.BundleFooterMagic {
+			t.Errorf("DeriveBundleProfile(empty) FooterMagic = %q, want %q",
+				p.FooterMagic, packer.BundleFooterMagic)
+		}
+	}
+}
+
+// TestDeriveBundleProfile_Deterministic asserts the SHA-256-derived
+// profile is stable for a given secret.
+func TestDeriveBundleProfile_Deterministic(t *testing.T) {
+	secret := []byte("ops-cycle-2026-05-deployment-A")
+	a := packer.DeriveBundleProfile(secret)
+	b := packer.DeriveBundleProfile(secret)
+	if a != b {
+		t.Errorf("DeriveBundleProfile drifted: %+v vs %+v", a, b)
+	}
+	if a.Magic == packer.BundleMagic {
+		t.Errorf("non-empty secret produced canonical magic — derivation broken")
+	}
+}
+
+// TestDeriveBundleProfile_DifferentSecretsDistinct asserts two
+// distinct secrets yield distinct profiles (collision-resistant via
+// SHA-256).
+func TestDeriveBundleProfile_DifferentSecretsDistinct(t *testing.T) {
+	a := packer.DeriveBundleProfile([]byte("alpha"))
+	b := packer.DeriveBundleProfile([]byte("bravo"))
+	if a.Magic == b.Magic {
+		t.Errorf("same magic for different secrets: %#x", a.Magic)
+	}
+	if a.FooterMagic == b.FooterMagic {
+		t.Errorf("same footer for different secrets")
+	}
+}
+
+// TestPackBinaryBundle_HonoursProfileMagic verifies the bundle blob
+// carries the operator-chosen Magic at offset 0 instead of the
+// canonical BundleMagic.
+func TestPackBinaryBundle_HonoursProfileMagic(t *testing.T) {
+	profile := packer.DeriveBundleProfile([]byte("kerckhoffs"))
+	out, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{Binary: []byte("p")}},
+		packer.BundleOptions{Profile: profile},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+	got := binary.LittleEndian.Uint32(out[0:4])
+	if got != profile.Magic {
+		t.Errorf("magic in blob = %#x, want %#x (canonical was %#x)",
+			got, profile.Magic, packer.BundleMagic)
+	}
+	if got == packer.BundleMagic {
+		t.Errorf("blob still carries canonical magic — profile ignored")
+	}
+}
+
+// TestAppendBundleWith_RoundTripsViaExtractWith asserts the
+// per-build footer round-trips and a canonical extract REJECTS the
+// per-build footer (proves the magic gate).
+func TestAppendBundleWith_RoundTripsViaExtractWith(t *testing.T) {
+	profile := packer.DeriveBundleProfile([]byte("deploy-secret-42"))
+	bundle, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{Binary: []byte("payload")}},
+		packer.BundleOptions{Profile: profile},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	launcher := bytes.Repeat([]byte{0x90}, 1024)
+	wrapped := packer.AppendBundleWith(launcher, bundle, profile)
+
+	got, err := packer.ExtractBundleWith(wrapped, profile)
+	if err != nil {
+		t.Fatalf("ExtractBundleWith: %v", err)
+	}
+	if !bytes.Equal(got, bundle) {
+		t.Errorf("extracted bundle != original (%d vs %d bytes)", len(got), len(bundle))
+	}
+
+	// Canonical ExtractBundle should REFUSE the per-build footer.
+	if _, err := packer.ExtractBundle(wrapped); !errors.Is(err, packer.ErrBundleBadMagic) {
+		t.Errorf("canonical Extract on per-build wrap: err = %v, want ErrBundleBadMagic", err)
+	}
+}
+
+// TestSelectPayloadWith_PerBuildMagic asserts the *With variant
+// matches against a per-build magic and the canonical SelectPayload
+// rejects the same blob with ErrBundleBadMagic.
+func TestSelectPayloadWith_PerBuildMagic(t *testing.T) {
+	profile := packer.DeriveBundleProfile([]byte("op-2026"))
+	bundle, _ := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{
+			Binary: []byte("x"),
+			Fingerprint: packer.FingerprintPredicate{PredicateType: packer.PTMatchAll},
+		}},
+		packer.BundleOptions{Profile: profile},
+	)
+
+	idx, err := packer.SelectPayloadWith(bundle, profile, [12]byte{}, 0)
+	if err != nil {
+		t.Fatalf("SelectPayloadWith: %v", err)
+	}
+	if idx != 0 {
+		t.Errorf("SelectPayloadWith idx = %d, want 0", idx)
+	}
+
+	if _, err := packer.SelectPayload(bundle, [12]byte{}, 0); !errors.Is(err, packer.ErrBundleBadMagic) {
+		t.Errorf("canonical SelectPayload on per-build blob: err = %v, want ErrBundleBadMagic", err)
+	}
+}
+
+// TestInspectBundleWith_PerBuildMagic asserts InspectBundleWith
+// parses a per-build blob whose canonical-Inspect call would have
+// failed with ErrBundleBadMagic.
+func TestInspectBundleWith_PerBuildMagic(t *testing.T) {
+	profile := packer.DeriveBundleProfile([]byte("inspect-test"))
+	bundle, _ := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{Binary: []byte("payload")}},
+		packer.BundleOptions{Profile: profile, FixedKey: make([]byte, 16)},
+	)
+
+	info, err := packer.InspectBundleWith(bundle, profile)
+	if err != nil {
+		t.Fatalf("InspectBundleWith: %v", err)
+	}
+	if info.Magic != profile.Magic {
+		t.Errorf("info.Magic = %#x, want %#x", info.Magic, profile.Magic)
+	}
+	if info.Count != 1 {
+		t.Errorf("info.Count = %d, want 1", info.Count)
+	}
+
+	if _, err := packer.InspectBundle(bundle); !errors.Is(err, packer.ErrBundleBadMagic) {
+		t.Errorf("canonical InspectBundle on per-build blob: err = %v, want ErrBundleBadMagic", err)
+	}
+}
+
+// TestKerckhoffs_FullRoundTrip is the end-to-end story: per-build
+// secret → derive profile → pack with profile → wrap with profile
+// → extract with profile → inspect + select + unpack with profile →
+// recover the original payload bytes. AND: every parser call without
+// the profile must REJECT with ErrBundleBadMagic.
+//
+// This is the gate test for the Kerckhoffs property — operator's
+// secret IS the only thing distinguishing identical operations
+// across deployments.
+func TestKerckhoffs_FullRoundTrip(t *testing.T) {
+	const opSecret = "deploy-cycle-2026-05-09-target-A"
+	profile := packer.DeriveBundleProfile([]byte(opSecret))
+	plain := []byte("the-real-payload-bytes-here")
+
+	// Pack with profile.
+	bundle, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{
+			Binary:      plain,
+			Fingerprint: packer.FingerprintPredicate{PredicateType: packer.PTMatchAll},
+		}},
+		packer.BundleOptions{Profile: profile, FixedKey: make([]byte, 16)},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	// Wrap with same profile.
+	launcher := bytes.Repeat([]byte{0xCC}, 256)
+	wrapped := packer.AppendBundleWith(launcher, bundle, profile)
+
+	// Extract with same profile.
+	extracted, err := packer.ExtractBundleWith(wrapped, profile)
+	if err != nil {
+		t.Fatalf("ExtractBundleWith: %v", err)
+	}
+	if !bytes.Equal(extracted, bundle) {
+		t.Fatalf("ExtractBundleWith returned %d bytes, expected %d", len(extracted), len(bundle))
+	}
+
+	// Inspect + select + unpack with same profile.
+	if _, err := packer.InspectBundleWith(extracted, profile); err != nil {
+		t.Fatalf("InspectBundleWith: %v", err)
+	}
+	idx, err := packer.SelectPayloadWith(extracted, profile, [12]byte{}, 0)
+	if err != nil || idx != 0 {
+		t.Fatalf("SelectPayloadWith: idx=%d err=%v", idx, err)
+	}
+	got, err := packer.UnpackBundleWith(extracted, idx, profile)
+	if err != nil {
+		t.Fatalf("UnpackBundleWith: %v", err)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Errorf("recovered = %q, want %q", got, plain)
+	}
+
+	// Negative: every canonical-API call should REFUSE the per-build blob.
+	for name, fn := range map[string]func() error{
+		"ExtractBundle":  func() error { _, e := packer.ExtractBundle(wrapped); return e },
+		"InspectBundle":  func() error { _, e := packer.InspectBundle(extracted); return e },
+		"SelectPayload":  func() error { _, e := packer.SelectPayload(extracted, [12]byte{}, 0); return e },
+		"UnpackBundle":   func() error { _, e := packer.UnpackBundle(extracted, 0); return e },
+	} {
+		if err := fn(); !errors.Is(err, packer.ErrBundleBadMagic) {
+			t.Errorf("canonical %s on per-build artefact: err = %v, want ErrBundleBadMagic", name, err)
+		}
+	}
+}
+
+// TestUnpackBundleWith_RoundTrip asserts payload bytes survive a
+// per-build pack → UnpackBundleWith.
+func TestUnpackBundleWith_RoundTrip(t *testing.T) {
+	profile := packer.DeriveBundleProfile([]byte("deploy"))
+	plain := []byte("the-secret-payload-content")
+	bundle, _ := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{Binary: plain}},
+		packer.BundleOptions{Profile: profile},
+	)
+	got, err := packer.UnpackBundleWith(bundle, 0, profile)
+	if err != nil {
+		t.Fatalf("UnpackBundleWith: %v", err)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Errorf("decrypted = %q, want %q", got, plain)
+	}
+}
+
 // TestAppendBundle_RoundTripsViaExtract concatenates a synthetic
 // "launcher" prefix with a real bundle and asserts ExtractBundle
 // returns byte-equal bundle bytes.
