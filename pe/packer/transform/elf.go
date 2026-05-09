@@ -233,13 +233,21 @@ func InjectStubELF(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, e
 	// We take the max to never shrink the segment — shrinking would cause the
 	// kernel to refuse to map bytes the binary's code expects to be present.
 	if plan.TextMemSize > plan.TextSize {
-		// Never shrink the segment: the PT_LOAD may cover more than .text (e.g. .plt
-		// follows immediately), so plan.TextMemSize could be smaller than the original
-		// p_memsz. Use max() to only ever widen, never shrink.
+		// p_memsz is measured from p_vaddr (segment start), but plan.TextMemSize
+		// is the size required FROM .text base. Compute the in-segment offset of
+		// .text and add it so the segment extends far enough past .text to cover
+		// [TextRVA, TextRVA+TextMemSize). Without this adjustment the LZ4
+		// in-place memmove writes past the mapped end and SIGSEGVs.
+		segVAddr := binary.LittleEndian.Uint64(input[textPhdrOff+elfPhdrVAddrOffset : textPhdrOff+elfPhdrVAddrOffset+8])
+		textOffsetInSeg := uint64(plan.TextRVA) - segVAddr
+		needMemSz := textOffsetInSeg + uint64(plan.TextMemSize)
+
+		// Never shrink: the PT_LOAD may cover more than .text (.rodata, .plt …),
+		// so origMemSz could already exceed needMemSz.
 		origMemSz := binary.LittleEndian.Uint64(input[textPhdrOff+elfPhdrMemSzOffset : textPhdrOff+elfPhdrMemSzOffset+8])
 		binary.LittleEndian.PutUint64(
 			out[textPhdrOff+elfPhdrMemSzOffset:textPhdrOff+elfPhdrMemSzOffset+8],
-			max(origMemSz, uint64(plan.TextMemSize)),
+			max(origMemSz, needMemSz),
 		)
 	}
 

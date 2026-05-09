@@ -107,23 +107,19 @@ func TestPackBinary_LinuxELF_MultiSeed_WithCover(t *testing.T) {
 //
 // CRITICAL GATE: if ANY seed fails, the C3 chantier is NOT shippable.
 func TestPackBinary_LinuxELF_MultiSeed_WithCompress(t *testing.T) {
-	// C3-stage-2 attempt 3 (2026-05-07): isolated the failure to the
-	// stub's register-setup-before-LZ4, NOT the asm decoder itself.
+	// C3-stage-2 attempt 4 (2026-05-09): root-caused attempts 1-3 (LZ4
+	// in-place needs compressed-at-END layout). Stub now does backward
+	// memmove + in-place inflate from end. Standalone reproducer green.
 	//
-	// Proven correct in isolation:
-	//   - Asm LZ4 inflate at sizes 0..65536 (TestEmitLZ4Inflate_*).
-	//   - Asm LZ4 inflate on the FULL 498-KB .text decoded from real
-	//     SGN+LZ4 chain output, in a standalone Go program with
-	//     LockOSThread + SetGCPercent(-1). Output byte-equal to original.
+	// New blocker: .text PT_LOAD can't grow past the next read-only
+	// PT_LOAD. Go static-PIE packs segments tightly — segment 1 ends
+	// ~500 KB after R15 and segment 2 starts on the next page. We need
+	// ~2 KB of extra writable space past .text for the LZ4 margin.
 	//
-	// Still failing here: every seed's packed binary SIGSEGVs at runtime.
-	// Since the asm is correct on the same input bytes when fed via Go
-	// register ABI (RAX=src, RBX=dst, RCX=srcSize), the bug must be in
-	// the inline stub's register-setup sequence emitted by stage1.EmitStub
-	// when EmitOptions.Compress=true. Next session: dump the inline-LZ4
-	// preamble bytes and compare against the standalone harness's call
-	// site to confirm the stub passes the same RAX/RBX/RCX values.
-	t.Skip("C3-stage-2 SIGSEGV at runtime; asm decoder proven correct, suspect stub reg-setup. See KNOWN-ISSUES-1e.md attempt 3.")
+	// Next session: option 1 from KNOWN-ISSUES-1e.md attempt 4 — inflate
+	// into the STUB segment (our memsz is freely sized). Stub scratch
+	// buffer = stub.memsz BSS slack; ~30 extra stub bytes, no syscalls.
+	t.Skip("C3-stage-2 attempt 4: layout fix shipped; need scratch-buffer in stub segment. See KNOWN-ISSUES-1e.md attempt 4.")
 	fixturePath := filepath.Join("..", "..", "pe", "packer", "runtime",
 		"testdata", "hello_static_pie")
 	fixturePath, err := filepath.Abs(fixturePath)

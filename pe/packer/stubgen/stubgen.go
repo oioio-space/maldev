@@ -155,32 +155,34 @@ func Generate(opts Options) ([]byte, []byte, error) {
 		compressed := dst[:n]
 		compressedSize = uint32(n)
 
-		// safety_margin = ⌈originalTextSize/255⌉ + 16, minimum 64.
+		// LZ4 in-place inflate requires src to lead dst by ≥ (M − N) +
+		// intra-sequence drift. Since ELF/PE put file content at the START
+		// of a segment, we ship only the compressed bytes on disk
+		// (filesz = N) and rely on memsz > filesz BSS slack to provide the
+		// trailing zero region. The stub then runs a backward rep-movsb at
+		// runtime to relocate the SGN-decoded compressed bytes from
+		// [textBase, textBase+N) to [textBase+memsz-N, textBase+memsz)
+		// before calling LZ4 inflate.
 		//
-		// For in-place LZ4 inflate (dst < src), the write pointer advances
-		// from textBase and the read pointer starts safetyMargin bytes ahead.
-		// Each output byte was produced from at most 1/255 of an input byte
-		// (worst case: 0xFF extension bytes each yield 255 literals). Total
-		// potential overshoot is ≤ originalTextSize/255. Using compressedSize/255
-		// underestimates because compressedSize ≤ originalTextSize.
-		margin := (originalTextSize+254)/255 + 16
-		if margin < 64 {
-			margin = 64
+		// memsz = originalTextSize + intraSeqMargin (LZ4 spec bound).
+		// filesz = compressedSize.
+		intraSeqMargin := uint32(originalTextSize>>8) + 32
+		if intraSeqMargin < 64 {
+			intraSeqMargin = 64
 		}
-		safetyMargin = margin
+		safetyMargin = intraSeqMargin
 
-		// Build the on-disk payload: zero prefix + compressed block.
-		encodePayload = make([]byte, safetyMargin+compressedSize)
-		copy(encodePayload[safetyMargin:], compressed)
+		// On-disk payload is just the compressed bytes; the leading zero
+		// region in memory is BSS slack (kernel zero-fills [filesz, memsz)).
+		encodePayload = compressed
 
-		// Update plan so the transform functions know the on-disk and
-		// virtual sizes differ (memsz > filesz for the inflate workspace).
-		plan.TextSize = uint32(len(encodePayload))
-		plan.TextMemSize = safetyMargin + originalTextSize
+		plan.TextSize = compressedSize
+		plan.TextMemSize = originalTextSize + intraSeqMargin
 
 		emitOpts.Compress = true
 		emitOpts.SafetyMargin = safetyMargin
 		emitOpts.CompressedSize = compressedSize
+		emitOpts.MemSize = plan.TextMemSize
 	} else {
 		// Non-compress path: encode the raw .text bytes directly.
 		encodePayload = originalTextBytes

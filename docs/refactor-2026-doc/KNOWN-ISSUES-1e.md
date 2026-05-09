@@ -663,3 +663,146 @@ margin.
 - `lz4_inflate_sgn_chain_linux_test.go` adds the guard inline.
 - `TestPackBinary_LinuxELF_MultiSeed_WithCompress` re-skipped with
   precise diagnosis comment pointing at this section.
+
+---
+
+## C3-stage-2 ROOT CAUSE FOUND (2026-05-09)
+
+**The bug is layout, not the decoder.** Local reproduction in `/tmp/c3_inplace.go`
+(LockOSThread + GCPercent(-1), no kernel/loader involvement) confirms:
+
+1. **Our layout** `[zeros (margin) | compressed (N)]` with src at offset `margin`,
+   dst at offset 0 → diverges at byte 8500 of 498161 with margin=1977.
+2. **LZ4 official layout** `[zeros | compressed (N)]` of total size `M + margin`
+   with src at offset `M + margin - N`, dst at offset 0 → byte-perfect.
+3. Binary search on our layout shows minimum margin ≈ 160 KB (≈ M − N) for
+   this fixture.
+
+The LZ4 spec's `(M>>8)+32` margin is the **intra-sequence** worst-case drift
+(within a single sequence, dst may advance up to (M>>8)+32 more than src
+during the rep-movsb literal copy plus byte-by-byte match copy). It is NOT
+the cumulative margin needed for in-place. The cumulative invariant requires
+src to start ahead of dst by ≥ M − N, which is provided by the
+"compressed-at-end" layout (initial gap = M − N + margin).
+
+### The fix
+
+ELF/PE put file content at the START of a PT_LOAD/section, not the end. So
+on-disk we keep `filesz = compressedSize`, and the kernel zero-fills the BSS
+slack from `filesz` to `memsz = M + margin`.
+
+The stub then prepends a small relocation step before calling LZ4 inflate:
+
+```asm
+;  After SGN decode: [textBase, textBase+N) = compressed; rest is BSS zero.
+;  Backward memmove compressed → end of region:
+std                                  ; DF=1 (backward copy)
+lea rsi, [r15 + N - 1]               ; src end
+lea rdi, [r15 + memsz - 1]           ; dst end
+mov rcx, N
+rep movsb
+cld                                  ; DF=0 (Go ABI invariant)
+;  Now [r15+memsz-N, r15+memsz) = compressed; [r15, r15+memsz-N) = zero.
+;  Set up LZ4 ABI:
+lea rax, [r15 + memsz - N]           ; src
+mov rbx, r15                         ; dst (textBase)
+mov rcx, N                           ; src_size
+;  ... fall through to inline LZ4 inflate.
+```
+
+Cost: ~25 bytes added to the stub. Stub-size budget already at 8192 → trivial.
+
+### Plan changes
+
+- `stubgen/stubgen.go`: build payload as `[compressed (N)]` only on disk;
+  set `plan.TextSize = N`, `plan.TextMemSize = M + margin`.
+- `stubgen/stage1/stub.go::EmitStub` (Compress branch): emit the 5-insn
+  memmove preamble before the existing RAX/RBX/RCX setup, switch the
+  RAX setup to `LEA RAX, [R15 + (memsz - N)]` instead of `ADD RAX, margin`.
+- `transform/elf.go` and `transform/pe.go`: ensure the section's memsz can
+  exceed filesz (ELF: trivial; PE: VirtualSize > SizeOfRawData with proper
+  characteristics flag — already supported per Phase 1e shipped layout).
+- Update `lz4_inflate_sgn_chain_linux_test.go` diagnostic to use
+  compressed-at-end layout (sanity check that test mirrors prod).
+- Re-test `/tmp/c3_inplace_correct.go` style across all 8 seeds via the
+  E2E gate; if green, ship as v0.66.0.
+
+The diagnostic test's current crash is caused by the SAME layout bug — once
+the production layout flips to compressed-at-end, the diagnostic will too,
+and the in-test crash should go away.
+
+---
+
+## C3-stage-2 attempt 4 — layout fix shipped, segment-grow blocker (2026-05-09)
+
+**Layout root cause from attempt 3 fixed.** Production code now:
+
+1. `stubgen.go`: payload on disk = compressed bytes only (filesz = N).
+   Sets `plan.TextSize = N`, `plan.TextMemSize = M + (M>>8)+32`,
+   `emitOpts.MemSize = plan.TextMemSize`.
+2. `stage1/stub.go`: Compress branch emits a backward-memmove preamble
+   (STD; LEA RSI/RDI end-pointers; MOV RCX,N; REP MOVSB; CLD) before
+   the existing LZ4 register setup. Setup now uses
+   `LEA RAX, [R15 + (MemSize − N)]` (compressed-at-end) instead of
+   `ADD RAX, SafetyMargin` (compressed-at-start).
+3. `stage1/stub.go::EmitOptions`: new exported field `MemSize uint32`,
+   validation rejects `MemSize ≤ CompressedSize`.
+4. `transform/elf.go`: p_memsz widening now adds the in-segment offset
+   of .text — `needMemSz = (TextRVA − segVAddr) + plan.TextMemSize`
+   — so memsz is measured from segment start, not from .text base.
+5. Test `TestEmitStub_Compress_AsmAssembles`: asserts STD+LEA preamble
+   present; `TestEmitStub_Compress_RejectsZeroMargin` extended to cover
+   the new `MemSize ≤ CompressedSize` rejection paths.
+6. Standalone `/tmp/c3_inplace_correct.go` proves the chain end-to-end
+   on the full 498 KB .text.
+
+**New blocker: ELF segment overlap.**
+The .text PT_LOAD can't grow past the next read-only PT_LOAD's vaddr.
+Go static-PIE binaries pack segments tightly — segment 1 ends
+~500 KB after R15 and segment 2 starts on the very next page (read-only,
+unwritable). Even with `p_memsz` widened to `plan.TextMemSize +
+(TextRVA − segVAddr)`, the kernel page-aligns segment 1's mapping at
+the start of segment 2's vaddr, so we lose the trailing ~2 KB needed
+for the LZ4 margin. SIGSEGV at the `rep movsb` writing the last byte.
+
+### Next session — three implementation options
+
+**Option 1 (recommended): inflate into the STUB segment as scratch.**
+The stub PT_LOAD is appended by us — its memsz is freely sized. Set
+`stub_segment.memsz = stub_size + originalTextSize` (filesz unchanged
+— BSS slack provided by the kernel). Stub does:
+
+  - Save R15 (text base) into a free callee-saved reg (e.g. R13).
+  - Compute scratch_addr = stub_base + stub_size, where stub_base is
+    obtained from the existing CALL+POP+ADD prologue (so we have a
+    RIP-derived address already).
+  - Run LZ4 inflate with src = R15 (compressed bytes after SGN
+    unwrap), dst = scratch_addr, srcSize = N.
+  - memcpy plaintext back: rep movsb from scratch_addr to R15,
+    rcx = originalSize.
+  - Jump OEP.
+
+  Total stub-size cost: ~30 bytes. No syscalls. Cross-platform
+  (works for both ELF and PE — PE's stub section is also free-sized).
+
+**Option 2: Linux-only mmap/munmap.** Stub manually invokes
+`syscall(SYS_mmap, …)` for scratch, `SYS_munmap` after. ~80 bytes.
+Doesn't help the Windows side.
+
+**Option 3: ELF surgery — shift segment 2+ later in vaddr.** Most
+invasive; touches every subsequent phdr's `p_vaddr` and `p_paddr`,
+plus any absolute pointers inside .rodata that reference moved
+sections. Avoid.
+
+**Implementation order for next session:**
+1. Drop the memmove preamble from stage1/stub.go (no longer needed
+   when scratch-buffer approach is used; in-place is abandoned).
+2. Add a new `EmitOptions.ScratchOffset` field — offset from the
+   stub's POP-relative anchor to the scratch region.
+3. Stub setup: `LEA RBX, [POP_anchor + ScratchOffset]` (Plan 9 LEA
+   already supported in amd64.Builder).
+4. After LZ4 inflate, emit the rep-movsb scratch→.text copy.
+5. transform/elf.go + transform/pe.go: stub_segment.memsz =
+   stub_filesz + originalTextSize; rename plan.StubMaxSize handling
+   so the "code budget" is separate from the "scratch budget".
+6. Re-run the 8-seed E2E gate — should be byte-perfect.

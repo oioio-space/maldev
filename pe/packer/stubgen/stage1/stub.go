@@ -27,28 +27,36 @@ type EmitOptions struct {
 	// flag.
 	AntiDebug bool
 
-	// Compress, when true, appends a 22-byte register-setup sequence
-	// followed by the 136-byte LZ4 block-format inflate decoder
-	// BETWEEN the last SGN round and the OEP-jump epilogue.
+	// Compress, when true, appends a backward-memmove preamble + LZ4
+	// register-setup + inline LZ4 inflate decoder BETWEEN the last SGN
+	// round and the OEP-jump epilogue.
 	//
-	// After all SGN rounds have run, R15 points to the start of .text
-	// in memory. The safety-margin prefix [R15, R15+SafetyMargin) is
-	// zero (SGN-decoded zeros), and the compressed payload lives at
-	// [R15+SafetyMargin, R15+SafetyMargin+CompressedSize). The decoder
-	// inflates in-place: output starts at R15 (overwriting the zero
-	// prefix first), advancing forward; the source pointer stays
-	// SafetyMargin bytes ahead at all times (LZ4 spec guarantee: each
-	// compressed byte expands to ≤255 output bytes; safety_margin =
-	// ⌈CompressedSize/255⌉+16 ensures dst never catches src).
+	// Layout invariants when this branch runs:
+	//   * filesz = CompressedSize (only the compressed bytes ship on disk)
+	//   * memsz  = MemSize         (= originalTextSize + LZ4 intra-seq margin)
+	//   * After kernel load: [R15, R15+CompressedSize) = compressed bytes
+	//                        [R15+CompressedSize, R15+MemSize)  = BSS zero
+	//   * After SGN unwrap: same — SGN runs over filesz bytes only.
 	//
-	// After inflate, [R15, R15+OriginalTextSize) holds the original
-	// .text bytes, and the epilogue ADD+JMP lands at OEP normally.
+	// The stub then:
+	//   1. Backward-memmoves compressed bytes to the END of the memsz region
+	//      (rep movsb with DF=1) so that LZ4's in-place decode invariant
+	//      `src ≥ dst + (M − N)` is satisfied. After the move:
+	//        [R15, R15+MemSize-CompressedSize)   = (now zero)
+	//        [R15+MemSize-CompressedSize, MemSize) = compressed bytes
+	//   2. Calls the inline LZ4 inflate with src = R15+MemSize-CompressedSize,
+	//      dst = R15, srcSize = CompressedSize.
+	//   3. After inflate, [R15, R15+OriginalTextSize) = plaintext .text;
+	//      epilogue ADD+JMP lands at OEP.
 	//
-	// SafetyMargin and CompressedSize must both be non-zero when Compress
-	// is true; EmitStub returns an error otherwise.
+	// SafetyMargin retained for diagnostic/back-compat (intra-sequence drift
+	// bound, ≈ originalTextSize/256 + 32). CompressedSize and MemSize must
+	// both be non-zero when Compress is true; EmitStub returns an error
+	// otherwise.
 	Compress       bool
-	SafetyMargin   uint32 // byte offset of compressed data from R15
-	CompressedSize uint32 // length of the LZ4 block in bytes
+	SafetyMargin   uint32 // LZ4 intra-sequence drift bound (informational)
+	CompressedSize uint32 // length of the LZ4 block in bytes (= filesz)
+	MemSize        uint32 // virtual size of the .text region (= memsz)
 }
 
 // baseReg is the callee-saved register the prologue loads with the
@@ -174,22 +182,58 @@ func EmitStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round, opts E
 
 	// LZ4 inflate decoder — runs after all SGN rounds have peeled the encoding.
 	// At this point R15 = text base:
-	//   [R15,                      R15+SafetyMargin)  = zero bytes (SGN-decoded zeros)
-	//   [R15+SafetyMargin,         R15+SafetyMargin+CompressedSize) = LZ4 block
+	//   [R15,              R15+CompressedSize) = LZ4 block (SGN-decoded compressed)
+	//   [R15+CompressedSize, R15+MemSize)      = BSS-zero (filesz<memsz slack)
 	//
-	// Go register ABI (Go 1.17+, amd64): RAX=src, RBX=dst, RCX=src_size.
-	// EmitLZ4InflateInline is used (no terminal RET) so execution falls through
-	// to the OEP epilogue — [R15, R15+OriginalSize) holds plaintext after inflate.
+	// Step 1: backward rep-movsb relocates the compressed bytes to the END
+	// of the memsz region. Required because LZ4's in-place decode invariant
+	// is `src ≥ dst + (M − N)` cumulative, not just intra-sequence — placing
+	// compressed at the END gives the decoder the ahead-distance it needs.
+	//
+	// Step 2: register setup for the inline LZ4 decoder. Go register ABI:
+	// RAX=src, RBX=dst, RCX=src_size.
+	//
+	// Step 3: EmitLZ4InflateInline — no terminal RET so execution falls
+	// through to the OEP epilogue.
+	//
+	// After inflate: [R15, R15+OriginalTextSize) = plaintext .text.
 	if opts.Compress {
-		if opts.SafetyMargin == 0 || opts.CompressedSize == 0 {
-			return fmt.Errorf("stage1: EmitStub Compress=true but SafetyMargin=%d CompressedSize=%d",
-				opts.SafetyMargin, opts.CompressedSize)
+		if opts.CompressedSize == 0 || opts.MemSize == 0 {
+			return fmt.Errorf("stage1: EmitStub Compress=true but CompressedSize=%d MemSize=%d",
+				opts.CompressedSize, opts.MemSize)
 		}
-		if err := b.MOV(amd64.RAX, baseReg); err != nil {
-			return fmt.Errorf("stage1: lz4 setup MOV RAX,R15: %w", err)
+		if opts.MemSize <= opts.CompressedSize {
+			return fmt.Errorf("stage1: EmitStub Compress=true requires MemSize(%d) > CompressedSize(%d)",
+				opts.MemSize, opts.CompressedSize)
 		}
-		if err := b.ADD(amd64.RAX, amd64.Imm(int64(opts.SafetyMargin))); err != nil {
-			return fmt.Errorf("stage1: lz4 setup ADD RAX,SafetyMargin: %w", err)
+
+		// Step 1: backward memmove — std; lea rsi/rdi end-pointers; mov rcx, N;
+		// rep movsb; cld. STD/CLD/REP MOVSB have no Builder helpers; emit raw.
+		if err := b.RawBytes([]byte{0xfd}); err != nil { // std
+			return fmt.Errorf("stage1: lz4 memmove STD: %w", err)
+		}
+		if err := b.LEA(amd64.RSI, amd64.MemOp{Base: amd64.R15, Disp: int32(opts.CompressedSize) - 1}); err != nil {
+			return fmt.Errorf("stage1: lz4 memmove LEA RSI: %w", err)
+		}
+		if err := b.LEA(amd64.RDI, amd64.MemOp{Base: amd64.R15, Disp: int32(opts.MemSize) - 1}); err != nil {
+			return fmt.Errorf("stage1: lz4 memmove LEA RDI: %w", err)
+		}
+		if err := b.MOV(amd64.RCX, amd64.Imm(int64(opts.CompressedSize))); err != nil {
+			return fmt.Errorf("stage1: lz4 memmove MOV RCX: %w", err)
+		}
+		if err := b.RawBytes([]byte{0xf3, 0xa4}); err != nil { // rep movsb
+			return fmt.Errorf("stage1: lz4 memmove REP MOVSB: %w", err)
+		}
+		if err := b.RawBytes([]byte{0xfc}); err != nil { // cld
+			return fmt.Errorf("stage1: lz4 memmove CLD: %w", err)
+		}
+
+		// Step 2: LZ4 register setup.
+		// RAX = R15 + (MemSize - CompressedSize)  -- src (compressed at end)
+		// RBX = R15                                -- dst (text base)
+		// RCX = CompressedSize                     -- srcSize
+		if err := b.LEA(amd64.RAX, amd64.MemOp{Base: amd64.R15, Disp: int32(opts.MemSize - opts.CompressedSize)}); err != nil {
+			return fmt.Errorf("stage1: lz4 setup LEA RAX: %w", err)
 		}
 		if err := b.MOV(amd64.RBX, baseReg); err != nil {
 			return fmt.Errorf("stage1: lz4 setup MOV RBX,R15: %w", err)
