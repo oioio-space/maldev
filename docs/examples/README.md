@@ -19,6 +19,7 @@ code, build instructions, and honest limitations.
 | DLL proxy side-load | recon/dllhijack · pe/parse · pe/dllproxy · stealthopen · timestomp | [dllproxy-side-load.md](dllproxy-side-load.md) |
 | UPX-style packer + cover | pe/packer · transform · cover layer | [upx-style-packer.md](upx-style-packer.md) |
 | Multi-target bundle (C6) | pe/packer.PackBinaryBundle · SelectPayload · cmd/packer bundle | [multi-target-bundle.md](multi-target-bundle.md) |
+| Packer elevation tour | transform.BuildMinimalELF64 · WrapBundleAsExecutableLinux · cmd/bundle-launcher · cmd/packer-vis | [packer-elevation-tour.md](packer-elevation-tour.md) |
 
 ## Conventions
 
