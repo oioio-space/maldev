@@ -37,3 +37,13 @@ func MatchBundleHost(bundle []byte) (int, error) {
 	build := hostWinBuild()
 	return SelectPayload(bundle, vendor, build)
 }
+
+// MatchBundleHostWith is the per-build-profile-aware variant of
+// [MatchBundleHost]. Validates the bundle's magic against
+// `profile.Magic` (canonical default when zero) and dispatches via
+// [SelectPayloadWith].
+func MatchBundleHostWith(bundle []byte, profile BundleProfile) (int, error) {
+	vendor := HostCPUIDVendor()
+	build := hostWinBuild()
+	return SelectPayloadWith(bundle, profile, vendor, build)
+}

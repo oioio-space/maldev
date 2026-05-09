@@ -305,6 +305,7 @@ func runBundle(args []string) int {
 	match := fs.String("match", "", "report which payload would fire on this host and exit (path)")
 	wrap := fs.String("wrap", "", "append a bundle blob to a launcher binary, producing a runnable executable (path to launcher)")
 	bundlePath := fs.String("bundle", "", "bundle blob to wrap (used with -wrap)")
+	secret := fs.String("secret", "", "per-build IOC secret — derives a unique BundleMagic + footer via SHA-256 (Kerckhoffs); operator must build the launcher with the same secret via -ldflags '-X main.bundleSecret=<secret>'")
 	var pls stringSliceFlag
 	fs.Var(&pls, "pl", "payload spec: <file>:<vendor>:<min>-<max>; repeatable")
 	if err := fs.Parse(args); err != nil {
@@ -319,7 +320,7 @@ func runBundle(args []string) int {
 		return runBundleMatch(*match)
 	}
 	if *wrap != "" {
-		return runBundleWrap(*wrap, *bundlePath, *out)
+		return runBundleWrap(*wrap, *bundlePath, *out, *secret)
 	}
 	if *out == "" || len(pls) == 0 {
 		fmt.Fprintln(os.Stderr, "bundle: -out and at least one -pl required (or use -inspect)")
@@ -349,7 +350,11 @@ func runBundle(args []string) int {
 		return 2
 	}
 
-	blob, err := packer.PackBinaryBundle(payloads, packer.BundleOptions{FallbackBehaviour: fb})
+	bundleOpts := packer.BundleOptions{FallbackBehaviour: fb}
+	if *secret != "" {
+		bundleOpts.Profile = packer.DeriveBundleProfile([]byte(*secret))
+	}
+	blob, err := packer.PackBinaryBundle(payloads, bundleOpts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "bundle:", err)
 		return 1
@@ -430,7 +435,7 @@ func parseBundleSpec(spec string) (packer.BundlePayload, error) {
 // producing a single-file executable that dispatches at runtime via
 // CPUID + Win build fingerprinting. The output preserves the
 // launcher's executable bit on the file.
-func runBundleWrap(launcherPath, bundlePath, outPath string) int {
+func runBundleWrap(launcherPath, bundlePath, outPath, secret string) int {
 	if launcherPath == "" || bundlePath == "" || outPath == "" {
 		fmt.Fprintln(os.Stderr, "bundle wrap: -wrap, -bundle, and -out are all required")
 		return 2
@@ -445,17 +450,28 @@ func runBundleWrap(launcherPath, bundlePath, outPath string) int {
 		fmt.Fprintln(os.Stderr, "bundle wrap: read bundle:", err)
 		return 1
 	}
-	if _, err := packer.InspectBundle(bundle); err != nil {
+
+	profile := packer.BundleProfile{}
+	if secret != "" {
+		profile = packer.DeriveBundleProfile([]byte(secret))
+	}
+	if _, err := packer.InspectBundleWith(bundle, profile); err != nil {
 		fmt.Fprintln(os.Stderr, "bundle wrap: bundle does not parse:", err)
 		return 1
 	}
-	wrapped := packer.AppendBundle(launcher, bundle)
+	wrapped := packer.AppendBundleWith(launcher, bundle, profile)
 	if err := os.WriteFile(outPath, wrapped, 0o755); err != nil {
 		fmt.Fprintln(os.Stderr, "bundle wrap: write output:", err)
 		return 1
 	}
 	fmt.Fprintf(os.Stderr, "bundle wrap: wrote %d bytes (%d launcher + %d bundle + 16-byte footer) to %s\n",
 		len(wrapped), len(launcher), len(bundle), outPath)
+	if secret != "" {
+		fmt.Fprintf(os.Stderr,
+			"bundle wrap: NOTE — launcher must be built with the same secret. Build it with:\n"+
+				"  go build -ldflags \"-X main.bundleSecret=%s\" -o bundle-launcher ./cmd/bundle-launcher\n",
+			secret)
+	}
 	return 0
 }
 

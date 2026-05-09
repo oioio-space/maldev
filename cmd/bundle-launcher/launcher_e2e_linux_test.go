@@ -151,6 +151,102 @@ func TestLauncher_E2E_FallbackExitOnNoMatch(t *testing.T) {
 	}
 }
 
+// TestLauncher_E2E_PerBuildSecret_PairsCorrectly is the Kerckhoffs
+// E2E gate. The launcher and the bundle wrap MUST share the same
+// per-build secret for the launcher to find its bundle:
+//
+//   - Build the launcher with -ldflags '-X main.bundleSecret=<S>'
+//   - Pack a bundle and wrap with the SAME secret S
+//   - Run wrapped binary → exit 42 (per-build pair works)
+//
+// The smoking-gun negative side:
+//
+//   - Build a launcher with secret A
+//   - Wrap a bundle with secret B
+//   - Run → launcher's ExtractBundleWith fails with ErrBundleBadMagic
+//     and the launcher exits non-zero (NOT 42).
+//
+// This proves Kerckhoffs in practice: the wire format is public; only
+// the secret distinguishes individual builds.
+func TestLauncher_E2E_PerBuildSecret_PairsCorrectly(t *testing.T) {
+	exit42 := buildExit42(t)
+	const secret = "ops-cycle-2026-05-target-deploy"
+
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "bundle-launcher-secret")
+	if out, err := exec.Command("go", "build",
+		"-ldflags", "-X main.bundleSecret="+secret,
+		"-o", launcher,
+		"github.com/oioio-space/maldev/cmd/bundle-launcher",
+	).CombinedOutput(); err != nil {
+		t.Fatalf("go build with secret ldflag: %v: %s", err, out)
+	}
+	launcherBytes, err := os.ReadFile(launcher)
+	if err != nil {
+		t.Fatalf("read launcher: %v", err)
+	}
+
+	profile := packer.DeriveBundleProfile([]byte(secret))
+	bundle, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{
+			Binary: exit42,
+			Fingerprint: packer.FingerprintPredicate{
+				PredicateType: packer.PTMatchAll,
+			},
+		}},
+		packer.BundleOptions{Profile: profile},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	wrapped := packer.AppendBundleWith(launcherBytes, bundle, profile)
+	wrappedPath := filepath.Join(dir, "app-secret")
+	if err := os.WriteFile(wrappedPath, wrapped, 0o755); err != nil {
+		t.Fatalf("write wrapped: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = exec.CommandContext(ctx, wrappedPath).Run()
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("paired-secret run: %v (expected ExitError exit 42)", err)
+	}
+	if got := exitErr.ExitCode(); got != 42 {
+		t.Errorf("paired secret exit = %d, want 42", got)
+	}
+
+	// Negative case: wrap with a DIFFERENT secret. The launcher's
+	// ExtractBundleWith call should fail to find a valid footer.
+	wrongProfile := packer.DeriveBundleProfile([]byte("wrong-secret"))
+	wrongBundle, _ := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{
+			Binary: exit42,
+			Fingerprint: packer.FingerprintPredicate{
+				PredicateType: packer.PTMatchAll,
+			},
+		}},
+		packer.BundleOptions{Profile: wrongProfile},
+	)
+	wrongWrapped := packer.AppendBundleWith(launcherBytes, wrongBundle, wrongProfile)
+	wrongPath := filepath.Join(dir, "app-mismatched")
+	if err := os.WriteFile(wrongPath, wrongWrapped, 0o755); err != nil {
+		t.Fatalf("write wrong-wrapped: %v", err)
+	}
+
+	err = exec.CommandContext(ctx, wrongPath).Run()
+	exitErr, ok = err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("mismatched-secret run: %v (expected ExitError, got nil or non-exit)", err)
+	}
+	if got := exitErr.ExitCode(); got == 42 {
+		t.Errorf("mismatched secret unexpectedly exited 42 — magic gate broken")
+	}
+	t.Logf("mismatched-secret rejected by launcher with exit code %d (expected non-42)",
+		exitErr.ExitCode())
+}
+
 // TestLauncher_E2E_WrapAndRun is the C6 ship gate: builds the launcher,
 // packs a bundle around a tiny `exit 42` payload, wraps the bundle into
 // the launcher via packer.AppendBundle, executes the result, asserts
