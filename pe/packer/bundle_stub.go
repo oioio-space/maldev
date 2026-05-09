@@ -540,13 +540,24 @@ const bundleOffsetImm32Pos = 10
 // CPUID + PEB evaluator loop ships in the next stub revision and
 // drops in transparently — this function's signature does not change.
 func WrapBundleAsExecutableLinux(bundle []byte) ([]byte, error) {
+	return WrapBundleAsExecutableLinuxWith(bundle, BundleProfile{})
+}
+
+// WrapBundleAsExecutableLinuxWith is the per-build-profile-aware
+// variant of [WrapBundleAsExecutableLinux]. Validates the supplied
+// bundle's magic against `profile.Magic` (canonical default when
+// zero) before wrapping. The bundle stub asm itself reads only
+// header offsets — count, fpTable, plTable — and is magic-agnostic,
+// so per-build magic bytes pass through transparently.
+func WrapBundleAsExecutableLinuxWith(bundle []byte, profile BundleProfile) ([]byte, error) {
 	if len(bundle) < BundleHeaderSize {
 		return nil, fmt.Errorf("%w: %d < BundleHeaderSize %d",
 			ErrBundleTruncated, len(bundle), BundleHeaderSize)
 	}
-	if magic := binary.LittleEndian.Uint32(bundle[0:4]); magic != BundleMagic {
+	expected := resolvedMagic(profile)
+	if magic := binary.LittleEndian.Uint32(bundle[0:4]); magic != expected {
 		return nil, fmt.Errorf("%w: %#x != %#x",
-			ErrBundleBadMagic, magic, BundleMagic)
+			ErrBundleBadMagic, magic, expected)
 	}
 
 	// Use the vendor-aware scan stub: walks the FingerprintEntry table,

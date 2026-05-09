@@ -150,6 +150,67 @@ func TestWrapBundleAsExecutableLinux_NoMatchExitsCleanly(t *testing.T) {
 	}
 }
 
+// TestWrapBundleAsExecutableLinuxWith_PerBuildSecretRoundTrip is the
+// Kerckhoffs gate for the all-asm wrap path. The bundle stub asm
+// reads only count + fpOff + plOff from the header, never the magic
+// — so per-build magic bytes pass through the runtime evaluator
+// transparently. This test pins:
+//
+//   - WrapBundleAsExecutableLinuxWith accepts a bundle whose magic
+//     was set by a per-build BundleOptions.Profile and produces a
+//     runnable ELF.
+//   - The ELF runs to exit 42 (proving the stub doesn't accidentally
+//     check for the canonical magic).
+//   - The canonical WrapBundleAsExecutableLinux REJECTS the same
+//     per-build bundle with ErrBundleBadMagic.
+func TestWrapBundleAsExecutableLinuxWith_PerBuildSecretRoundTrip(t *testing.T) {
+	profile := packer.DeriveBundleProfile([]byte("allasm-deploy-A"))
+	bundle, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{
+			Binary: exit42Shellcode,
+			Fingerprint: packer.FingerprintPredicate{
+				PredicateType: packer.PTMatchAll,
+			},
+		}},
+		packer.BundleOptions{Profile: profile},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	wrapped, err := packer.WrapBundleAsExecutableLinuxWith(bundle, profile)
+	if err != nil {
+		t.Fatalf("WrapBundleAsExecutableLinuxWith: %v", err)
+	}
+	if len(wrapped) >= 4096 {
+		t.Errorf("wrapped binary = %d bytes, want < 4096", len(wrapped))
+	}
+
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "perbuild-bundle")
+	if err := os.WriteFile(exe, wrapped, 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = exec.CommandContext(ctx, exe).Run()
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("run %q: %v (per-build wrap didn't dispatch)", exe, err)
+	}
+	if got := exitErr.ExitCode(); got != 42 {
+		t.Errorf("per-build wrap exit code = %d, want 42", got)
+	}
+	t.Logf("per-build all-asm bundle: %d bytes; magic=%#x → exit=42",
+		len(wrapped), profile.Magic)
+
+	// Negative: canonical wrap must reject the per-build bundle.
+	if _, err := packer.WrapBundleAsExecutableLinux(bundle); !errors.Is(err, packer.ErrBundleBadMagic) {
+		t.Errorf("canonical Wrap on per-build bundle: err = %v, want ErrBundleBadMagic", err)
+	}
+}
+
 // TestWrapBundleAsExecutableLinux_VendorAwareDispatch proves the
 // vendor-aware predicate evaluation in the scan loop: the bundle has
 // TWO PTCPUIDVendor entries — one targeting a bogus vendor (decoy)
