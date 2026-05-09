@@ -150,6 +150,113 @@ func TestWrapBundleAsExecutableLinux_NoMatchExitsCleanly(t *testing.T) {
 	}
 }
 
+// TestWrapBundleAsExecutableLinux_VendorAwareDispatch proves the
+// vendor-aware predicate evaluation in the scan loop: the bundle has
+// TWO PTCPUIDVendor entries — one targeting a bogus vendor (decoy)
+// and one targeting the actual host CPU vendor. The stub must run the
+// CPUID prologue, walk both entries, do a 12-byte VendorString
+// compare against the host, fail the first entry, succeed on the
+// second, and dispatch to the second payload (exit42 shellcode).
+//
+// This is the test that distinguishes the vendor-aware stub from
+// the prior 'first PT_MATCH_ALL wins' baseline. If it passes, the
+// CPUID setup and the 12-byte compare logic are wired correctly.
+func TestWrapBundleAsExecutableLinux_VendorAwareDispatch(t *testing.T) {
+	hostVendor := packer.HostCPUIDVendor()
+	if hostVendor == ([12]byte{}) {
+		t.Skip("HostCPUIDVendor returned zero — non-x86 build agent?")
+	}
+
+	bogus := [12]byte{'N', 'o', 't', 'A', 'R', 'e', 'a', 'l', 'C', 'P', 'U', '!'}
+	bundle, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{
+			{
+				Binary: []byte("decoy-payload-shouldnt-fire"),
+				Fingerprint: packer.FingerprintPredicate{
+					PredicateType: packer.PTCPUIDVendor,
+					VendorString:  bogus,
+				},
+			},
+			{
+				Binary: exit42Shellcode,
+				Fingerprint: packer.FingerprintPredicate{
+					PredicateType: packer.PTCPUIDVendor,
+					VendorString:  hostVendor,
+				},
+			},
+		},
+		packer.BundleOptions{},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	wrapped, err := packer.WrapBundleAsExecutableLinux(bundle)
+	if err != nil {
+		t.Fatalf("WrapBundleAsExecutableLinux: %v", err)
+	}
+
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "vendor-bundle")
+	if err := os.WriteFile(exe, wrapped, 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = exec.CommandContext(ctx, exe).Run()
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("run %q: %v (not an ExitError; vendor-aware dispatch crashed)", exe, err)
+	}
+	if got := exitErr.ExitCode(); got != 42 {
+		t.Errorf("exit code = %d, want 42 (host-vendor entry should fire)", got)
+	}
+	t.Logf("vendor-aware bundle: %d bytes; host=%q matched idx 1 → exit=42",
+		len(wrapped), string(hostVendor[:]))
+}
+
+// TestWrapBundleAsExecutableLinux_VendorWildcard verifies that an
+// all-zero VendorString in a PTCPUIDVendor entry acts as a wildcard
+// (matches any host).
+func TestWrapBundleAsExecutableLinux_VendorWildcard(t *testing.T) {
+	bundle, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{
+			Binary: exit42Shellcode,
+			Fingerprint: packer.FingerprintPredicate{
+				PredicateType: packer.PTCPUIDVendor,
+				// VendorString left zero → wildcard
+			},
+		}},
+		packer.BundleOptions{},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	wrapped, err := packer.WrapBundleAsExecutableLinux(bundle)
+	if err != nil {
+		t.Fatalf("WrapBundleAsExecutableLinux: %v", err)
+	}
+
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "wildcard-bundle")
+	if err := os.WriteFile(exe, wrapped, 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = exec.CommandContext(ctx, exe).Run()
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("run %q: %v", exe, err)
+	}
+	if got := exitErr.ExitCode(); got != 42 {
+		t.Errorf("wildcard bundle exit = %d, want 42", got)
+	}
+}
+
 // TestWrapBundleAsExecutableLinux_RunsExit42 is the SHIP GATE for the
 // all-asm bundle path. It exercises every layer:
 //

