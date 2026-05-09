@@ -1,8 +1,10 @@
 package packer
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	mathrand "math/rand"
 
 	"github.com/oioio-space/maldev/pe/packer/transform"
 )
@@ -17,6 +19,69 @@ import (
 // approach (~5 MB binary, full Go runtime + memfd+execve dispatch).
 // The all-asm path trades operator ergonomics (no Negate / no full
 // fingerprint loop in v0.69) for binary size and OPSEC.
+
+// intelNops are the Intel-recommended multi-byte NOP encodings (SDM
+// Vol 2B, NOP §). Using these instead of N×0x90 means a yara writer
+// can't pattern-match on long 0x90 runs to spot junk insertion.
+//
+// Each entry is one NOP of length [index+1]. The 9-byte version uses
+// the maximum recommended single-NOP encoding.
+var intelNops = [][]byte{
+	{0x90},                                                       // 1: nop
+	{0x66, 0x90},                                                 // 2: 66 nop
+	{0x0f, 0x1f, 0x00},                                           // 3: nop dword [rax]
+	{0x0f, 0x1f, 0x40, 0x00},                                     // 4: nop dword [rax+0]
+	{0x0f, 0x1f, 0x44, 0x00, 0x00},                               // 5: nop dword [rax+rax+0]
+	{0x66, 0x0f, 0x1f, 0x44, 0x00, 0x00},                         // 6
+	{0x0f, 0x1f, 0x80, 0x00, 0x00, 0x00, 0x00},                   // 7
+	{0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00},             // 8
+	{0x66, 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00},       // 9
+}
+
+// junkInsertOffset is the byte position WITHIN the stub bytes where
+// the polymorphic junk gets inlined — between the PIC trampoline
+// (call/pop/add r15, imm32 — 14 bytes) and the CPUID prologue.
+//
+// Why this slot is safe: every Jcc displacement in the stub is rel8
+// relative to the end-of-Jcc address; both the source AND target of
+// every Jcc live AFTER junkInsertOffset, so inserting N bytes shifts
+// both by the same N — disp = (target+N) - (end-of-Jcc+N) is
+// invariant. The PIC's `add r15, imm32` immediate is independently
+// patched at wrap time to the new total stub length minus 5, so the
+// junk simply lands inside the bundle-base computation.
+const junkInsertOffset = 14
+
+// injectStubJunk returns a copy of `stub` with a random number of
+// Intel-recommended NOP bytes spliced in at [junkInsertOffset]. The
+// total inserted byte count is in [4, 32) — enough to perturb yara
+// signatures across packs without bloating the wrapped binary.
+//
+// `r` drives the choice of NOP sizes and the total length, so caller
+// supplying the same seed gets the same junk (test determinism).
+// Production callers in [WrapBundleAsExecutableLinuxWith] use
+// crypto/rand for the seed so two packs of the same bundle produce
+// distinct stub byte sequences.
+func injectStubJunk(stub []byte, r *mathrand.Rand) []byte {
+	if r == nil {
+		return append([]byte(nil), stub...)
+	}
+	target := 4 + r.Intn(28) // [4, 32)
+	junk := make([]byte, 0, target)
+	for len(junk) < target {
+		remaining := target - len(junk)
+		maxSize := remaining
+		if maxSize > len(intelNops) {
+			maxSize = len(intelNops)
+		}
+		size := 1 + r.Intn(maxSize)
+		junk = append(junk, intelNops[size-1]...)
+	}
+	out := make([]byte, 0, len(stub)+len(junk))
+	out = append(out, stub[:junkInsertOffset]...)
+	out = append(out, junk...)
+	out = append(out, stub[junkInsertOffset:]...)
+	return out
+}
 
 // bundleStubVendorAware returns stub bytes that walk the
 // FingerprintEntry table and JMP into the first entry whose predicate
@@ -549,7 +614,30 @@ func WrapBundleAsExecutableLinux(bundle []byte) ([]byte, error) {
 // zero) before wrapping. The bundle stub asm itself reads only
 // header offsets — count, fpTable, plTable — and is magic-agnostic,
 // so per-build magic bytes pass through transparently.
+//
+// Polymorphism: each call splices a fresh batch of Intel multi-byte
+// NOPs into the stub (between the PIC trampoline and the CPUID
+// prologue) so two packs of the same bundle produce distinct stub
+// byte sequences — yara writers cannot signature the 160-byte stub
+// across packs. The seed is drawn from crypto/rand. For deterministic
+// pack output (testing, reproducible builds) use
+// [WrapBundleAsExecutableLinuxWithSeed].
 func WrapBundleAsExecutableLinuxWith(bundle []byte, profile BundleProfile) ([]byte, error) {
+	var seedBytes [8]byte
+	if _, err := rand.Read(seedBytes[:]); err != nil {
+		return nil, fmt.Errorf("packer: stub junk seed: %w", err)
+	}
+	seed := int64(binary.LittleEndian.Uint64(seedBytes[:]))
+	return WrapBundleAsExecutableLinuxWithSeed(bundle, profile, seed)
+}
+
+// WrapBundleAsExecutableLinuxWithSeed is the deterministic variant
+// of [WrapBundleAsExecutableLinuxWith]: same seed → same stub junk
+// pattern → byte-identical wrapped output (modulo the random per-
+// payload XOR keys, which the caller controls via
+// BundleOptions.FixedKey upstream). Use seed=0 for the canonical
+// junk-free shape.
+func WrapBundleAsExecutableLinuxWithSeed(bundle []byte, profile BundleProfile, seed int64) ([]byte, error) {
 	if len(bundle) < BundleHeaderSize {
 		return nil, fmt.Errorf("%w: %d < BundleHeaderSize %d",
 			ErrBundleTruncated, len(bundle), BundleHeaderSize)
@@ -567,6 +655,14 @@ func WrapBundleAsExecutableLinuxWith(bundle []byte, profile BundleProfile) ([]by
 	// wired in this Linux stub (host build = 0); a future
 	// WrapBundleAsExecutableWindows minor will add the PEB read.
 	stub := bundleStubVendorAware()
+	// Polymorphic junk insertion at slot A (after PIC trampoline,
+	// before CPUID prologue). All Jcc displacements are AFTER this
+	// slot, so they remain valid; the PIC's bundleOff immediate is
+	// recomputed below from the new total stub length.
+	if seed != 0 {
+		rng := mathrand.New(mathrand.NewSource(seed))
+		stub = injectStubJunk(stub, rng)
+	}
 	bundleOff := uint32(len(stub)) - 5 // distance from .pic label
 	binary.LittleEndian.PutUint32(stub[bundleOffsetImm32Pos:], bundleOff)
 

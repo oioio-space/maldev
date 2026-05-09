@@ -3,8 +3,10 @@
 package packer_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/oioio-space/maldev/pe/packer"
+	"github.com/oioio-space/maldev/pe/packer/transform"
 )
 
 // exit42Shellcode mirrors the fixture used by transform's minimal-ELF
@@ -147,6 +150,104 @@ func TestWrapBundleAsExecutableLinux_NoMatchExitsCleanly(t *testing.T) {
 	defer cancel()
 	if err := exec.CommandContext(ctx, exe).Run(); err != nil {
 		t.Errorf("expected exit 0 (no-match fallback), got %v", err)
+	}
+}
+
+// TestWrapBundleAsExecutableLinux_PolymorphicAcrossPacks is the
+// polymorphism gate: two consecutive packs of the same bundle must
+// produce wrapped binaries with DIFFERENT byte sequences in the stub
+// region (Intel multi-byte NOPs spliced at random per-pack), but
+// BOTH must run to exit 42.
+//
+// Defenders writing yara on stub bytes can no longer cluster
+// individual packs even within a single deployment.
+func TestWrapBundleAsExecutableLinux_PolymorphicAcrossPacks(t *testing.T) {
+	bundle, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{
+			Binary: exit42Shellcode,
+			Fingerprint: packer.FingerprintPredicate{
+				PredicateType: packer.PTMatchAll,
+			},
+		}},
+		// FixedKey makes the bundle bytes themselves identical across
+		// the two packs — only the stub junk differs.
+		packer.BundleOptions{FixedKey: bytes.Repeat([]byte{0x42}, 16)},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	a, err := packer.WrapBundleAsExecutableLinux(bundle)
+	if err != nil {
+		t.Fatalf("Wrap a: %v", err)
+	}
+	b, err := packer.WrapBundleAsExecutableLinux(bundle)
+	if err != nil {
+		t.Fatalf("Wrap b: %v", err)
+	}
+
+	if bytes.Equal(a, b) {
+		t.Fatal("two consecutive Wrap calls produced identical bytes — junk randomisation broken")
+	}
+
+	// Compare the stub region (bytes 120..200) — they MUST differ.
+	stubA := a[transform.MinimalELF64HeadersSize:transform.MinimalELF64HeadersSize+200]
+	stubB := b[transform.MinimalELF64HeadersSize:transform.MinimalELF64HeadersSize+200]
+	if bytes.Equal(stubA, stubB) {
+		t.Errorf("stub regions identical across packs — polymorphism broken")
+	}
+
+	// Both must run to exit 42.
+	dir := t.TempDir()
+	for i, blob := range [][]byte{a, b} {
+		exe := filepath.Join(dir, fmt.Sprintf("poly-%d", i))
+		if err := os.WriteFile(exe, blob, 0o755); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err := exec.CommandContext(ctx, exe).Run()
+		exitErr, ok := err.(*exec.ExitError)
+		if !ok {
+			t.Fatalf("pack %d run: %v (junk-injected stub crashed)", i, err)
+		}
+		if got := exitErr.ExitCode(); got != 42 {
+			t.Errorf("pack %d exit = %d, want 42", i, got)
+		}
+	}
+	t.Logf("two packs: %d B vs %d B; stub bytes differ; both exit=42",
+		len(a), len(b))
+}
+
+// TestWrapBundleAsExecutableLinuxWithSeed_DeterministicAcrossSameSeed
+// is the inverse pin: the same seed MUST produce byte-identical
+// output. Used by reproducible-build operators and by golden-file
+// regression tests.
+func TestWrapBundleAsExecutableLinuxWithSeed_DeterministicAcrossSameSeed(t *testing.T) {
+	bundle, _ := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{
+			Binary:      exit42Shellcode,
+			Fingerprint: packer.FingerprintPredicate{PredicateType: packer.PTMatchAll},
+		}},
+		packer.BundleOptions{FixedKey: bytes.Repeat([]byte{0xAB}, 16)},
+	)
+
+	a, err := packer.WrapBundleAsExecutableLinuxWithSeed(bundle, packer.BundleProfile{}, 12345)
+	if err != nil {
+		t.Fatalf("Wrap a: %v", err)
+	}
+	b, err := packer.WrapBundleAsExecutableLinuxWithSeed(bundle, packer.BundleProfile{}, 12345)
+	if err != nil {
+		t.Fatalf("Wrap b: %v", err)
+	}
+	if !bytes.Equal(a, b) {
+		t.Errorf("same seed produced different bytes — determinism broken")
+	}
+
+	// Different seed → different bytes.
+	c, _ := packer.WrapBundleAsExecutableLinuxWithSeed(bundle, packer.BundleProfile{}, 99999)
+	if bytes.Equal(a, c) {
+		t.Errorf("different seeds produced same bytes — junk size insensitive to seed")
 	}
 }
 
