@@ -18,6 +18,7 @@ code, build instructions, and honest limitations.
 | Full red-team chain | masquerade · inject · sleepmask · C2 · token · cleanup | [full-chain.md](full-chain.md) |
 | DLL proxy side-load | recon/dllhijack · pe/parse · pe/dllproxy · stealthopen · timestomp | [dllproxy-side-load.md](dllproxy-side-load.md) |
 | UPX-style packer + cover | pe/packer · transform · cover layer | [upx-style-packer.md](upx-style-packer.md) |
+| Multi-target bundle (C6) | pe/packer.PackBinaryBundle · SelectPayload · cmd/packer bundle | [multi-target-bundle.md](multi-target-bundle.md) |
 
 ## Conventions
 
