@@ -177,6 +177,115 @@ func TestUnpackBundle_RejectsBadInputs(t *testing.T) {
 	}
 }
 
+// TestInspectBundle_RoundTripsHeaderAndEntries verifies InspectBundle
+// extracts every wire-format field for a 2-payload bundle.
+func TestInspectBundle_RoundTripsHeaderAndEntries(t *testing.T) {
+	intel := [12]byte{'G', 'e', 'n', 'u', 'i', 'n', 'e', 'I', 'n', 't', 'e', 'l'}
+	pls := []packer.BundlePayload{
+		{Binary: []byte("intel"), Fingerprint: packer.FingerprintPredicate{
+			PredicateType: packer.PTCPUIDVendor,
+			VendorString:  intel,
+			BuildMin:      22000,
+			BuildMax:      22631,
+		}},
+		{Binary: bytes.Repeat([]byte{0xCC}, 1024), Fingerprint: packer.FingerprintPredicate{
+			PredicateType: packer.PTMatchAll,
+		}},
+	}
+	bundle, err := packer.PackBinaryBundle(pls, packer.BundleOptions{
+		FallbackBehaviour: packer.BundleFallbackCrash,
+	})
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	info, err := packer.InspectBundle(bundle)
+	if err != nil {
+		t.Fatalf("InspectBundle: %v", err)
+	}
+	if info.Magic != packer.BundleMagic {
+		t.Errorf("Magic = %#x, want %#x", info.Magic, packer.BundleMagic)
+	}
+	if info.Count != 2 {
+		t.Errorf("Count = %d, want 2", info.Count)
+	}
+	if info.FallbackBehaviour != packer.BundleFallbackCrash {
+		t.Errorf("FallbackBehaviour = %d, want %d", info.FallbackBehaviour, packer.BundleFallbackCrash)
+	}
+	if got := len(info.Entries); got != 2 {
+		t.Fatalf("len(Entries) = %d, want 2", got)
+	}
+
+	e0 := info.Entries[0]
+	if e0.PredicateType != packer.PTCPUIDVendor {
+		t.Errorf("Entries[0].PredicateType = %#x, want %#x", e0.PredicateType, packer.PTCPUIDVendor)
+	}
+	if e0.VendorString != intel {
+		t.Errorf("Entries[0].VendorString = %q, want %q", e0.VendorString, intel)
+	}
+	if e0.BuildMin != 22000 || e0.BuildMax != 22631 {
+		t.Errorf("Entries[0] build = [%d, %d], want [22000, 22631]", e0.BuildMin, e0.BuildMax)
+	}
+	if e0.PlaintextSize != uint32(len(pls[0].Binary)) {
+		t.Errorf("Entries[0].PlaintextSize = %d, want %d", e0.PlaintextSize, len(pls[0].Binary))
+	}
+
+	e1 := info.Entries[1]
+	if e1.PredicateType != packer.PTMatchAll {
+		t.Errorf("Entries[1].PredicateType = %#x, want PTMatchAll", e1.PredicateType)
+	}
+	if e1.PlaintextSize != 1024 {
+		t.Errorf("Entries[1].PlaintextSize = %d, want 1024", e1.PlaintextSize)
+	}
+
+	// Decrypting via the parsed Key matches the original payload.
+	for i, p := range pls {
+		ct := bundle[info.Entries[i].DataRVA : info.Entries[i].DataRVA+info.Entries[i].DataSize]
+		pt := make([]byte, len(ct))
+		for j := range ct {
+			pt[j] = ct[j] ^ info.Entries[i].Key[j%16]
+		}
+		if !bytes.Equal(pt, p.Binary) {
+			t.Errorf("entry %d: decrypted %d bytes, want %d", i, len(pt), len(p.Binary))
+		}
+	}
+}
+
+// TestInspectBundle_RejectsBadInputs covers the three sentinels
+// ErrBundleTruncated / ErrBundleBadMagic / ErrBundleOutOfRange.
+func TestInspectBundle_RejectsBadInputs(t *testing.T) {
+	good, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{Binary: []byte("x")}},
+		packer.BundleOptions{CipherKey: make([]byte, 16)},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	t.Run("truncated", func(t *testing.T) {
+		_, err := packer.InspectBundle(good[:8])
+		if !errors.Is(err, packer.ErrBundleTruncated) {
+			t.Errorf("err = %v, want ErrBundleTruncated", err)
+		}
+	})
+	t.Run("badMagic", func(t *testing.T) {
+		bad := append([]byte(nil), good...)
+		bad[0] = 0xFF
+		_, err := packer.InspectBundle(bad)
+		if !errors.Is(err, packer.ErrBundleBadMagic) {
+			t.Errorf("err = %v, want ErrBundleBadMagic", err)
+		}
+	})
+	t.Run("dataOutOfRange", func(t *testing.T) {
+		// Zero out the trailing payload bytes so DataRVA+DataSize escapes
+		// the blob: shrink the slice by 1 byte (last payload byte gone).
+		_, err := packer.InspectBundle(good[:len(good)-1])
+		if !errors.Is(err, packer.ErrBundleOutOfRange) {
+			t.Errorf("err = %v, want ErrBundleOutOfRange", err)
+		}
+	})
+}
+
 // TestSelectPayload_PicksFirstMatch verifies the per-spec selection
 // semantics — PT_CPUID_VENDOR + PT_WIN_BUILD AND-combined; first-match
 // wins; PT_MATCH_ALL acts as a default; Negate inverts.

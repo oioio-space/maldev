@@ -121,6 +121,15 @@ var (
 	ErrEmptyBundle = errors.New("packer: empty bundle")
 	// ErrBundleTooLarge fires when len(payloads) exceeds BundleMaxPayloads.
 	ErrBundleTooLarge = errors.New("packer: bundle exceeds 255 payloads")
+	// ErrBundleTruncated fires when a blob is shorter than the minimum
+	// header. Surfaced by [InspectBundle] / [SelectPayload] / [UnpackBundle].
+	ErrBundleTruncated = errors.New("packer: bundle truncated")
+	// ErrBundleBadMagic fires when the magic dword does not match
+	// [BundleMagic]. Surfaced by [InspectBundle].
+	ErrBundleBadMagic = errors.New("packer: bundle bad magic")
+	// ErrBundleOutOfRange fires when a declared offset / size escapes
+	// the blob bounds. Surfaced by [InspectBundle].
+	ErrBundleOutOfRange = errors.New("packer: bundle offset out of range")
 )
 
 // PackBinaryBundle packs N payload binaries into a single multi-target
@@ -219,6 +228,105 @@ func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, err
 	}
 
 	return out, nil
+}
+
+// BundleInfo is the parsed-header view of a bundle blob, populated by
+// [InspectBundle]. Fields mirror the spec §3 wire-format regions: a
+// fixed BundleHeader followed by per-entry FingerprintEntry +
+// PayloadEntry slices in matching order.
+//
+// All offsets are RVAs from the start of the bundle blob. Sizes are
+// measured in bytes. The Entries slice always has len(Entries) == Count.
+type BundleInfo struct {
+	Magic             uint32
+	Version           uint16
+	Count             uint16
+	FpTableOffset     uint32
+	PayloadTableOffset uint32
+	DataOffset        uint32
+	FallbackBehaviour BundleFallbackBehaviour
+	Entries           []BundleEntryInfo
+}
+
+// BundleEntryInfo is one parsed FingerprintEntry + PayloadEntry pair.
+// Wire fields are decoded into typed Go fields; unrecognised
+// PredicateType bits are preserved verbatim so callers can flag them.
+type BundleEntryInfo struct {
+	// Fingerprint side.
+	PredicateType     uint8
+	Negate            bool
+	VendorString      [12]byte
+	BuildMin          uint32
+	BuildMax          uint32
+	CPUIDFeatureMask  uint32
+	CPUIDFeatureValue uint32
+
+	// Payload side.
+	DataRVA       uint32
+	DataSize      uint32
+	PlaintextSize uint32
+	CipherType    uint8
+	Key           [16]byte
+}
+
+// InspectBundle parses a bundle blob's header and per-entry tables into
+// a [BundleInfo] for inspection. It is the structured-output companion
+// to the human-readable `cmd/packer bundle -inspect` flow and the
+// preferred entrypoint for test assertions over the wire format.
+//
+// Validates: magic, header length, that the declared region offsets
+// stay inside the blob, and that each PayloadEntry's data range stays
+// inside the blob. On any structural error it returns a wrapped error;
+// callers can compare against [ErrBundleTruncated] /
+// [ErrBundleBadMagic] / [ErrBundleOutOfRange] to differentiate.
+func InspectBundle(bundle []byte) (BundleInfo, error) {
+	var info BundleInfo
+	if len(bundle) < BundleHeaderSize {
+		return info, fmt.Errorf("%w: %d < %d", ErrBundleTruncated, len(bundle), BundleHeaderSize)
+	}
+	info.Magic = binary.LittleEndian.Uint32(bundle[0:4])
+	if info.Magic != BundleMagic {
+		return info, fmt.Errorf("%w: %#x != %#x", ErrBundleBadMagic, info.Magic, BundleMagic)
+	}
+	info.Version = binary.LittleEndian.Uint16(bundle[4:6])
+	info.Count = binary.LittleEndian.Uint16(bundle[6:8])
+	info.FpTableOffset = binary.LittleEndian.Uint32(bundle[8:12])
+	info.PayloadTableOffset = binary.LittleEndian.Uint32(bundle[12:16])
+	info.DataOffset = binary.LittleEndian.Uint32(bundle[16:20])
+	info.FallbackBehaviour = BundleFallbackBehaviour(binary.LittleEndian.Uint32(bundle[20:24]))
+
+	count := int(info.Count)
+	fpEnd := int(info.FpTableOffset) + count*BundleFingerprintEntrySize
+	plEnd := int(info.PayloadTableOffset) + count*BundlePayloadEntrySize
+	if fpEnd > len(bundle) || plEnd > len(bundle) {
+		return info, fmt.Errorf("%w: fpEnd=%d plEnd=%d blob=%d", ErrBundleOutOfRange, fpEnd, plEnd, len(bundle))
+	}
+
+	info.Entries = make([]BundleEntryInfo, count)
+	for i := 0; i < count; i++ {
+		fpOff := int(info.FpTableOffset) + i*BundleFingerprintEntrySize
+		plOff := int(info.PayloadTableOffset) + i*BundlePayloadEntrySize
+		e := &info.Entries[i]
+		e.PredicateType = bundle[fpOff]
+		e.Negate = bundle[fpOff+1]&0x01 != 0
+		copy(e.VendorString[:], bundle[fpOff+4:fpOff+16])
+		e.BuildMin = binary.LittleEndian.Uint32(bundle[fpOff+16 : fpOff+20])
+		e.BuildMax = binary.LittleEndian.Uint32(bundle[fpOff+20 : fpOff+24])
+		e.CPUIDFeatureMask = binary.LittleEndian.Uint32(bundle[fpOff+24 : fpOff+28])
+		e.CPUIDFeatureValue = binary.LittleEndian.Uint32(bundle[fpOff+28 : fpOff+32])
+
+		e.DataRVA = binary.LittleEndian.Uint32(bundle[plOff : plOff+4])
+		e.DataSize = binary.LittleEndian.Uint32(bundle[plOff+4 : plOff+8])
+		e.PlaintextSize = binary.LittleEndian.Uint32(bundle[plOff+8 : plOff+12])
+		e.CipherType = bundle[plOff+12]
+		copy(e.Key[:], bundle[plOff+16:plOff+32])
+
+		if int(e.DataRVA)+int(e.DataSize) > len(bundle) {
+			return info, fmt.Errorf("%w: entry %d data %d..+%d outside blob (%d)",
+				ErrBundleOutOfRange, i, e.DataRVA, e.DataSize, len(bundle))
+		}
+	}
+	return info, nil
 }
 
 // SelectPayload is the pure-Go reference implementation of the bundle

@@ -42,7 +42,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -408,44 +407,31 @@ func parseBundleSpec(spec string) (packer.BundlePayload, error) {
 }
 
 // runBundleInspect walks a bundle blob and prints its header + per-entry
-// summary to stdout. Build-host debugging aid.
+// summary to stdout via [packer.InspectBundle]. Build-host debugging aid.
 func runBundleInspect(path string) int {
 	blob, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "bundle inspect:", err)
 		return 1
 	}
-	if len(blob) < packer.BundleHeaderSize {
-		fmt.Fprintln(os.Stderr, "bundle inspect: file shorter than header")
+	info, err := packer.InspectBundle(blob)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bundle inspect:", err)
 		return 1
 	}
-	magic := binary.LittleEndian.Uint32(blob[0:4])
-	version := binary.LittleEndian.Uint16(blob[4:6])
-	count := binary.LittleEndian.Uint16(blob[6:8])
-	fpOff := binary.LittleEndian.Uint32(blob[8:12])
-	plOff := binary.LittleEndian.Uint32(blob[12:16])
-	dataOff := binary.LittleEndian.Uint32(blob[16:20])
-	fb := binary.LittleEndian.Uint32(blob[20:24])
 
 	fmt.Printf("bundle %s — %d bytes\n", path, len(blob))
-	fmt.Printf("  magic=%#x version=%#x count=%d fb=%d\n", magic, version, count, fb)
-	fmt.Printf("  fpTable=%#x plTable=%#x data=%#x\n", fpOff, plOff, dataOff)
-	for i := 0; i < int(count); i++ {
-		off := int(fpOff) + i*packer.BundleFingerprintEntrySize
-		predType := blob[off]
-		var vendor string
-		if predType&packer.PTCPUIDVendor != 0 {
-			vendor = strings.TrimRight(string(blob[off+4:off+16]), "\x00")
-		} else {
-			vendor = "*"
+	fmt.Printf("  magic=%#x version=%#x count=%d fb=%d\n",
+		info.Magic, info.Version, info.Count, info.FallbackBehaviour)
+	fmt.Printf("  fpTable=%#x plTable=%#x data=%#x\n",
+		info.FpTableOffset, info.PayloadTableOffset, info.DataOffset)
+	for i, e := range info.Entries {
+		vendor := "*"
+		if e.PredicateType&packer.PTCPUIDVendor != 0 {
+			vendor = strings.TrimRight(string(e.VendorString[:]), "\x00")
 		}
-		bMin := binary.LittleEndian.Uint32(blob[off+16 : off+20])
-		bMax := binary.LittleEndian.Uint32(blob[off+20 : off+24])
-		plOffI := int(plOff) + i*packer.BundlePayloadEntrySize
-		dRVA := binary.LittleEndian.Uint32(blob[plOffI : plOffI+4])
-		dSize := binary.LittleEndian.Uint32(blob[plOffI+4 : plOffI+8])
 		fmt.Printf("  [%d] pred=%#02x vendor=%-12s build=[%d, %d] data=%#x..+%d\n",
-			i, predType, vendor, bMin, bMax, dRVA, dSize)
+			i, e.PredicateType, vendor, e.BuildMin, e.BuildMax, e.DataRVA, e.DataSize)
 	}
 	return 0
 }
