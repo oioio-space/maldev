@@ -657,6 +657,30 @@ out, err := packer.AddFakeImportsPE(packed, packer.DefaultFakeImports)
   returned `ErrCoverSectionTableFull`. The cover layer now relocates
   the PHT to file-end and preserves all four ELF spec invariants;
   `ErrCoverSectionTableFull` is no longer returned for these inputs.
+- **All-asm bundle wrap shipped (v0.69.0)** — 318-byte runnable
+  bundle for the exit42 fixture, 15 957× smaller than the Go-launcher
+  path. [`packer.WrapBundleAsExecutableLinux`][asmwrap] composes a
+  hand-rolled 73-byte x86-64 stub (call/pop PIC + XOR-decrypt + JMP)
+  with [`transform.BuildMinimalELF64`][minelf] (a Brian-Raiter-shaped
+  120-byte tiny ELF). Today's limitation: always selects payload 0
+  regardless of fingerprint (equivalent to `BundleFallbackFirst`); the
+  full CPUID+PEB evaluator loop drops in transparently in a follow-up
+  minor without changing the public signature. Coexists with the
+  Go-runtime [`cmd/bundle-launcher`][lnch] path — operators pick by
+  trade-off (size vs feature set).
+
+[asmwrap]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#WrapBundleAsExecutableLinux
+[minelf]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/transform#BuildMinimalELF64
+
+- **Reflective bundle launch shipped (v0.68.0).** `MALDEV_REFLECTIVE=1`
+  flips the launcher's dispatch path from `memfd_create + execve` to
+  in-process loading via [`pe/packer/runtime.Prepare`][rtp]. Process
+  tree shows ONE binary; `/proc/self/maps` shows anonymous mappings
+  where the default path would show the payload's file path. E2E
+  gate: `TestLauncher_E2E_ReflectiveLoadsHello`.
+
+[rtp]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/runtime#Prepare
+
 - **C6 multi-target bundle ships runnable (v0.67.0).** The bundle path
   now closes the loop: `packer bundle -wrap <launcher> -bundle <blob>
   -out <exe>` concatenates a [bundle blob][pkg] onto a pre-built

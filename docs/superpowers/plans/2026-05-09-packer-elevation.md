@@ -50,10 +50,10 @@ linux/windows/darwin amd64.
 | 2 — All-asm stub | 2.5 Tag v0.69.0 | ⏳ next | | |
 | 2 — All-asm stub | 2.6 Bundle stub asm — full evaluator loop (post-tag) | ⏳ | | |
 | 2 — All-asm stub | 2.7 Minimal PE32+ writer (Windows symmetry, post-tag) | ⏳ | | |
-| 3 — packer-vis | 3.1 Entropy heatmap rendering | ⏳ | | |
-| 3 — packer-vis | 3.2 SGN round byte-diff display | ⏳ | | |
-| 3 — packer-vis | 3.3 Bundle wire-format viz | ⏳ | | |
-| 3 — packer-vis | 3.4 Tag v0.70.0 | ⏳ | | |
+| 3 — packer-vis | 3.1 Entropy heatmap rendering | ✅ | (this commit) | — |
+| 3 — packer-vis | 3.3 Bundle wire-format viz | ✅ | (this commit) | — |
+| 3 — packer-vis | 3.2 SGN round byte-diff display (deferred — needs hooks in poly engine) | ⏳ | | |
+| 3 — packer-vis | 3.4 Tag v0.70.0 | ⏳ next | | |
 
 **To resume on another machine:**
 
