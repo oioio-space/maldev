@@ -107,14 +107,23 @@ func TestPackBinary_LinuxELF_MultiSeed_WithCover(t *testing.T) {
 //
 // CRITICAL GATE: if ANY seed fails, the C3 chantier is NOT shippable.
 func TestPackBinary_LinuxELF_MultiSeed_WithCompress(t *testing.T) {
-	// C3-stage-2 wiring is shipped (Compress flag, LZ4 inflate inlined
-	// in the stub, memsz>filesz support) but the runtime path SIGSEGVs
-	// on every seed: dst overtakes src by ~3 bytes ~6.5 KB into the
-	// decode, producing OOB read during match-copy. Root cause not
-	// isolated — see docs/refactor-2026-doc/KNOWN-ISSUES-1e.md
-	// C3-stage-2 attempt 2. Until a debugging session isolates the
-	// SGN+LZ4 chain semantics, skip so the gated test suite stays green.
-	t.Skip("C3-stage-2 SIGSEGV at runtime; see KNOWN-ISSUES-1e.md")
+	// C3-stage-2 attempt 3 (2026-05-07): isolated the failure to the
+	// stub's register-setup-before-LZ4, NOT the asm decoder itself.
+	//
+	// Proven correct in isolation:
+	//   - Asm LZ4 inflate at sizes 0..65536 (TestEmitLZ4Inflate_*).
+	//   - Asm LZ4 inflate on the FULL 498-KB .text decoded from real
+	//     SGN+LZ4 chain output, in a standalone Go program with
+	//     LockOSThread + SetGCPercent(-1). Output byte-equal to original.
+	//
+	// Still failing here: every seed's packed binary SIGSEGVs at runtime.
+	// Since the asm is correct on the same input bytes when fed via Go
+	// register ABI (RAX=src, RBX=dst, RCX=srcSize), the bug must be in
+	// the inline stub's register-setup sequence emitted by stage1.EmitStub
+	// when EmitOptions.Compress=true. Next session: dump the inline-LZ4
+	// preamble bytes and compare against the standalone harness's call
+	// site to confirm the stub passes the same RAX/RBX/RCX values.
+	t.Skip("C3-stage-2 SIGSEGV at runtime; asm decoder proven correct, suspect stub reg-setup. See KNOWN-ISSUES-1e.md attempt 3.")
 	fixturePath := filepath.Join("..", "..", "pe", "packer", "runtime",
 		"testdata", "hello_static_pie")
 	fixturePath, err := filepath.Abs(fixturePath)

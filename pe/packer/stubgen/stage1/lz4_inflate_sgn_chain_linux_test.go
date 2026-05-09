@@ -4,10 +4,12 @@ package stage1_test
 
 import (
 	"bytes"
-	"unsafe"
 	"debug/elf"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"testing"
+	"unsafe"
 
 	"github.com/pierrec/lz4/v4"
 
@@ -143,6 +145,18 @@ func TestLZ4Inflate_SGNChain_RoundTrip(t *testing.T) {
 	// Pad the source with 64 trailing zeros to absorb potential decoder over-read.
 	padded := make([]byte, int(compressedSize)+64)
 	copy(padded, decoded[safetyMargin:])
+	// Guard against Go's async preemption: at this input scale (~500 KB .text,
+	// ~330 KB compressed) the surrounding allocations prime a GC cycle that
+	// fires DURING the asm call. The runtime then attempts to scan our
+	// goroutine, walks into the asm PC (which has no Go function metadata),
+	// and SIGSEGVs deep inside runtime.scanstack. Locking the OS thread +
+	// disabling GC for the duration of the call sidesteps both.
+	// Production stubs run on a fresh kernel thread before any Go runtime
+	// exists, so they never hit this path.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	gcPct := debug.SetGCPercent(-1)
+	defer debug.SetGCPercent(gcPct)
 	decodeFn(unsafe.Pointer(&padded[0]), unsafe.Pointer(&out[0]), uint64(compressedSize))
 
 	if !bytes.Equal(out, originalText) {

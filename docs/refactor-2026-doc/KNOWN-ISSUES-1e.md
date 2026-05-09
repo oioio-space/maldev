@@ -597,3 +597,69 @@ real bug is unrelated to RBX/R12. Further investigation needed.
 The diagnostic test `lz4_inflate_sgn_chain_linux_test.go` (build-gated
 `maldev_packer_lz4_diagnose`) is a faithful reproduction harness for the
 crash. Default suite stays green.
+
+---
+
+## C3-stage-2 attempt 3 — in-place inflate isolation (2026-05-07)
+
+**Three new facts confirmed this session:**
+
+1. **The asm LZ4 decoder is correct at full scale.** A standalone Go program
+   (`/tmp/c3_locked.go`, in conversation transcript) runs the FULL chain on
+   real `.text` (498 KB original, 336 KB compressed):
+   - Read `.text` from `hello_static_pie` fixture
+   - LZ4 compress
+   - Build `payload = zero_prefix + compressed`
+   - SGN encode (seed=1, rounds=1) then decode
+   - Call asm LZ4 inflate via the same mmap+funcval harness as the tests
+   - Compare output to original — **byte-perfect equal**
+   - Required only `runtime.LockOSThread()` + `debug.SetGCPercent(-1)` to
+     suppress async preemption during the asm call.
+
+2. **The "GC scanstack" hypothesis was a red herring.** The standalone test
+   uses **separate src and dst buffers**. The production stub does
+   **in-place inflate** (src = R15+SafetyMargin, dst = R15, same allocation).
+   The standalone output equality merely proved the decoder logic itself is
+   correct on the byte stream — not that in-place mode at this scale works.
+
+3. **Production stub still SIGSEGVs on every seed.** Re-running the 8-seed
+   E2E gate (`TestPackBinary_LinuxELF_MultiSeed_WithCompress`) produces 8/8
+   crashes — same signature as attempt 2 (dst overtakes src ~6.5 KB into the
+   decode).
+
+**Conclusion:** the bug is in **in-place inflate**, not the decoder
+algorithm. Either the LZ4 safety-margin formula is insufficient for
+`hello_static_pie` (498 KB original → margin = 1978 bytes per LZ4's
+official `(decompressedSize >> 8) + 32`), or the LZ4 block format produces
+sequences this decoder can't decompress in-place even with the official
+margin.
+
+**Next session — three concrete avenues:**
+
+1. **Local reproduction in user-space:** modify `/tmp/c3_locked.go` to
+   inflate **in place** (allocate one buffer of size
+   `safetyMargin + originalSize`, populate `[safetyMargin..]` with
+   compressed bytes, call decoder with `src=&buf[safetyMargin]`,
+   `dst=&buf[0]`, `srcSize=compressedSize`). If this reproduces the crash
+   locally (no kernel/loader involvement), the bug is in the in-place
+   algorithm and we can iterate fast.
+
+2. **LZ4 official reference test:** download `lz4` C source, build the
+   `LZ4_decompress_safe_inPlace_pre` example, run it on the same input
+   bytes. If reference fails too: this specific compressed block is not
+   in-place-safe → fall back to non-in-place inflate (dst is a fresh
+   page, free the old one after).
+
+3. **Bigger margin:** try `originalSize / 16 + 64` (~16x the spec) and
+   re-run the 8-seed gate. If even that crashes, the algorithm itself is
+   wrong; if it passes, the spec margin is wrong for our compressor's
+   output (pierrec/lz4 v4 may emit sequences that violate the in-place
+   invariant).
+
+**Test infrastructure clean-up shipped this session:**
+
+- `lz4_inflate_test.go::newDecoder` doc updated to flag that callers
+  feeding ≳100 KB inputs MUST guard with `LockOSThread + SetGCPercent(-1)`.
+- `lz4_inflate_sgn_chain_linux_test.go` adds the guard inline.
+- `TestPackBinary_LinuxELF_MultiSeed_WithCompress` re-skipped with
+  precise diagnosis comment pointing at this section.

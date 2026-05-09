@@ -65,7 +65,12 @@ func lz4InflateBytes(t *testing.T) []byte {
 // calls the asm code via the standard indirect-call path — no cgo required.
 //
 // The decoder has no GC synchronisation points (no heap allocation, no
-// goroutine yields), so calling it from a plain goroutine is safe.
+// goroutine yields), so calling it from a plain goroutine is safe for short
+// inputs. For large inputs (≳100 KB compressed) where the surrounding test
+// allocates enough to prime a GC cycle during the asm call, the caller MUST
+// guard with runtime.LockOSThread + debug.SetGCPercent(-1); see the SGN chain
+// diagnostic for an example. Production stubs never hit this because they run
+// on a fresh kernel thread before any Go runtime exists.
 func newDecoder(t testing.TB, asmBytes []byte) (fn func(src, dst unsafe.Pointer, srcSize uint64), cleanup func()) {
 	t.Helper()
 
