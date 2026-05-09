@@ -657,19 +657,25 @@ out, err := packer.AddFakeImportsPE(packed, packer.DefaultFakeImports)
   returned `ErrCoverSectionTableFull`. The cover layer now relocates
   the PHT to file-end and preserves all four ELF spec invariants;
   `ErrCoverSectionTableFull` is no longer returned for these inputs.
-- **C6 multi-target bundle wire format shipped (v0.67.0-alpha.1).**
+- **C6 multi-target bundle build-host stack shipped (v0.67.0-alpha.2).**
   `PackBinaryBundle` serialises N payloads into a single bundle blob
   (BundleHeader + FingerprintEntry × N + PayloadEntry × N + encrypted
   payload data) per
   `docs/superpowers/specs/2026-05-08-packer-multi-target-bundle.md`.
   Each payload gets an independent random 16-byte XOR-rolling key.
-  `SelectPayload` is the host-side selection oracle (CPUID vendor +
-  Windows build-number predicates, AND-combined per entry, first-match
-  across entries, optional `Negate` flag). `EmitCPUIDVendorRead` /
-  `EmitPEBBuildRead` (in `stubgen/stage1`) emit the asm primitives the
-  runtime stub will use. Stub-side fingerprint evaluator + container
-  injection ship in C6 phases P3-P4. Operator-facing `cmd/packer`
-  bundle subcommand also deferred.
+  Three selection-side helpers ship today:
+    - `SelectPayload(bundle, vendor, build)` — pure-Go reference for
+      the spec §3.4 matching logic.
+    - `HostCPUIDVendor()` — runtime CPUID vendor read via mmap'd asm
+      trampoline (uses `EmitCPUIDVendorRead`).
+    - `MatchBundleHost(bundle)` — operator dry-run; reads host vendor
+      + Windows build, calls SelectPayload. Surfaced as
+      `packer bundle -match <bundle>` in the CLI.
+    - `InspectBundle(bundle)` — structured bundle parser returning
+      BundleInfo + per-entry BundleEntryInfo; used by `cmd/packer
+      bundle -inspect`.
+  Stub-side asm fingerprint evaluator (C6-P3) and Windows VM E2E
+  (C6-P4) ship in v0.67.0 final.
 - **`PackBinary` LZ4 compression shipped (v0.66.0).** Pass
   `Compress: true` to `PackBinary` to LZ4-compress `.text`
   before SGN encoding. The stub gains a 136-byte hand-rolled
