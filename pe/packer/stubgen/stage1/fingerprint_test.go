@@ -127,6 +127,42 @@ func TestEmitCPUIDVendorRead_BytesShape(t *testing.T) {
 	}
 }
 
+// TestEmitVendorCompare_BytesShape pins the encoding so accidental
+// changes to the byte sequence get caught regardless of host arch.
+func TestEmitVendorCompare_BytesShape(t *testing.T) {
+	b, err := amd64.New()
+	if err != nil {
+		t.Fatalf("amd64.New: %v", err)
+	}
+	if err := stage1.EmitVendorCompare(b); err != nil {
+		t.Fatalf("EmitVendorCompare: %v", err)
+	}
+	out, err := b.Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	want := []byte{
+		0x4c, 0x8b, 0x17,
+		0x4c, 0x3b, 0x16,
+		0x75, 0x06,
+		0x44, 0x8b, 0x57, 0x08,
+		0x44, 0x3b, 0x56, 0x08,
+	}
+	if !bytes.Equal(out, want) {
+		t.Errorf("EmitVendorCompare bytes = %x, want %x", out, want)
+	}
+}
+
+// Runtime-exercise of EmitVendorCompare via mmap+funcval was attempted
+// (push/pop rbx trampoline, LockOSThread + GCPercent(-1) guard) but
+// reproducibly crashed on the second call with a hard SIGSEGV that
+// bypassed Go's signal handler — symptomatic of the same Go-asm-funcval
+// hazards the LZ4 SGN chain test hit. The byte-shape contract pinned by
+// TestEmitVendorCompare_BytesShape is the authoritative regression
+// guard; runtime correctness will be exercised end-to-end via the
+// bundle E2E (a packed binary running standalone, no Go test harness)
+// in C6-P4.
+
 // TestEmitPEBBuildRead_BytesShape pins the encoding. Runtime exercise
 // requires a Windows VM (PEB only exists on Windows x64) and is covered
 // by the bundle E2E in a later phase.

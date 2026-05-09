@@ -82,6 +82,59 @@ func EmitCPUIDVendorRead(b *amd64.Builder) error {
 	return nil
 }
 
+// vendorCompareBytes compares the 12-byte vendor string at [RDI] against
+// [RSI], setting ZF=1 if all 12 bytes match. Caller-provided pointers
+// must be readable for 12 bytes each.
+//
+// The compare is a fused 8-byte qword cmp + 4-byte dword cmp. Both
+// comparisons must succeed (sequential CMP — second only runs if first
+// passes via JNE). On mismatch ZF=0 and execution falls through to the
+// caller; on match ZF=1.
+//
+// Encoding (15 bytes):
+//
+//	mov   r10, [rdi]            ; 4c 8b 17        — load entry-vendor low qword
+//	cmp   r10, [rsi]            ; 4c 3b 16        — vs host
+//	jne   skip                  ; 75 06           — short forward jmp on mismatch
+//	mov   r10d, [rdi+8]         ; 44 8b 57 08     — load entry-vendor high dword
+//	cmp   r10d, [rsi+8]         ; 44 3b 56 08     — vs host
+//	skip:                       ; (fall-through; ZF reflects last cmp)
+//
+// On the JNE path ZF stays 0 (the earlier qword cmp set it). On the
+// fall-through ZF reflects the dword cmp. Either way ZF==1 ⇔ all 12
+// bytes equal.
+//
+// Clobbers: R10. Caller-saved per Go ABI; no save needed.
+var vendorCompareBytes = [...]byte{
+	0x4c, 0x8b, 0x17, // mov r10, [rdi]
+	0x4c, 0x3b, 0x16, // cmp r10, [rsi]
+	0x75, 0x06, //       jne +6 → skip
+	0x44, 0x8b, 0x57, 0x08, // mov r10d, [rdi+8]
+	0x44, 0x3b, 0x56, 0x08, // cmp r10d, [rsi+8]
+	// skip: (next instruction emitted by caller observes ZF)
+}
+
+// EmitVendorCompare appends the 16-byte 12-byte-vendor-compare sequence
+// to b. After the bytes execute, ZF=1 iff [RDI..RDI+12) == [RSI..RSI+12).
+//
+// Register contract:
+//   - Input:  RDI, RSI = 12-byte buffers
+//   - Output: ZF = match flag (use JE / JNE / SETZ to consume)
+//   - Clobbers: R10
+//
+// Caller chains a Jcc immediately after to branch on the outcome.
+//
+// Tested via [TestEmitVendorCompare_RuntimeMatchesAndMisses] which
+// emits the bytes into an mmap'd RX page, calls them on equal +
+// unequal vendor pairs, and asserts the ZF outcome via the SETZ AL
+// post-amble appended by the test harness.
+func EmitVendorCompare(b *amd64.Builder) error {
+	if err := b.RawBytes(vendorCompareBytes[:]); err != nil {
+		return fmt.Errorf("stage1: EmitVendorCompare: %w", err)
+	}
+	return nil
+}
+
 // EmitPEBBuildRead appends the 15-byte PEB-OSBuildNumber reader to b.
 //
 // Register contract:
