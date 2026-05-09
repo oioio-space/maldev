@@ -221,6 +221,92 @@ func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, err
 	return out, nil
 }
 
+// SelectPayload is the pure-Go reference implementation of the bundle
+// stub's fingerprint-matching logic. Given a bundle blob and the host's
+// CPUID vendor + Windows build number, it returns the index of the first
+// FingerprintEntry whose predicate matches, or -1 if none does.
+//
+// Matching logic per spec §3.4:
+//   - PT_MATCH_ALL (bit 3): always matches.
+//   - Otherwise, every set bit in PredicateType must pass:
+//     - PT_CPUID_VENDOR: VendorString == hostVendor (or all-zero wildcard)
+//     - PT_WIN_BUILD: BuildMin <= hostBuild <= BuildMax
+//       (zero on either bound means no bound on that side)
+//     - PT_CPUID_FEATURES: not consulted by SelectPayload — caller would
+//       supply the feature ECX value separately; deferred until needed.
+//   - Negate flag inverts the entire entry's match outcome.
+//
+// On no match, the caller applies FallbackBehaviour from the header.
+//
+// The asm evaluator emitted in C6-P3 mirrors this logic byte-for-byte
+// (excepting the feature-mask branch). Tests in bundle_test.go assert
+// SelectPayload and the asm produce identical indices for matched
+// vendor/build combinations.
+func SelectPayload(bundle []byte, hostVendor [12]byte, hostBuild uint32) (int, error) {
+	if len(bundle) < BundleHeaderSize {
+		return -1, fmt.Errorf("packer: bundle truncated (%d < %d)", len(bundle), BundleHeaderSize)
+	}
+	if magic := binary.LittleEndian.Uint32(bundle[0:4]); magic != BundleMagic {
+		return -1, fmt.Errorf("packer: bundle magic %#x != %#x", magic, BundleMagic)
+	}
+	count := int(binary.LittleEndian.Uint16(bundle[6:8]))
+	fpTableOff := int(binary.LittleEndian.Uint32(bundle[8:12]))
+	if fpTableOff+count*BundleFingerprintEntrySize > len(bundle) {
+		return -1, fmt.Errorf("packer: fingerprint table outside blob")
+	}
+
+	for i := 0; i < count; i++ {
+		off := fpTableOff + i*BundleFingerprintEntrySize
+		predType := bundle[off]
+		negate := bundle[off+1]&0x01 != 0
+
+		match := evaluateEntry(bundle[off:off+BundleFingerprintEntrySize], hostVendor, hostBuild)
+		if predType&PTMatchAll != 0 {
+			match = true
+		}
+		if negate {
+			match = !match
+		}
+		if match {
+			return i, nil
+		}
+	}
+	return -1, nil
+}
+
+// evaluateEntry runs the AND-combined predicate checks for one
+// FingerprintEntry slice. Caller has already verified the slice is at
+// least BundleFingerprintEntrySize bytes long.
+func evaluateEntry(entry []byte, hostVendor [12]byte, hostBuild uint32) bool {
+	predType := entry[0]
+	if predType == 0 {
+		// No checks set — empty predicate matches nothing (use PTMatchAll
+		// for "always match"). Defensive: prevents accidental wide matches.
+		return false
+	}
+
+	if predType&PTCPUIDVendor != 0 {
+		var want [12]byte
+		copy(want[:], entry[4:16])
+		if want != [12]byte{} && want != hostVendor {
+			return false
+		}
+	}
+	if predType&PTWinBuild != 0 {
+		bMin := binary.LittleEndian.Uint32(entry[16:20])
+		bMax := binary.LittleEndian.Uint32(entry[20:24])
+		if bMin != 0 && hostBuild < bMin {
+			return false
+		}
+		if bMax != 0 && hostBuild > bMax {
+			return false
+		}
+	}
+	// PTCPUIDFeatures — caller-supplied ECX not threaded through this
+	// signature; once added, AND a (hostECX & mask) == value check here.
+	return true
+}
+
 // UnpackBundle is the host-side inverse of [PackBinaryBundle]: it parses a
 // bundle blob, locates the payload at index `idx`, and decrypts it using
 // the on-disk key.

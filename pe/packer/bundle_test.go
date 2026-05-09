@@ -177,6 +177,101 @@ func TestUnpackBundle_RejectsBadInputs(t *testing.T) {
 	}
 }
 
+// TestSelectPayload_PicksFirstMatch verifies the per-spec selection
+// semantics — PT_CPUID_VENDOR + PT_WIN_BUILD AND-combined; first-match
+// wins; PT_MATCH_ALL acts as a default; Negate inverts.
+func TestSelectPayload_PicksFirstMatch(t *testing.T) {
+	intel := [12]byte{'G', 'e', 'n', 'u', 'i', 'n', 'e', 'I', 'n', 't', 'e', 'l'}
+	amd := [12]byte{'A', 'u', 't', 'h', 'e', 'n', 't', 'i', 'c', 'A', 'M', 'D'}
+
+	pls := []packer.BundlePayload{
+		{Binary: []byte("intel-w11"), Fingerprint: packer.FingerprintPredicate{
+			PredicateType: packer.PTCPUIDVendor | packer.PTWinBuild,
+			VendorString:  intel,
+			BuildMin:      22000,
+			BuildMax:      99999,
+		}},
+		{Binary: []byte("amd-w10"), Fingerprint: packer.FingerprintPredicate{
+			PredicateType: packer.PTCPUIDVendor | packer.PTWinBuild,
+			VendorString:  amd,
+			BuildMin:      10000,
+			BuildMax:      19999,
+		}},
+		{Binary: []byte("fallback"), Fingerprint: packer.FingerprintPredicate{
+			PredicateType: packer.PTMatchAll,
+		}},
+	}
+	bundle, err := packer.PackBinaryBundle(pls, packer.BundleOptions{})
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		vendor [12]byte
+		build  uint32
+		want   int
+	}{
+		{"intelWin11", intel, 22631, 0},
+		{"amdWin10", amd, 19041, 1},
+		{"intelWin10", intel, 19041, 2},   // intel build out of range → fallback
+		{"unknownVendor", [12]byte{}, 100, 2}, // → PTMatchAll
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := packer.SelectPayload(bundle, c.vendor, c.build)
+			if err != nil {
+				t.Fatalf("SelectPayload: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("SelectPayload = %d, want %d", got, c.want)
+			}
+		})
+	}
+}
+
+// TestSelectPayload_NegateInverts asserts the Flags.Negate bit reverses
+// an entry's match outcome.
+func TestSelectPayload_NegateInverts(t *testing.T) {
+	intel := [12]byte{'G', 'e', 'n', 'u', 'i', 'n', 'e', 'I', 'n', 't', 'e', 'l'}
+	pls := []packer.BundlePayload{
+		// Negated Intel: matches anything that is NOT Intel.
+		{Binary: []byte("non-intel"), Fingerprint: packer.FingerprintPredicate{
+			PredicateType: packer.PTCPUIDVendor,
+			VendorString:  intel,
+			Negate:        true,
+		}},
+	}
+	bundle, _ := packer.PackBinaryBundle(pls, packer.BundleOptions{})
+
+	idx, _ := packer.SelectPayload(bundle, [12]byte{'A', 'u', 't', 'h', 'e', 'n', 't', 'i', 'c', 'A', 'M', 'D'}, 0)
+	if idx != 0 {
+		t.Errorf("AMD against !Intel: got %d, want 0", idx)
+	}
+	idx, _ = packer.SelectPayload(bundle, intel, 0)
+	if idx != -1 {
+		t.Errorf("Intel against !Intel: got %d, want -1 (no match)", idx)
+	}
+}
+
+// TestSelectPayload_NoMatchReturnsMinusOne asserts -1 + nil error when no
+// entry matches and there's no PTMatchAll catch-all.
+func TestSelectPayload_NoMatchReturnsMinusOne(t *testing.T) {
+	pls := []packer.BundlePayload{
+		{Binary: []byte("x"), Fingerprint: packer.FingerprintPredicate{
+			PredicateType: packer.PTWinBuild, BuildMin: 10000, BuildMax: 20000,
+		}},
+	}
+	bundle, _ := packer.PackBinaryBundle(pls, packer.BundleOptions{})
+	got, err := packer.SelectPayload(bundle, [12]byte{}, 99999)
+	if err != nil {
+		t.Fatalf("SelectPayload: %v", err)
+	}
+	if got != -1 {
+		t.Errorf("got %d, want -1", got)
+	}
+}
+
 // TestPackBinaryBundle_PayloadKeysIndependent asserts that successive
 // packs without an explicit CipherKey yield distinct ciphertexts even
 // when the plaintexts are identical — confirming the per-payload key is
