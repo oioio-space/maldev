@@ -334,6 +334,32 @@ shows a normal call site; no kernel transition.
 **Platform:** amd64 (Windows + Linux + macOS). Stub on other
 arches returns `false`.
 
+#### `func CPUVendor() string`
+
+[godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#CPUVendor)
+
+Reads the 12-byte ASCII CPU vendor identification string from
+CPUID leaf 0 (`EBX → EDX → ECX`, per Intel SDM Vol. 2A). Stable
+across every x86-64 CPU and every hypervisor that doesn't
+masquerade.
+
+**Common values:** `"GenuineIntel"`, `"AuthenticAMD"`,
+`"HygonGenuine"`, `"CentaurHauls"`. Unlike [HypervisorVendor]
+(leaf `0x40000000`, hypervisor-only) this leaf is universal —
+every x86 CPU since the original Pentium implements it.
+
+**Returns:** the raw 12-byte signature, or `""` on non-amd64.
+
+**OPSEC / Required privileges / Platform:** as
+[HypervisorPresent].
+
+**Used by:** [`pe/packer.HostCPUIDVendor`][pkgHCV] and
+[`pe/packer.MatchBundleHost`][pkgMB] to drive C6 multi-target
+bundle host fingerprinting.
+
+[pkgHCV]: https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#HostCPUIDVendor
+[pkgMB]:  https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer#MatchBundleHost
+
 #### `func HypervisorVendor() string`
 
 [godoc](https://pkg.go.dev/github.com/oioio-space/maldev/recon/antivm#HypervisorVendor)
