@@ -661,6 +661,43 @@ if antivm.HypervisorPresent() ||
 }
 ```
 
+### Privileged — VMware backdoor I/O port (Ring 0 / root only)
+
+`BackdoorVMware` reads the VMware-specific backdoor port (0x5658,
+"VX"). When the hypervisor traps the `IN EAX, DX` instruction, EBX
+echoes the magic ("VMXh") — a definitive VMware signature that
+non-VMware HVMs cannot fake. The probe only runs after a
+privilege check (Linux: `iopl(3)` succeeds; Windows: never in
+user mode); otherwise [ErrBackdoorPrivilege] is returned and the
+caller treats VMware status as unknown.
+
+```go
+import (
+    "errors"
+    "log"
+
+    "github.com/oioio-space/maldev/recon/antivm"
+)
+
+rep, err := antivm.BackdoorVMware()
+switch {
+case errors.Is(err, antivm.ErrBackdoorPrivilege):
+    log.Println("not privileged — fall back to Hypervisor() vendor check")
+case err != nil:
+    log.Printf("backdoor probe error: %v", err)
+case rep.IsVMware:
+    log.Printf("definitively VMware: echo=%#x ECX=%#x EDX=%#x",
+        rep.Echo, rep.ECX, rep.EDX)
+default:
+    log.Println("not VMware (or backdoor disabled)")
+}
+```
+
+Pair this with the user-mode-friendly `Hypervisor()` for a
+two-tier signal: `Hypervisor()` always runs and identifies the
+generic vendor; `BackdoorVMware` adds a high-confidence "this is
+specifically VMware" bit when Ring 0 / iopl is available.
+
 ### Advanced — orchestrator integration
 
 See [`recon/sandbox`](sandbox.md) for the multi-factor
@@ -704,6 +741,14 @@ VM detection are two of the seven dimensions it composes.
   the `BeingDebugged` flag — ScyllaHide and similar harden it.
 - **No anti-VMI.** Bare-metal VMI (Volatility-on-host) defeats
   every userland check.
+- **VMware-specific backdoor probe ([BackdoorVMware]) needs Ring 0.**
+  The `IN EAX, DX` instruction against port 0x5658 ("VX") only
+  succeeds at IOPL 3 (Linux: `iopl(3)` syscall, requires
+  CAP_SYS_RAWIO + root) or in kernel-mode (Windows: Ring 0
+  driver). User-mode probes return [ErrBackdoorPrivilege] without
+  attempting the IN — issuing it from CPL 3 would otherwise
+  SIGSEGV / #GP and crash the process. Pair with [Hypervisor]
+  for the user-mode path (CPUID 0x40000000 vendor read).
 - **Static fingerprints.** Vendors who customise OEM strings
   in DMI / registry can defeat default fingerprints; supply
   custom `Vendor` lists for hostile environments.
