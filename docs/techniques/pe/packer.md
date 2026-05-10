@@ -35,6 +35,7 @@ yara-able regardless.
 | You want… | Use | Output size (typical) |
 |---|---|---|
 | **Pack a single PE/ELF that runs natively** | `packer.PackBinary` | Input + ~1-8 KiB stub |
+| **Wrap raw shellcode into a runnable .exe / .elf** (with or without encryption) | `packer.PackShellcode` | ~400 B plain / ~8 KiB encrypted |
 | **Pack a payload that fingerprints the host first** (multi-target) | `packer.PackBinaryBundle` + the `cmd/bundle-launcher` runtime | ~5 MB (Go runtime) |
 | **Same, but tiny single-file** | `packer.PackBinaryBundle` + `packer.WrapBundleAsExecutableLinux` | ~470 B |
 | **Encrypt arbitrary bytes into a blob (no exec)** | `packer.Pack` / `packer.Unpack` | Input + 32 B header + AES-GCM tag |
@@ -46,17 +47,29 @@ yara-able regardless.
 
 ## Mental model
 
-Two pipelines, orthogonal:
+Three pipelines, orthogonal:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Single-target pipeline                                      │
+│  Single-target pipeline (Go binary input)                    │
 │                                                              │
 │   payload.exe ──[PackBinary]──► packed.exe                   │
 │   (real PE/ELF)                  │                           │
 │                                  └─ kernel loads → SGN stub  │
 │                                     decrypts .text in place  │
 │                                     → JMP original entry     │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  Shellcode pipeline (raw bytes input)                        │
+│                                                              │
+│   sc.bin ──[PackShellcode]──► out.exe / out.elf              │
+│   (raw, position-       │                                    │
+│    independent)         ├─ plain wrap → minimal host PE/ELF  │
+│                         │  shellcode at e_entry              │
+│                         │                                    │
+│                         └─ encrypted wrap → minimal host →   │
+│                            PackBinary → SGN stub envelope    │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
@@ -399,6 +412,92 @@ os.WriteFile("app", out, 0o755)
   using both modes should test the all-asm path with their actual
   fingerprint set).
 
+### Mode 6 — `PackShellcode` (raw shellcode → runnable PE/ELF)
+
+Shipped v0.81.0. Bridges the operator gap "I have raw shellcode bytes
+(msfvenom, hand-rolled stage-1) and want a runnable `.exe` / `.elf`".
+[`PackBinary`](#mode-3--packbinary-single-target-runs-directly) rejects
+non-PE / non-ELF inputs because it transforms existing sections in
+place — there is nothing to transform when the input is bare bytes.
+`PackShellcode` wraps the bytes in a minimal host first, then
+optionally runs that host through `PackBinary` for the SGN-style stub
+envelope.
+
+```go
+// Plain wrap — runnable, shellcode at e_entry in cleartext.
+exe, _, _ := packer.PackShellcode(sc, packer.PackShellcodeOptions{
+    Format: packer.FormatLinuxELF,
+})
+
+// Encrypted wrap — SGN-style stub decrypts in place + JMPs to entry.
+exe, key, _ := packer.PackShellcode(sc, packer.PackShellcodeOptions{
+    Format:  packer.FormatLinuxELF,
+    Encrypt: true,
+})
+```
+
+CLI:
+
+```bash
+$ printf '\x48\xc7\xc0\xe7\x00\x00\x00\x48\xc7\xc7\x2a\x00\x00\x00\x0f\x05' > sc.bin
+
+$ packer shellcode -in sc.bin -out plain.elf -format linux-elf
+shellcode: 16 bytes → plain.elf (401 bytes, encrypt=false, format=linux-elf)
+$ ./plain.elf; echo $?
+42
+
+$ packer shellcode -in sc.bin -out enc.elf -format linux-elf -encrypt
+shellcode: 16 bytes → enc.elf (8192 bytes, encrypt=true, format=linux-elf)
+2e93292902833d9ab1fb7316f9b9f5f835cfc6c2e15fc78ad1553d1b75bd8606
+$ ./enc.elf; echo $?
+42
+```
+
+| Property | Plain wrap | Encrypted wrap |
+|---|---|---|
+| Output | minimal PE / ELF | SGN-style packed PE / ELF |
+| Size (16 B sc) | ~400 B | ~8 KiB |
+| Shellcode at e_entry? | yes, cleartext | no — stub at e_entry |
+| YARA the .text? | sees plaintext shellcode | sees ciphertext + stub |
+| Per-pack polymorphism | no | yes (rounds + seed) |
+| Use when | shellcode is pre-encrypted upstream, OR stealth not the concern | real-world EDR-facing ship |
+
+**Format-specific notes:**
+
+- **Linux**: a section-aware minimal ELF writer (`transform.BuildMinimalELF64WithSections`)
+  pre-reserves one phdr slot so `InjectStubELF` has the headroom it
+  needs to append its stub PT_LOAD. The Brian-Raiter-style
+  `BuildMinimalELF64` (no SHT) cannot be fed to PackBinary —
+  PlanELF rejects it with `ErrNoTextSection`.
+- **Windows**: `transform.BuildMinimalPE32Plus` already produces a
+  PE with a real `.text` section header; the chain works out of
+  the box.
+
+**Per-build IOC randomisation:** pass `ImageBase` / `Vaddr` (`-base 0xHEX`
+on the CLI) to defeat YARA rules keyed on "tiny PE/ELF at standard
+load address". Canonical bases (0x140000000 PE, 0x400000 ELF) are the
+default; per-deployment values are derived from your secret via
+[`packer.DeriveBundleProfile`](#per-build-ioc-randomisation--kerckhoffs).
+
+**Avantages:** the only path that takes shellcode end-to-end. Same
+SGN-style stub envelope as `PackBinary` for Go binaries — operators
+get one mental model regardless of payload shape.
+
+**Inconvénients:**
+
+- Shellcode must be position-independent (no relocations expected,
+  no specific load address baked in). Standard for msfvenom output;
+  hand-rolled stage-1 needs the same discipline.
+- Encrypted Windows path not yet VM-validated end-to-end (Linux is —
+  see `TestPackShellcode_E2E_EncryptedELFExits42`). The unit tests
+  prove `debug/pe` parses the output; the kernel-level run-and-exit
+  contract is queued behind §2 of the windows-tiny-exe plan
+  (ExitProcess via PEB walk).
+- Plain wrap with no PEB-walk-aware exit asm at the end of your
+  shellcode means a Windows .exe will SIGSEGV cleanly when the
+  shellcode RETs into nothing. Either append `xor eax,eax; ret` for
+  a clean exit code or accept the SIGSEGV.
+
 ---
 
 ## Per-build IOC randomisation — Kerckhoffs
@@ -551,7 +650,17 @@ packer bundle  -inspect <bundle>
 packer bundle  -match   <bundle>
 packer bundle  -wrap    <launcher> -bundle <bundle> -out <exe>
                                       [-secret <s>]
+packer shellcode -in <sc> -out <bin> [-format windows-exe|linux-elf]
+                                     [-encrypt] [-base 0xHEX]
+                                     [-rounds N] [-seed S]
+                                     [-key <hex32>] [-keyout <file>]
 ```
+
+The `shellcode` subcommand (Mode 6) wraps raw position-independent
+shellcode in a runnable host PE / ELF. `-encrypt` chains through
+PackBinary's SGN-style stub envelope; without `-encrypt`, the
+shellcode sits at the entry point in cleartext (smaller output,
+trivially YARA-able).
 
 Bundle spec syntax (`-pl`):
 
@@ -599,6 +708,30 @@ rewrites the entry point. Output is a runnable binary.
 - `transform.ErrTLSCallbacks` — input has TLS callbacks (would run
   before stub).
 - `transform.ErrStubTooLarge` — stub exceeded `StubMaxSize`.
+
+#### `func PackShellcode(shellcode []byte, opts PackShellcodeOptions) ([]byte, []byte, error)`
+
+Wraps raw position-independent shellcode in a runnable host PE / ELF;
+optionally chains through `PackBinary` for the SGN-style stub envelope.
+Returns `(binary, key, err)` — `key` is non-nil only when `Encrypt=true`
+and the operator did not supply one.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `Format` | `Format` | (required) | `FormatWindowsExe` / `FormatLinuxELF` — `FormatUnknown` rejected |
+| `Encrypt` | `bool` | false | Run the wrapped host through PackBinary's stub envelope |
+| `ImageBase` | `uint64` | 0 (= canonical) | Per-build PE ImageBase / ELF vaddr override; 0 → 0x140000000 (PE) or 0x400000 (ELF) |
+| `Stage1Rounds` | `int` | 3 | SGN decoder rounds; `-encrypt` only |
+| `Seed` | `int64` | 0 (= random) | Same seed → byte-identical output; `-encrypt` only |
+| `Key` | `[]byte` | nil | Operator-supplied AEAD key; `-encrypt` only |
+| `AntiDebug` | `bool` | false | Windows-only PEB + RDTSC probe; `-encrypt` only |
+| `Compress` | `bool` | false | LZ4 the wrapped host before SGN; `-encrypt` only |
+
+**Sentinels** (use `errors.Is`):
+
+- `packer.ErrShellcodeEmpty` — shellcode bytes nil or zero-length.
+- `packer.ErrUnsupportedFormat` — `opts.Format` is `FormatUnknown`.
+- `transform.ErrMinimalELFWithSectionsCodeEmpty` — surfaced as a wrap error.
 
 #### `func Pack(data []byte, opts Options) ([]byte, []byte, error)`
 
