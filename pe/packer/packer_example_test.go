@@ -84,3 +84,52 @@ func ExampleApplyDefaultCover() {
 	}
 	_ = os.WriteFile("output.bin", out, 0o755)
 }
+
+// ExamplePackShellcode shows the canonical operator flow for
+// turning raw position-independent shellcode (msfvenom output,
+// hand-rolled stage-1) into a runnable PE32+ or ELF64 binary.
+//
+// Two modes:
+//
+//   - Plain: smallest output (~400 B for 16-byte shellcode), no
+//     decryption stub. The shellcode bytes sit at the entry point
+//     in cleartext — trivially YARA-able. Use when stealth isn't
+//     the concern or the shellcode is pre-encrypted upstream.
+//   - Encrypted: ~8 KiB output, polymorphic SGN-style stub at the
+//     entry point decrypts the shellcode in place and JMPs to it.
+//     Same envelope the rest of the packer uses.
+//
+// On Linux the encrypted path is end-to-end VM-validated via
+// TestPackShellcode_E2E_EncryptedELFExits42.
+func ExamplePackShellcode() {
+	// 17-byte Linux x86-64 exit_group(42).
+	sc := []byte{
+		0x48, 0xc7, 0xc0, 0xe7, 0x00, 0x00, 0x00, // mov rax, 231
+		0x48, 0xc7, 0xc7, 0x2a, 0x00, 0x00, 0x00, // mov rdi, 42
+		0x0f, 0x05, // syscall
+	}
+
+	// Plain wrap — runnable, shellcode at e_entry in cleartext.
+	plain, _, err := packer.PackShellcode(sc, packer.PackShellcodeOptions{
+		Format: packer.FormatLinuxELF,
+	})
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile("plain.elf", plain, 0o755)
+
+	// Encrypted wrap — stub envelope, AEAD key returned for
+	// out-of-band logging; the binary itself self-decrypts at run
+	// time with the seed derived per pack.
+	enc, key, err := packer.PackShellcode(sc, packer.PackShellcodeOptions{
+		Format:       packer.FormatLinuxELF,
+		Encrypt:      true,
+		Stage1Rounds: 3,
+		Seed:         time.Now().UnixNano(),
+	})
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile("enc.elf", enc, 0o755)
+	fmt.Printf("plain=%d enc=%d key=%x...\n", len(plain), len(enc), key[:4])
+}
