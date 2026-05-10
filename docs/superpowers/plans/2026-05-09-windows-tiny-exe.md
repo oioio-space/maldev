@@ -135,7 +135,24 @@ loader accepts varies by version — start at 240-byte Optional Header
 - TLS callbacks and base relocation directory must be valid even if
   empty.
 
-### §2. ExitProcess via PEB walk
+### §2. ExitProcess via PEB walk — STATUS: queued for supervised session (2026-05-10)
+
+> Considered for autonomous shipment 2026-05-10; deferred. The
+> ~120-150 B of hand-encoded asm (PEB walk + Ldr list traversal +
+> PE export directory walk + strcmp on "RtlExitUserProcess" + indirect
+> call) is bounded but the only meaningful validation is a runtime
+> Windows VM round-trip — a silent off-by-one in any MOV r64 offset
+> or list-link adjustment surfaces as a generic ACCESS_VIOLATION at
+> exec time, indistinguishable from a wider stub bug. Wrapping that
+> in a single autonomous commit was judged outside the safe envelope.
+>
+> Note for the supervised pickup: the operationally-cheaper variant
+> below (taking ntdll as the second InMemoryOrderModuleList entry,
+> resolving `RtlExitUserProcess` instead of kernel32!ExitProcess) was
+> evaluated and is recommended — the function does the same job with
+> one less indirection layer (kernel32!ExitProcess calls into
+> ntdll!RtlExitUserProcess internally). Skips the kernel32-loaded-third
+> assumption.
 
 **File:** `pe/packer/stubgen/stage1/exitprocess.go` (new)
 
