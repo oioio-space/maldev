@@ -82,14 +82,17 @@ Total Tier 1: ~3-4h supervised.
   primitives already shipped in v0.79+). ~50 B asm. Win VM test.
   ~2-3h.
 
-- [ ] **#2.3 Polymorphic slots B & C**
-  `injectStubJunk` operates only on slot A (offset 14). Add slot B
-  (between CPUID prologue and loop body, offset ~36) and slot C
-  (between matched body and decrypt tail). Multiplies stub
-  byte-pattern surface vs YARA across packs. Slot offsets must
-  stay reachable post-injection (the Jcc displacements behind them
-  are auto-resolved by Builder labels in V2/V2N/V2NW — easy).
-  ~1.5h.
+- [x] **#2.3 Polymorphic slots B & C** (pending commit)
+  Added `emitNopJunk` helper (Builder-time RawBytes NOP-run with
+  caller rng). Wired into V2-Negate and V2NW at slot B
+  (post-CPUID-prologue / pre-loop) and slot C (post-matched-pointer-
+  computation / pre-decrypt). Builder labels auto-resolve all Jcc
+  displacements crossing the slots. Production callers split seed
+  into `bRng` (slots B/C) + `aRng` (slot A) so adding slots
+  doesn't reshuffle the others' choices. Tests:
+  `TestBundleStub_V2Negate_SlotsBC_Polymorphism` and
+  `TestBundleStub_V2NW_SlotsBC_Polymorphism` pin determinism per
+  seed + difference across seeds + growth vs no-junk baseline.
 
 - [ ] **#2.4 PackBinaryOptions.CipherKey wire-in**
   Currently marked "Reserved for future AES wrapping". Lands with

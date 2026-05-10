@@ -412,17 +412,25 @@ func WrapBundleAsExecutableLinuxWithSeed(bundle []byte, profile BundleProfile, s
 	// PT_WIN_BUILD remains Linux-no-op (host build = 0); the Windows
 	// wrap uses `bundleStubV2NegateWinBuildWindows` which reads the
 	// PEB and applies the range check.
-	stub, _, err := bundleStubVendorAwareV2Negate()
+	// Slots B + C (in-Builder NOP runs) are driven by `bRng`; slot A
+	// (post-Encode byte splice at offset 14) uses a separate `aRng`.
+	// Both rngs derive from the same seed but step independently so
+	// adding a slot doesn't reshuffle the others' choices.
+	var bRng, aRng *mathrand.Rand
+	if seed != 0 {
+		bRng = mathrand.New(mathrand.NewSource(seed))
+		aRng = mathrand.New(mathrand.NewSource(seed ^ 0x5a5a5a5a5a5a5a5a))
+	}
+	stub, _, err := bundleStubVendorAwareV2NegateRng(bRng)
 	if err != nil {
 		return nil, fmt.Errorf("packer: V2-Negate stub: %w", err)
 	}
-	// Polymorphic junk insertion at slot A (after PIC trampoline,
-	// before CPUID prologue). All Jcc displacements are AFTER this
-	// slot, so they remain valid; the PIC's bundleOff immediate is
-	// recomputed below from the new total stub length.
-	if seed != 0 {
-		rng := mathrand.New(mathrand.NewSource(seed))
-		stub = injectStubJunk(stub, rng)
+	// Slot A — post-Encode byte splice at offset 14 (after PIC
+	// trampoline, before CPUID prologue). All Jcc displacements
+	// are AFTER this slot, so they remain valid; the PIC's
+	// bundleOff immediate is recomputed below.
+	if aRng != nil {
+		stub = injectStubJunk(stub, aRng)
 	}
 	bundleOff := uint32(len(stub)) - 5 // distance from .pic label
 	binary.LittleEndian.PutUint32(stub[bundleOffsetImm32Pos:], bundleOff)

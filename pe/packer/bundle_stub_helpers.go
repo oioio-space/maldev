@@ -2,9 +2,45 @@ package packer
 
 import (
 	"fmt"
+	mathrand "math/rand"
 
 	"github.com/oioio-space/maldev/pe/packer/stubgen/amd64"
 )
+
+// emitNopJunk emits a small random sequence of Intel multi-byte NOPs
+// directly into the Builder stream. Used for in-stub polymorphism
+// slots (B and C) in V2-family bundle stubs — yara byte-pattern
+// signatures across packs differ even when the algorithmic body is
+// identical. Caller-supplied rng for test determinism; nil rng emits
+// zero bytes (no-op). Total inserted: [4, 16) bytes per call — small
+// enough that slots B and C together stay under one cacheline of
+// stub-size overhead while still spanning a single yara hit window.
+//
+// Distinct from [injectStubJunk] which performs a post-Encode byte
+// splice at slot A (offset 14). emitNopJunk runs DURING Builder
+// emission, so any forward Jcc displacements crossing the junk are
+// auto-resolved by Builder's label resolver — no offset bookkeeping
+// required.
+func emitNopJunk(b *amd64.Builder, r *mathrand.Rand) error {
+	if r == nil {
+		return nil
+	}
+	target := 4 + r.Intn(12) // [4, 16)
+	junk := make([]byte, 0, target)
+	for len(junk) < target {
+		remaining := target - len(junk)
+		maxSize := remaining
+		if maxSize > len(intelNops) {
+			maxSize = len(intelNops)
+		}
+		size := 1 + r.Intn(maxSize)
+		junk = append(junk, intelNops[size-1]...)
+	}
+	if err := b.RawBytes(junk); err != nil {
+		return fmt.Errorf("packer: emit nop junk: %w", err)
+	}
+	return nil
+}
 
 // emitDecryptStep emits the 6-instruction SBox-indirection decrypt
 // step used by every V2-family bundle stub (plain V2, V2-Negate,
