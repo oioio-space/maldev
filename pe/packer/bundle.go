@@ -217,6 +217,25 @@ type FingerprintPredicate struct {
 	Negate bool
 }
 
+// CipherType values are written into PayloadEntry.CipherType and
+// drive the pack-time encrypt + runtime decrypt path. The wire field
+// is one byte; values not listed here are reserved.
+const (
+	// CipherTypeXORRolling is the v0.61 default: payload bytes XORed
+	// against a 16-byte key (PayloadEntry.Key) rolling modulo 16.
+	// Size-preserving; one-line decrypt loop in the stub.
+	CipherTypeXORRolling uint8 = 1
+	// CipherTypeAESCTR is AES-128-CTR (Tier 🟡 #2.2). Key in
+	// PayloadEntry.Key (16 B); the 16-byte IV/initial counter is
+	// prepended to the encrypted payload data, so on-disk:
+	//     [IV (16 B)] [AES-CTR ciphertext]
+	// PayloadEntry.DataSize includes the IV prefix;
+	// PlaintextSize stays the plaintext length. Stub-side decrypt
+	// uses AES-NI (requires the host CPU to advertise the AES bit
+	// in CPUID[1].ECX — every desktop x86-64 since ~2010 does).
+	CipherTypeAESCTR uint8 = 2
+)
+
 // BundlePayload is one payload binary paired with its fingerprint
 // predicate and the per-payload pack options.
 type BundlePayload struct {
@@ -224,6 +243,12 @@ type BundlePayload struct {
 	Binary []byte
 	// Fingerprint is the host-matching rule for this payload.
 	Fingerprint FingerprintPredicate
+	// CipherType selects the encrypt-then-decrypt algorithm for
+	// THIS payload. Zero value (and 1) → CipherTypeXORRolling (the
+	// pre-#2.2 default); 2 → CipherTypeAESCTR. Mixing types within
+	// one bundle is supported — each PayloadEntry carries its own
+	// type byte so the stub dispatches per-entry.
+	CipherType uint8
 }
 
 // BundleOptions parameterises [PackBinaryBundle].
@@ -263,6 +288,45 @@ var (
 	ErrBundleOutOfRange = errors.New("packer: bundle offset out of range")
 )
 
+// ErrCipherTypeFixedKey fires when a per-payload CipherType requires
+// fresh randomness (e.g. AES-CTR's IV) but the bundle was packed with
+// BundleOptions.FixedKey set — that path is test-determinism-only and
+// can't coexist with cipher modes whose security relies on per-pack
+// randomness.
+var ErrCipherTypeFixedKey = errors.New("packer: CipherType requires random IV; cannot combine with FixedKey")
+
+// encryptBundlePayload encrypts one payload according to its requested
+// [CipherType]. Returns the on-disk ciphertext bytes (including any
+// cipher-specific prefix like an IV) and the cipherType byte that
+// will be written into the PayloadEntry.
+//
+// CipherType=0 is normalised to [CipherTypeXORRolling] for backward
+// compatibility with pre-#2.2 callers who left the field zero.
+func encryptBundlePayload(plain []byte, key [16]byte, cipherType uint8, hasFixedKey bool) ([]byte, uint8, error) {
+	if cipherType == 0 {
+		cipherType = CipherTypeXORRolling
+	}
+	switch cipherType {
+	case CipherTypeXORRolling:
+		ct := make([]byte, len(plain))
+		for j := range plain {
+			ct[j] = plain[j] ^ key[j%16]
+		}
+		return ct, CipherTypeXORRolling, nil
+	case CipherTypeAESCTR:
+		if hasFixedKey {
+			return nil, 0, ErrCipherTypeFixedKey
+		}
+		ct, err := crypto.EncryptAESCTR(key[:], plain)
+		if err != nil {
+			return nil, 0, fmt.Errorf("aes-ctr: %w", err)
+		}
+		return ct, CipherTypeAESCTR, nil
+	default:
+		return nil, 0, fmt.Errorf("packer: unknown CipherType %d", cipherType)
+	}
+}
+
 // PackBinaryBundle packs N payload binaries into a single multi-target
 // bundle blob. The bundle is a flat byte slice in spec layout, with
 // each payload XOR-encrypted under an independent random 16-byte key.
@@ -290,12 +354,14 @@ func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, err
 	plTableOff := fpTableOff + uint32(count)*BundleFingerprintEntrySize
 	dataOff := plTableOff + uint32(count)*BundlePayloadEntrySize
 
-	// Encrypt each payload up front so we know the ciphertext sizes
-	// (XOR is size-preserving but factor out for future cipher swaps).
+	// Encrypt each payload up front so we know the ciphertext sizes.
+	// XOR-rolling is size-preserving; AES-CTR adds a 16-byte IV prefix
+	// (DataSize then = 16 + plaintextLen, PlaintextSize unchanged).
 	type encrypted struct {
-		bytes []byte
-		key   [16]byte
-		plain uint32
+		bytes      []byte
+		key        [16]byte
+		plain      uint32
+		cipherType uint8
 	}
 	encs := make([]encrypted, count)
 	totalSize := dataOff
@@ -310,11 +376,11 @@ func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, err
 			}
 			copy(key[:], b)
 		}
-		ct := make([]byte, len(p.Binary))
-		for j := range p.Binary {
-			ct[j] = p.Binary[j] ^ key[j%16]
+		ct, cipherType, err := encryptBundlePayload(p.Binary, key, p.CipherType, opts.FixedKey != nil)
+		if err != nil {
+			return nil, fmt.Errorf("packer: bundle payload %d: %w", i, err)
 		}
-		encs[i] = encrypted{bytes: ct, key: key, plain: uint32(len(p.Binary))}
+		encs[i] = encrypted{bytes: ct, key: key, plain: uint32(len(p.Binary)), cipherType: cipherType}
 		totalSize += uint32(len(ct))
 	}
 
@@ -364,7 +430,7 @@ func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, err
 		binary.LittleEndian.PutUint32(out[off:off+4], dataCursor)
 		binary.LittleEndian.PutUint32(out[off+4:off+8], uint32(len(e.bytes)))
 		binary.LittleEndian.PutUint32(out[off+8:off+12], e.plain)
-		out[off+12] = 1 // CipherType = XOR-rolling (16-byte key)
+		out[off+12] = e.cipherType // CipherType — see CipherType* constants
 		// off+13..off+16 reserved
 		copy(out[off+16:off+32], e.key[:])
 		copy(out[dataCursor:], e.bytes)
@@ -721,12 +787,27 @@ func unpackBundleBody(bundle []byte, idx int, expectedMagic uint32) ([]byte, err
 	if int(dataRVA)+int(dataSize) > len(bundle) {
 		return nil, fmt.Errorf("%w: payload %d data outside blob", ErrBundleOutOfRange, idx)
 	}
+	cipherType := bundle[entryOff+12]
+	if cipherType == 0 {
+		cipherType = CipherTypeXORRolling
+	}
 	var key [16]byte
 	copy(key[:], bundle[entryOff+16:entryOff+32])
 	ct := bundle[dataRVA : dataRVA+dataSize]
-	pt := make([]byte, len(ct))
-	for j := range ct {
-		pt[j] = ct[j] ^ key[j%16]
+	switch cipherType {
+	case CipherTypeXORRolling:
+		pt := make([]byte, len(ct))
+		for j := range ct {
+			pt[j] = ct[j] ^ key[j%16]
+		}
+		return pt, nil
+	case CipherTypeAESCTR:
+		pt, err := crypto.DecryptAESCTR(key[:], ct)
+		if err != nil {
+			return nil, fmt.Errorf("packer: unpack payload %d: %w", idx, err)
+		}
+		return pt, nil
+	default:
+		return nil, fmt.Errorf("packer: payload %d unknown CipherType %d", idx, cipherType)
 	}
-	return pt, nil
 }

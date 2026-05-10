@@ -75,15 +75,25 @@ Total Tier 1: ~3-4h supervised.
   (`TestBuilder_ANDB` / `TestBuilder_MOVZBL` / `TestBuilder_XORB`)
   + Linux runtime E2E green.
 
-- [~] **#2.2 Multi-cipher support (`CipherType` field) — Phase 1: Builder primitives** (pending commit)
-  Phase 1 lands the AES-NI building blocks needed for the stub-side
-  AES-CTR decrypt loop. New amd64 Builder primitives (all byte-pinned):
-  AESENC, AESENCLAST, PXOR (XMM-XMM), MOVDQULoad, MOVDQUStore.
-  New `XmmReg` type with X0..X15 constants (separate from the GPR
-  `Reg` enum because XMM encoding tables differ).
-  Phase 2 (queued): pack-time AES-CTR encrypt pipeline +
-  `CipherType=2` wire-format dispatch + stub asm decrypt loop
-  emitter. Phase 3: Win VM AES-NI runtime test.
+- [~] **#2.2 Multi-cipher (`CipherType` field) — Phases 1+2 of 3** (pending commits)
+  **Phase 1 (7505407):** AES-NI Builder primitives — `XmmReg` type
+  (X0..X15) + `AESENC` / `AESENCLAST` / `PXOR` / `MOVDQULoad` /
+  `MOVDQUStore`, all byte-pinned.
+  **Phase 2 (pending commit):** wire-format `CipherType=2` dispatch
+  + pack-time AES-CTR encrypt + unpack-time decrypt. New surface:
+  `CipherTypeXORRolling` / `CipherTypeAESCTR` constants,
+  `BundlePayload.CipherType` field (zero = legacy XOR-rolling for
+  backward compat), `ErrCipherTypeFixedKey` sentinel (AES-CTR's IV
+  randomness can't coexist with `BundleOptions.FixedKey`). On-disk
+  layout for CipherType=2: `IV (16 B) || AES-CTR ciphertext` —
+  `DataSize` includes IV, `PlaintextSize` does not. Tests cover
+  round-trip, mixed XOR + AES-CTR within one bundle, FixedKey
+  rejection, and legacy backward compat.
+  **Phase 3 (queued):** stub asm AES-CTR decrypt-loop emitter (uses
+  Phase 1 primitives) + per-entry CipherType dispatch in the stub +
+  Win VM runtime test. The cleanest seam is a new
+  `emitAESCTRDecryptStep` helper sitting next to `emitDecryptStep`,
+  selected by reading the CipherType byte from PayloadEntry.
 
 - [x] **#2.3 Polymorphic slots B & C** (pending commit)
   Added `emitNopJunk` helper (Builder-time RawBytes NOP-run with
