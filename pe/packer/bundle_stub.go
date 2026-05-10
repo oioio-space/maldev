@@ -402,12 +402,20 @@ func WrapBundleAsExecutableLinuxWithSeed(bundle []byte, profile BundleProfile, s
 	}
 
 	// Use the vendor-aware scan stub: walks the FingerprintEntry table,
-	// matches entries by PT_MATCH_ALL bit OR PT_CPUID_VENDOR with a
-	// 12-byte host CPUID compare (all-zero VendorString = wildcard).
-	// On no match, exit_group(0). PT_WIN_BUILD is intentionally not
-	// wired in this Linux stub (host build = 0); a future
-	// WrapBundleAsExecutableWindows minor will add the PEB read.
-	stub := bundleStubVendorAware()
+	// V2-Negate scan stub (v0.88.0+): Builder-driven emission with
+	// FingerprintPredicate.Negate flag operational. Matches entries
+	// by PT_MATCH_ALL bit OR PT_CPUID_VENDOR with a 12-byte host
+	// CPUID compare (all-zero VendorString = wildcard), then XORs
+	// the per-entry negate byte into the match accumulator before
+	// branching. On no match, sys_exit_group(0).
+	//
+	// PT_WIN_BUILD remains Linux-no-op (host build = 0); the Windows
+	// wrap uses `bundleStubV2NegateWinBuildWindows` which reads the
+	// PEB and applies the range check.
+	stub, _, err := bundleStubVendorAwareV2Negate()
+	if err != nil {
+		return nil, fmt.Errorf("packer: V2-Negate stub: %w", err)
+	}
 	// Polymorphic junk insertion at slot A (after PIC trampoline,
 	// before CPUID prologue). All Jcc displacements are AFTER this
 	// slot, so they remain valid; the PIC's bundleOff immediate is

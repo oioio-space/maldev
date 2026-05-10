@@ -18,7 +18,8 @@ box + record commit short-SHA + bump front-matter `last_updated`.
 
 ## 🔴 Tier 1 — High priority (features inaccessible aux opérateurs)
 
-- [ ] **#1.1 Wire V2-Negate into `WrapBundleAsExecutableLinux*`**
+- [x] **#1.1 Wire V2-Negate into `WrapBundleAsExecutableLinux*`** (commit pending)
+  All Linux E2E tests stay green; bundle sizes shifted +29 B (V2-Negate adds ~30 B vs V1).
   V2-Negate exists since v0.88.0 but the public Linux wrap still uses
   V1. Operators can't set `Negate: true` on a FingerprintPredicate
   and see it honored end-to-end. Fix: switch `bundleStubVendorAware()`
@@ -27,7 +28,11 @@ box + record commit short-SHA + bump front-matter `last_updated`.
   `TestWrapBundleAsExecutableLinux_*` runtime tests to confirm
   green. ~30 min.
 
-- [ ] **#1.2 Wire V2NW into `WrapBundleAsExecutableWindows*`**
+- [x] **#1.2 Wire V2NW into `WrapBundleAsExecutableWindows*`** (commit pending)
+  Win VM E2E TestWrapBundleAsExecutableWindows_E2E_RunsExit42Windows
+  passed FIRST DISPATCH with V2NW wired in. StubLayoutSanity test
+  updated to V2NW's structure (offset-115 V1+§2-patch byte check
+  replaced with "len ≥ 400" sanity bound).
   Same as #1.1 for Windows. Currently uses V1+§2-patch (no negate, no
   PT_WIN_BUILD). Switch to `bundleStubV2NegateWinBuildWindows`. Win
   VM E2E re-dispatch. ~30 min.

@@ -211,7 +211,13 @@ func WrapBundleAsExecutableWindowsWithSeed(bundle []byte, profile BundleProfile,
 			ErrBundleBadMagic, magic, expected)
 	}
 
-	stub, err := bundleStubVendorAwareWindows()
+	// V2NW Builder-driven scan stub (v0.88.0+): adds §5 negate flag
+	// + §4-PHASE-B-2 PT_WIN_BUILD support to the Windows wrap.
+	// EmitPEBBuildRead loads OSBuildNumber into R13 at prologue exit;
+	// per-entry test honors PT_CPUID_VENDOR, PT_WIN_BUILD range
+	// check, and the negate flag XOR. On no-match, jumps to the §2
+	// EmitNtdllRtlExitUserProcess(0) block embedded inline.
+	stub, _, err := bundleStubV2NegateWinBuildWindows()
 	if err != nil {
 		return nil, err
 	}

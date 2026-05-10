@@ -255,11 +255,16 @@ func TestWrapBundleAsExecutableWindows_StubLayoutSanity(t *testing.T) {
 			textBytes[:5], wantPrefix)
 	}
 
-	// At offset 115 we expect the jmp rel32 (0xe9) replacing the
-	// Linux exit_group sequence.
-	if textBytes[115] != 0xe9 {
-		t.Errorf("byte at offset 115 = %#x, want 0xe9 (jmp rel32 to §2 block)",
-			textBytes[115])
+	// V2NW (v0.88.0+) emits the entire scan stub via amd64.Builder
+	// with label-resolved jumps; the .no_match → §2 transition is no
+	// longer at the V1+§2-patch offset 115. Asserting on a specific
+	// byte position there would be V1-specific. Instead, assert the
+	// stub is substantially larger than V1+§2-patch (V2NW is ~420 B
+	// + bundle vs V1's ~340 B + bundle) which catches any accidental
+	// fall-back to V1.
+	if len(textBytes) < 400 {
+		t.Errorf(".text section %d bytes < 400 — may have fallen back to V1+§2-patch instead of V2NW",
+			len(textBytes))
 	}
 }
 
