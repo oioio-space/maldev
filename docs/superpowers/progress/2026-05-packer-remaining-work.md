@@ -65,13 +65,14 @@ Total Tier 1: ~3-4h supervised.
 
 ## 🟡 Tier 2 — Medium priority (polish)
 
-- [x] **#2.1 Builder migration of decrypt-loop 8-bit ops** (pending commit)
+- [x] **#2.1 Builder migration of decrypt-loop 8-bit ops** (2f529c5 + simplify pass)
   Added 3 new Builder primitives: ANDB (8-bit imm AND), MOVZBL
   (byte-reg → dword zero-extend), XORB (8-bit XOR with SIB-mem).
   Reused existing MOVBReg / MOVB / regToByteReg for the 3 already-
-  shaped ops. Replaced both V2-Negate (Linux) and V2NW (Windows)
-  decrypt blocks. Byte-identical emission pinned by encoder unit
-  tests (`TestBuilder_ANDB` / `TestBuilder_MOVZBL` / `TestBuilder_XORB`)
+  shaped ops. Extracted `emitDecryptStep` shared helper used by
+  V2 + V2-Negate + V2NW (–52 LOC). Migrated `and r9b, 1` x2 to
+  ANDB. Byte-identical emission pinned by encoder unit tests
+  (`TestBuilder_ANDB` / `TestBuilder_MOVZBL` / `TestBuilder_XORB`)
   + Linux runtime E2E green.
 
 - [ ] **#2.2 Multi-cipher support (`CipherType` field)**

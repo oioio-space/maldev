@@ -324,7 +324,7 @@ func bundleStubV2NegateWinBuildWindows() ([]byte, int, error) {
 	if e := check(b.MOVZX(amd64.R9, amd64.MemOp{Base: amd64.R8, Disp: 1}), "movzx negate"); e != nil {
 		return nil, 0, e
 	}
-	if e := check(b.RawBytes([]byte{0x41, 0x80, 0xe1, 0x01}), "and r9b 1"); e != nil {
+	if e := check(b.ANDB(amd64.R9, amd64.Imm(0x01)), "and r9b 1"); e != nil {
 		return nil, 0, e
 	}
 	// xor r12b, r9b  → 45 30 cc
@@ -415,25 +415,7 @@ func bundleStubV2NegateWinBuildWindows() ([]byte, int, error) {
 	if e := check(b.JE(jmpPayloadLabel), "dec jz jmp_payload"); e != nil {
 		return nil, 0, e
 	}
-	// Decrypt 6-step (Builder-emitted; was RawBytes before #2.1).
-	// Same shape as V2-Negate's Linux path; both stubs share the
-	// SBox-indirection schema (4-bit round index → SIB lookup → XOR).
-	if e := check(b.MOVBReg(amd64.RAX, amd64.MemOp{Base: amd64.RDI}), "dec mov al [rdi]"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOVBReg(amd64.RDX, amd64.R9), "dec mov dl r9b"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.ANDB(amd64.RDX, amd64.Imm(0x0f)), "dec and dl 15"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOVZBL(amd64.RDX, amd64.RDX), "dec movzx edx dl"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.XORB(amd64.RAX, amd64.MemOp{Base: amd64.R8, Index: amd64.RDX, Scale: 1}), "dec xor al [r8+rdx]"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOVB(amd64.MemOp{Base: amd64.RDI}, amd64.RAX), "dec mov [rdi] al"); e != nil {
+	if e := check(emitDecryptStep(b), "dec step"); e != nil {
 		return nil, 0, e
 	}
 	if e := check(b.INC(amd64.RDI), "dec inc rdi"); e != nil {

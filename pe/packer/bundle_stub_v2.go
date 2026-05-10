@@ -292,22 +292,8 @@ func bundleStubVendorAwareV2() ([]byte, int, error) {
 		return nil, 0, fmt.Errorf("packer: V2 dec jz jmp_payload: %w", err)
 	}
 	// 8-bit per-byte XOR loop body — RawBytes for Plan-9-tricky
-	// 8-bit ops:
-	//   mov   al, [rdi]          ; 8a 07
-	//   mov   dl, r9b            ; 44 88 ca
-	//   and   dl, 15             ; 80 e2 0f
-	//   movzx edx, dl            ; 0f b6 d2
-	//   xor   al, [r8+rdx]       ; 41 32 04 10
-	//   mov   [rdi], al          ; 88 07
-	if err := b.RawBytes([]byte{
-		0x8a, 0x07, // mov al, [rdi]
-		0x44, 0x88, 0xca, // mov dl, r9b
-		0x80, 0xe2, 0x0f, // and dl, 15
-		0x0f, 0xb6, 0xd2, // movzx edx, dl
-		0x41, 0x32, 0x04, 0x10, // xor al, [r8+rdx]
-		0x88, 0x07, // mov [rdi], al
-	}); err != nil {
-		return nil, 0, fmt.Errorf("packer: V2 dec 8-bit ops: %w", err)
+	if err := emitDecryptStep(b); err != nil {
+		return nil, 0, fmt.Errorf("packer: V2 dec step: %w", err)
 	}
 	// inc rdi
 	if err := b.INC(amd64.RDI); err != nil {

@@ -214,11 +214,12 @@ func (bb *Builder) MOVB(dst MemOp, src Reg) error {
 	return nil
 }
 
-// ANDB emits AND r/m8, imm8 — 8-bit AND with sign-extended-not-applicable
-// immediate. Used by the bundle scan stub's decrypt loop (`and dl, 15`)
-// to mask the SBox index, and by the predicate path (`and r9b, 1`) to
-// isolate a bitmask bit. Plan 9 wart: AANDB encodes correctly only when
-// the destination is written via [regToByteReg]; without it, golang-asm
+// ANDB emits AND r8, imm8 — 8-bit AND with an 8-bit immediate, byte-
+// register destination only (no r/m8-memory form is exposed). Used by
+// the bundle scan stub's decrypt loop (`and dl, 15`) to mask the SBox
+// index, and by the predicate path (`and r9b, 1`) to isolate a
+// bitmask bit. Plan 9 wart: AANDB encodes correctly only when the
+// destination is written via [regToByteReg]; without it, golang-asm
 // rejects the full 64-bit GPR as illegal.
 func (bb *Builder) ANDB(dst Reg, imm Imm) error {
 	p := bb.b.NewProg()
@@ -249,8 +250,9 @@ func (bb *Builder) MOVZBL(dst Reg, src Reg) error {
 
 // XORB emits XOR r8, byte ptr [mem] — 8-bit XOR with memory source.
 // Used by the bundle decrypt loop's SBox indirection
-// (`xor al, [r8+rdx]`); src must be a [MemOp] (callers wanting reg-reg
-// XOR should use the 64-bit [XOR] with byte-aliased regs).
+// (`xor al, [r8+rdx]`); src must be a [MemOp]. No reg-reg byte XOR
+// is exposed — [XOR] uses AXORQ which would clobber the upper 56 bits
+// of the destination; add an XORBReg sibling here if/when needed.
 func (bb *Builder) XORB(dst Reg, src MemOp) error {
 	p := bb.b.NewProg()
 	p.As = x86.AXORB
