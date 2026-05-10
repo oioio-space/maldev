@@ -7,6 +7,63 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Packer chantier — v0.88 → v0.90 (2026-05-10)
+
+**Note:** version-section discipline in this CHANGELOG drifted between
+v0.18 and v0.87; this entry consolidates the most recent packer chantier
+without backfilling the intermediate gap (a separate audit ticket).
+
+#### v0.90.0 (2026-05-10) — polymorphism slots B & C
+
+- `pe/packer`: V2-Negate (Linux) and V2NW (Windows) all-asm bundle
+  stubs gain two new in-Builder polymorphism slots — slot B between
+  CPUID prologue and scan-loop entry, slot C between matched-pointer
+  computation and decrypt step. Combined with the pre-existing
+  post-Encode slot A, per-pack stub diversity surface tripled
+  (4-80 byte total NOP insertion vs the prior 4-32 byte single-slot).
+- Builder labels auto-resolve every Jcc displacement crossing the
+  new slots; the public stub functions retain their no-arg signatures
+  via thin `…Rng(rng)` cores so existing callsites stay untouched.
+- `cmd/packerscope`: `extract` verb round-trip tests landed (canonical
+  + per-build-secret + wrong-secret negative path) — Tier 🟢 #3.2.
+- Dead code retirement: V1 stubs (`bundleStubVendorAware`,
+  `bundleStubVendorAwareWindows`) and V2-plain
+  (`bundleStubVendorAwareV2`) deleted; −1019 LOC net. V2-Negate /
+  V2NW inherit the imm32 + PIC-prefix contracts via direct pin tests.
+- Internal refactor: 4 shared emitters extracted (`emitBundlePICTrampoline`,
+  `emitCPUIDVendorPrologue`, `emitCPUIDFeaturesProbe`,
+  `emitBundleLoopSetup`) for the cross-platform prefix.
+
+#### v0.89.0 (2026-05-10) — Tier 🔴 close: every FingerprintPredicate bit operational
+
+- `cmd/packer`: `-pl` bundle spec extended with optional `:negate`
+  suffix — `<file>:<vendor>:<min>-<max>[:negate]`. Operators can now
+  build "match EXCEPT this" rules from the CLI without a Go shim.
+- `docs/techniques/pe/packer.md`: refreshed for V2-Negate / V2NW
+  wire-in state. Mode 5 (all-asm) predicate-evaluator row upgraded
+  from "PT_MATCH_ALL + PT_CPUID_VENDOR" to the full vocabulary
+  (PT_MATCH_ALL + PT_CPUID_VENDOR + PT_WIN_BUILD + PT_CPUID_FEATURES
+  + Negate). Stale "Mode 5 queued" limitations removed.
+
+#### v0.88.0 (2026-05-10) — V2-Negate + V2NW wired into public Wrap APIs
+
+- `pe/packer`: `WrapBundleAsExecutableLinux*` switched from the V1
+  hand-encoded scan stub to `bundleStubVendorAwareV2Negate` —
+  operators setting `FingerprintPredicate.Negate = true` now see
+  it honoured by the all-asm path (previously only the Go-runtime
+  evaluator + host-side `SelectPayload` did).
+- `pe/packer`: `WrapBundleAsExecutableWindows*` switched to
+  `bundleStubV2NegateWinBuildWindows` — adds `PT_WIN_BUILD`
+  predicate via `EmitPEBBuildRead` (reads `PEB.OSBuildNumber`,
+  Windows-only).
+- `pe/packer`: `PT_CPUID_FEATURES` predicate wired into both V2-Negate
+  and V2NW (CPUID leaf 1 → ECX features → per-entry mask + value
+  compare). Final reserved predicate bit now operational.
+- `amd64.Builder`: gained `ANDB` / `MOVZBL` / `XORB` primitives to
+  let the decrypt loop emit through the Builder instead of RawBytes;
+  shared `emitDecryptStep` helper unifies the 6-instruction SBox
+  block across V2-Negate, V2NW, and (briefly) V2-plain.
+
 ### Added — `credentials/lsassdump` v0.31.4 — `FindLsassEProcess` walker
 
 Closes the kvc-inspired chantier with a Windows-only high-level
