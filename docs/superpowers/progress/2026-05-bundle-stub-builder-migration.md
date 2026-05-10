@@ -92,6 +92,25 @@ until the §5/§4-B-2 work makes V2 the canonical path.
 
 ## Phase 4 — Layer §5 + §4-PHASE-B-2 onto V2 (~2h, the unlock)
 
+**Phase 4a — §5 negate flag — ✅ COMPLETE (commit pending)**
+- [x] `bundleStubVendorAwareV2Negate()` shipped in
+  `pe/packer/bundle_stub_v2_negate.go` — restructures per-entry
+  test to R12B-accumulator pattern + XOR-with-negate + branch
+- [x] TestBundleStubV2Negate_E2E_NegateFlipsMatch — PASS
+- [x] TestBundleStubV2Negate_E2E_PTMatchAllStillWorks — PASS
+
+Bug story (caught + fixed via gdb core dump):
+  First iteration used AL as the accumulator (`mov al, 1`). AL is
+  the low byte of EAX which is the loop counter. mov al, 1 made
+  EAX = 1 instead of 0, so .matched dispatched to PayloadEntry[1]
+  (which doesn't exist on 1-entry bundles → garbage pointer →
+  SIGSEGV at `mov (%rdi),%al` in the decrypt loop). Switched to
+  R12B as the accumulator (3-byte mov instead of 2-byte, but
+  preserves EAX). Both tests now PASS.
+
+**Phase 4b — §4-PHASE-B-2 PT_WIN_BUILD — UNBLOCKED, ready for next session**
+
+
 Once V2 ships, Builder labels handle Jcc displacements
 automatically. The negate-flag + PT_WIN_BUILD additions become
 **structural changes** instead of byte-recompute exercises.
