@@ -151,6 +151,30 @@ func (bb *Builder) DEC(dst Op) error {
 	return nil
 }
 
+// INC emits INC dst (64-bit increment).
+func (bb *Builder) INC(dst Op) error {
+	p := bb.b.NewProg()
+	p.As = x86.AINCQ
+	if err := setOperand(&p.To, dst); err != nil {
+		return fmt.Errorf("amd64: INC dst: %w", err)
+	}
+	bb.b.AddInstruction(p)
+	return nil
+}
+
+// CMP emits CMP dst, src (64-bit compare; sets flags based on
+// `dst - src`). Order matches the rest of this package's binaryOp
+// convention — destination first, source second.
+func (bb *Builder) CMP(dst, src Op) error {
+	return bb.binaryOp(x86.ACMPQ, "CMP", dst, src)
+}
+
+// TEST emits TEST dst, src (64-bit AND-then-discard; sets flags).
+// Same operand order as [CMP].
+func (bb *Builder) TEST(dst, src Op) error {
+	return bb.binaryOp(x86.ATESTQ, "TEST", dst, src)
+}
+
 // POP emits POP dst (64-bit pop from stack). Used by the CALL+POP+ADD
 // PIC prologue in the UPX-style stub to read the return address pushed
 // by CALL into a callee-saved register.
@@ -188,7 +212,14 @@ func (bb *Builder) JMP(target Op) error { return bb.branchOp(obj.AJMP, "JMP", ta
 func (bb *Builder) JNZ(target Op) error { return bb.branchOp(x86.AJNE, "JNZ", target) }
 
 // JE emits a jump-if-equal (JE/JZ). target must be LabelRef or MemOp.
-func (bb *Builder) JE(target Op) error { return bb.branchOp(x86.AJEQ, "JE", target) }
+func (bb *Builder) JE(target Op) error  { return bb.branchOp(x86.AJEQ, "JE", target) }
+
+// JGE emits a signed-greater-or-equal conditional jump. Used by the
+// bundle scan loop's index-vs-count check at the top of each iteration.
+func (bb *Builder) JGE(target Op) error { return bb.branchOp(x86.AJGE, "JGE", target) }
+
+// JL emits a signed-less-than conditional jump.
+func (bb *Builder) JL(target Op) error { return bb.branchOp(x86.AJLT, "JL", target) }
 
 // CALL emits a CALL instruction. target must be LabelRef or MemOp.
 func (bb *Builder) CALL(target Op) error { return bb.branchOp(obj.ACALL, "CALL", target) }

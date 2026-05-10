@@ -59,6 +59,23 @@ func TestBuilder_AllMnemonics(t *testing.T) {
 		{"DEC_Reg", func(b *amd64.Builder) error {
 			return b.DEC(amd64.RAX)
 		}, x86asm.DEC},
+		{"INC_Reg", func(b *amd64.Builder) error {
+			return b.INC(amd64.RAX)
+		}, x86asm.INC},
+		{"CMP_RegReg", func(b *amd64.Builder) error {
+			return b.CMP(amd64.RAX, amd64.RBX)
+		}, x86asm.CMP},
+		{"TEST_RegReg", func(b *amd64.Builder) error {
+			return b.TEST(amd64.RAX, amd64.RBX)
+		}, x86asm.TEST},
+		// CMP/TEST with immediate operands: golang-asm's Plan 9
+		// encoder treats CMPQ/TESTQ + Imm as "compare flag vs imm"
+		// which has a different prog shape than the binaryOp wrapper
+		// emits — silently produces 0 bytes. The scan-loop refactor
+		// only needs CMP/TEST reg-reg / reg-mem; immediate forms are
+		// NOT exercised here. If a future use needs them, swap to
+		// AND-with-mask pattern (b.AND(reg, Imm(...))) which is the
+		// idiomatic Plan 9 path.
 		{"RET", func(b *amd64.Builder) error {
 			return b.RET()
 		}, x86asm.RET},
@@ -193,6 +210,37 @@ func TestBuilder_JMP_Reg(t *testing.T) {
 	// Intel Vol 2A: JMP r/m64 with REX.B+R15 = 41 FF E7
 	if len(out) < 3 || out[0] != 0x41 || out[1] != 0xFF || out[2] != 0xE7 {
 		t.Errorf("encoding % x, want 41 ff e7", out)
+	}
+}
+
+// TestBuilder_JGE_JL_Resolve covers the two new conditional jumps
+// added for the §5/PHASE-B-2 scan-loop refactor. Backward target
+// pattern matches TestBuilder_LabelAndJMP (avoids depending on the
+// exact rel8 vs rel32 encoding choice).
+func TestBuilder_JGE_JL_Resolve(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		emit func(b *amd64.Builder, target amd64.LabelRef) error
+		want x86asm.Op
+	}{
+		{"JGE", func(b *amd64.Builder, t amd64.LabelRef) error { return b.JGE(t) }, x86asm.JGE},
+		{"JL", func(b *amd64.Builder, t amd64.LabelRef) error { return b.JL(t) }, x86asm.JL},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			b, err := amd64.New()
+			require.NoError(t, err)
+			loop := b.Label("loop")
+			require.NoError(t, b.NOP(1))
+			require.NoError(t, c.emit(b, loop))
+			out, err := b.Encode()
+			require.NoError(t, err, "Encode")
+			require.GreaterOrEqual(t, len(out), 2)
+			inst, err := x86asm.Decode(out[1:], 64)
+			require.NoError(t, err, "Decode (bytes=% x)", out[1:])
+			if inst.Op != c.want {
+				t.Errorf("got %v, want %v", inst.Op, c.want)
+			}
+		})
 	}
 }
 
