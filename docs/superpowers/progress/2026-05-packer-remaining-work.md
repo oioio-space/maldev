@@ -92,16 +92,27 @@ Total Tier 1: ~3-4h supervised.
   **Phase 3a (27453db):** `emitAESCTRBlockDecrypt` helper +
   byte-pin test. 148-byte single-block AES-128-CTR decryption asm
   sequence composed from Phase 1 primitives.
-  **Phase 3a' (pending commit):** `crypto.ExpandAESKey` — pure-Go
+  **Phase 3a' (d2499eb):** `crypto.ExpandAESKey` — pure-Go
   FIPS 197 § 5.2 AES-128 round-key expansion. Stdlib hides round
   keys; the all-asm stub needs them in-wire so AES-NI decrypt can
   MOVDQU directly. Pinned against the FIPS 197 Appendix A.1 test
   vector + bad-key-length guard + stdlib AES-CTR cross-validation.
-  **Phase 3b (queued, needs Win VM):** per-entry CipherType
-  dispatch in the stub scan loop + pack-time round-key expansion
-  into the bundle wire format (consumes ExpandAESKey) + the
-  PT_CPUID_FEATURES auto-injection so the stub rejects pre-AES-NI
-  hosts cleanly + Win VM runtime test.
+  **Phase 3b/host (pending commit):** wire-format extension — every
+  CipherType=2 entry now carries [IV(16)|ciphertext|round keys(176)].
+  `AESCTRRoundKeysSize` + `CPUIDFeatureAES` constants exported.
+  Pack-time auto-injects the AES bit (0x02000000) into the entry's
+  PT_CPUID_FEATURES mask + value (strict OR — operator-supplied
+  feature constraints survive). UnpackBundle strips round keys
+  before DecryptAESCTR. 3 new pin tests (round-key tail layout +
+  auto-inject + auto-inject-is-OR) + existing 4 round-trip tests
+  all green.
+  **Phase 3c (queued, needs Win VM E2E):** stub-side AES-CTR
+  dispatch — V2NW reads PayloadEntry[12], branches to a new
+  emit-time path that sets R8 = ciphertext_end (round keys), loads
+  IV into XMM0, loops emitAESCTRBlockDecrypt + counter increment
+  per 16-byte block, handles trailing partial block. Win VM E2E
+  test required (AES-NI semantics can't be runtime-validated on the
+  Fedora dev box).
 
 - [x] **#2.3 Polymorphic slots B & C** (pending commit)
   Added `emitNopJunk` helper (Builder-time RawBytes NOP-run with

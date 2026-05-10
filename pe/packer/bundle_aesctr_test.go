@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"testing"
+
+	"github.com/oioio-space/maldev/crypto"
 )
 
 // TestBundleAESCTR_RoundTrip pins the Tier 🟡 #2.2 Phase 2 wire-
@@ -32,9 +34,10 @@ func TestBundleAESCTR_RoundTrip(t *testing.T) {
 	if e.CipherType != CipherTypeAESCTR {
 		t.Errorf("CipherType = %d, want %d (CipherTypeAESCTR)", e.CipherType, CipherTypeAESCTR)
 	}
-	// 16-byte IV prefix means on-disk size > plaintext size.
-	if want := uint32(len(plain) + 16); e.DataSize != want {
-		t.Errorf("DataSize = %d, want %d (plaintext %d + 16 B IV)", e.DataSize, want, len(plain))
+	// CipherType=2 wire layout: IV (16) + ciphertext + round keys (176).
+	if want := uint32(16 + len(plain) + AESCTRRoundKeysSize); e.DataSize != want {
+		t.Errorf("DataSize = %d, want %d (16 IV + %d plaintext + %d round keys)",
+			e.DataSize, want, len(plain), AESCTRRoundKeysSize)
 	}
 	if e.PlaintextSize != uint32(len(plain)) {
 		t.Errorf("PlaintextSize = %d, want %d", e.PlaintextSize, len(plain))
@@ -124,3 +127,107 @@ func TestBundleAESCTR_BackwardCompat(t *testing.T) {
 		t.Errorf("legacy round-trip: %v / %q vs %q", err, got, plain)
 	}
 }
+
+// TestBundleAESCTR_RoundKeysAppended asserts the stub-side wire-
+// format contract: every CipherType=2 entry carries its 11×16=176B
+// expanded AES-128 round keys appended IMMEDIATELY AFTER the
+// ciphertext. The stub-side AES-NI decrypt loop reads them via
+// `MOVDQU XMM, [R8 + 16*round]` so R8 = data_base + 16 (IV) +
+// plaintext_len. This test pins (1) the layout, (2) byte-identity
+// of the appended round keys against [crypto.ExpandAESKey] for the
+// PayloadEntry's recorded key.
+func TestBundleAESCTR_RoundKeysAppended(t *testing.T) {
+	plain := []byte("payload-for-round-key-tail-pin")
+	bundle, err := PackBinaryBundle(
+		[]BundlePayload{{Binary: plain, CipherType: CipherTypeAESCTR}},
+		BundleOptions{},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+	info, err := InspectBundle(bundle)
+	if err != nil {
+		t.Fatalf("InspectBundle: %v", err)
+	}
+	e := info.Entries[0]
+	// Round keys live at the tail of the entry's data region.
+	rkOff := int(e.DataRVA) + int(e.DataSize) - AESCTRRoundKeysSize
+	gotRK := bundle[rkOff : rkOff+AESCTRRoundKeysSize]
+	wantRK, err := crypto.ExpandAESKey(e.Key[:])
+	if err != nil {
+		t.Fatalf("crypto.ExpandAESKey: %v", err)
+	}
+	if !bytes.Equal(gotRK, wantRK) {
+		t.Errorf("round keys at offset %d don't match crypto.ExpandAESKey output:\n got % x\nwant % x",
+			rkOff, gotRK[:16], wantRK[:16])
+	}
+	// Round 0 (first 16 bytes of expansion) must equal the key
+	// itself per FIPS 197 § 5.2 — sanity check against the recorded
+	// PayloadEntry.Key.
+	if !bytes.Equal(gotRK[:16], e.Key[:]) {
+		t.Errorf("round 0 != PayloadEntry.Key:\n got % x\nwant % x", gotRK[:16], e.Key)
+	}
+}
+
+// TestBundleAESCTR_AutoInjectsAESFeatureBit asserts the pack-time
+// safety net: a CipherType=2 entry whose Fingerprint does NOT
+// already require the AES-NI bit gets it OR'd in (mask + value +
+// PTCPUIDFeatures bit) so pre-AES-NI hosts skip the entry cleanly
+// instead of crashing on the stub's first `AESENC`.
+func TestBundleAESCTR_AutoInjectsAESFeatureBit(t *testing.T) {
+	bundle, err := PackBinaryBundle(
+		[]BundlePayload{{
+			Binary:     []byte("aes-payload"),
+			CipherType: CipherTypeAESCTR,
+			// No explicit fingerprint — operator left it default.
+		}},
+		BundleOptions{},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+	info, _ := InspectBundle(bundle)
+	e := info.Entries[0]
+	if e.PredicateType&PTCPUIDFeatures == 0 {
+		t.Errorf("PredicateType = %#x — PTCPUIDFeatures bit not auto-injected", e.PredicateType)
+	}
+	if e.CPUIDFeatureMask&CPUIDFeatureAES == 0 {
+		t.Errorf("CPUIDFeatureMask = %#x — AES bit not in mask", e.CPUIDFeatureMask)
+	}
+	if e.CPUIDFeatureValue&CPUIDFeatureAES == 0 {
+		t.Errorf("CPUIDFeatureValue = %#x — AES bit not in value", e.CPUIDFeatureValue)
+	}
+}
+
+// TestBundleAESCTR_AutoInjectIsOR confirms the auto-injection is a
+// strict OR: operator-supplied feature constraints survive
+// alongside the auto-injected AES bit, never overwritten.
+func TestBundleAESCTR_AutoInjectIsOR(t *testing.T) {
+	const (
+		opMask  uint32 = 0x00000001 // operator wants SSE3 bit
+		opValue uint32 = 0x00000001 // SSE3 must be SET on host
+	)
+	bundle, _ := PackBinaryBundle(
+		[]BundlePayload{{
+			Binary:     []byte("aes-payload"),
+			CipherType: CipherTypeAESCTR,
+			Fingerprint: FingerprintPredicate{
+				PredicateType:     PTCPUIDFeatures,
+				CPUIDFeatureMask:  opMask,
+				CPUIDFeatureValue: opValue,
+			},
+		}},
+		BundleOptions{},
+	)
+	info, _ := InspectBundle(bundle)
+	e := info.Entries[0]
+	// Operator's SSE3 constraint survives.
+	if e.CPUIDFeatureMask&opMask == 0 {
+		t.Errorf("operator SSE3 mask bit dropped: %#x", e.CPUIDFeatureMask)
+	}
+	// AES bit OR'd in alongside.
+	if e.CPUIDFeatureMask&CPUIDFeatureAES == 0 {
+		t.Errorf("AES bit not OR'd in: %#x", e.CPUIDFeatureMask)
+	}
+}
+

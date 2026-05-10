@@ -227,13 +227,40 @@ const (
 	CipherTypeXORRolling uint8 = 1
 	// CipherTypeAESCTR is AES-128-CTR (Tier 🟡 #2.2). Key in
 	// PayloadEntry.Key (16 B); the 16-byte IV/initial counter is
-	// prepended to the encrypted payload data, so on-disk:
-	//     [IV (16 B)] [AES-CTR ciphertext]
-	// PayloadEntry.DataSize includes the IV prefix;
-	// PlaintextSize stays the plaintext length. Stub-side decrypt
-	// uses AES-NI (requires the host CPU to advertise the AES bit
-	// in CPUID[1].ECX — every desktop x86-64 since ~2010 does).
+	// prepended to the encrypted payload data, and the 11 × 16-byte
+	// expanded round keys (= 176 B, per [crypto.ExpandAESKey]) are
+	// appended AFTER the ciphertext so the stub-side AES-NI decrypt
+	// loop can `MOVDQU` them straight into XMM without an in-stub
+	// expansion step. On-disk layout:
+	//     [IV (16 B)] [AES-CTR ciphertext] [round keys (176 B)]
+	// PayloadEntry.DataSize = 16 + len(ciphertext) + 176;
+	// PlaintextSize = len(plaintext).
+	//
+	// Stub-side decrypt uses AES-NI — pack-time auto-injects the
+	// AES bit (0x02000000) into the entry's PT_CPUID_FEATURES mask
+	// + value so pre-AES-NI hosts fall through cleanly (no
+	// crash, predicate just doesn't match). Operators can override
+	// by pre-setting CPUIDFeatureMask/Value to include the AES bit
+	// themselves; the auto-injection is a strict OR, never a
+	// silent overwrite.
 	CipherTypeAESCTR uint8 = 2
+
+	// AESCTRRoundKeysSize is the byte size of the 11 expanded
+	// AES-128 round keys appended after each CipherType=2 ciphertext.
+	// Stub-side address: matched-entry data + 16 (IV) + plaintext_len.
+	AESCTRRoundKeysSize = 176
+
+	// aesIVSize is the AES-CTR IV size in bytes (= AES block size).
+	// Matches crypto/aes.BlockSize but local to avoid the import
+	// boundary on every read.
+	aesIVSize = 16
+
+	// CPUIDFeatureAES is the AES-NI feature bit in CPUID[1].ECX
+	// (Intel SDM Vol. 2A). Pack-time auto-injects this bit into a
+	// CipherType=2 entry's PT_CPUID_FEATURES mask + value so the
+	// runtime predicate evaluator skips the entry on pre-AES-NI
+	// hosts. Same bit since 2010 (Westmere / Bulldozer onwards).
+	CPUIDFeatureAES uint32 = 0x02000000
 )
 
 // BundlePayload is one payload binary paired with its fingerprint
@@ -321,7 +348,16 @@ func encryptBundlePayload(plain []byte, key [16]byte, cipherType uint8, hasFixed
 		if err != nil {
 			return nil, 0, fmt.Errorf("aes-ctr: %w", err)
 		}
-		return ct, CipherTypeAESCTR, nil
+		// Append the expanded round keys for stub-side AES-NI consumption.
+		// Wire layout: [IV (16 B)] [ciphertext] [round keys (176 B)].
+		rk, err := crypto.ExpandAESKey(key[:])
+		if err != nil {
+			return nil, 0, fmt.Errorf("aes-ctr expand: %w", err)
+		}
+		out := make([]byte, 0, len(ct)+len(rk))
+		out = append(out, ct...)
+		out = append(out, rk...)
+		return out, CipherTypeAESCTR, nil
 	default:
 		return nil, 0, fmt.Errorf("packer: unknown CipherType %d", cipherType)
 	}
@@ -411,15 +447,29 @@ func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, err
 	// FingerprintEntry × N.
 	for i, p := range payloads {
 		off := int(fpTableOff) + i*BundleFingerprintEntrySize
-		out[off] = p.Fingerprint.PredicateType
+		predType := p.Fingerprint.PredicateType
+		mask := p.Fingerprint.CPUIDFeatureMask
+		value := p.Fingerprint.CPUIDFeatureValue
+		// AES-NI auto-gate: a CipherType=2 entry would crash on
+		// pre-AES-NI hosts (CPUID[1].ECX bit 25 absent). OR the
+		// AES bit into the entry's PT_CPUID_FEATURES predicate so
+		// the runtime evaluator skips the entry cleanly instead.
+		// Operators who already authored a feature constraint keep
+		// theirs — this is a strict OR, never a silent overwrite.
+		if encs[i].cipherType == CipherTypeAESCTR {
+			predType |= PTCPUIDFeatures
+			mask |= CPUIDFeatureAES
+			value |= CPUIDFeatureAES
+		}
+		out[off] = predType
 		if p.Fingerprint.Negate {
 			out[off+1] = 1
 		}
 		copy(out[off+4:off+16], p.Fingerprint.VendorString[:])
 		binary.LittleEndian.PutUint32(out[off+16:off+20], p.Fingerprint.BuildMin)
 		binary.LittleEndian.PutUint32(out[off+20:off+24], p.Fingerprint.BuildMax)
-		binary.LittleEndian.PutUint32(out[off+24:off+28], p.Fingerprint.CPUIDFeatureMask)
-		binary.LittleEndian.PutUint32(out[off+28:off+32], p.Fingerprint.CPUIDFeatureValue)
+		binary.LittleEndian.PutUint32(out[off+24:off+28], mask)
+		binary.LittleEndian.PutUint32(out[off+28:off+32], value)
 		// Reserved2 [off+32:off+48] left zero.
 	}
 
@@ -802,7 +852,17 @@ func unpackBundleBody(bundle []byte, idx int, expectedMagic uint32) ([]byte, err
 		}
 		return pt, nil
 	case CipherTypeAESCTR:
-		pt, err := crypto.DecryptAESCTR(key[:], ct)
+		// Strip the 176-byte round-keys tail before handing the
+		// IV+ciphertext to DecryptAESCTR. The round keys exist
+		// only so the all-asm stub can MOVDQU them at runtime;
+		// the Go-side decrypt re-expands the key internally via
+		// crypto/aes.NewCipher and doesn't need them.
+		if len(ct) < AESCTRRoundKeysSize+aesIVSize {
+			return nil, fmt.Errorf("%w: AES-CTR payload %d too short (%d B)",
+				ErrBundleOutOfRange, idx, len(ct))
+		}
+		body := ct[:len(ct)-AESCTRRoundKeysSize]
+		pt, err := crypto.DecryptAESCTR(key[:], body)
 		if err != nil {
 			return nil, fmt.Errorf("packer: unpack payload %d: %w", idx, err)
 		}
