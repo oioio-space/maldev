@@ -503,10 +503,11 @@ even if the bit is enabled in `PredicateType`.
 ##### `Negate` — invert the predicate
 
 Flips the overall match outcome. Lets operators write "everything
-EXCEPT X" rules without enumerating X. Currently honoured by the Mode 4
-launcher's host-side `SelectPayload` and the Go-runtime evaluator;
-the Mode 5 all-asm stub is queued for the same support — see
-[Limitations](#limitations).
+EXCEPT X" rules without enumerating X. As of v0.88.0 honoured by all
+three paths: Mode 4 launcher's host-side `SelectPayload`, the
+Go-runtime evaluator, AND the Mode 5 all-asm stub (V2-Negate on Linux,
+V2NW on Windows). CLI: append `:negate` to the `-pl` spec, e.g.
+`-pl exclude-vm.exe:intel:0-99999:negate`.
 
 ##### Runtime flow (what happens on the target)
 
@@ -653,7 +654,7 @@ os.WriteFile("app", out, 0o755)
 |---|---|
 | Total size | **~470 B** (1-payload PTMatchAll) → **~550 B** (2-payload vendor-aware) |
 | Stub | 160 B hand-rolled x86-64 + Intel multi-byte NOP polymorphism |
-| Predicate evaluator | PT_MATCH_ALL + PT_CPUID_VENDOR (12-byte compare, all-zero = wildcard) |
+| Predicate evaluator | full — PT_MATCH_ALL + PT_CPUID_VENDOR + PT_WIN_BUILD (Windows V2NW) + PT_CPUID_FEATURES + `Negate` (v0.88.0) |
 | Payload format | **Raw shellcode only** — stub JMPs into the bytes |
 | Process tree | 1 binary (no fork, no execve) |
 | Disk artefact | none |
@@ -667,13 +668,12 @@ os.WriteFile("app", out, 0o755)
 - No Go runtime fingerprint.
 
 **Inconvénients:**
-- Linux only (Windows symmetry queue-d).
 - Payload must be raw position-independent shellcode (the stub jumps
   directly into the decrypted bytes). PE/ELF payloads need Mode 4.
-- Predicate evaluator does not (yet) honour the `Negate` flag or
-  `PT_WIN_BUILD` (the host-side `SelectPayload` does — operators
-  using both modes should test the all-asm path with their actual
-  fingerprint set).
+- `PT_WIN_BUILD` only meaningful on Windows targets (V2NW reads
+  `PEB.OSBuildNumber`); Linux V2-Negate stub treats the build-number
+  predicate as a no-op (use `PT_CPUID_VENDOR` / `PT_CPUID_FEATURES` /
+  `PT_MATCH_ALL` for cross-platform predicates).
 
 ### Mode 6 — `PackShellcode` (raw shellcode → runnable PE/ELF)
 
@@ -1253,21 +1253,13 @@ Brief summary follows.
   own page (the bundle data). The trade-off is documented; operators
   needing R+X / R+W split should use Mode 3 (`PackBinary`) which
   preserves segment-level permissions.
-- **All-asm wrap is Linux-only today.** The Windows symmetric path
-  (`BuildMinimalPE32Plus` + `WrapBundleAsExecutableWindows`) and the
-  matching `PT_WIN_BUILD` predicate wire-up in the stub asm are
-  planned — see the Windows-tiny-exe plan linked above for the
-  complete §1-§9 breakdown. The `cmd/bundle-launcher` path supports
-  Windows now via the Go runtime.
-- **All-asm stub does not honour the `Negate` predicate flag.** The
-  Go-side `SelectPayload` does. Operators using Negate-keyed
-  predicates should validate behaviour against
-  `cmd/bundle-launcher` (full evaluator) and avoid the all-asm path
-  for those entries.
-- **PT_WIN_BUILD predicates ignored on Linux.** The host-side build
-  number is 0 on non-Windows hosts; any entry with a non-zero
-  `BuildMin` will not match. Use `PT_CPUID_VENDOR` or `PT_MATCH_ALL`
-  for cross-platform predicates.
+- **PT_WIN_BUILD predicates are no-ops on Linux all-asm.** The
+  predicate reads `PEB.OSBuildNumber`, which only exists on Windows.
+  Linux V2-Negate stub (`bundleStubVendorAwareV2Negate`) skips the
+  build-number compare; matching against `BuildMin > 0` will silently
+  fall through. Windows V2NW (`bundleStubV2NegateWinBuildWindows`)
+  honours it fully. Use `PT_CPUID_VENDOR` / `PT_CPUID_FEATURES` /
+  `PT_MATCH_ALL` for cross-platform predicates.
 - **TLS callbacks rejected by `PackBinary`.** The stub runs at the
   rewritten entry point — TLS callbacks would fire BEFORE the stub
   could decrypt. Surfaced as `transform.ErrTLSCallbacks`.

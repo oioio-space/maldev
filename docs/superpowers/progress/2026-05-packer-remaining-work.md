@@ -1,6 +1,6 @@
 ---
 title: Packer — remaining work inventory (post-v0.88.0)
-last_updated: 2026-05-10 (post v0.88.0)
+last_updated: 2026-05-10 (post v0.88.0, #1.4 c61d511)
 session_origin: 13ddbfbb-2239-47f5-a19c-2021dee94c64
 ---
 
@@ -51,10 +51,10 @@ box + record commit short-SHA + bump front-matter `last_updated`.
   mismatch xor r12b, r12b`. ~30 B asm. Plus Linux test +
   Win VM test. ~1.5h.
 
-- [ ] **#1.4 CLI flag for Negate**
-  `cmd/packer bundle -pl <file>:<vendor>:<min>-<max>` doesn't support
-  negate. Add either `-pl-negate <spec>` or extend syntax to
-  `<file>:<vendor>:<min>-<max>:negate`. CLI test. ~30 min.
+- [x] **#1.4 CLI flag for Negate** (c61d511)
+  Extended `-pl` spec to `<file>:<vendor>:<min>-<max>[:negate]`.
+  TestParseBundleSpec_NegateFlag (4 cases) + bogus-keyword error
+  case green. Usage text updated with `exclude-vm.exe` example.
 
 - [ ] **#1.5 docs/techniques/pe/packer.md update for v0.88.0**
   Mention V2-Negate / V2NW are wired in (after #1.1 #1.2). Update
