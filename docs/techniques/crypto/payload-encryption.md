@@ -415,6 +415,32 @@ truncation case, as `ErrStreamTruncated`).
 - Required privileges: none.
 - Platform: any.
 
+### `DeriveKey(secret []byte, label string, length int) ([]byte, error)`
+
+- godoc: HKDF-SHA256 subkey derivation (RFC 5869) with empty salt — produces statistically independent length-byte subkeys from a single master secret based on a per-purpose label.
+- Description: replaces hand-rolled `sha256.Sum256(secret)[a:b]` slicing patterns. Different labels (e.g. `"stub-xor"` vs `"bundle-magic"`) yield independent keys; same label is deterministic — call it twice and get the same bytes. Backed by [golang.org/x/crypto/hkdf]; this wrapper provides sane defaults and explicit error sentinels.
+- Parameters: `secret` — should be uniformly random (e.g. an AES key or random bytes); `label` — purpose tag, binds the subkey to a specific use; `length` — output bytes, max 8160 for SHA-256.
+- Returns: `length`-byte subkey; [`ErrHKDFLengthTooLarge`](#errhkdflengthtoolarge) when length exceeds the RFC 5869 cap (255 × 32 = 8160 for SHA-256).
+- Side effects: allocates the output slice.
+- OPSEC: very-quiet — pure computation, no I/O.
+- Required privileges: none.
+- Platform: any.
+
+### `DeriveKeySalted(secret, salt []byte, label string, length int) ([]byte, error)`
+
+- godoc: full HKDF-Extract-then-Expand. Use when secret is **not** uniformly random (operator passphrase, low-entropy pre-shared key) — the salt absorbs the secret's actual entropy and produces a uniform PRK before expansion.
+- Description: salt should be deployment-unique but does **not** need to be secret. A random byte string committed to the binary is fine. For uniformly-random secrets, [`DeriveKey`](#derivekeysecret-byte-label-string-length-int-byte-error) (empty salt) is sufficient.
+- Parameters: `secret` — input keying material; `salt` — non-secret per-deployment binding; `label` — purpose tag; `length` — output bytes, max 8160.
+- Returns: `length`-byte subkey; same error sentinel.
+- Side effects: allocates the output slice.
+- OPSEC: very-quiet.
+- Required privileges: none.
+- Platform: any.
+
+### `ErrHKDFLengthTooLarge`
+
+Sentinel returned by [`DeriveKey`](#derivekeysecret-byte-label-string-length-int-byte-error) and [`DeriveKeySalted`](#derivekeysaltedsecret-salt-byte-label-string-length-int-byte-error) when the requested length exceeds 255 × 32 = 8160 bytes (the HKDF-SHA256 hard limit). Operators needing more derive multiple subkeys with different labels.
+
 ### `EncryptSpeck(key [16]byte, data []byte) ([]byte, error)`
 
 - godoc: Speck-128/128 block cipher (NSA, 2013) — 128-bit block, 128-bit key, 32 rounds, ECB mode with PKCS#7 padding.
