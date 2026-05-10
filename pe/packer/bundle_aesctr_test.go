@@ -34,10 +34,16 @@ func TestBundleAESCTR_RoundTrip(t *testing.T) {
 	if e.CipherType != CipherTypeAESCTR {
 		t.Errorf("CipherType = %d, want %d (CipherTypeAESCTR)", e.CipherType, CipherTypeAESCTR)
 	}
-	// CipherType=2 wire layout: IV (16) + ciphertext + round keys (176).
-	if want := uint32(16 + len(plain) + AESCTRRoundKeysSize); e.DataSize != want {
-		t.Errorf("DataSize = %d, want %d (16 IV + %d plaintext + %d round keys)",
-			e.DataSize, want, len(plain), AESCTRRoundKeysSize)
+	// CipherType=2 wire layout: IV (16) + ciphertext-padded-to-16
+	// + round keys (176). Plaintext is padded up to the next 16-byte
+	// boundary so the stub decrypts whole blocks.
+	paddedLen := len(plain)
+	if rem := paddedLen % 16; rem != 0 {
+		paddedLen += 16 - rem
+	}
+	if want := uint32(16 + paddedLen + AESCTRRoundKeysSize); e.DataSize != want {
+		t.Errorf("DataSize = %d, want %d (16 IV + %d padded plaintext + %d round keys)",
+			e.DataSize, want, paddedLen, AESCTRRoundKeysSize)
 	}
 	if e.PlaintextSize != uint32(len(plain)) {
 		t.Errorf("PlaintextSize = %d, want %d", e.PlaintextSize, len(plain))
@@ -125,6 +131,44 @@ func TestBundleAESCTR_BackwardCompat(t *testing.T) {
 	got, err := UnpackBundle(bundle, 0)
 	if err != nil || !bytes.Equal(got, plain) {
 		t.Errorf("legacy round-trip: %v / %q vs %q", err, got, plain)
+	}
+}
+
+// TestBundleAESCTR_PaddingRoundTrip targets the v0.92 Phase 3c-wire
+// pack-time padding: a 7-byte plaintext (smaller than the AES block)
+// is padded to 16 B at pack time so the stub-side AES-CTR decrypt
+// loop can run in fixed-block mode. PlaintextSize keeps the original
+// 7 — UnpackBundle trims back to that. The full padded 16-byte
+// region is what the stub asm will JMP into; trailing zero bytes
+// never execute (typical shellcode hits ret/jmp before reaching
+// them).
+func TestBundleAESCTR_PaddingRoundTrip(t *testing.T) {
+	plain := []byte("7bytes!") // exactly 7 B
+	bundle, err := PackBinaryBundle(
+		[]BundlePayload{{Binary: plain, CipherType: CipherTypeAESCTR}},
+		BundleOptions{},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+	info, _ := InspectBundle(bundle)
+	e := info.Entries[0]
+	// Padded ciphertext length = 16 (next multiple of 16 from 7).
+	if want := uint32(16 + 16 + AESCTRRoundKeysSize); e.DataSize != want {
+		t.Errorf("DataSize = %d, want %d (16 IV + 16 padded + %d round keys)",
+			e.DataSize, want, AESCTRRoundKeysSize)
+	}
+	// PlaintextSize tracks the original (un-padded) length.
+	if e.PlaintextSize != 7 {
+		t.Errorf("PlaintextSize = %d, want 7", e.PlaintextSize)
+	}
+	// Round-trip via UnpackBundle must trim back to the original 7 B.
+	got, err := UnpackBundle(bundle, 0)
+	if err != nil {
+		t.Fatalf("UnpackBundle: %v", err)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Errorf("decrypted = %q (%d B), want %q (%d B)", got, len(got), plain, len(plain))
 	}
 }
 

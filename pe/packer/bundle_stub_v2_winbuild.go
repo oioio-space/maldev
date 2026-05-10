@@ -371,6 +371,21 @@ func bundleStubV2NegateWinBuildWindowsRng(rng *mathrand.Rand) ([]byte, int, erro
 		return nil, 0, err
 	}
 
+	// CipherType dispatch (Tier 🟡 #2.2 Phase 3c). Read the entry's
+	// CipherType byte at [RCX+12]; on CipherType=2 (AES-CTR) jump
+	// to .aes_ctr_path (block at stub tail, between .jmp_payload and
+	// .exit_block). Fall through = CipherType 0/1 (XOR-rolling).
+	aesCTRLabel := amd64.LabelRef("aes_ctr_path")
+	if e := check(b.MOVZX(amd64.RAX, amd64.MemOp{Base: amd64.RCX, Disp: 12}), "ct movzx rax"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.CMP(amd64.RAX, amd64.Imm(int64(CipherTypeAESCTR))), "ct cmp 2"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.JE(aesCTRLabel), "ct je aes_ctr_path"); e != nil {
+		return nil, 0, e
+	}
+
 	if e := check(b.MOVL(amd64.RDI, amd64.MemOp{Base: amd64.RCX}), "dec mov edi"); e != nil {
 		return nil, 0, e
 	}
@@ -425,6 +440,44 @@ func bundleStubV2NegateWinBuildWindowsRng(rng *mathrand.Rand) ([]byte, int, erro
 		return nil, 0, e
 	}
 	if e := check(b.JMPReg(amd64.RDI), "jp jmp rdi"); e != nil {
+		return nil, 0, e
+	}
+
+	// === Section 5c: AES-CTR path (Tier 🟡 #2.2 Phase 3c) ===
+	// Reached via the .aes_ctr_path label when [RCX+12] CipherType == 2.
+	// RDI is loaded with the absolute ciphertext-region start (=
+	// IV at offset 0), then emitAESCTRDecryptLoop runs the per-
+	// block AES-NI decrypt + BE counter increment in-place. After
+	// the loop falls through (.aes_done), recompute RDI = entry's
+	// data + 16 (skip IV) and JMP into the plaintext.
+	b.Label("aes_ctr_path")
+	if e := check(b.MOVL(amd64.RDI, amd64.MemOp{Base: amd64.RCX}), "aes mov edi"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.ADD(amd64.RDI, amd64.R15), "aes add rdi r15"); e != nil {
+		return nil, 0, e
+	}
+	if err := emitAESCTRDecryptLoop(b); err != nil {
+		return nil, 0, fmt.Errorf("packer: V2NW aes-ctr loop: %w", err)
+	}
+	// Post-decrypt JMP epilogue (AES-CTR variant): plaintext is at
+	// data + 16 (after the IV). Re-derive from RCX since the loop
+	// clobbered RDI.
+	if e := check(b.MOVL(amd64.RDI, amd64.MemOp{Base: amd64.RCX}), "aes ep mov edi"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.ADD(amd64.RDI, amd64.R15), "aes ep add rdi r15"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.ADD(amd64.RDI, amd64.Imm(16)), "aes ep skip IV"); e != nil {
+		return nil, 0, e
+	}
+	// add rsp, 16 — restore CPUID prologue stack allocation
+	// (same shape as XOR-rolling jmp_payload).
+	if e := check(b.RawBytes([]byte{0x48, 0x83, 0xc4, 0x10}), "aes ep add rsp 16"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.JMPReg(amd64.RDI), "aes ep jmp rdi"); e != nil {
 		return nil, 0, e
 	}
 

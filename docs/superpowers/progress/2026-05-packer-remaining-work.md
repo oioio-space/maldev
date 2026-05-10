@@ -115,12 +115,16 @@ Total Tier 1: ~3-4h supervised.
   ~40 B, advance pointers, jmp aes_loop). Length sentinel + setup
   prefix pinned by `TestEmitAESCTRDecryptLoop`. Padded plaintext
   assumption: pack-time pads to 16-byte multiple (Phase 3c-wire).
-  **Phase 3c-wire (queued, needs Win VM E2E):** V2NW dispatch —
-  read CipherType byte at [RCX+12], branch to emitAESCTRDecryptLoop
-  for CipherType=2 OR fall through to existing emitDecryptStep XOR
-  loop. Pack-time padding of plaintext to 16-byte multiple +
-  PlaintextSize-trim on UnpackBundle. Win VM E2E test for an AES-CTR
-  exit42 bundle.
+  **Phase 3c-wire (pending commit):** V2NW dispatch shipped + Win VM
+  E2E GREEN. CipherType byte at [RCX+12] drives the branch
+  (movzx + cmp + je); CipherType=2 → .aes_ctr_path block at stub
+  tail (between .jmp_payload and .exit_block) which composes
+  emitAESCTRDecryptLoop + plaintext-start JMP. Pack-time pads
+  plaintext to 16-byte multiple; UnpackBundle trims back to
+  PlaintextSize. V2NW stub grew from 458 B → 739 B
+  (+281 B for the AES-CTR path). New test:
+  `TestBundleStubV2NW_E2E_AESCTR` → exit=42 on win10 VM
+  (2048 B wrapped PE, full AES-NI decrypt round-trip).
 
 - [x] **#2.3 Polymorphic slots B & C** (pending commit)
   Added `emitNopJunk` helper (Builder-time RawBytes NOP-run with
@@ -239,7 +243,7 @@ Phase 3b stub-side AES-CTR wiring.
 
 | Aspect | State as of 2026-05-10 |
 |---|---|
-| Latest tag | v0.91.0 (Tier 🟡 #2.2 Phases 1+2 — AES-CTR host-side) |
+| Latest tag | v0.92.0 (Tier 🟡 #2.2 complete — AES-CTR end-to-end Win VM) |
 | HEAD commit | ef71e1f (Phase 4b V2NW shipped) |
 | Linux scan stub | V1 (bundleStubVendorAware) — operational, runtime-green |
 | Linux scan stub V2 | bundleStubVendorAwareV2 — runtime-green, NOT WIRED |

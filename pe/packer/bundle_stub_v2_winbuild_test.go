@@ -16,11 +16,13 @@ func TestBundleStubV2NWBuilds(t *testing.T) {
 	if immPos != bundleOffsetImm32Pos {
 		t.Errorf("immPos = %d, want %d", immPos, bundleOffsetImm32Pos)
 	}
-	// V2 = 204, V2-Negate ≈ 226, V2NW expected ≈ 280-310 (adds
-	// EmitPEBBuildRead 15 B + R13 save 3 B + PT_WIN_BUILD block ~30 B
-	// + §2 ExitProcess inline 143 B). Sanity bound.
-	if len(stub) < 350 || len(stub) > 500 {
-		t.Errorf("V2NW stub length %d outside expected [350..500]", len(stub))
+	// V2 = 204, V2-Negate ≈ 226, V2NW pre-#2.2 ≈ 458; Phase 3c
+	// adds ~280 B for the AES-CTR path (CipherType dispatch ~12 B +
+	// emitAESCTRDecryptLoop 243 B + AES-CTR epilogue ~25 B), bringing
+	// V2NW to ~740 B. Bound includes headroom for slot polymorphism
+	// + future feature additions.
+	if len(stub) < 600 || len(stub) > 900 {
+		t.Errorf("V2NW stub length %d outside expected [600..900]", len(stub))
 	}
 }
 

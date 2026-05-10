@@ -344,7 +344,19 @@ func encryptBundlePayload(plain []byte, key [16]byte, cipherType uint8, hasFixed
 		if hasFixedKey {
 			return nil, 0, ErrCipherTypeFixedKey
 		}
-		ct, err := crypto.EncryptAESCTR(key[:], plain)
+		// Pad plaintext up to next 16-byte boundary so the stub-side
+		// AES-CTR loop decrypts whole blocks only (no trailing
+		// partial-block handling in asm). PayloadEntry.PlaintextSize
+		// records the ORIGINAL length so UnpackBundle can trim back
+		// after decrypt. Shellcode reads up to PlaintextSize; trailing
+		// zero-padding never executes (typical shellcode hits ret/jmp
+		// before reaching it).
+		padded := plain
+		if rem := len(plain) % aesIVSize; rem != 0 {
+			padded = make([]byte, len(plain)+aesIVSize-rem)
+			copy(padded, plain)
+		}
+		ct, err := crypto.EncryptAESCTR(key[:], padded)
 		if err != nil {
 			return nil, 0, fmt.Errorf("aes-ctr: %w", err)
 		}
@@ -866,7 +878,16 @@ func unpackBundleBody(bundle []byte, idx int, expectedMagic uint32) ([]byte, err
 		if err != nil {
 			return nil, fmt.Errorf("packer: unpack payload %d: %w", idx, err)
 		}
-		return pt, nil
+		// Trim the 16-byte-boundary padding back to the original
+		// plaintext length recorded in PayloadEntry.PlaintextSize.
+		// Stub-side decrypt produces the full padded block; the
+		// Go-side caller wants the raw operator-supplied bytes.
+		plaintextSize := binary.LittleEndian.Uint32(bundle[entryOff+8 : entryOff+12])
+		if int(plaintextSize) > len(pt) {
+			return nil, fmt.Errorf("%w: payload %d PlaintextSize=%d exceeds decrypted %d",
+				ErrBundleOutOfRange, idx, plaintextSize, len(pt))
+		}
+		return pt[:plaintextSize], nil
 	default:
 		return nil, fmt.Errorf("packer: payload %d unknown CipherType %d", idx, cipherType)
 	}
