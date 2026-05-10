@@ -7,11 +7,48 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
-### Packer chantier — v0.88 → v0.90 (2026-05-10)
+### Packer chantier — v0.88 → v0.92 (2026-05-10)
 
 **Note:** version-section discipline in this CHANGELOG drifted between
 v0.18 and v0.87; this entry consolidates the most recent packer chantier
 without backfilling the intermediate gap (a separate audit ticket).
+
+#### v0.92.0 (2026-05-10) — AES-CTR end-to-end (Win VM AES-NI runtime)
+
+- `pe/packer` Tier 🟡 #2.2 complete. Bundles can ship AES-128-CTR
+  encrypted payloads that decrypt at runtime via AES-NI inside the
+  all-asm V2NW Windows stub — no Go runtime, no extra deps.
+- Wire format (`CipherType=2` only): `[IV (16)] [AES-CTR ciphertext
+  padded to 16-byte multiple] [11 expanded round keys (176)]`.
+  `PayloadEntry.Key` holds the AES-128 key (16 B).
+- Pack-time auto-injects the AES-NI feature bit
+  (`CPUIDFeatureAES = 0x02000000`) into the entry's
+  `PT_CPUID_FEATURES` mask + value (strict OR — operator constraints
+  survive). Pre-AES-NI hosts skip the entry cleanly.
+- V2NW stub size: 458 B → 739 B (+281 B AES-CTR path). Still 8×
+  smaller than the `cmd/bundle-launcher` Go-runtime alternative.
+- Win VM E2E proof: `TestBundleStubV2NW_E2E_AESCTR` exit=42, full
+  encrypt → wrap → run → decrypt → JMP round-trip.
+- Tier 🟡 #2.4 (closure): `BundlePayload.Key` for operator-supplied
+  deterministic per-payload keys (16-byte size guard via
+  `ErrBundleBadKeyLen`).
+- 8 new exported symbols across the chantier: `XmmReg` + `X0..X15`,
+  `AESENC`, `AESENCLAST`, `PXOR`, `MOVDQULoad`, `MOVDQUStore`,
+  `BSWAP` (Builder primitives), `CipherTypeXORRolling`,
+  `CipherTypeAESCTR`, `AESCTRRoundKeysSize`, `CPUIDFeatureAES`,
+  `ErrCipherTypeFixedKey`, `ErrBundleBadKeyLen`,
+  `BundlePayload.CipherType`, `BundlePayload.Key`,
+  `crypto.ExpandAESKey`.
+
+#### v0.91.0 (2026-05-10) — AES-CTR host-side pipeline
+
+- `pe/packer` Tier 🟡 #2.2 Phases 1+2. AES-NI Builder primitives +
+  host-side `CipherType=2` dispatch in pack/unpack. Bundles produced
+  this way decrypt cleanly via `cmd/bundle-launcher` Go runtime;
+  all-asm V2NW path lands in v0.92.
+- `crypto.ExpandAESKey` — pure-Go FIPS 197 § 5.2 AES-128 round-key
+  expansion (stdlib hides round keys; the all-asm stub needs them
+  in-wire). Pinned against the canonical Appendix A.1 test vector.
 
 #### v0.90.0 (2026-05-10) — polymorphism slots B & C
 

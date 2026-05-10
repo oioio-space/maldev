@@ -1,6 +1,6 @@
 ---
-title: Packer — remaining work inventory (post-v0.88.0)
-last_updated: 2026-05-10 (Tier 1 closed — #1.4 c61d511, #1.5 e1d99ae)
+title: Packer — remaining work inventory (post-v0.92.0)
+last_updated: 2026-05-10 (v0.92.0 shipped — Tier 🔴 + most of 🟡 closed)
 session_origin: 13ddbfbb-2239-47f5-a19c-2021dee94c64
 ---
 
@@ -8,6 +8,38 @@ session_origin: 13ddbfbb-2239-47f5-a19c-2021dee94c64
 
 Inventory ordered by operational priority. As work lands, tick the
 box + record commit short-SHA + bump front-matter `last_updated`.
+
+## Session-end checkpoint — 2026-05-10 (post v0.92.0)
+
+**Repo state:** master at `8e309d9`, all 4 SEMVER tags pushed
+(v0.89.0, v0.90.0, v0.91.0, v0.92.0). 27 commits this session, every
+author verified `oioio-space@users.noreply.github.com`, every test
+green on Linux + Win VM E2E for V2NW (incl. AES-CTR runtime).
+
+**What shipped:**
+- 🔴 Tier 1 fully closed (5/5 items) — Negate flag, CLI, docs
+- 🟡 Tier 2 mostly closed — #2.1 (Builder migration), #2.3 (slots
+  B/C), #2.2 (full multi-cipher AES-CTR, 7 phases), #2.4
+  (BundlePayload.Key)
+- 🟢 Tier 3 mostly closed — #3.2 (packerscope extract tests),
+  #3.3 (V1+V2-plain retirement, −1019 LOC), #3.4 (shared prefix
+  emitters)
+- 🔵 Tier 4 partial — #4.3 vulgarisation callout expansion
+
+**What remains:** see boxes below; only the long-form items left
+are #3.1 (per-build SBox in stub, ~2-3h asm work), Linux V2-Negate
+AES-CTR parity, and Tier 4 long-form work (#4.1 solution D stepper,
+#4.2 asmtrace Linux, #4.3 full vulgarisation pass).
+
+**Resume on another machine:**
+1. `git pull` (master at `8e309d9` or later)
+2. Open this file — find first unchecked row in highest tier
+3. The "Win VM validation" block below has the exact tarball-deploy
+   recipe that worked this session (scripts/vm-run-tests.sh was
+   timing out at 16 min on Windows OpenSSH sftp; tar+scp+tar -xzf
+   on the Windows side is the proven workaround).
+4. Memory note `packer_session_close_2026-05-10.md` carries the
+   one-line orientation pointer.
 
 ## Companion docs
 
