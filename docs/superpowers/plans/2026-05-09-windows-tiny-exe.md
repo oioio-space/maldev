@@ -237,7 +237,61 @@ The Windows stub must:
 Total Windows-stub additional asm vs Linux: ~50 bytes (PEB read +
 build-range check).
 
-### §4. WrapBundleAsExecutableWindows
+### §4. WrapBundleAsExecutableWindows — PHASE A: byte-shape shipped, runtime debug queued (2026-05-10)
+
+> Shipped 2026-05-10:
+>
+>   - `pe/packer/bundle_stub_winwrap.go` —
+>     `bundleStubVendorAwareWindows()` builds a Windows-flavoured
+>     scan stub by patching the Linux stub: 5-byte `jmp rel32`
+>     replaces the 9-byte sys_exit_group, §2 ExitProcess block
+>     appended at the end, 3 Jcc displacements decremented to
+>     follow the .matched-section move (124 → 120).
+>   - 3 exported APIs: `WrapBundleAsExecutableWindows`,
+>     `WrapBundleAsExecutableWindowsWith`,
+>     `WrapBundleAsExecutableWindowsWithSeed` — mirror the Linux
+>     trio shape.
+>   - 4 unit tests green (RejectsBadInputs, DebugPEParses,
+>     WithSeed_Deterministic, StubLayoutSanity).
+>
+> **Runtime status: NOT GREEN.** First VM dispatch reported
+> ACCESS_VIOLATION (0xc0000005). The wrapped PE path is
+> kernel-loaded — VEH harness inside the test process can't catch
+> the crash. Test now t.Skip-gated until supervised debug routes
+> the stub bytes through the asmtrace harness for a register dump.
+>
+> Suspect list (in order of investigation cost):
+>
+>   1. The 5-byte `jmp rel32` at offset 115 — disp encoding may be
+>      off (verified to be `matchedLen` in source, may need
+>      double-checking on the actual byte layout post-injectStubJunk).
+>   2. The 3 Jcc patches at offsets 63/88/106 — the disp shift
+>      assumed .matched moved -4 because exit_group(9 B) → jmp
+>      rel32(5 B). Sanity-check by extracting and disassembling
+>      the produced stub bytes.
+>   3. The §2 block embedded inline — when reached via JMP from
+>      .no_match (vs from a fresh kernel-call), RSP alignment may
+>      differ. CPUID prologue's `sub rsp, 16` shifts RSP, then §2's
+>      `sub rsp, 0x28` may land mis-aligned. Validate by manually
+>      computing RSP through the path.
+>   4. injectStubJunk interaction with the Jcc patches — junk
+>      insertion at slot A (offset 14) shifts everything after; the
+>      patches happen BEFORE junk insertion. Verify by setting seed=0
+>      to disable junk and seeing if the runtime crash still occurs
+>      (the unit test StubLayoutSanity uses seed=0 and the byte
+>      shape looks right).
+>
+> Debug strategy for the supervised pickup:
+>
+>     // Build the stub-only bytes
+>     stub, _ := bundleStubVendorAwareWindows()
+>     // Append a fake bundle blob with 1 PT_MATCH_ALL entry pointing
+>     // at WindowsExit42ShellcodeX64
+>     // Concat stub + bundle, write to file
+>     // Run via asmtrace.exe — VEH harness gives full register dump
+>
+> §5 (negate flag refactor) is independent of this — proceed in
+> parallel.
 
 **File:** `pe/packer/bundle_stub.go` (extend) + `pe/packer/bundle_stub_windows_test.go` (new)
 
