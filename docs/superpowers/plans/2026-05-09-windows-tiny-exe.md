@@ -135,24 +135,44 @@ loader accepts varies by version — start at 240-byte Optional Header
 - TLS callbacks and base relocation directory must be valid even if
   empty.
 
-### §2. ExitProcess via PEB walk — STATUS: queued for supervised session (2026-05-10)
+### §2. ExitProcess via PEB walk — STATUS: byte-shape shipped, runtime NOT GREEN (2026-05-10)
 
-> Considered for autonomous shipment 2026-05-10; deferred. The
-> ~120-150 B of hand-encoded asm (PEB walk + Ldr list traversal +
-> PE export directory walk + strcmp on "RtlExitUserProcess" + indirect
-> call) is bounded but the only meaningful validation is a runtime
-> Windows VM round-trip — a silent off-by-one in any MOV r64 offset
-> or list-link adjustment surfaces as a generic ACCESS_VIOLATION at
-> exec time, indistinguishable from a wider stub bug. Wrapping that
-> in a single autonomous commit was judged outside the safe envelope.
+> Attempted under autonomy 2026-05-10. Shipped:
 >
-> Note for the supervised pickup: the operationally-cheaper variant
-> below (taking ntdll as the second InMemoryOrderModuleList entry,
-> resolving `RtlExitUserProcess` instead of kernel32!ExitProcess) was
-> evaluated and is recommended — the function does the same job with
-> one less indirection layer (kernel32!ExitProcess calls into
-> ntdll!RtlExitUserProcess internally). Skips the kernel32-loaded-third
-> assumption.
+>   - `pe/packer/stubgen/stage1/exitprocess.go` —
+>     `EmitNtdllRtlExitUserProcess(b, exitCode)` 143-byte primitive
+>     with full byte-by-byte annotation, byte-shape unit test,
+>     immediate-patching test.
+>   - `ExitProcessImmediateOffset` exported constant for
+>     analysts / operators tracking the patched exit-code position.
+>
+> Runtime VM E2E **failed** twice with ACCESS_VIOLATION (0xc0000005)
+> at exec time — the canonical autonomy-hazard scenario. Documented
+> open suspects in the file's doc comment:
+>
+>   1. Export-table walk RVA offsets (NumberOfNames=0x18,
+>      AddressOfNames=0x20, AddressOfNameOrdinals=0x24,
+>      AddressOfFunctions=0x1c) — verify against modern ntdll dumps.
+>   2. The 16-byte string compare may match a non-RtlExitUserProcess
+>      prefix; switch to a 19-byte cmp or a ROR-13 hash.
+>   3. MS x64 ABI xmm spill space.
+>   4. RtlExitUserProcess may be a forwarder on modern ntdll —
+>      verify via `dumpbin /exports ntdll.dll` on the target.
+>
+> Lessons captured for the supervised pickup:
+>
+>   - InLoadOrderModuleList (offset 0x10 in PEB.Ldr) is the right
+>     list for "second entry = ntdll" — InMemoryOrderModuleList
+>     (offset 0x20) is sorted by memory address and ASLR-dependent.
+>   - DllBase is at LDR_DATA_TABLE_ENTRY+0x30 when walking via
+>     InLoadOrderLinks (which sit at offset 0x00 in the entry).
+>   - The byte-shape pin shipped is wire-correct against my
+>     intended encoding — drift would fail the unit test loudly.
+>     Runtime debug must focus on semantic correctness of those
+>     pinned bytes, not on the encoder.
+>
+> §4 (WrapBundleAsExecutableWindows) remains blocked behind this
+> primitive's runtime green.
 
 **File:** `pe/packer/stubgen/stage1/exitprocess.go` (new)
 
