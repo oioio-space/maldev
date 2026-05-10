@@ -89,16 +89,19 @@ Total Tier 1: ~3-4h supervised.
   `DataSize` includes IV, `PlaintextSize` does not. Tests cover
   round-trip, mixed XOR + AES-CTR within one bundle, FixedKey
   rejection, and legacy backward compat.
-  **Phase 3a (pending commit):** `emitAESCTRBlockDecrypt` helper +
+  **Phase 3a (27453db):** `emitAESCTRBlockDecrypt` helper +
   byte-pin test. 148-byte single-block AES-128-CTR decryption asm
-  sequence composed from Phase 1 primitives; register contract
-  documented (RDI=plaintext-out, RSI=ciphertext-in, R8=round keys,
-  XMM0=counter). Caller responsible for counter increment +
-  outer loop. Not yet wired into V2-Negate / V2NW stubs.
-  **Phase 3b (queued):** per-entry CipherType dispatch in the stub
-  scan loop + round-key expansion via crypto/aes at pack-time +
-  Win VM runtime test. Phase 3a's pinned bytes are the
-  contract Phase 3b will glue around.
+  sequence composed from Phase 1 primitives.
+  **Phase 3a' (pending commit):** `crypto.ExpandAESKey` — pure-Go
+  FIPS 197 § 5.2 AES-128 round-key expansion. Stdlib hides round
+  keys; the all-asm stub needs them in-wire so AES-NI decrypt can
+  MOVDQU directly. Pinned against the FIPS 197 Appendix A.1 test
+  vector + bad-key-length guard + stdlib AES-CTR cross-validation.
+  **Phase 3b (queued, needs Win VM):** per-entry CipherType
+  dispatch in the stub scan loop + pack-time round-key expansion
+  into the bundle wire format (consumes ExpandAESKey) + the
+  PT_CPUID_FEATURES auto-injection so the stub rejects pre-AES-NI
+  hosts cleanly + Win VM runtime test.
 
 - [x] **#2.3 Polymorphic slots B & C** (pending commit)
   Added `emitNopJunk` helper (Builder-time RawBytes NOP-run with

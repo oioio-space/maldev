@@ -478,6 +478,18 @@ truncation case, as `ErrStreamTruncated`).
 - Required privileges: none.
 - Platform: any.
 
+### `ExpandAESKey(key []byte) ([]byte, error)`
+
+- godoc: AES-128 round-key expansion per FIPS 197 § 5.2 (pure Go).
+- Description: expands a 16-byte AES-128 key into 11 × 16-byte round keys (176 bytes total). Round 0 is the input key itself at offset 0; round 10 is at offset 160. Go stdlib's `crypto/aes` performs this expansion internally but does NOT expose the resulting round keys — this helper exists because the all-asm bundle stub (Tier 🟡 #2.2 packer chantier) ships the expanded keys in the bundle wire format so its AES-NI decrypt loop can `MOVDQU` them into XMM at runtime without a software expansion step.
+- Parameters: `key` — exactly 16 bytes (AES-128 only; AES-192/256 not supported).
+- Returns: 176-byte contiguous round-key buffer.
+- Side effects: allocates the output slice.
+- OPSEC: very-quiet (pure computation).
+- Required privileges: none.
+- Platform: any.
+- Test vector: pinned against FIPS 197 Appendix A.1 (key `2b7e151628aed2a6abf7158809cf4f3c`).
+
 ### `EncryptChaCha20Raw(key, plaintext []byte) ([]byte, error)`
 
 - godoc: raw XChaCha20 stream cipher (no Poly1305 authentication). 24-byte random nonce.
