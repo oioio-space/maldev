@@ -206,7 +206,7 @@ _Each area is collapsed by default — click to expand. Detection level is the c
 
 </details>
 
-<details><summary><strong>PE manipulation — `pe/*`</strong> — 19 packages</summary>
+<details><summary><strong>PE manipulation — `pe/*`</strong> — 20 packages</summary>
 
 | Package | Detection | Summary |
 |---|---|---|
@@ -225,6 +225,7 @@ _Each area is collapsed by default — click to expand. Detection level is the c
 | [`pe/packer/stubgen/amd64`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/stubgen/amd64) | quiet | wraps github.com/twitchyliquid64/golang-asm into a focused builder API for the polymorphic stage-1 decoder Phase 1e (v0.61.x) emits |
 | [`pe/packer/stubgen/poly`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/stubgen/poly) | quiet | implements the SGN-style metamorphic engine the Phase 1e (v0.61.x) packer uses to generate polymorphic stage-1 decoders |
 | [`pe/packer/stubgen/stage1`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/stubgen/stage1) | moderate | emits the polymorphic stub the UPX-style packer places in a new section of the modified host binary |
+| [`pe/packer/stubgen/stage1/asmtrace`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/stubgen/stage1/asmtrace) | — | on non-Windows platforms is a stub |
 | [`pe/packer/transform`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/packer/transform) | noisy | implements UPX-style in-place modification of input PE/ELF binaries |
 | [`pe/parse`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/parse) | very-quiet | provides PE file parsing and modification utilities |
 | [`pe/srdi`](https://pkg.go.dev/github.com/oioio-space/maldev/pe/srdi) | moderate | converts PE / .NET / script payloads into position-independent shellcode via the Donut framework (github.com/Binject/go-donut) |

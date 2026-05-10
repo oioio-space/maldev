@@ -276,6 +276,24 @@ type BundlePayload struct {
 	// one bundle is supported — each PayloadEntry carries its own
 	// type byte so the stub dispatches per-entry.
 	CipherType uint8
+	// Key, when non-nil + 16 bytes, is the operator-supplied
+	// encryption key for this payload. nil = pack-time generates a
+	// fresh crypto-random 16-byte key (the default — preserves the
+	// per-payload-secrecy property). Operator-supplied keys enable:
+	//   - Reproducible packs across machines / runs (the same Key
+	//     + Binary + IV always produces the same ciphertext for
+	//     XOR-rolling; AES-CTR still differs due to random IV, but
+	//     [crypto.ExpandAESKey] output stays identical).
+	//   - HKDF-from-deployment-secret workflows where operators
+	//     derive keys outside the pack pipeline.
+	// Length MUST be exactly 16 — both CipherTypeXORRolling and
+	// CipherTypeAESCTR use 16-byte keys. Rejected with
+	// [ErrBundleBadKeyLen] otherwise. Mutually exclusive with
+	// [BundleOptions.FixedKey] (the test-determinism mode):
+	// FixedKey forces all payloads to share one key, BundlePayload.Key
+	// is per-payload. If both are set, BundleOptions.FixedKey wins
+	// (matching the pre-#2.4 behaviour).
+	Key []byte
 }
 
 // BundleOptions parameterises [PackBinaryBundle].
@@ -313,6 +331,10 @@ var (
 	// ErrBundleOutOfRange fires when a declared offset / size escapes
 	// the blob bounds. Surfaced by [InspectBundle].
 	ErrBundleOutOfRange = errors.New("packer: bundle offset out of range")
+	// ErrBundleBadKeyLen fires when [BundlePayload.Key] is non-nil
+	// but its length isn't 16. Both XOR-rolling and AES-CTR ciphers
+	// use 16-byte keys.
+	ErrBundleBadKeyLen = errors.New("packer: BundlePayload.Key must be 16 bytes")
 )
 
 // ErrCipherTypeFixedKey fires when a per-payload CipherType requires
@@ -415,9 +437,16 @@ func PackBinaryBundle(payloads []BundlePayload, opts BundleOptions) ([]byte, err
 	totalSize := dataOff
 	for i, p := range payloads {
 		var key [16]byte
-		if opts.FixedKey != nil {
+		switch {
+		case opts.FixedKey != nil:
+			// Test-determinism mode wins over per-payload keys.
 			copy(key[:], opts.FixedKey)
-		} else {
+		case p.Key != nil:
+			if len(p.Key) != 16 {
+				return nil, fmt.Errorf("%w: payload %d key=%d", ErrBundleBadKeyLen, i, len(p.Key))
+			}
+			copy(key[:], p.Key)
+		default:
 			b, err := random.Bytes(16)
 			if err != nil {
 				return nil, fmt.Errorf("packer: bundle key %d: %w", i, err)

@@ -138,9 +138,15 @@ Total Tier 1: ~3-4h supervised.
   `TestBundleStub_V2NW_SlotsBC_Polymorphism` pin determinism per
   seed + difference across seeds + growth vs no-junk baseline.
 
-- [ ] **#2.4 PackBinaryOptions.CipherKey wire-in**
-  Currently marked "Reserved for future AES wrapping". Lands with
-  #2.2. ~30 min after #2.2.
+- [x] **#2.4 BundlePayload.Key wire-in** (pending commit)
+  Added `BundlePayload.Key []byte` for operator-supplied
+  deterministic per-payload keys. 16-byte length enforced via
+  `ErrBundleBadKeyLen`. Precedence: `BundleOptions.FixedKey` (test
+  determinism) > `BundlePayload.Key` (per-payload) > random. Tests:
+  `TestBundlePayloadKey_Deterministic` (same Key → same XOR-rolling
+  bundle bytes), `TestBundlePayloadKey_BadLen` (1/8/15/17/24/32 →
+  rejected), `TestBundlePayloadKey_FixedKeyWins` (precedence pin).
+  Closes the multi-cipher chantier.
 
 Total Tier 2: ~6-8h.
 
