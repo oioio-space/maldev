@@ -15,9 +15,13 @@ encryption) and multi-target bundling (N payloads, runtime CPUID
 dispatch) are both first-class.
 
 > **New here?** Skim the [Glossary](#glossary) at the bottom of the page —
-> jargon like *SGN*, *PIC*, *RWX*, *PEB*, *AEAD*, *yara*, *static-PIE*
-> gets defined there in plain language. The rest of the doc references
-> those terms freely.
+> every jargon term used in the rest of this doc is defined there in
+> plain language. Notably *SGN*, *PIC trampoline*, *RWX*, *PE32+* /
+> *ELF*, *Static-PIE*, *PT_LOAD*, *OEP*, *TLS callbacks*, *Imports* /
+> *IAT*, *CPUID*, *PEB*, *auxv*, *rep movsb*, *Brian Raiter shape*,
+> *Round* (in the SGN sense), *Payload*, *yara* — most one-liner
+> definitions, all conceptual not API. If a paragraph below stops
+> making sense, the term is probably in the glossary.
 
 **MITRE ATT&CK:** [T1027.002 — Software Packing](https://attack.mitre.org/techniques/T1027/002/) ·
 [T1140 — Deobfuscate/Decode Files or Information](https://attack.mitre.org/techniques/T1140/)
