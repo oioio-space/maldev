@@ -190,11 +190,37 @@ Total Tier 4: ~3-5 days.
     - `virsh -c qemu:///system list` shows win10 reachable (libvirt)
 4. Pick up at first unchecked Tier 1 row.
 
+## Win VM validation (2026-05-10, post-v0.91 baseline)
+
+Direct ssh dispatch on `win10` libvirt VM (192.168.122.122, INIT
+snapshot) — bypassed `scripts/vm-run-tests.sh` (scp of full tree was
+timing out at 16 min on Windows OpenSSH sftp) via tarball-deploy:
+
+  1. `tar czf maldev.tgz . --exclude=.git --exclude=ignore`     (30 MB)
+  2. `tar czf gomodcache.tgz -C ~/go/pkg/mod/cache download`    (266 MB)
+  3. `scp` both → C:/
+  4. `tar -xzf` on Windows (Win10 1803+ ships tar.exe)
+  5. `cd C:\maldev && set GOPROXY=off && set GOFLAGS=-mod=mod && go test ./pe/packer/ -run TestBundleStubV2N`
+
+All 7 V2N + V2NW tests green:
+- TestBundleStubV2NW_E2E_PTCpuidFeaturesWindows  → exit=42 (SSE3 bit)
+- TestBundleStubV2NW_E2E_PTMatchAllWindows       → exit=42
+- TestBundleStubV2NW_E2E_PTWinBuildWindows       → exit=42 (PEB build match)
+- TestBundleStubV2N_PICOffsetMatchesConst        → pass
+- TestBundleStubV2N_PICTrampolinePrefix          → pass
+- TestBundleStubV2NW_PICTrampolinePrefix         → pass
+- TestBundleStubV2NWBuilds                       → 458 B emit + immPos=10
+
+Conclusion: every refactor + new primitive shipped this session
+(Tier 🟡 #2.1 / #2.3, Tier 🟢 #3.3 / #3.4, Tier 🟡 #2.2 Phases 1+2+3a)
+preserved Win runtime correctness. v0.91 is a safe baseline for
+Phase 3b stub-side AES-CTR wiring.
+
 ## Last-known-good signposts
 
 | Aspect | State as of 2026-05-10 |
 |---|---|
-| Latest tag | v0.88.0 |
+| Latest tag | v0.91.0 (Tier 🟡 #2.2 Phases 1+2 — AES-CTR host-side) |
 | HEAD commit | ef71e1f (Phase 4b V2NW shipped) |
 | Linux scan stub | V1 (bundleStubVendorAware) — operational, runtime-green |
 | Linux scan stub V2 | bundleStubVendorAwareV2 — runtime-green, NOT WIRED |
