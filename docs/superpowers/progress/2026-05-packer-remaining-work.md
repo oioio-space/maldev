@@ -1,6 +1,6 @@
 ---
 title: Packer — remaining work inventory (post-v0.88.0)
-last_updated: 2026-05-10 (post v0.88.0, #1.4 c61d511)
+last_updated: 2026-05-10 (Tier 1 closed — #1.4 c61d511, #1.5 e1d99ae)
 session_origin: 13ddbfbb-2239-47f5-a19c-2021dee94c64
 ---
 
@@ -56,11 +56,10 @@ box + record commit short-SHA + bump front-matter `last_updated`.
   TestParseBundleSpec_NegateFlag (4 cases) + bogus-keyword error
   case green. Usage text updated with `exclude-vm.exe` example.
 
-- [ ] **#1.5 docs/techniques/pe/packer.md update for v0.88.0**
-  Mention V2-Negate / V2NW are wired in (after #1.1 #1.2). Update
-  Bundle + FingerprintPredicate guide's "Negate" and "PT_WIN_BUILD"
-  blurbs from "queued" to "operational". Add API reference entries
-  if needed. ~30 min.
+- [x] **#1.5 docs/techniques/pe/packer.md update for v0.88.0** (e1d99ae)
+  Negate subsection now records all 3 paths operational + CLI
+  example; Mode 5 predicate row upgraded; Limitations § collapsed
+  to the single remaining PT_WIN_BUILD-on-Linux edge.
 
 Total Tier 1: ~3-4h supervised.
 
