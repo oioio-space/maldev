@@ -4,12 +4,43 @@ import (
 	"encoding/binary"
 	"fmt"
 	mathrand "math/rand"
+	"sync"
 
 	"github.com/oioio-space/maldev/pe/packer/stubgen/amd64"
 	"github.com/oioio-space/maldev/pe/packer/stubgen/stage1"
 	"github.com/oioio-space/maldev/pe/packer/transform"
 	"github.com/oioio-space/maldev/random"
 )
+
+// exitProcessBlockCache caches the §2 EmitNtdllRtlExitUserProcess(0)
+// bytes — the block is deterministic (no varying input) and gets
+// embedded into every Windows wrap. /simplify-pass 2026-05-10 flagged
+// the per-wrap re-assembly (143-byte primitive emitted via 143
+// individual ABYTE progs) as the dominant cost on the wrap hot path.
+var (
+	exitProcessBlockOnce  sync.Once
+	exitProcessBlockBytes []byte
+	exitProcessBlockErr   error
+)
+
+func cachedExitProcessBlock() ([]byte, error) {
+	exitProcessBlockOnce.Do(func() {
+		b, err := amd64.New()
+		if err != nil {
+			exitProcessBlockErr = fmt.Errorf("packer: amd64 builder: %w", err)
+			return
+		}
+		if err := stage1.EmitNtdllRtlExitUserProcess(b, 0); err != nil {
+			exitProcessBlockErr = fmt.Errorf("packer: emit ExitProcess: %w", err)
+			return
+		}
+		exitProcessBlockBytes, exitProcessBlockErr = b.Encode()
+		if exitProcessBlockErr != nil {
+			exitProcessBlockErr = fmt.Errorf("packer: encode ExitProcess: %w", exitProcessBlockErr)
+		}
+	})
+	return exitProcessBlockBytes, exitProcessBlockErr
+}
 
 // Windows symmetry of [WrapBundleAsExecutableLinux]. PHASE A shipped
 // 2026-05-10.
@@ -74,17 +105,13 @@ func bundleStubVendorAwareWindows() ([]byte, error) {
 		return nil, fmt.Errorf("packer: linux stub %d bytes < 124 (matched-section anchor)", len(linux))
 	}
 
-	// Assemble the §2 ExitProcess block via the public API.
-	b, err := amd64.New()
+	// Assemble the §2 ExitProcess block via the cached helper —
+	// the bytes are deterministic for exitCode=0, so we pay the
+	// 143-prog Builder/Encode cost once per process instead of
+	// once per wrap.
+	exitBlock, err := cachedExitProcessBlock()
 	if err != nil {
-		return nil, fmt.Errorf("packer: amd64 builder: %w", err)
-	}
-	if err := stage1.EmitNtdllRtlExitUserProcess(b, 0); err != nil {
-		return nil, fmt.Errorf("packer: emit ExitProcess: %w", err)
-	}
-	exitBlock, err := b.Encode()
-	if err != nil {
-		return nil, fmt.Errorf("packer: encode ExitProcess: %w", err)
+		return nil, err
 	}
 
 	// Patch the matched-tail to insert `add rsp, 16` (48 83 c4 10)
@@ -125,10 +152,8 @@ func bundleStubVendorAwareWindows() ([]byte, error) {
 	// jmp rel32 → §2 block.
 	// End-of-jmp is at offset 120; §2 starts at 120 + matchedLen.
 	// Disp = matchedLen.
-	jmpDisp := make([]byte, 4)
-	binary.LittleEndian.PutUint32(jmpDisp, matchedLen)
 	out = append(out, 0xe9)
-	out = append(out, jmpDisp...)
+	out = binary.LittleEndian.AppendUint32(out, matchedLen)
 	out = append(out, matchedTail...)
 	out = append(out, exitBlock...)
 

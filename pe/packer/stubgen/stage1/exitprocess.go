@@ -53,9 +53,11 @@ import (
 // catch this kind of semantic encoding bug — only runtime + VEH-
 // trace can.
 //
-// NOT YET WIRED into the bundle-stub fallback path. §4
-// (WrapBundleAsExecutableWindows) is now unblocked for the
-// supervised pickup.
+// Wired into [pe/packer.WrapBundleAsExecutableWindows]'s no-match
+// fallback as of v0.86.0 (commit 883520e). When the scan stub
+// fails to match any FingerprintEntry, control flows to the §2
+// block via a 5-byte `jmp rel32` and the process exits via
+// ntdll!RtlExitUserProcess(0).
 
 // EmitNtdllRtlExitUserProcess appends the PEB-walk + export-table-walk +
 // indirect-call sequence to b. The exit code is baked into the emitted
@@ -84,65 +86,13 @@ func EmitNtdllRtlExitUserProcess(b *amd64.Builder, exitCode uint32) error {
 // when reverse-engineering a packed binary.
 const ExitProcessImmediateOffset = 0x89
 
-// assembleExitProcess hand-encodes the asm. Layout, with byte counts
-// in the leftmost column for offset calculation:
+// assembleExitProcess hand-encodes the asm. Total: 143 bytes.
 //
-//	off  bytes                      asm
-//	---  -----                      ---
-//	 0   65 48 8b 04 25 60 00 00 00  mov  rax, gs:[0x60]              ; PEB
-//	 9   48 8b 40 18                 mov  rax, [rax+0x18]              ; PEB.Ldr
-//	13   48 8b 40 20                 mov  rax, [rax+0x20]              ; Ldr.InMemoryOrderModuleList.Flink (1st: EXE)
-//	17   48 8b 00                    mov  rax, [rax]                   ; → 2nd entry: ntdll
-//	20   48 8b 50 20                 mov  rdx, [rax+0x20]              ; ntdll.DllBase (entry+0x30 - 0x10 list-link offset)
-//	24   8b 42 3c                    mov  eax, [rdx+0x3c]              ; e_lfanew
-//	27   48 01 d0                    add  rax, rdx                     ; PE header absolute
-//	30   8b 80 88 00 00 00           mov  eax, [rax+0x88]              ; ExportDir.VirtualAddress
-//	36   48 01 d0                    add  rax, rdx                     ; ExportDir absolute
-//	39   49 89 c0                    mov  r8, rax                      ; save ExportDir base
-//	42   45 8b 48 18                 mov  r9d, [r8+0x18]               ; NumberOfNames
-//	46   45 8b 50 20                 mov  r10d, [r8+0x20]              ; AddressOfNames RVA
-//	50   4c 01 d2                    add  r10, rdx                     ; AddressOfNames absolute
-//	53   4d 31 db                    xor  r11, r11                     ; i = 0
-//
-//	; .loop:                                                            ; offset 0x38 = 56
-//	56   45 39 cb                    cmp  r11d, r9d                    ; i vs NumberOfNames
-//	59   7d 25                       jge  .notfound (rel8 +0x25 → 96)
-//	61   43 8b 04 9a                 mov  eax, [r10 + r11*4]           ; nameRVA
-//	65   48 01 d0                    add  rax, rdx                     ; absolute name string
-//	68   48 bb 52 74 6c 45 78 69 74 55  mov rbx, 'RtlExitU' (LE u64)   ; 0x5574697845_6c_74_52
-//	78   48 39 18                    cmp  [rax], rbx                   ; first 8 bytes match?
-//	81   75 0e                       jne  .next (rel8 +0x0e → 97)
-//	83   48 bb 73 65 72 50 72 6f 63 65  mov rbx, 'serProce' (LE u64)   ; 0x6563_6f72_5072_6573
-//	93   48 39 58 08                 cmp  [rax+8], rbx                 ; next 8 bytes match?
-//	97   74 04                       je   .found (rel8 +0x04 → 103)
-//
-//	; .next:                                                            ; offset 0x63 = 99
-//	99   49 ff c3                    inc  r11
-//	102  eb e8                       jmp  .loop (rel8 -0x18 → 56)
-//
-//	; .notfound:                                                        ; offset 0x68 = 104 (UNREACHABLE on real ntdll)
-//	104  cc                          int3                              ; trap
-//	105  0f 0b                       ud2                               ; backstop
-//
-//	; .found:                                                           ; offset 0x6b = 107
-//	107  41 8b 40 24                 mov  eax, [r8+0x24]               ; AddressOfNameOrdinals RVA
-//	111  48 01 d0                    add  rax, rdx                     ; absolute
-//	114  42 0f b7 04 58              movzx eax, word [rax + r11*2]     ; ordinal at index i
-//	119  41 8b 70 1c                 mov  esi, [r8+0x1c]               ; AddressOfFunctions RVA
-//	123  48 01 d6                    add  rsi, rdx                     ; absolute
-//	126  8b 04 86                    mov  eax, [rsi + rax*4]           ; function RVA
-//	129  48 01 d0                    add  rax, rdx                     ; function absolute address
-//	132  48 83 ec 28                 sub  rsp, 0x28                    ; shadow space + 16-byte align
-//	136  b9 XX XX XX XX              mov  ecx, <exitCode>              ; arg1 (Microsoft x64 ABI) — imm at offset 137
-//	141  ff d0                       call rax                          ; → ntdll!RtlExitUserProcess
-//	; never returns
-//
-// Total: 143 bytes.
-//
-// The exit-code immediate sits at byte offset 137 in the stream
-// (5-byte `mov ecx, imm32` opcode 0xb9 followed by 4 little-endian
-// bytes). Byte offset 0x80 in the BLOCK above corresponds to that;
-// see [exitCodeImmOffset].
+// Inline byte-by-byte annotation lives in the byte-array body
+// below. The exit-code immediate is patched at
+// [ExitProcessImmediateOffset] (= 0x89). Linux-list-walk uses
+// InLoadOrderModuleList (offset 0x10 in PEB.Ldr); ntdll is its
+// 2nd entry, DllBase at LDR_DATA_TABLE_ENTRY+0x30.
 //
 // Note on the `cmp [mem], reg` direction: when assembling
 // `cmp rbx, [rax]` Go's tooling emits the SAME bytes as
