@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 
@@ -87,4 +88,4 @@ func DeriveKeySalted(secret, salt []byte, label string, length int) ([]byte, err
 // when the requested key length exceeds 255 * 32 bytes (the RFC 5869
 // limit for HKDF-SHA256). Sentinel for operators wanting to detect
 // the case explicitly.
-var ErrHKDFLengthTooLarge = fmt.Errorf("hkdf length exceeds 255*HashLen")
+var ErrHKDFLengthTooLarge = errors.New("hkdf length exceeds 255*HashLen")
