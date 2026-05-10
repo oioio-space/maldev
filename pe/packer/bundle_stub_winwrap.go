@@ -201,6 +201,37 @@ func WrapBundleAsExecutableWindowsWithSeed(bundle []byte, profile BundleProfile,
 	combined = append(combined, stub...)
 	combined = append(combined, bundle...)
 
-	// PHASE A: canonical ImageBase. PHASE B will derive from profile.Vaddr.
-	return transform.BuildMinimalPE32Plus(combined)
+	imageBase := windowsImageBaseFromProfile(profile)
+	return transform.BuildMinimalPE32PlusWithBase(combined, imageBase)
+}
+
+// windowsImageBaseFromProfile derives a Windows-suitable ImageBase
+// from the bundle profile's Vaddr field (set by [DeriveBundleProfile]
+// to randomise per-build IOCs).
+//
+// PE32+ ImageBase has stricter alignment than ELF PT_LOAD vaddr:
+// Windows requires 64K alignment whereas Linux is content with 4K
+// page alignment. profile.Vaddr is page-aligned by HKDF + masking
+// in DeriveBundleProfile; for Windows we additionally zero the low
+// 16 bits.
+//
+// Returns the canonical ImageBase when:
+//   - profile is the zero value (Vaddr == 0; canonical default), or
+//   - the masked Vaddr falls below 64K (after low-bits zeroing the
+//     value is too low to be a legal user-space ImageBase).
+//
+// The derivation loses ~4 bits of randomness vs the Linux ELF use
+// (12 bits → 16 bits cleared) but the remaining ~36 bits of entropy
+// in [0x10000..0x7fff_ffff_ffff_0000] are far more than enough to
+// defeat 'tiny PE at canonical 0x140000000' yara rules.
+func windowsImageBaseFromProfile(profile BundleProfile) uint64 {
+	if profile.Vaddr == 0 {
+		return transform.MinimalPE32PlusImageBase
+	}
+	const peAlignmentMask uint64 = ^uint64(0xffff)
+	candidate := profile.Vaddr & peAlignmentMask
+	if candidate < 0x10000 {
+		return transform.MinimalPE32PlusImageBase
+	}
+	return candidate
 }

@@ -146,6 +146,73 @@ func firstDiff(a, b []byte) int {
 	return -1
 }
 
+// TestWrapBundleAsExecutableWindows_HonoursProfileVaddr asserts the
+// PHASE B per-build ImageBase derivation: profile.Vaddr (when set)
+// is masked to 64 K alignment and used as the wrapped PE's
+// ImageBase. Zero / unaligned-low-Vaddr fall back to the canonical
+// 0x140000000.
+func TestWrapBundleAsExecutableWindows_HonoursProfileVaddr(t *testing.T) {
+	bundle, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{
+			Binary:      []byte{0xc3},
+			Fingerprint: packer.FingerprintPredicate{PredicateType: packer.PTMatchAll},
+		}},
+		packer.BundleOptions{},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	cases := []struct {
+		name     string
+		vaddr    uint64
+		wantBase uint64
+	}{
+		{
+			name:     "zero falls back to canonical",
+			vaddr:    0,
+			wantBase: transform.MinimalPE32PlusImageBase,
+		},
+		{
+			name:     "page-aligned in user half — masked to 64K",
+			vaddr:    0x196ef3ddb000,
+			wantBase: 0x196ef3dd0000,
+		},
+		{
+			name:     "already 64K-aligned — passes through",
+			vaddr:    0x180000000,
+			wantBase: 0x180000000,
+		},
+		{
+			name:     "below 64K after masking — fall back to canonical",
+			vaddr:    0x1234,
+			wantBase: transform.MinimalPE32PlusImageBase,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			profile := packer.BundleProfile{
+				Magic:       packer.BundleMagic,
+				FooterMagic: packer.BundleFooterMagic,
+				Vaddr:       tc.vaddr,
+			}
+			out, err := packer.WrapBundleAsExecutableWindowsWithSeed(bundle, profile, 0)
+			if err != nil {
+				t.Fatalf("WrapBundleAsExecutableWindowsWithSeed: %v", err)
+			}
+			f, err := pe.NewFile(bytes.NewReader(out))
+			if err != nil {
+				t.Fatalf("debug/pe: %v", err)
+			}
+			defer f.Close()
+			oh := f.OptionalHeader.(*pe.OptionalHeader64)
+			if oh.ImageBase != tc.wantBase {
+				t.Errorf("ImageBase = %#x, want %#x", oh.ImageBase, tc.wantBase)
+			}
+		})
+	}
+}
+
 // TestWrapBundleAsExecutableWindows_StubLayoutSanity asserts the
 // scan-stub bytes match the documented Phase-A layout shape: shared
 // 115-byte prefix with the Linux stub, then the divergence at the
