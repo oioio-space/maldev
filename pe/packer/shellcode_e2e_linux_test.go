@@ -11,28 +11,15 @@ import (
 	"time"
 
 	"github.com/oioio-space/maldev/pe/packer"
+	"github.com/oioio-space/maldev/testutil"
 )
-
-// exit42ShellcodeForPackShellcode is 12 bytes of position-independent x86-64 issuing
-// the Linux exit_group syscall with status 42:
-//
-//	48 c7 c0 e7 00 00 00      mov rax, 231 (SYS_exit_group)
-//	48 c7 c7 2a 00 00 00      mov rdi, 42
-//	0f 05                     syscall
-//
-// Total: 17 bytes. No imports, no relocations — runs anywhere RWX.
-var exit42ShellcodeForPackShellcode = []byte{
-	0x48, 0xc7, 0xc0, 0xe7, 0x00, 0x00, 0x00, // mov rax, 231
-	0x48, 0xc7, 0xc7, 0x2a, 0x00, 0x00, 0x00, // mov rdi, 42
-	0x0f, 0x05, // syscall
-}
 
 // TestPackShellcode_E2E_PlainELFExits42 runs the no-encrypt path
 // end-to-end on the host: shellcode → minimal ELF wrap → exec →
 // assert exit code 42. Catches any structural mistake in the ELF
 // writer that lets debug/elf parse but the kernel reject.
 func TestPackShellcode_E2E_PlainELFExits42(t *testing.T) {
-	out, _, err := packer.PackShellcode(exit42ShellcodeForPackShellcode, packer.PackShellcodeOptions{
+	out, _, err := packer.PackShellcode(testutil.LinuxExit42ShellcodeX64, packer.PackShellcodeOptions{
 		Format: packer.FormatLinuxELF,
 	})
 	if err != nil {
@@ -68,7 +55,7 @@ func TestPackShellcode_E2E_PlainELFExits42(t *testing.T) {
 // SIGSEGVs immediately. A green run proves the full chain works
 // for raw position-independent code, not just Go-built binaries.
 func TestPackShellcode_E2E_EncryptedELFExits42(t *testing.T) {
-	out, _, err := packer.PackShellcode(exit42ShellcodeForPackShellcode, packer.PackShellcodeOptions{
+	out, _, err := packer.PackShellcode(testutil.LinuxExit42ShellcodeX64, packer.PackShellcodeOptions{
 		Format:  packer.FormatLinuxELF,
 		Encrypt: true,
 	})

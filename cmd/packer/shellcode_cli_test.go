@@ -9,15 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-)
 
-// exit42SC is the 16-byte position-independent Linux exit_group(42)
-// shellcode used by the CLI tests below.
-var exit42SC = []byte{
-	0x48, 0xc7, 0xc0, 0xe7, 0x00, 0x00, 0x00, // mov rax, 231 (SYS_exit_group)
-	0x48, 0xc7, 0xc7, 0x2a, 0x00, 0x00, 0x00, // mov rdi, 42
-	0x0f, 0x05, // syscall
-}
+	"github.com/oioio-space/maldev/testutil"
+)
 
 // buildPackerCLI compiles cmd/packer once per test process via the
 // caller's TempDir. Returns the binary path. Mirrors the
@@ -46,7 +40,7 @@ func TestShellcodeCLI_PlainExits42(t *testing.T) {
 	cli := buildPackerCLI(t)
 	dir := t.TempDir()
 	scPath := filepath.Join(dir, "sc.bin")
-	if err := os.WriteFile(scPath, exit42SC, 0o644); err != nil {
+	if err := os.WriteFile(scPath, testutil.LinuxExit42ShellcodeX64, 0o644); err != nil {
 		t.Fatalf("write sc: %v", err)
 	}
 	binPath := filepath.Join(dir, "out.elf")
@@ -83,7 +77,7 @@ func TestShellcodeCLI_EncryptedExits42(t *testing.T) {
 	cli := buildPackerCLI(t)
 	dir := t.TempDir()
 	scPath := filepath.Join(dir, "sc.bin")
-	if err := os.WriteFile(scPath, exit42SC, 0o644); err != nil {
+	if err := os.WriteFile(scPath, testutil.LinuxExit42ShellcodeX64, 0o644); err != nil {
 		t.Fatalf("write sc: %v", err)
 	}
 	binPath := filepath.Join(dir, "out-enc.elf")

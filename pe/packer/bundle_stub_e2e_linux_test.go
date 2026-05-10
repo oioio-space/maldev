@@ -15,18 +15,14 @@ import (
 
 	"github.com/oioio-space/maldev/pe/packer"
 	"github.com/oioio-space/maldev/pe/packer/transform"
+	"github.com/oioio-space/maldev/testutil"
 )
 
-// exit42Shellcode mirrors the fixture used by transform's minimal-ELF
-// test — same 12-byte exit(42) sequence so the all-asm path can prove
-// itself with a payload that has no PE/ELF headers (the stub jumps
-// into raw shellcode after decrypt).
-var exit42Shellcode = []byte{
-	0x31, 0xff,                   // xor edi, edi
-	0x40, 0xb7, 0x2a,             // mov dil, 42
-	0xb8, 0x3c, 0x00, 0x00, 0x00, // mov eax, 60
-	0x0f, 0x05,                   // syscall
-}
+// exit42Shellcode aliases [testutil.LinuxExit42ShellcodeX64Compact]
+// — the 12-byte sys_exit(42) sequence shared with the minimal-ELF
+// transform test. Local name preserved for readability of the
+// rest of the file.
+var exit42Shellcode = testutil.LinuxExit42ShellcodeX64Compact
 
 // TestWrapBundleAsExecutableLinux_RejectsBadInputs covers the two
 // fast-path validation errors WrapBundleAsExecutableLinux surfaces

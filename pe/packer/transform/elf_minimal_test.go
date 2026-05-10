@@ -12,22 +12,14 @@ import (
 	"time"
 
 	"github.com/oioio-space/maldev/pe/packer/transform"
+	"github.com/oioio-space/maldev/testutil"
 )
 
-// exit42Shellcode is the 12-byte x86-64 Linux exit(42) sequence:
-//
-//	xor edi, edi    ; clear arg
-//	mov dil, 42     ; arg = 42
-//	mov eax, 60     ; sys_exit
-//	syscall
-//
-// Hand-encoded to avoid a build-time as/ld dependency.
-var exit42Shellcode = []byte{
-	0x31, 0xff, // xor edi, edi
-	0x40, 0xb7, 0x2a, // mov dil, 42
-	0xb8, 0x3c, 0x00, 0x00, 0x00, // mov eax, 60
-	0x0f, 0x05, // syscall
-}
+// exit42Shellcode aliases [testutil.LinuxExit42ShellcodeX64Compact]
+// — the 12-byte sys_exit(42) sequence shared with bundle_stub_e2e.
+// Kept as a local name so the rest of this file's body reads as
+// originally intended.
+var exit42Shellcode = testutil.LinuxExit42ShellcodeX64Compact
 
 // TestBuildMinimalELF64_RejectsEmpty pins the [transform.ErrMinimalELFCodeEmpty]
 // sentinel.

@@ -11,30 +11,8 @@ import (
 	"time"
 
 	"github.com/oioio-space/maldev/pe/packer"
+	"github.com/oioio-space/maldev/testutil"
 )
-
-// exit42WinShellcode is 6 bytes of position-independent x86-64 that
-// returns 42 to the caller:
-//
-//	b8 2a 00 00 00      mov eax, 42
-//	c3                  ret
-//
-// On Windows, when a PE entry-point function returns, the kernel's
-// thread-startup wrapper (ntdll!RtlUserThreadStart) calls
-// ExitProcess(rax) on the main thread. Net effect: process exits
-// with code 42 — reliable across Win10/11/Server 2019+ since the
-// ABI hasn't changed.
-//
-// Important: the shellcode does NOT touch any Win32 API; it's pure
-// position-independent code, exactly the shape PackShellcode is
-// designed for. Operators shipping shellcode that ITSELF calls
-// ExitProcess via PEB walk (the common msfvenom pattern) get the
-// same wrapping treatment — this test just picks the simplest
-// shellcode that gives a deterministic exit code.
-var exit42WinShellcode = []byte{
-	0xb8, 0x2a, 0x00, 0x00, 0x00, // mov eax, 42
-	0xc3, // ret
-}
 
 // TestPackShellcode_E2E_PlainPEExits42Windows asserts the no-encrypt
 // PE path produces a runnable .exe whose entry point reaches the
@@ -43,7 +21,7 @@ var exit42WinShellcode = []byte{
 //
 // VM-gated via scripts/vm-run-tests.sh windows.
 func TestPackShellcode_E2E_PlainPEExits42Windows(t *testing.T) {
-	out, _, err := packer.PackShellcode(exit42WinShellcode, packer.PackShellcodeOptions{
+	out, _, err := packer.PackShellcode(testutil.WindowsExit42ShellcodeX64, packer.PackShellcodeOptions{
 		Format: packer.FormatWindowsExe,
 	})
 	if err != nil {
@@ -77,7 +55,7 @@ func TestPackShellcode_E2E_PlainPEExits42Windows(t *testing.T) {
 //
 // VM-gated via scripts/vm-run-tests.sh windows.
 func TestPackShellcode_E2E_EncryptedPEExits42Windows(t *testing.T) {
-	out, _, err := packer.PackShellcode(exit42WinShellcode, packer.PackShellcodeOptions{
+	out, _, err := packer.PackShellcode(testutil.WindowsExit42ShellcodeX64, packer.PackShellcodeOptions{
 		Format:  packer.FormatWindowsExe,
 		Encrypt: true,
 	})
