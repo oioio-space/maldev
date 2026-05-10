@@ -127,3 +127,76 @@ func TestBuildMinimalPE32PlusWithBase_RejectsBadBase(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateMinimalPE_HappyPath asserts a freshly-built minimal PE
+// passes its own validator. Belt-and-braces — BuildMinimalPE32Plus
+// already runs ValidateMinimalPE on its output, but a direct call
+// pins the export's contract for operator-side pre-flight callers.
+func TestValidateMinimalPE_HappyPath(t *testing.T) {
+	out, err := transform.BuildMinimalPE32Plus(peExit42StubBytes)
+	if err != nil {
+		t.Fatalf("BuildMinimalPE32Plus: %v", err)
+	}
+	if err := transform.ValidateMinimalPE(out); err != nil {
+		t.Errorf("ValidateMinimalPE on fresh build: %v", err)
+	}
+}
+
+// TestValidateMinimalPE_CatchesCorruption flips a few well-known
+// header offsets and asserts the validator rejects each. Pins the
+// negative-path contract: no silent passes on tampered PEs.
+func TestValidateMinimalPE_CatchesCorruption(t *testing.T) {
+	good, err := transform.BuildMinimalPE32Plus(peExit42StubBytes)
+	if err != nil {
+		t.Fatalf("BuildMinimalPE32Plus: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		mut  func([]byte)
+	}{
+		{"too short", func(b []byte) {}}, // truncate handled below
+		{"bad DOS magic", func(b []byte) { b[0] = 'X' }},
+		{"bad PE signature", func(b []byte) {
+			// e_lfanew at offset 0x3c
+			off := uint32(b[0x3c]) | uint32(b[0x3d])<<8 | uint32(b[0x3e])<<16 | uint32(b[0x3f])<<24
+			b[off] = 'Q'
+		}},
+		{"wrong machine", func(b []byte) {
+			off := uint32(b[0x3c]) | uint32(b[0x3d])<<8 | uint32(b[0x3e])<<16 | uint32(b[0x3f])<<24
+			b[off+4] = 0x00 // Machine low byte → 0x0000 invalid
+		}},
+		{"wrong optional magic", func(b []byte) {
+			off := uint32(b[0x3c]) | uint32(b[0x3d])<<8 | uint32(b[0x3e])<<16 | uint32(b[0x3f])<<24
+			b[off+24] = 0x0b // PE32 (0x10b) instead of PE32+ (0x20b)
+			b[off+25] = 0x01
+		}},
+		{"unaligned ImageBase", func(b []byte) {
+			off := uint32(b[0x3c]) | uint32(b[0x3d])<<8 | uint32(b[0x3e])<<16 | uint32(b[0x3f])<<24
+			// ImageBase at ohOff+24 = lfanew+48; flip a low byte
+			b[off+48] = 0x55
+		}},
+		{"zero entry RVA", func(b []byte) {
+			off := uint32(b[0x3c]) | uint32(b[0x3d])<<8 | uint32(b[0x3e])<<16 | uint32(b[0x3f])<<24
+			// AddressOfEntryPoint at ohOff+16 = lfanew+40
+			b[off+40] = 0
+			b[off+41] = 0
+			b[off+42] = 0
+			b[off+43] = 0
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := append([]byte(nil), good...)
+			if tc.name == "too short" {
+				b = b[:transform.MinimalPE32PlusHeadersSize-1]
+			} else {
+				tc.mut(b)
+			}
+			if err := transform.ValidateMinimalPE(b); err == nil {
+				t.Errorf("ValidateMinimalPE accepted tampered PE (%s)", tc.name)
+			}
+		})
+	}
+}

@@ -182,32 +182,75 @@ func BuildMinimalPE32PlusWithBase(code []byte, imageBase uint64) ([]byte, error)
 	// === Code at sectionFileOff ===
 	copy(out[sectionFileOff:sectionFileOff+codeSize], code)
 
-	if err := validateMinimalPE(out, len(code), imageBase); err != nil {
+	if err := ValidateMinimalPE(out); err != nil {
 		return nil, fmt.Errorf("transform: minimal PE self-check: %w", err)
 	}
 	return out, nil
 }
 
-// validateMinimalPE runs the structural invariants the Windows
-// loader will enforce on load. Catches off-by-ones at build time
-// instead of at exec time.
-func validateMinimalPE(pe []byte, codeLen int, imageBase uint64) error {
-	if len(pe) < MinimalPE32PlusHeadersSize {
-		return fmt.Errorf("size %d < headers %d", len(pe), MinimalPE32PlusHeadersSize)
+// ValidateMinimalPE runs the structural invariants the Windows loader
+// will enforce on load. Catches off-by-ones at build time instead of
+// at exec time. Build-host smoke loader for any AMD64 PE32+ produced
+// by [BuildMinimalPE32Plus] or compatible writers.
+//
+// Cheap sanity wall — does NOT exhaust every loader rejection (no
+// import resolution, no relocation walk, no resource validation).
+// Catches the structural mistakes that would crash on Win immediately:
+//   - DOS / PE magics, e_lfanew range
+//   - Machine == AMD64
+//   - PE32+ optional header magic (0x20b)
+//   - SizeOfHeaders fits the file
+//   - At least one section, AddressOfEntryPoint inside a section
+//   - ImageBase aligned to 64 K (Windows loader requirement)
+//
+// Operator usage: pre-flight gate after a tiny-PE wrap, before
+// shipping a payload to a target. Pairs with [BuildMinimalPE32Plus]
+// — that constructor already calls ValidateMinimalPE on its output;
+// callers shaping PEs by hand can run it themselves.
+func ValidateMinimalPE(peBytes []byte) error {
+	if len(peBytes) < MinimalPE32PlusHeadersSize {
+		return fmt.Errorf("size %d < headers %d", len(peBytes), MinimalPE32PlusHeadersSize)
 	}
-	if pe[0] != 'M' || pe[1] != 'Z' {
-		return fmt.Errorf("bad DOS magic: %q", pe[0:2])
+	if peBytes[0] != 'M' || peBytes[1] != 'Z' {
+		return fmt.Errorf("bad DOS magic: %q", peBytes[0:2])
 	}
-	lfanew := binary.LittleEndian.Uint32(pe[0x3c:0x40])
-	if lfanew == 0 || int(lfanew)+4 > len(pe) {
+	lfanew := binary.LittleEndian.Uint32(peBytes[0x3c:0x40])
+	if lfanew == 0 || int(lfanew)+4 > len(peBytes) {
 		return fmt.Errorf("e_lfanew %#x out of range", lfanew)
 	}
-	if string(pe[lfanew:lfanew+4]) != "PE\x00\x00" {
+	if string(peBytes[lfanew:lfanew+4]) != "PE\x00\x00" {
 		return fmt.Errorf("missing PE signature at %#x", lfanew)
 	}
-	machine := binary.LittleEndian.Uint16(pe[lfanew+4 : lfanew+6])
+	machine := binary.LittleEndian.Uint16(peBytes[lfanew+4 : lfanew+6])
 	if machine != 0x8664 {
 		return fmt.Errorf("Machine = %#x, want 0x8664 (AMD64)", machine)
+	}
+
+	// Optional header sits at lfanew + 24 (COFF header is 20 bytes,
+	// PE signature 4). PE32+ Magic is the first 2 bytes of the optional
+	// header.
+	ohOff := int(lfanew) + 24
+	if ohOff+24 > len(peBytes) {
+		return fmt.Errorf("optional header truncated at %#x", ohOff)
+	}
+	ohMagic := binary.LittleEndian.Uint16(peBytes[ohOff : ohOff+2])
+	if ohMagic != 0x20b {
+		return fmt.Errorf("optional header magic = %#x, want 0x20b (PE32+)", ohMagic)
+	}
+
+	// ImageBase at ohOff + 24, 8 bytes. Must be 64 K aligned per the
+	// Windows PE32+ loader.
+	imageBase := binary.LittleEndian.Uint64(peBytes[ohOff+24 : ohOff+32])
+	if imageBase&0xFFFF != 0 {
+		return fmt.Errorf("ImageBase %#x not 64K-aligned", imageBase)
+	}
+
+	// AddressOfEntryPoint at ohOff + 16, 4 bytes. Must be non-zero
+	// (zero is technically legal — exit-process-on-load — but for our
+	// minimal stub-shipping flow always indicates a writer bug).
+	entryRVA := binary.LittleEndian.Uint32(peBytes[ohOff+16 : ohOff+20])
+	if entryRVA == 0 {
+		return fmt.Errorf("AddressOfEntryPoint = 0 (writer forgot to set it)")
 	}
 	return nil
 }

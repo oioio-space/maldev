@@ -32,11 +32,13 @@ plan section.
       richer (DOS header + PE signature + COFF + Optional header
       + section table + file alignment), so the minimum bounded by
       the Windows loader's tolerance is ~268 B. See §1.
-- [ ] **No build-host Windows PE validator.** Today operators rely
-      on `debug/pe` roundtrip from Go's stdlib — that gives format
-      well-formedness but not runtime guarantees. A second-pass
-      smoke-loader (PEReady-style) would catch loader-rejection
-      before `.exe` ship. See §6.
+- [x] **No build-host Windows PE validator.** ✅ Shipped (2026-05-10)
+      as `transform.ValidateMinimalPE`. `debug/pe` roundtrip already
+      covers format well-formedness via the test layer; the new
+      exported function gives operators a header-walking smoke check
+      (DOS/PE magic, AMD64 machine, PE32+ optional magic, 64K-aligned
+      ImageBase, non-zero entry RVA) callable on any AMD64 PE bytes
+      pre-flight. See §6.
 
 ### Stub asm gaps (Windows-specific)
 
@@ -72,7 +74,11 @@ plan section.
 
 ### Reflective-load asymmetry
 
-- [ ] **Reflective load (`MALDEV_REFLECTIVE=1`) is Linux-only.** The
+- [x] **Reflective load (`MALDEV_REFLECTIVE=1`) is Linux-only.** ✅
+      Shipped (2026-05-10, v0.78.0). `cmd/bundle-launcher/exec_reflective_windows.go`
+      now dispatches to `runtime.Prepare` + `(*PreparedImage).Run`;
+      VM-gated E2E `TestLauncher_E2E_ReflectiveLoadsExitCodeWindows`
+      green on win10 libvirt. See §8. (Original gap text:) The
       `pe/packer/runtime` reflective loader ships PE support, but
       `cmd/bundle-launcher` only invokes it on Linux. The Windows
       reflective path needs the launcher's `executePayloadReflective`
