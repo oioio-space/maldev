@@ -83,6 +83,7 @@ function.
 | **RC4** | Stream | very fast | uniform | 5–256 B | none | ❌ | yes | YARA: keystream bias | Cheap unpacker between layers; never as outer envelope. |
 | **TEA** | Block (64-bit) | very fast | uniform | 16 B | none (ECB) | ❌ | yes | low | Tiny block primitive when binary footprint matters. |
 | **XTEA** | Block (64-bit) | very fast | uniform | 16 B | none (ECB) | ❌ | yes | low | Same as TEA but with corrected key schedule. |
+| **Speck-128/128** | Block (128-bit) | very fast | uniform | 16 B | none (ECB) | ❌ | yes | low | NSA 2013 ARX cipher; ~30 B/round of x86-64 asm — preferred when stage-1 stub needs a real cipher but can't afford AES's S-box. |
 | **XOR** | Stream | trivial | matches key length | any | implicit | ❌ | yes | YARA: visible key | Dev / scratch only; never alone in production. |
 | **S-Box (substitute)** | Permutation | very fast | uniform when keyed | 256-byte table | none | ❌ | yes (`Reverse*`) | breaks byte-frequency YARA | Layer between AES-GCM and embed to flatten histograms. |
 | **Matrix Hill** | Permutation | medium (per-row) | uniform | 4×4 / 8×8 matrix | none | ❌ | yes | breaks contiguous-byte YARA | Defeat contiguous-byte signatures; pair with S-Box. |
@@ -410,6 +411,34 @@ truncation case, as `ErrStreamTruncated`).
 - Parameters: `key` — 16 bytes; `data` — XTEA ciphertext.
 - Returns: plaintext; `error` for misalignment or bad padding.
 - Side effects: allocates the plaintext.
+- OPSEC: very-quiet.
+- Required privileges: none.
+- Platform: any.
+
+### `EncryptSpeck(key [16]byte, data []byte) ([]byte, error)`
+
+- godoc: Speck-128/128 block cipher (NSA, 2013) — 128-bit block, 128-bit key, 32 rounds, ECB mode with PKCS#7 padding.
+- Description: ARX (add-rotate-xor) design — round function is three 64-bit operations on two state words, no S-box. Reference asm fits in ~30 bytes per round on x86-64, making this the lightweight cipher of choice when a stage-1 stub needs a real block primitive but cannot afford AES's S-box (~256 B table) or RC4's keystream bias.
+- Parameters: `key` — exactly 16 bytes (compile-time enforced via `[16]byte`); `data` — any length, PKCS#7-padded internally to 16-byte block boundary.
+- Returns: ciphertext, length rounded up to next multiple of 16; `error` only on padding failure (impossible for valid input).
+- Side effects: allocates the padded ciphertext.
+- OPSEC: ECB mode is visible on highly-repetitive plaintexts. Pair with [SBox](#newsbox-sbox-256byte-inverse-256byte-err-error) or layer under AES-GCM when blocks repeat.
+- Required privileges: none.
+- Platform: any.
+
+> [!NOTE]
+> Speck/Simon were withdrawn from ISO 29192-2 standardization in 2018
+> after disagreement over NSA's design rationale; the cipher itself
+> has no known practical break against the 32-round 128/128 variant
+> as of the 2024 cryptanalysis state-of-the-art.
+
+### `DecryptSpeck(key [16]byte, data []byte) ([]byte, error)`
+
+- godoc: inverse of `EncryptSpeck`. Strips PKCS#7 padding.
+- Description: rejects ciphertexts that are not a multiple of 16 bytes or whose padding bytes don't validate.
+- Parameters: `key` — same 16-byte key; `data` — Speck ciphertext.
+- Returns: plaintext; `error` for misalignment or padding failure.
+- Side effects: allocates `len(data)` bytes (then re-slices for padding).
 - OPSEC: very-quiet.
 - Required privileges: none.
 - Platform: any.

@@ -7,8 +7,10 @@
 //     and XChaCha20-Poly1305 (`EncryptChaCha20` / `DecryptChaCha20`).
 //     Random nonce prepended to ciphertext.
 //   - **Lightweight stream / block**: RC4 (`EncryptRC4`), TEA / XTEA
-//     16-byte block ciphers, ArithShift (position-dependent byte add),
-//     XOR with repeating key.
+//     16-byte block ciphers, Speck-128/128 (ARX block cipher, ~30 B
+//     of asm per round — preferred when stage-1 stubs need a real
+//     block primitive without AES's S-box footprint), ArithShift
+//     (position-dependent byte add), XOR with repeating key.
 //   - **Signature-breaking transforms**: SBox (random 256-byte
 //     permutation + inverse), MatrixTransform (Hill cipher mod 256,
 //     n ∈ {2,3,4}). Not strong cryptography — used to break static
