@@ -7,6 +7,31 @@ import (
 	"github.com/oioio-space/maldev/pe/packer/stubgen/amd64"
 )
 
+// slotARngSeedMask is XORed with the operator seed to derive an
+// independent rng for slot A (post-Encode byte splice). Slots B and C
+// use the raw seed directly. Stepping the two rngs independently
+// means adding a fourth slot later won't reshuffle the byte choices
+// for slots A/B/C — operators who pin reproducible packs (e.g. for
+// red-team artefact provenance) keep getting the same bytes from
+// pre-existing slots when a new slot lands. The exact mask value is
+// not security-relevant; any non-zero 64-bit constant decorrelates
+// the two rng streams. 0x5a5a… is a recognisable IBCC-style ramp.
+const slotARngSeedMask int64 = 0x5a5a5a5a5a5a5a5a
+
+// splitSeedRngs derives independent rngs for in-Builder slots (bRng,
+// for slots B and C) and the post-Encode byte-splice slot (aRng).
+// seed == 0 returns (nil, nil) — deterministic no-junk emission.
+// Both rngs use [math/rand], which is fine here: the slot bytes are
+// inert NOPs whose only purpose is to perturb yara byte hashes, not
+// to resist key-recovery.
+func splitSeedRngs(seed int64) (bRng, aRng *mathrand.Rand) {
+	if seed == 0 {
+		return nil, nil
+	}
+	return mathrand.New(mathrand.NewSource(seed)),
+		mathrand.New(mathrand.NewSource(seed ^ slotARngSeedMask))
+}
+
 // emitNopJunk emits a small random sequence of Intel multi-byte NOPs
 // directly into the Builder stream. Used for in-stub polymorphism
 // slots (B and C) in V2-family bundle stubs — yara byte-pattern

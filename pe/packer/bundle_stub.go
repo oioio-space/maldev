@@ -412,15 +412,7 @@ func WrapBundleAsExecutableLinuxWithSeed(bundle []byte, profile BundleProfile, s
 	// PT_WIN_BUILD remains Linux-no-op (host build = 0); the Windows
 	// wrap uses `bundleStubV2NegateWinBuildWindows` which reads the
 	// PEB and applies the range check.
-	// Slots B + C (in-Builder NOP runs) are driven by `bRng`; slot A
-	// (post-Encode byte splice at offset 14) uses a separate `aRng`.
-	// Both rngs derive from the same seed but step independently so
-	// adding a slot doesn't reshuffle the others' choices.
-	var bRng, aRng *mathrand.Rand
-	if seed != 0 {
-		bRng = mathrand.New(mathrand.NewSource(seed))
-		aRng = mathrand.New(mathrand.NewSource(seed ^ 0x5a5a5a5a5a5a5a5a))
-	}
+	bRng, aRng := splitSeedRngs(seed)
 	stub, _, err := bundleStubVendorAwareV2NegateRng(bRng)
 	if err != nil {
 		return nil, fmt.Errorf("packer: V2-Negate stub: %w", err)

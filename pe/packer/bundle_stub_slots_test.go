@@ -6,6 +6,42 @@ import (
 	"testing"
 )
 
+// TestSplitSeedRngs_Independence verifies that the two rngs derived
+// from a single operator seed produce DIFFERENT byte streams (the
+// XOR-mask achieves stream separation) and that a zero seed returns
+// (nil, nil) — the contract expected by the polymorphism callers.
+func TestSplitSeedRngs_Independence(t *testing.T) {
+	if b, a := splitSeedRngs(0); b != nil || a != nil {
+		t.Errorf("seed=0 must return (nil,nil); got (%v,%v)", b, a)
+	}
+
+	bRng, aRng := splitSeedRngs(42)
+	if bRng == nil || aRng == nil {
+		t.Fatalf("non-zero seed must yield two rngs; got bRng=%v aRng=%v", bRng, aRng)
+	}
+
+	// Pull 32 bytes from each — if the XOR-mask didn't decorrelate
+	// them they'd be byte-identical (both seeded from `seed`).
+	bStream := make([]byte, 32)
+	aStream := make([]byte, 32)
+	for i := range bStream {
+		bStream[i] = byte(bRng.Intn(256))
+		aStream[i] = byte(aRng.Intn(256))
+	}
+	if bytes.Equal(bStream, aStream) {
+		t.Errorf("bRng and aRng produced identical 32-byte streams — XOR-mask not decorrelating")
+	}
+
+	// Determinism: same seed → identical streams from the same slot.
+	bRng2, _ := splitSeedRngs(42)
+	for i := range bStream {
+		if got := byte(bRng2.Intn(256)); got != bStream[i] {
+			t.Errorf("bRng not deterministic at byte %d: %#x vs %#x", i, got, bStream[i])
+			break
+		}
+	}
+}
+
 // TestBundleStub_V2Negate_SlotsBC_Polymorphism verifies that the
 // rng-driven slots B and C produce DIFFERENT byte sequences across
 // distinct seeds while remaining DETERMINISTIC for a given seed.

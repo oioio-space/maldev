@@ -3,7 +3,6 @@ package packer
 import (
 	"encoding/binary"
 	"fmt"
-	mathrand "math/rand"
 	"sync"
 
 	"github.com/oioio-space/maldev/pe/packer/stubgen/amd64"
@@ -217,11 +216,7 @@ func WrapBundleAsExecutableWindowsWithSeed(bundle []byte, profile BundleProfile,
 	// per-entry test honors PT_CPUID_VENDOR, PT_WIN_BUILD range
 	// check, and the negate flag XOR. On no-match, jumps to the §2
 	// EmitNtdllRtlExitUserProcess(0) block embedded inline.
-	var bRng, aRng *mathrand.Rand
-	if seed != 0 {
-		bRng = mathrand.New(mathrand.NewSource(seed))
-		aRng = mathrand.New(mathrand.NewSource(seed ^ 0x5a5a5a5a5a5a5a5a))
-	}
+	bRng, aRng := splitSeedRngs(seed)
 	stub, _, err := bundleStubV2NegateWinBuildWindowsRng(bRng)
 	if err != nil {
 		return nil, err
