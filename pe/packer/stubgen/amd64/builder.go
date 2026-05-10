@@ -93,6 +93,53 @@ func (bb *Builder) AND(dst, src Op) error {
 	return bb.binaryOp(x86.AANDQ, "AND", dst, src)
 }
 
+// SHL emits SHL dst, count (64-bit shift-left). count must be an
+// [Imm] (immediate); register count (CL) form is not exposed since
+// the bundle scan stub only needs constant shifts (e.g. `shl r10d, 5`
+// when computing the matched-payload-entry pointer).
+func (bb *Builder) SHL(dst Op, count Op) error {
+	return bb.binaryOp(x86.ASHLQ, "SHL", dst, count)
+}
+
+// JMPReg emits JMP r/m (indirect jump through a register). Distinct
+// from [JMP] which takes a label and emits rel8/rel32. Used by the
+// bundle stub's final dispatch (`jmp rdi` after the decrypt loop
+// finishes — JMPs into the matched payload bytes).
+func (bb *Builder) JMPReg(target Reg) error {
+	p := bb.b.NewProg()
+	p.As = obj.AJMP
+	if err := setOperand(&p.To, target); err != nil {
+		return fmt.Errorf("amd64: JMPReg target: %w", err)
+	}
+	bb.b.AddInstruction(p)
+	return nil
+}
+
+// MOVBReg emits an 8-bit MOV with a register destination, mirror of
+// [MOVB] (which has a memory destination). Used by the bundle
+// stub's per-byte XOR loop: `mov al, [rdi]` (load) and `mov dl, r9b`
+// (reg-to-reg).
+func (bb *Builder) MOVBReg(dst Reg, src Op) error {
+	p := bb.b.NewProg()
+	p.As = x86.AMOVB
+	if err := setOperand(&p.From, src); err != nil {
+		return fmt.Errorf("amd64: MOVBReg src: %w", err)
+	}
+	if err := setOperand(&p.To, dst); err != nil {
+		return fmt.Errorf("amd64: MOVBReg dst: %w", err)
+	}
+	bb.b.AddInstruction(p)
+	return nil
+}
+
+// SYSCALL emits the Linux/AMD64 syscall instruction (`0f 05`).
+// Used by the Linux .no_match path's `sys_exit_group(0)` and any
+// future Linux-side asm primitive that needs to issue a direct
+// syscall.
+func (bb *Builder) SYSCALL() error {
+	return bb.RawBytes([]byte{0x0f, 0x05})
+}
+
 // LEA emits LEA dst, [mem]. Common shape: LEA dst, [base+disp] for
 // address computation inside the decoder loop.
 func (bb *Builder) LEA(dst Reg, src MemOp) error {
@@ -192,6 +239,14 @@ func (bb *Builder) INC(dst Op) error {
 // convention — destination first, source second.
 func (bb *Builder) CMP(dst, src Op) error {
 	return bb.binaryOp(x86.ACMPQ, "CMP", dst, src)
+}
+
+// CMPL emits a 32-bit CMP. Distinct from [CMP] (64-bit). Used by
+// the bundle scan loop's `cmp r10d, [rsi+8]` and similar 32-bit
+// vendor-prefix comparisons where the 64-bit form would over-read
+// the source operand.
+func (bb *Builder) CMPL(dst, src Op) error {
+	return bb.binaryOp(x86.ACMPL, "CMPL", dst, src)
 }
 
 // TEST emits TEST dst, src (64-bit AND-then-discard; sets flags).

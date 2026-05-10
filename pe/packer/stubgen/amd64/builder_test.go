@@ -71,6 +71,21 @@ func TestBuilder_AllMnemonics(t *testing.T) {
 		{"CMP_RegReg", func(b *amd64.Builder) error {
 			return b.CMP(amd64.RAX, amd64.RBX)
 		}, x86asm.CMP},
+		{"CMPL_RegReg", func(b *amd64.Builder) error {
+			return b.CMPL(amd64.RAX, amd64.RBX)
+		}, x86asm.CMP},
+		{"SHL_RegImm", func(b *amd64.Builder) error {
+			return b.SHL(amd64.RAX, amd64.Imm(5))
+		}, x86asm.SHL},
+		{"JMPReg", func(b *amd64.Builder) error {
+			return b.JMPReg(amd64.RDI)
+		}, x86asm.JMP},
+		{"MOVBReg_RegReg", func(b *amd64.Builder) error {
+			return b.MOVBReg(amd64.RAX, amd64.RBX)
+		}, x86asm.MOV},
+		{"SYSCALL", func(b *amd64.Builder) error {
+			return b.SYSCALL()
+		}, x86asm.SYSCALL},
 		{"TEST_RegReg", func(b *amd64.Builder) error {
 			return b.TEST(amd64.RAX, amd64.RBX)
 		}, x86asm.TEST},
