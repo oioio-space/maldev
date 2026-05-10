@@ -751,15 +751,12 @@ get one mental model regardless of payload shape.
 - Shellcode must be position-independent (no relocations expected,
   no specific load address baked in). Standard for msfvenom output;
   hand-rolled stage-1 needs the same discipline.
-- Encrypted Windows path not yet VM-validated end-to-end (Linux is —
-  see `TestPackShellcode_E2E_EncryptedELFExits42`). The unit tests
-  prove `debug/pe` parses the output; the kernel-level run-and-exit
-  contract is queued behind §2 of the windows-tiny-exe plan
-  (ExitProcess via PEB walk).
-- Plain wrap with no PEB-walk-aware exit asm at the end of your
-  shellcode means a Windows .exe will SIGSEGV cleanly when the
-  shellcode RETs into nothing. Either append `xor eax,eax; ret` for
-  a clean exit code or accept the SIGSEGV.
+- Encrypted shellcode + Windows shellcode that ends in `ret` rely on
+  ntdll's `RtlUserThreadStart` to call `ExitProcess(rax)` for a clean
+  exit code. Shellcode that needs explicit ExitProcess (e.g. when
+  exec ends mid-stream, not via ret) must walk the PEB itself —
+  msfvenom's templates already do this; hand-rolled stage-1 needs
+  the same discipline or it crashes silently with `0xc0000005`.
 
 ---
 
