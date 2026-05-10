@@ -65,6 +65,8 @@ func main() {
 		os.Exit(runUnpack(os.Args[2:]))
 	case "bundle":
 		os.Exit(runBundle(os.Args[2:]))
+	case "shellcode":
+		os.Exit(runShellcode(os.Args[2:]))
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -88,6 +90,9 @@ Usage:
   packer bundle -inspect <bundle>
   packer bundle -match   <bundle>
   packer bundle -wrap    <launcher> -bundle <bundle> -out <exe>
+  packer shellcode -in <sc> -out <bin> [-format windows-exe|linux-elf]
+                   [-encrypt] [-base 0xHEX]
+                   [-rounds N] [-seed S] [-key <hex32>] [-keyout <file>]
 
 Formats:
   blob         (default) AES-GCM encrypted bytes; key printed as 64-char hex
@@ -529,5 +534,92 @@ func runBundleInspect(path string) int {
 		fmt.Printf("  [%d] pred=%#02x vendor=%-12s build=[%d, %d] data=%#x..+%d\n",
 			i, e.PredicateType, vendor, e.BuildMin, e.BuildMax, e.DataRVA, e.DataSize)
 	}
+	return 0
+}
+
+// runShellcode wraps raw shellcode bytes in a runnable PE32+ or
+// ELF64 host via packer.PackShellcode. -encrypt flips the runnable
+// host through the polymorphic SGN-style stub envelope.
+func runShellcode(args []string) int {
+	fs := flag.NewFlagSet("shellcode", flag.ExitOnError)
+	in := fs.String("in", "", "shellcode bytes file (raw, position-independent)")
+	out := fs.String("out", "", "output binary path")
+	format := fs.String("format", "linux-elf", `host format: "windows-exe" (PE32+) or "linux-elf" (ELF64 ET_EXEC)`)
+	encrypt := fs.Bool("encrypt", false, "wrap host through PackBinary's SGN-style stub envelope")
+	base := fs.String("base", "", "per-build ImageBase / vaddr override (hex, e.g. 0x180000000); empty = canonical default")
+	rounds := fs.Int("rounds", 3, "SGN polymorphism rounds (1-10); -encrypt only")
+	seed := fs.Int64("seed", 0, "poly seed (0 = crypto-random); -encrypt only")
+	keyHex := fs.String("key", "", "AEAD key as 64-char hex (default: generate fresh); -encrypt only")
+	keyOut := fs.String("keyout", "", "write the AEAD key to this file (hex); default: stdout; -encrypt only")
+	_ = fs.Parse(args)
+
+	if *in == "" || *out == "" {
+		fmt.Fprintln(os.Stderr, "shellcode: -in and -out are required")
+		return 2
+	}
+	sc, err := os.ReadFile(*in)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "shellcode: read %s: %v\n", *in, err)
+		return 1
+	}
+
+	opts := packer.PackShellcodeOptions{
+		Encrypt:      *encrypt,
+		Stage1Rounds: *rounds,
+		Seed:         *seed,
+	}
+	switch *format {
+	case "windows-exe":
+		opts.Format = packer.FormatWindowsExe
+	case "linux-elf":
+		opts.Format = packer.FormatLinuxELF
+	default:
+		fmt.Fprintf(os.Stderr, "shellcode: unknown format %q (want \"windows-exe\" or \"linux-elf\")\n", *format)
+		return 1
+	}
+
+	if *base != "" {
+		v, err := strconv.ParseUint(strings.TrimPrefix(*base, "0x"), 16, 64)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "shellcode: -base %q invalid hex: %v\n", *base, err)
+			return 2
+		}
+		opts.ImageBase = v
+	}
+	if *keyHex != "" {
+		if !*encrypt {
+			fmt.Fprintln(os.Stderr, "shellcode: -key requires -encrypt")
+			return 2
+		}
+		opts.Key, err = hex.DecodeString(*keyHex)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "shellcode: -key invalid hex: %v\n", err)
+			return 2
+		}
+	}
+
+	bin, key, err := packer.PackShellcode(sc, opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "shellcode: %v\n", err)
+		return 1
+	}
+	if err := os.WriteFile(*out, bin, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "shellcode: write %s: %v\n", *out, err)
+		return 1
+	}
+
+	if *encrypt && key != nil {
+		keyStr := hex.EncodeToString(key) + "\n"
+		if *keyOut != "" {
+			if err := os.WriteFile(*keyOut, []byte(keyStr), 0o600); err != nil {
+				fmt.Fprintf(os.Stderr, "shellcode: write key to %s: %v\n", *keyOut, err)
+				return 1
+			}
+		} else {
+			fmt.Print(keyStr)
+		}
+	}
+	fmt.Fprintf(os.Stderr, "shellcode: %d bytes → %s (%d bytes, encrypt=%v, format=%s)\n",
+		len(sc), *out, len(bin), *encrypt, *format)
 	return 0
 }
