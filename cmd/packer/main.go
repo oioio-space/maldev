@@ -389,10 +389,10 @@ func parseBundleSpec(spec string) (packer.BundlePayload, error) {
 	pred := packer.FingerprintPredicate{}
 	switch strings.ToLower(vendorStr) {
 	case "intel":
-		copy(pred.VendorString[:], "GenuineIntel")
+		pred.VendorString = packer.VendorIntel
 		pred.PredicateType |= packer.PTCPUIDVendor
 	case "amd":
-		copy(pred.VendorString[:], "AuthenticAMD")
+		pred.VendorString = packer.VendorAMD
 		pred.PredicateType |= packer.PTCPUIDVendor
 	case "*", "":
 		// wildcard — leave PTCPUIDVendor unset; if range is also wildcard,

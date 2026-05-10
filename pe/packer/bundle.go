@@ -10,6 +10,20 @@ import (
 	"github.com/oioio-space/maldev/random"
 )
 
+// BundleHKDFLabel* are the per-purpose HKDF-Expand labels used by
+// [DeriveBundleProfile] to generate statistically independent
+// bytes for each profile field. Wire-format-load-bearing — changing
+// any of these strings invalidates every bundle ever produced
+// against the matching label set, so they live here as named
+// constants beside [BundleMagic] / [BundleFooterMagic] rather than
+// as inline literals at the call site.
+const (
+	BundleHKDFLabelMagic   = "maldev/bundle/magic"
+	BundleHKDFLabelFooter  = "maldev/bundle/footer"
+	BundleHKDFLabelVersion = "maldev/bundle/version"
+	BundleHKDFLabelVaddr   = "maldev/bundle/vaddr"
+)
+
 // BundleProfile groups the per-build IOCs an operator can override
 // to randomise yara-able byte patterns across deployments. Per
 // Kerckhoffs's principle: the wire format stays public; only the
@@ -67,16 +81,22 @@ func DeriveBundleProfile(secret []byte) BundleProfile {
 		}
 	}
 	// Each field gets its own HKDF-Expand with a purpose-bound label.
-	// crypto.DeriveKey errors only on impossible input shapes
-	// (length > 8160 B for SHA-256); our fixed 4/8/2/8-byte requests
-	// are well below that floor — the underlying io.ReadFull cannot
-	// fail. Errors are intentionally swallowed; if the impossible
-	// happens, the caller sees the canonical Magic / FooterMagic /
-	// Version which is a graceful degradation, not a corruption.
-	magicB, _ := crypto.DeriveKey(secret, "maldev/bundle/magic", 4)
-	footerB, _ := crypto.DeriveKey(secret, "maldev/bundle/footer", 8)
-	versionB, _ := crypto.DeriveKey(secret, "maldev/bundle/version", 2)
-	vaddrB, _ := crypto.DeriveKey(secret, "maldev/bundle/vaddr", 8)
+	// crypto.DeriveKey only errors on length > 8160 B for SHA-256;
+	// our fixed 4/8/2/8-byte requests are well below that. If the
+	// impossible happens (caller-side memory pressure starving
+	// HMAC), fall back to canonical magics — graceful degradation
+	// is preferable to a panic on bundle pack-time.
+	magicB, errA := crypto.DeriveKey(secret, BundleHKDFLabelMagic, 4)
+	footerB, errB := crypto.DeriveKey(secret, BundleHKDFLabelFooter, 8)
+	versionB, errC := crypto.DeriveKey(secret, BundleHKDFLabelVersion, 2)
+	vaddrB, errD := crypto.DeriveKey(secret, BundleHKDFLabelVaddr, 8)
+	if errA != nil || errB != nil || errC != nil || errD != nil {
+		return BundleProfile{
+			Magic:       BundleMagic,
+			Version:     BundleVersion,
+			FooterMagic: BundleFooterMagic,
+		}
+	}
 
 	var p BundleProfile
 	p.Magic = binary.LittleEndian.Uint32(magicB)

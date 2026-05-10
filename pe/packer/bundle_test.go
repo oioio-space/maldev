@@ -433,6 +433,27 @@ func TestDeriveBundleProfile_Deterministic(t *testing.T) {
 	}
 }
 
+// TestBundleHKDFLabels_PinValues pins the wire-format-load-bearing
+// HKDF label strings. Changing any of these strings silently
+// invalidates every bundle produced against the previous set —
+// catching drift here is cheaper than diagnosing decryption
+// failures in the field.
+func TestBundleHKDFLabels_PinValues(t *testing.T) {
+	cases := []struct {
+		got, want string
+	}{
+		{packer.BundleHKDFLabelMagic, "maldev/bundle/magic"},
+		{packer.BundleHKDFLabelFooter, "maldev/bundle/footer"},
+		{packer.BundleHKDFLabelVersion, "maldev/bundle/version"},
+		{packer.BundleHKDFLabelVaddr, "maldev/bundle/vaddr"},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("HKDF label drift: got %q, want %q", c.got, c.want)
+		}
+	}
+}
+
 // TestDeriveBundleProfile_PinHKDFVector pins the v0.83.0 HKDF-derived
 // values for a fixed secret. Catches accidental drift in the HKDF
 // label strings, the underlying crypto.DeriveKey API, or the bit

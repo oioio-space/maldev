@@ -3,9 +3,9 @@ package crypto
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
 	"fmt"
-	"io"
+
+	"github.com/oioio-space/maldev/random"
 )
 
 // AES-CTR — unauthenticated counter-mode AES. Sits next to
@@ -49,11 +49,12 @@ func EncryptAESCTR(key, plaintext []byte) ([]byte, error) {
 		return nil, fmt.Errorf("crypto: aes-ctr cipher: %w", err)
 	}
 	out := make([]byte, aes.BlockSize+len(plaintext))
-	iv := out[:aes.BlockSize]
-	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+	iv, err := random.Bytes(aes.BlockSize)
+	if err != nil {
 		return nil, fmt.Errorf("crypto: aes-ctr iv: %w", err)
 	}
-	stream := cipher.NewCTR(block, iv)
+	copy(out[:aes.BlockSize], iv)
+	stream := cipher.NewCTR(block, out[:aes.BlockSize])
 	stream.XORKeyStream(out[aes.BlockSize:], plaintext)
 	return out, nil
 }

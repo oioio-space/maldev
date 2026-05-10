@@ -254,5 +254,3 @@ func ValidateMinimalPE(peBytes []byte) error {
 	}
 	return nil
 }
-
-// alignUpU32 lives in pe.go — reuse from there.

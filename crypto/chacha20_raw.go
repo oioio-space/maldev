@@ -1,10 +1,9 @@
 package crypto
 
 import (
-	"crypto/rand"
 	"fmt"
-	"io"
 
+	"github.com/oioio-space/maldev/random"
 	"golang.org/x/crypto/chacha20"
 )
 
@@ -39,11 +38,12 @@ func EncryptChaCha20Raw(key, plaintext []byte) ([]byte, error) {
 		return nil, fmt.Errorf("crypto: chacha20 key %d bytes, want %d", len(key), chacha20.KeySize)
 	}
 	out := make([]byte, chacha20.NonceSizeX+len(plaintext))
-	nonce := out[:chacha20.NonceSizeX]
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+	nonce, err := random.Bytes(chacha20.NonceSizeX)
+	if err != nil {
 		return nil, fmt.Errorf("crypto: chacha20 nonce: %w", err)
 	}
-	cipher, err := chacha20.NewUnauthenticatedCipher(key, nonce)
+	copy(out[:chacha20.NonceSizeX], nonce)
+	cipher, err := chacha20.NewUnauthenticatedCipher(key, out[:chacha20.NonceSizeX])
 	if err != nil {
 		return nil, fmt.Errorf("crypto: chacha20 cipher: %w", err)
 	}
