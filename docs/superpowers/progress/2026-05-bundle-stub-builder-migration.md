@@ -108,7 +108,25 @@ Bug story (caught + fixed via gdb core dump):
   R12B as the accumulator (3-byte mov instead of 2-byte, but
   preserves EAX). Both tests now PASS.
 
-**Phase 4b — §4-PHASE-B-2 PT_WIN_BUILD — UNBLOCKED, ready for next session**
+**Phase 4b — §4-PHASE-B-2 PT_WIN_BUILD — ✅ COMPLETE (commit pending)**
+- [x] `bundleStubV2NegateWinBuildWindows()` shipped in
+  `pe/packer/bundle_stub_v2_winbuild.go` — Windows variant of the
+  V2-Negate stub with EmitPEBBuildRead in prologue (saves
+  OSBuildNumber to R13) and PT_WIN_BUILD bit-test + range compare
+  inside the per-entry test
+- [x] §2 ExitProcess block embedded inline at .exit_block label
+  (replaces Linux's sys_exit_group)
+- [x] `add rsp, 16` patch before `jmp rdi` (Windows-specific stack
+  discipline so matched payload's `ret` reaches RtlUserThreadStart)
+- [x] TestBundleStubV2NWBuilds — PASS (assembly clean, length 418 B)
+- [x] TestBundleStubV2NW_PICTrampolinePrefix — PASS
+- [x] TestBundleStubV2NW_E2E_PTMatchAllWindows — PASS on Win10 VM
+- [x] TestBundleStubV2NW_E2E_PTWinBuildWindows — PASS on Win10 VM
+  (PT_WIN_BUILD with [0..999999] matches host's actual build → exit 42)
+
+**🎉 Phase 4 complete. Both §5 negate flag (Linux) and §4-PHASE-B-2
+PT_WIN_BUILD (Windows) layered onto the Builder-driven scan stub
+with auto-resolved Jcc displacements. Total Phases 1-4 done.**
 
 
 Once V2 ships, Builder labels handle Jcc displacements
