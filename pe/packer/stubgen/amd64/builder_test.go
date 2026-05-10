@@ -490,3 +490,37 @@ func TestBuilder_MOVDQUStore(t *testing.T) {
 		t.Errorf("op = %v, want MOVDQU", inst.Op)
 	}
 }
+
+// TestBuilder_BSWAP pins the 3-byte REX.W BSWAP encoding for both
+// the low-8 GPRs (REX prefix 0x48) and R8..R15 (REX prefix 0x49 +
+// register-extension bit). The bundle stub's AES-CTR counter
+// increment path uses this to flip the 64-bit half of the BE
+// counter into native arithmetic order, INC, then flip back —
+// avoids a 16-byte sequence of byte-INC+ADC with carry propagation.
+func TestBuilder_BSWAP(t *testing.T) {
+	cases := []struct {
+		name string
+		dst  amd64.Reg
+		want []byte
+	}{
+		{"bswap rax", amd64.RAX, []byte{0x48, 0x0f, 0xc8}},
+		{"bswap r9", amd64.R9, []byte{0x49, 0x0f, 0xc9}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			b, err := amd64.New()
+			require.NoError(t, err)
+			require.NoError(t, b.BSWAP(c.dst))
+			out, err := b.Encode()
+			require.NoError(t, err)
+			if !bytes.Equal(out, c.want) {
+				t.Errorf("encoding % x, want % x", out, c.want)
+			}
+			inst, err := x86asm.Decode(out, 64)
+			require.NoError(t, err, "Decode (% x)", out)
+			if inst.Op != x86asm.BSWAP {
+				t.Errorf("op = %v, want BSWAP", inst.Op)
+			}
+		})
+	}
+}

@@ -265,6 +265,24 @@ func (bb *Builder) XORB(dst Reg, src MemOp) error {
 	return nil
 }
 
+// BSWAP emits BSWAP r64 — byte-swap a 64-bit GPR's contents
+// (0f c8+rd, with REX.W). Used by AES-CTR's big-endian 128-bit
+// counter increment in the bundle stub (Tier 🟡 #2.2 Phase 3c):
+// the counter lives in XMM0 in big-endian byte order, so to
+// increment it as a native integer the asm spills to stack,
+// BSWAPs the low 64 bits, increments, BSWAPs back, reloads XMM0.
+//
+// Encoding: REX.W + 0f c8+rd. Three bytes for any GPR; the second
+// byte is fixed at 0f c8 (the +rd embeds in the third byte).
+func (bb *Builder) BSWAP(dst Reg) error {
+	p := bb.b.NewProg()
+	p.As = x86.ABSWAPQ
+	p.To.Type = obj.TYPE_REG
+	p.To.Reg = regToObj(dst)
+	bb.b.AddInstruction(p)
+	return nil
+}
+
 // xmmToObj maps a [XmmReg] to golang-asm's REG_X* constant.
 func xmmToObj(r XmmReg) int16 {
 	return x86.REG_X0 + int16(r)
