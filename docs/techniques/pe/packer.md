@@ -41,7 +41,9 @@ yara-able regardless.
 | **Pack a single PE/ELF that runs natively** | `packer.PackBinary` | Input + ~1-8 KiB stub |
 | **Wrap raw shellcode into a runnable .exe / .elf** (with or without encryption) | `packer.PackShellcode` | ~400 B plain / ~8 KiB encrypted |
 | **Pack a payload that fingerprints the host first** (multi-target) | `packer.PackBinaryBundle` + the `cmd/bundle-launcher` runtime | ~5 MB (Go runtime) |
-| **Same, but tiny single-file** | `packer.PackBinaryBundle` + `packer.WrapBundleAsExecutableLinux` | ~470 B |
+| **Same, but tiny single-file all-asm** | `packer.PackBinaryBundle` + `packer.WrapBundleAsExecutableLinux` / `…Windows` | ~470 B Linux · ~740 B Windows |
+| **Same, with stronger per-payload encryption** (AES-128-CTR via AES-NI, Windows) | as above + `BundlePayload{CipherType: CipherTypeAESCTR}` | +~280 B stub + 176 B round keys per AES-CTR entry |
+| **Reproducible packs across machines** (deterministic ciphertext) | `BundlePayload{Key: <16 B>}` (operator-supplied key) | Same as the matching cipher |
 | **Encrypt arbitrary bytes into a blob (no exec)** | `packer.Pack` / `packer.Unpack` | Input + 32 B header + AES-GCM tag |
 | **Compose multiple ciphers + permutations** | `packer.PackPipeline` | Same |
 | **Inspect / extract a maldev artefact** (defender) | `cmd/packerscope` | n/a |
@@ -559,17 +561,40 @@ offset.
 
 ##### `CipherType` — per-payload cipher (v0.92+)
 
-Pre-v0.92 the cipher was hard-coded to XOR-rolling; v0.92 shipped
-multi-cipher dispatch so each payload picks its own. The wire field
-is at `PayloadEntry[12]`; the runtime evaluator (host-side
-`SelectPayload`, Go-runtime launcher, AND the all-asm V2NW Windows
-stub) dispatches on it.
+**Why this matters.** Every bundle entry's payload bytes get
+encrypted at pack-time and decrypted at runtime. Pre-v0.92 the
+cipher was a fixed 16-byte XOR with a rolling key — cheap (~17
+bytes of asm) and survives YARA-on-plaintext, but it's not
+*cryptography*: anyone holding the bundle can recover plaintext
+from the on-disk key (which is precisely what `cmd/packerscope
+extract` demonstrates — the key field sits next to the ciphertext
+because the runtime stub needs it). The all-asm wrap is a
+delivery-time obfuscation, not a secrecy guarantee.
+
+v0.92 added a second option — proper AES-128-CTR — that operators
+can pick per-payload. The wire field lives at `PayloadEntry[12]`;
+every runtime evaluator (host-side `SelectPayload`, Go-runtime
+launcher, AND the all-asm V2NW Windows stub) dispatches on it,
+which means a single bundle can mix XOR-rolling entries for the
+cheap fast-path and AES-CTR entries for the higher-stakes payload.
 
 | Value | Constant | Cipher | Stub cost | When |
 |---|---|---|---|---|
 | 0 (zero) | — | normalises to `CipherTypeXORRolling` for backward compat | — | bundles packed before v0.92 |
 | 1 | `CipherTypeXORRolling` | XOR with a 16-byte rolling key (byte XORed against `Key[i%16]`) | ~17 B decrypt loop | small budget, AES-NI absent, plaintext already self-validating |
 | 2 | `CipherTypeAESCTR` | AES-128-CTR, random IV per pack, 11 round keys shipped in-wire | +281 B in V2NW (148 B AES-NI block decrypt + counter management + dispatch) | proper crypto wanted; the host has AES-NI (every desktop x86-64 since ~2010) |
+
+**Decision matrix:**
+
+| You want… | Use |
+|---|---|
+| **Smallest stub possible** (Linux Mode 5 baseline ~470 B) | `CipherTypeXORRolling` |
+| **Stronger crypto** (the AES key bytes don't trivially reveal the plaintext to an analyst dumping the bundle) | `CipherTypeAESCTR` |
+| **Windows + a payload that's >a few hundred bytes** (the +281 B stub overhead amortises) | `CipherTypeAESCTR` |
+| **Mix of one decoy XOR payload + one real AES-CTR payload** in the same bundle | both — set per-`BundlePayload` |
+| **Linux Mode 5 + AES-CTR** | not yet — V2-Negate (Linux) stays XOR-rolling-only as of v0.92. Use Mode 4 (Go-runtime launcher) for AES-CTR on Linux. |
+| **Reproducible ciphertext across machines** (XOR-rolling) | `CipherTypeXORRolling` + operator-supplied `BundlePayload.Key` |
+| **AES-CTR but reproducible keys, accepting random IV** | `CipherTypeAESCTR` + `BundlePayload.Key` (round keys identical across packs; IV+ciphertext differ) |
 
 **CipherType=2 wire layout** (per entry):
 
@@ -723,11 +748,24 @@ but cannot mechanically align signatures across deployments.
 
 ### Mode 5 — `PackBinaryBundle` + all-asm wrap (tiny)
 
-Same bundle wire format as Mode 4, but the runtime is a hand-rolled
-~160-byte asm stub wrapped in a minimal hand-written ELF (Brian
-Raiter shape: `Ehdr + 1 PT_LOAD + stub + bundle blob`). No Go
-runtime. The stub does CPUID dispatch and JMPs into the matched
-payload bytes directly.
+**Why this mode exists.** Mode 4 ships a working multi-target
+bundle in ~5 MB because it carries the Go runtime to evaluate the
+fingerprint predicate. For ops where size matters — a USB drop,
+an embedded payload inside a Word doc, a TFTP boot stage —
+that's not an option. Mode 5 replaces the Go runtime with a
+hand-rolled asm dispatcher that does the same thing in **~470
+bytes on Linux** or **~740 bytes on Windows**: read CPUID, walk
+the FingerprintEntry table, decrypt the matched payload, JMP
+into it. Same wire format as Mode 4; the operator chooses the
+runtime at wrap-time.
+
+Same bundle wire format as Mode 4, but the runtime is a
+Builder-emitted x86-64 stub wrapped in a minimal hand-written
+ELF / PE32+ (Brian Raiter shape on Linux: `Ehdr + 1 PT_LOAD +
+stub + bundle blob`). No Go runtime. The stub does CPUID
+dispatch, decrypts the matched payload in place (XOR-rolling
+or AES-CTR — operator's per-payload choice, v0.92+) and JMPs
+into the matched payload bytes directly.
 
 ```go
 bundle, _ := packer.PackBinaryBundle(payloads, packer.BundleOptions{Profile: profile})
