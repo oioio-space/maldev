@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"testing"
 
 	"github.com/oioio-space/maldev/pe/packer"
@@ -112,5 +113,96 @@ func TestIsTinyRWXELF(t *testing.T) {
 	// Non-ELF garbage should fall through.
 	if isTinyRWXELF([]byte("not an elf at all")) {
 		t.Errorf("non-ELF input falsely detected as tiny RWX ELF")
+	}
+}
+
+// TestRunExtract_RoundTrip is the defender-side decrypt contract for
+// Tier 🟢 #3.2: pack two payloads, hand the bundle file to
+// `packerscope extract -out <dir>`, verify both decrypted files
+// round-trip byte-identical to the originals. This is the
+// pedagogical inverse of `cmd/packer bundle -pl …` — the wire
+// format is genuinely public and the per-payload XOR keys live
+// inside each FingerprintEntry, so any defender holding the bundle
+// can decrypt without further secrets.
+func TestRunExtract_RoundTrip(t *testing.T) {
+	pA := []byte("payload-zero-content-AAA")
+	pB := []byte("payload-one-content-BBB")
+	bundle, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{
+			{Binary: pA},
+			{Binary: pB},
+		},
+		packer.BundleOptions{},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	dir := t.TempDir()
+	src := dir + "/bundle.bin"
+	if err := os.WriteFile(src, bundle, 0o644); err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+
+	outDir := dir + "/out"
+	if rc := runExtract([]string{"-out", outDir, src}); rc != 0 {
+		t.Fatalf("runExtract returned %d, want 0", rc)
+	}
+
+	got0, err := os.ReadFile(outDir + "/payload-00.bin")
+	if err != nil {
+		t.Fatalf("read payload-00: %v", err)
+	}
+	got1, err := os.ReadFile(outDir + "/payload-01.bin")
+	if err != nil {
+		t.Fatalf("read payload-01: %v", err)
+	}
+	if !bytes.Equal(got0, pA) {
+		t.Errorf("payload-00: got %q, want %q", got0, pA)
+	}
+	if !bytes.Equal(got1, pB) {
+		t.Errorf("payload-01: got %q, want %q", got1, pB)
+	}
+}
+
+// TestRunExtract_SecretRoundTrip mirrors the canonical round-trip
+// for a per-build wrap: operator packs with `-secret S`, defender
+// supplies the SAME secret to extract. Without it, detection
+// returns kindUnknown and extract bails out (covered separately
+// by TestDetectArtefact_PerBuildSecretRequiresMatchingProfile).
+func TestRunExtract_SecretRoundTrip(t *testing.T) {
+	const secret = "operator-team-2026-04"
+	profile := packer.DeriveBundleProfile([]byte(secret))
+	payload := []byte("the answer is 42 and other deep truths")
+	bundle, err := packer.PackBinaryBundle(
+		[]packer.BundlePayload{{Binary: payload}},
+		packer.BundleOptions{Profile: profile},
+	)
+	if err != nil {
+		t.Fatalf("PackBinaryBundle: %v", err)
+	}
+
+	dir := t.TempDir()
+	src := dir + "/bundle-secret.bin"
+	if err := os.WriteFile(src, bundle, 0o644); err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+
+	outDir := dir + "/out"
+	if rc := runExtract([]string{"-secret", secret, "-out", outDir, src}); rc != 0 {
+		t.Fatalf("runExtract returned %d, want 0", rc)
+	}
+	got, err := os.ReadFile(outDir + "/payload-00.bin")
+	if err != nil {
+		t.Fatalf("read payload-00: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Errorf("payload-00: got %q, want %q", got, payload)
+	}
+
+	// Negative path: wrong secret → kindUnknown → non-zero exit.
+	wrongDir := dir + "/wrong"
+	if rc := runExtract([]string{"-secret", "wrong-secret", "-out", wrongDir, src}); rc == 0 {
+		t.Errorf("runExtract with wrong secret returned 0 (want non-zero)")
 	}
 }

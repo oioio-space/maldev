@@ -108,9 +108,15 @@ Total Tier 2: ~6-8h.
   `HKDF(secret, "stub-sbox-PER-PACK", 256)` + Fisher-Yates in
   emitted asm. Extra unmasking layer at runtime. ~2-3h.
 
-- [ ] **#3.2 `packerscope decrypt -bundle X -secret SECRET`**
-  Defensive helper that dumps decrypted payloads given the secret.
-  Mirrors operator's pack-time crypto in reverse. ~1.5h.
+- [x] **#3.2 packerscope decrypt — shipped as `extract` verb** (pending commit)
+  The `packerscope extract <file> -out <dir>` verb already
+  decrypts every payload in a bundle and writes them under
+  `<dir>/payload-NN.bin` (calls `packer.UnpackBundleWith`
+  per entry). Round-trip + per-build-secret round-trip + wrong-
+  secret negative path now covered by `TestRunExtract_RoundTrip`
+  and `TestRunExtract_SecretRoundTrip`. Naming kept as `extract`
+  (closer to standard CLI vocabulary) rather than the speculative
+  `decrypt`/`-bundle` from this tracker row.
 
 - [x] **#3.3 V1 → V2 retirement** (pending commit)
   Deleted V1 stubs (`bundleStubVendorAware`,
