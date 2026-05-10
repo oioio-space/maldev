@@ -68,6 +68,31 @@ func (bb *Builder) MOV(dst, src Op) error {
 	return nil
 }
 
+// MOVL emits a 32-bit MOV (mov dst, src as r/m32 / r32). Distinct
+// from [MOV] which forces 64-bit. Required when the source is a
+// 32-bit register that comes from CPUID (EAX/EBX/ECX/EDX bottom
+// halves) — using the 64-bit MOVQ form would write 8 bytes,
+// clobbering the next 4 bytes of the destination buffer.
+func (bb *Builder) MOVL(dst, src Op) error {
+	p := bb.b.NewProg()
+	p.As = x86.AMOVL
+	if err := setOperand(&p.From, src); err != nil {
+		return fmt.Errorf("amd64: MOVL src: %w", err)
+	}
+	if err := setOperand(&p.To, dst); err != nil {
+		return fmt.Errorf("amd64: MOVL dst: %w", err)
+	}
+	bb.b.AddInstruction(p)
+	return nil
+}
+
+// AND emits AND dst, src (64-bit bitwise AND). Same operand-order
+// convention as the rest of binaryOp. Useful for masked-bit checks
+// inside the bundle scan loop's per-entry test.
+func (bb *Builder) AND(dst, src Op) error {
+	return bb.binaryOp(x86.AANDQ, "AND", dst, src)
+}
+
 // LEA emits LEA dst, [mem]. Common shape: LEA dst, [base+disp] for
 // address computation inside the decoder loop.
 func (bb *Builder) LEA(dst Reg, src MemOp) error {

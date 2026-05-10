@@ -62,6 +62,12 @@ func TestBuilder_AllMnemonics(t *testing.T) {
 		{"INC_Reg", func(b *amd64.Builder) error {
 			return b.INC(amd64.RAX)
 		}, x86asm.INC},
+		{"MOVL_RegReg", func(b *amd64.Builder) error {
+			return b.MOVL(amd64.RAX, amd64.RBX)
+		}, x86asm.MOV},
+		{"AND_RegReg", func(b *amd64.Builder) error {
+			return b.AND(amd64.RAX, amd64.RBX)
+		}, x86asm.AND},
 		{"CMP_RegReg", func(b *amd64.Builder) error {
 			return b.CMP(amd64.RAX, amd64.RBX)
 		}, x86asm.CMP},
