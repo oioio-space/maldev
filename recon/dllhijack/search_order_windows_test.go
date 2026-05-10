@@ -38,14 +38,22 @@ func TestHijackPath_WritableAppDirHijacks(t *testing.T) {
 	// Simulate an app in a writable directory (t.TempDir) importing a
 	// DLL that lives only in System32. Expected: TempDir is earlier in
 	// the search order AND writable, so HijackPath points there.
-	// We pick `winhttp.dll` — present in System32, NOT a KnownDLL (only
-	// a small whitelist is, and winhttp isn't on it).
-	if isKnownDLL("winhttp.dll") {
-		t.Skip("winhttp.dll is a KnownDLL on this host — pick a different sentinel")
+	//
+	// Sentinel pick: `samcli.dll` — Security Account Manager Client,
+	// present in System32 since XP, structurally not in the KnownDLLs
+	// whitelist (verified on Win10 22H2 / Win11 23H2 by inspecting
+	// HKLM\System\CurrentControlSet\Control\Session Manager\KnownDLLs).
+	// Picked over `winhttp.dll` (the prior choice) because winhttp
+	// HAS started appearing on the KnownDLL list on later Win10
+	// servicing branches, causing a known-environmental SKIP triaged
+	// out per docs/superpowers/plans/2026-04-25-ship-blockers-and-followups.md.
+	const sentinelDLL = "samcli.dll"
+	if isKnownDLL(sentinelDLL) {
+		t.Skipf("%s is a KnownDLL on this host — pick a different sentinel", sentinelDLL)
 	}
 	tmp := t.TempDir()
 
-	hi, resolved := HijackPath(tmp, "winhttp.dll")
+	hi, resolved := HijackPath(tmp, sentinelDLL)
 	assert.Equal(t, tmp, hi, "writable TempDir should be the hijack path")
 	assert.NotEmpty(t, resolved, "resolved path should be System32")
 	assert.Contains(t, strings.ToLower(resolved), "system32")

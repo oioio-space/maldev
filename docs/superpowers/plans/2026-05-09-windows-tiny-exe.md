@@ -313,7 +313,43 @@ Mirrors the Linux trio. Internal:
 
 **CLI:** new `-format windows-tiny` for `packer bundle -wrap`.
 
-### §5. Negate flag in the stub asm
+### §5. Negate flag in the stub asm — STATUS: deferred to supervised session (2026-05-10)
+
+> Considered for autonomy 2026-05-10 alongside §4 PHASE A; deferred.
+>
+> Why deferred: §5 touches the existing
+> `bundleStubVendorAware()` byte array — the Linux scan stub that
+> has runtime-green E2E tests. Refactoring it for negate support
+> requires:
+>
+>   1. Replacing each `jnz .matched` / `jz .next` direct branch with
+>      a "set AL; jmp .compute_negate" sequence (~3 bytes more per
+>      branch × 5 branches = +15 bytes).
+>   2. Adding a new `.compute_negate` block (~10-15 bytes):
+>      `movzx r9d, byte [r8+1]; and r9b, 1; xor al, r9b;
+>       test al, al; jnz .matched; jmp .next`
+>   3. Recomputing every Jcc displacement in the loop body (the
+>      .matched / .next / .vendor_zero_check anchors all shift).
+>
+> Total stub growth: ~25-30 bytes. Without an asm-stepper (Solution D
+> long-term plan) or per-instruction unit tests, the only validation
+> path is runtime VM E2E — and a wrong displacement breaks the
+> Linux green tests too.
+>
+> Recommended approach for the supervised pickup:
+>
+>   - Migrate `bundleStubVendorAware()` from raw byte arrays to the
+>     existing `pe/packer/stubgen/amd64.Builder` API which handles
+>     Jcc displacements via labels. Removes the recomputation hazard.
+>   - Add `EmitBundleScanLoop(b *amd64.Builder, withNegate bool)`
+>     that the existing function then wraps. New tests pin the
+>     byte shape with and without negate.
+>   - Once Builder-driven, `bundleStubVendorAwareWindows()` can be
+>     similarly Builder-rewritten (Solution D becomes very valuable
+>     here — testing different stub variants at unit-speed).
+>
+> Independent of §4 PHASE A runtime green — §5 can land in its own
+> minor regardless of §4 status.
 
 Unblocks both Linux and Windows. Refactor the per-entry asm so the
 match outcome is computed into AL (1 byte) and then XOR'd with the
