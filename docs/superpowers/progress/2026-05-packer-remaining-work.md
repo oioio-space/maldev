@@ -127,11 +127,16 @@ Total Tier 2: ~6-8h.
   `TestBundleStubV2N_PICTrampolinePrefix` guard the canonical shape
   directly (no longer via V1 byte-for-byte comparison).
 
-- [ ] **#3.4 Consolidate V2 / V2-Negate / V2NW into a single
-  parametrized function**
-  3 functions with ~80% shared code. `bundleStub(opts ScanStubOpts)`
-  with feature toggles (negate, winbuild, exitVia). Pure refactor;
-  no behavior change. ~2h.
+- [~] **#3.4 Consolidate V2-Negate / V2NW shared prefix** (pending commit)
+  V2 plain already deleted in #3.3. The remaining V2-Negate and V2NW
+  share an identical prefix (§1 PIC + §2 CPUID vendor + §2.5 CPUID
+  features + §3 loop setup); extracted to 4 shared emitters in
+  pe/packer/bundle_stub_helpers.go. Per-platform divergence (PEB read
+  on Windows, syscall vs jmp on no_match, PT_WIN_BUILD per-entry
+  check) intentionally NOT consolidated — those are where the
+  platforms truly differ, and folding them under a callback table
+  would obscure the asm shape that operators must reason about.
+  Net effect: V2-Negate −80 LOC, V2NW −72 LOC, helpers +123 LOC.
 
 Total Tier 3: ~6-7h.
 

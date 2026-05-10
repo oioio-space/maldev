@@ -57,80 +57,28 @@ func bundleStubVendorAwareV2NegateRng(rng *mathrand.Rand) ([]byte, int, error) {
 		return nil, 0, fmt.Errorf("packer: amd64 builder: %w", err)
 	}
 
-	// === Section 1: PIC trampoline (verbatim from V2) ===
-	if err := b.RawBytes([]byte{
-		0xe8, 0x00, 0x00, 0x00, 0x00, // call .pic
-		0x41, 0x5f, // pop r15
-		0x49, 0x81, 0xc7, 0x00, 0x00, 0x00, 0x00, // add r15, imm32
-	}); err != nil {
-		return nil, 0, fmt.Errorf("packer: V2N PIC: %w", err)
+	// §1 PIC trampoline + §2 CPUID vendor + §2.5 features + §3 loop
+	// setup all live in shared emitters (pe/packer/bundle_stub_helpers.go)
+	// to keep V2-Negate (Linux) and V2NW (Windows) byte-identical
+	// across the non-platform-specific prefix.
+	immPos, err := emitBundlePICTrampoline(b)
+	if err != nil {
+		return nil, 0, fmt.Errorf("packer: V2N: %w", err)
 	}
-	immPos := 10
-
-	// === Section 2: CPUID prologue (verbatim from V2) ===
 	check := func(err error, where string) error {
 		if err != nil {
 			return fmt.Errorf("packer: V2N %s: %w", where, err)
 		}
 		return nil
 	}
-	if e := check(b.SUB(amd64.RSP, amd64.Imm(16)), "sub rsp"); e != nil {
-		return nil, 0, e
+	if err := emitCPUIDVendorPrologue(b); err != nil {
+		return nil, 0, fmt.Errorf("packer: V2N: %w", err)
 	}
-	if e := check(b.MOV(amd64.RDI, amd64.RSP), "mov rdi"); e != nil {
-		return nil, 0, e
+	if err := emitCPUIDFeaturesProbe(b); err != nil {
+		return nil, 0, fmt.Errorf("packer: V2N: %w", err)
 	}
-	if e := check(b.XOR(amd64.RAX, amd64.RAX), "xor eax"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.RawBytes([]byte{0x0f, 0xa2}), "cpuid"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOVL(amd64.MemOp{Base: amd64.RDI}, amd64.RBX), "mov [rdi] ebx"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOVL(amd64.MemOp{Base: amd64.RDI, Disp: 4}, amd64.RDX), "mov [rdi+4] edx"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOVL(amd64.MemOp{Base: amd64.RDI, Disp: 8}, amd64.RCX), "mov [rdi+8] ecx"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOV(amd64.RSI, amd64.RDI), "mov rsi rdi"); e != nil {
-		return nil, 0, e
-	}
-
-	// === Section 2.5: CPUID EAX=1 → save ECX features to [rdi+12] ===
-	// Used by the PT_CPUID_FEATURES predicate. The 16-byte stack
-	// scratch was pre-allocated for the 12-byte vendor; the
-	// remaining 4 bytes fit the feature ECX. Layout:
-	//   [rsi+0..11]   12-byte CPUID vendor (canonical)
-	//   [rsi+12..15]  4-byte CPUID[1].ECX (feature flags 1)
-	//
-	// mov eax, 1   (b8 01 00 00 00 — 5 bytes)
-	// cpuid        (0f a2 — 2 bytes)
-	// mov [rdi+12], ecx (89 4f 0c — 3 bytes)
-	if e := check(b.RawBytes([]byte{0xb8, 0x01, 0x00, 0x00, 0x00}), "mov eax 1"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.RawBytes([]byte{0x0f, 0xa2}), "cpuid #1"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOVL(amd64.MemOp{Base: amd64.RDI, Disp: 12}, amd64.RCX), "mov [rdi+12] ecx"); e != nil {
-		return nil, 0, e
-	}
-
-	// === Section 3: Loop setup ===
-	if e := check(b.MOVZWL(amd64.RCX, amd64.MemOp{Base: amd64.R15, Disp: 6}), "movzx ecx"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOVL(amd64.R8, amd64.MemOp{Base: amd64.R15, Disp: 8}), "mov r8d"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.ADD(amd64.R8, amd64.R15), "add r8 r15"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.XOR(amd64.RAX, amd64.RAX), "xor eax 2"); e != nil {
-		return nil, 0, e
+	if err := emitBundleLoopSetup(b); err != nil {
+		return nil, 0, fmt.Errorf("packer: V2N: %w", err)
 	}
 
 	// Polymorphism slot B — between CPUID prologue and scan loop

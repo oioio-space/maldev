@@ -62,43 +62,19 @@ func bundleStubV2NegateWinBuildWindowsRng(rng *mathrand.Rand) ([]byte, int, erro
 		return nil
 	}
 
-	// === Section 1: PIC trampoline (verbatim from V2/V2-Negate) ===
-	if err := b.RawBytes([]byte{
-		0xe8, 0x00, 0x00, 0x00, 0x00,
-		0x41, 0x5f,
-		0x49, 0x81, 0xc7, 0x00, 0x00, 0x00, 0x00,
-	}); err != nil {
-		return nil, 0, fmt.Errorf("packer: V2NW PIC: %w", err)
+	// §1 PIC + §2 vendor + §2.6 features + §3 loop setup via the
+	// shared emitters in pe/packer/bundle_stub_helpers.go — keeps
+	// V2-Negate (Linux) and V2NW (Windows) byte-identical across
+	// the cross-platform prefix.
+	immPos, err := emitBundlePICTrampoline(b)
+	if err != nil {
+		return nil, 0, fmt.Errorf("packer: V2NW: %w", err)
 	}
-	immPos := 10
-
-	// === Section 2: CPUID prologue ===
-	if e := check(b.SUB(amd64.RSP, amd64.Imm(16)), "sub rsp"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOV(amd64.RDI, amd64.RSP), "mov rdi"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.XOR(amd64.RAX, amd64.RAX), "xor eax"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.RawBytes([]byte{0x0f, 0xa2}), "cpuid"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOVL(amd64.MemOp{Base: amd64.RDI}, amd64.RBX), "mov [rdi] ebx"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOVL(amd64.MemOp{Base: amd64.RDI, Disp: 4}, amd64.RDX), "mov [rdi+4] edx"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOVL(amd64.MemOp{Base: amd64.RDI, Disp: 8}, amd64.RCX), "mov [rdi+8] ecx"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOV(amd64.RSI, amd64.RDI), "mov rsi rdi"); e != nil {
-		return nil, 0, e
+	if err := emitCPUIDVendorPrologue(b); err != nil {
+		return nil, 0, fmt.Errorf("packer: V2NW: %w", err)
 	}
 
-	// === Section 2.5: PEB.OSBuildNumber read → R13 (Windows-specific) ===
+	// §2.5 PEB.OSBuildNumber → R13 (Windows-only — Linux has no PEB).
 	// EmitPEBBuildRead emits the 15-byte sequence:
 	//   mov rax, gs:[0x60]      ; PEB
 	//   mov eax, [rax+0x120]    ; OSBuildNumber
@@ -110,31 +86,11 @@ func bundleStubV2NegateWinBuildWindowsRng(rng *mathrand.Rand) ([]byte, int, erro
 		return nil, 0, e
 	}
 
-	// === CPUID EAX=1 → save ECX features to [rdi+12] (Tier 🔴 #1.3) ===
-	// Same shape as V2-Negate's prologue extension. 4-byte feature
-	// flags fit in the unused tail of the 16-byte stack scratch.
-	if e := check(b.RawBytes([]byte{0xb8, 0x01, 0x00, 0x00, 0x00}), "mov eax 1"); e != nil {
-		return nil, 0, e
+	if err := emitCPUIDFeaturesProbe(b); err != nil {
+		return nil, 0, fmt.Errorf("packer: V2NW: %w", err)
 	}
-	if e := check(b.RawBytes([]byte{0x0f, 0xa2}), "cpuid #1"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOVL(amd64.MemOp{Base: amd64.RDI, Disp: 12}, amd64.RCX), "mov [rdi+12] ecx"); e != nil {
-		return nil, 0, e
-	}
-
-	// === Section 3: Loop setup ===
-	if e := check(b.MOVZWL(amd64.RCX, amd64.MemOp{Base: amd64.R15, Disp: 6}), "movzx ecx"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.MOVL(amd64.R8, amd64.MemOp{Base: amd64.R15, Disp: 8}), "mov r8d"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.ADD(amd64.R8, amd64.R15), "add r8 r15"); e != nil {
-		return nil, 0, e
-	}
-	if e := check(b.XOR(amd64.RAX, amd64.RAX), "xor eax 2"); e != nil {
-		return nil, 0, e
+	if err := emitBundleLoopSetup(b); err != nil {
+		return nil, 0, fmt.Errorf("packer: V2NW: %w", err)
 	}
 
 	// Polymorphism slot B — between PEB-build read / loop setup and

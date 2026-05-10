@@ -32,6 +32,129 @@ func splitSeedRngs(seed int64) (bRng, aRng *mathrand.Rand) {
 		mathrand.New(mathrand.NewSource(seed ^ slotARngSeedMask))
 }
 
+// bundleStubPICImmPos is the byte offset of the imm32 immediate in
+// the PIC trampoline emitted by [emitBundlePICTrampoline]. Operators
+// patch this position post-encode with the distance from the .pic
+// label to the bundle base. Mirrors [bundleOffsetImm32Pos] but lives
+// next to the emitter for locality.
+const bundleStubPICImmPos = 10
+
+// emitBundlePICTrampoline emits the canonical 14-byte position-
+// independent prologue shared by every V2-family stub:
+//
+//	call .pic              ; e8 00 00 00 00  — push next-instr addr
+//	pop  r15               ; 41 5f            — read it into R15
+//	add  r15, imm32        ; 49 81 c7 …      — patched post-encode
+//
+// The imm32 placeholder is zero; the wrap layer rewrites it via
+// bundleStubPICImmPos. Returns the imm32 offset so callers can
+// thread it back to their own immPos return value (kept for API
+// symmetry with the pre-extraction code).
+func emitBundlePICTrampoline(b *amd64.Builder) (int, error) {
+	if err := b.RawBytes([]byte{
+		0xe8, 0x00, 0x00, 0x00, 0x00, // call .pic
+		0x41, 0x5f, // pop r15
+		0x49, 0x81, 0xc7, 0x00, 0x00, 0x00, 0x00, // add r15, imm32
+	}); err != nil {
+		return 0, fmt.Errorf("packer: PIC trampoline: %w", err)
+	}
+	return bundleStubPICImmPos, nil
+}
+
+// emitCPUIDVendorPrologue emits the 12-byte CPUID-leaf-0 vendor read
+// into a 16-byte stack scratch and pins the scratch pointer in RSI:
+//
+//	sub  rsp, 16
+//	mov  rdi, rsp
+//	xor  eax, eax
+//	cpuid                                    ; EAX=0 → EBX,EDX,ECX
+//	mov  [rdi+0],  ebx                       ; "Genu" / "Auth" / …
+//	mov  [rdi+4],  edx
+//	mov  [rdi+8],  ecx
+//	mov  rsi, rdi                            ; vendor pointer
+//
+// Shared by every V2-family stub (Linux + Windows). Leaves the
+// upper 4 bytes of the scratch slot unused — [emitCPUIDFeaturesProbe]
+// fills them with CPUID[1].ECX immediately after.
+func emitCPUIDVendorPrologue(b *amd64.Builder) error {
+	if err := b.SUB(amd64.RSP, amd64.Imm(16)); err != nil {
+		return fmt.Errorf("packer: CPUID vendor prologue sub rsp: %w", err)
+	}
+	if err := b.MOV(amd64.RDI, amd64.RSP); err != nil {
+		return fmt.Errorf("packer: CPUID vendor prologue mov rdi rsp: %w", err)
+	}
+	if err := b.XOR(amd64.RAX, amd64.RAX); err != nil {
+		return fmt.Errorf("packer: CPUID vendor prologue xor eax: %w", err)
+	}
+	if err := b.RawBytes([]byte{0x0f, 0xa2}); err != nil {
+		return fmt.Errorf("packer: CPUID vendor prologue cpuid: %w", err)
+	}
+	if err := b.MOVL(amd64.MemOp{Base: amd64.RDI}, amd64.RBX); err != nil {
+		return fmt.Errorf("packer: CPUID vendor prologue mov [rdi] ebx: %w", err)
+	}
+	if err := b.MOVL(amd64.MemOp{Base: amd64.RDI, Disp: 4}, amd64.RDX); err != nil {
+		return fmt.Errorf("packer: CPUID vendor prologue mov [rdi+4] edx: %w", err)
+	}
+	if err := b.MOVL(amd64.MemOp{Base: amd64.RDI, Disp: 8}, amd64.RCX); err != nil {
+		return fmt.Errorf("packer: CPUID vendor prologue mov [rdi+8] ecx: %w", err)
+	}
+	if err := b.MOV(amd64.RSI, amd64.RDI); err != nil {
+		return fmt.Errorf("packer: CPUID vendor prologue mov rsi rdi: %w", err)
+	}
+	return nil
+}
+
+// emitCPUIDFeaturesProbe emits CPUID-leaf-1 (feature flags) and
+// stashes ECX at [rdi+12]:
+//
+//	mov  eax, 1                              ; CPUID leaf 1
+//	cpuid                                    ; EAX,EBX,ECX,EDX
+//	mov  [rdi+12], ecx                       ; ECX = feature flags 1
+//
+// Reads PT_CPUID_FEATURES inputs — the 4-byte slot lives in the
+// unused tail of the 16-byte stack scratch allocated by
+// [emitCPUIDVendorPrologue]. Must be called AFTER the vendor
+// prologue (relies on RDI still pointing at the scratch).
+func emitCPUIDFeaturesProbe(b *amd64.Builder) error {
+	if err := b.RawBytes([]byte{0xb8, 0x01, 0x00, 0x00, 0x00}); err != nil {
+		return fmt.Errorf("packer: CPUID features probe mov eax 1: %w", err)
+	}
+	if err := b.RawBytes([]byte{0x0f, 0xa2}); err != nil {
+		return fmt.Errorf("packer: CPUID features probe cpuid: %w", err)
+	}
+	if err := b.MOVL(amd64.MemOp{Base: amd64.RDI, Disp: 12}, amd64.RCX); err != nil {
+		return fmt.Errorf("packer: CPUID features probe mov [rdi+12] ecx: %w", err)
+	}
+	return nil
+}
+
+// emitBundleLoopSetup emits the per-stub scan-loop initialiser:
+//
+//	movzx ecx, word [r15+6]   ; entry count (BundleHeader.Count)
+//	mov   r8d, [r15+8]        ; entries RVA (relative to bundle base)
+//	add   r8,  r15            ; → absolute entries pointer
+//	xor   eax, eax            ; loop counter
+//
+// Reads the FingerprintEntry table location from the BundleHeader
+// (R15 already points at the bundle base, set up by the PIC
+// trampoline + post-encode imm32 patch). Shared by V2-Negate and
+// V2NW; bytes are identical.
+func emitBundleLoopSetup(b *amd64.Builder) error {
+	if err := b.MOVZWL(amd64.RCX, amd64.MemOp{Base: amd64.R15, Disp: 6}); err != nil {
+		return fmt.Errorf("packer: loop setup movzx ecx: %w", err)
+	}
+	if err := b.MOVL(amd64.R8, amd64.MemOp{Base: amd64.R15, Disp: 8}); err != nil {
+		return fmt.Errorf("packer: loop setup mov r8d: %w", err)
+	}
+	if err := b.ADD(amd64.R8, amd64.R15); err != nil {
+		return fmt.Errorf("packer: loop setup add r8 r15: %w", err)
+	}
+	if err := b.XOR(amd64.RAX, amd64.RAX); err != nil {
+		return fmt.Errorf("packer: loop setup xor eax: %w", err)
+	}
+	return nil
+}
+
 // emitNopJunk emits a small random sequence of Intel multi-byte NOPs
 // directly into the Builder stream. Used for in-stub polymorphism
 // slots (B and C) in V2-family bundle stubs — yara byte-pattern
