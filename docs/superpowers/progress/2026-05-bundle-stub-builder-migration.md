@@ -1,6 +1,6 @@
 ---
 title: Bundle stub Builder migration — live progress
-last_updated: 2026-05-10
+last_updated: 2026-05-10 (Phase 1 complete @ 4f2f159)
 session_origin: 13ddbfbb-2239-47f5-a19c-2021dee94c64
 ---
 
@@ -26,11 +26,15 @@ Builder methods needed by the audit but missing from the API today.
 
 - [x] **INC / CMP / TEST / JGE / JL** — added 2026-05-10 (commit 82132da)
 - [x] **MOVL / AND** — added 2026-05-10 (commit 0d87fdb)
-- [ ] **CMPL** (32-bit CMP) — needed for `cmp r10d, [rsi+8]` etc.
-- [ ] **SHL imm** — needed for `shl r10d, 5` (matched-section pointer compute)
-- [ ] **JMPReg / JMPIndirect** — needed for `jmp rdi` (final dispatch)
-- [ ] **MOVB r, r/m** — Builder.MOVB today is mem-as-dst only; need reg-as-dst variant
-- [ ] **SYSCALL** — trivial wrapper over `RawBytes(0x0f, 0x05)`; useful for Linux .no_match path
+- [x] **CMPL** (32-bit CMP) — added 2026-05-10 (commit 4f2f159)
+- [x] **SHL imm** — added 2026-05-10 (commit 4f2f159)
+- [x] **JMPReg** (indirect jump through register) — added 2026-05-10 (commit 4f2f159)
+- [x] **MOVBReg** (8-bit MOV reg-as-dst) — added 2026-05-10 (commit 4f2f159)
+- [x] **SYSCALL** — added 2026-05-10 (commit 4f2f159)
+
+**Phase 1 ✅ COMPLETE** as of commit 4f2f159. Builder API now covers
+every instruction in the migration audit except CPUID, gs-segment
+override, and TEST r/m,imm (all RawBytes).
 
 Tests required: byte-shape pin via x86asm decode, mirroring the
 existing TestBuilder_AllMnemonics pattern.
@@ -110,10 +114,10 @@ When resuming on a different machine / new session:
 | Aspect | State as of 2026-05-10 |
 |---|---|
 | Latest tag | v0.87.0 (§4 PHASE B-1 ImageBase) |
-| HEAD commit | 613c458 (audit doc) |
+| HEAD commit | 4f2f159 (Phase 1 of migration complete) |
 | Linux scan-stub bytes | hand-encoded in `bundle_stub.go::bundleStubVendorAware()` — UNCHANGED, runtime-green |
 | Windows scan-stub | composes Linux bytes + §2 ExitProcess + 4-byte add-rsp patch — RUNTIME GREEN on win10 |
-| Builder API | INC/CMP/TEST/JGE/JL/MOVL/AND added; CMPL/SHL/JMP-r-m/MOVB-r-rm/SYSCALL pending |
+| Builder API | INC/CMP/TEST/JGE/JL/MOVL/AND/CMPL/SHL/JMPReg/MOVBReg/SYSCALL — all primitives needed for the migration ARE PRESENT |
 | asmtrace VEH harness | shipped + working (debugged §2 + §4-A bugs already) |
 
 ## Open questions for the next session
