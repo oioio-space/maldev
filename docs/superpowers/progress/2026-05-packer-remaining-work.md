@@ -112,9 +112,14 @@ Total Tier 2: ~6-8h.
   Defensive helper that dumps decrypted payloads given the secret.
   Mirrors operator's pack-time crypto in reverse. ~1.5h.
 
-- [ ] **#3.3 V1 → V2 retirement**
-  Once #1.1 #1.2 land, V1 (`bundleStubVendorAware`) becomes dead
-  code. Delete + simplify. ~30 min cleanup.
+- [x] **#3.3 V1 → V2 retirement** (pending commit)
+  Deleted V1 stubs (`bundleStubVendorAware`,
+  `bundleStubVendorAwareWindows`) + V2-plain (`bundleStubVendorAwareV2`)
+  + 5 test files exercising the dead paths (665 LOC net). V2-Negate
+  inherits the imm32 / PIC-prefix contracts; new pin tests
+  `TestBundleStubV2N_PICOffsetMatchesConst` and
+  `TestBundleStubV2N_PICTrampolinePrefix` guard the canonical shape
+  directly (no longer via V1 byte-for-byte comparison).
 
 - [ ] **#3.4 Consolidate V2 / V2-Negate / V2NW into a single
   parametrized function**
