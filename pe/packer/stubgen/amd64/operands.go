@@ -20,6 +20,12 @@ const (
 	R13
 	R14
 	R15
+	// RSP / RBP are intentionally NOT in AllGPRs() because the
+	// stage1 polymorphic register-shuffle would corrupt the stack
+	// frame if it picked them. Exposed here for direct addressing
+	// in stub asm (e.g. `sub rsp, 16` in the CPUID prologue).
+	RSP
+	RBP
 )
 
 // AllGPRs returns every Reg the encoder can use as a generic GPR.

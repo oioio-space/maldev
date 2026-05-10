@@ -180,6 +180,23 @@ func (bb *Builder) MOVZX(dst Reg, src MemOp) error {
 	return nil
 }
 
+// MOVZWL emits MOVZX r32, word ptr [src] — zero-extending word load
+// into a 32-bit destination register. Distinct from [MOVZX] which
+// uses byte-source. Used by the bundle scan stub at
+// `movzx ecx, word [r15+6]` (read FingerprintEntry count) and
+// `movzx eax, word [rax+r11*2]` (read AddressOfNameOrdinals entry).
+func (bb *Builder) MOVZWL(dst Reg, src MemOp) error {
+	p := bb.b.NewProg()
+	p.As = x86.AMOVWLZX
+	if err := setOperand(&p.From, src); err != nil {
+		return fmt.Errorf("amd64: MOVZWL src: %w", err)
+	}
+	p.To.Type = obj.TYPE_REG
+	p.To.Reg = regToObj(dst)
+	bb.b.AddInstruction(p)
+	return nil
+}
+
 // MOVB emits MOVB byte ptr [dst], src — stores the low 8 bits of src
 // into the memory location pointed to by dst. Used as the write-back in
 // the SGN decoder loop after the substitution has updated the byte register.
@@ -235,18 +252,25 @@ func (bb *Builder) INC(dst Op) error {
 }
 
 // CMP emits CMP dst, src (64-bit compare; sets flags based on
-// `dst - src`). Order matches the rest of this package's binaryOp
-// convention — destination first, source second.
+// `dst - src`). Order matches Intel syntax: first operand is the
+// LHS of the subtraction.
+//
+// Plan 9 wart: `binaryOp` puts the second arg into From (src) and
+// the first into To (dst), but Plan 9's CMPQ flag-direction is
+// `From - To` — the OPPOSITE of what the docstring promises. We
+// swap the operands at call time so the public CMP/CMPL API
+// matches Intel semantics (and the doc) regardless of golang-asm's
+// internal convention. See [TestCMP_PlanFlagDirection] for the
+// pinned semantic.
 func (bb *Builder) CMP(dst, src Op) error {
-	return bb.binaryOp(x86.ACMPQ, "CMP", dst, src)
+	return bb.binaryOp(x86.ACMPQ, "CMP", src, dst)
 }
 
-// CMPL emits a 32-bit CMP. Distinct from [CMP] (64-bit). Used by
-// the bundle scan loop's `cmp r10d, [rsi+8]` and similar 32-bit
-// vendor-prefix comparisons where the 64-bit form would over-read
-// the source operand.
+// CMPL emits a 32-bit CMP. Same Intel-semantics swap as [CMP].
+// Used by the bundle scan loop's `cmp r10d, [rsi+8]` and similar
+// 32-bit comparisons where the 64-bit form would over-read.
 func (bb *Builder) CMPL(dst, src Op) error {
-	return bb.binaryOp(x86.ACMPL, "CMPL", dst, src)
+	return bb.binaryOp(x86.ACMPL, "CMPL", src, dst)
 }
 
 // TEST emits TEST dst, src (64-bit AND-then-discard; sets flags).
@@ -450,6 +474,10 @@ func regToObj(r Reg) int16 {
 		return x86.REG_R14
 	case R15:
 		return x86.REG_R15
+	case RSP:
+		return x86.REG_SP
+	case RBP:
+		return x86.REG_BP
 	}
 	panic(fmt.Sprintf("amd64: unknown Reg %d", r))
 }

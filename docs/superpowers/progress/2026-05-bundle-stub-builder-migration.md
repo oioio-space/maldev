@@ -50,12 +50,20 @@ func bundleStubVendorAwareV2() ([]byte, error) {
 }
 ```
 
-- [ ] Section 1 (PIC trampoline) — 1 Builder call + 2 RawBytes blocks
-- [ ] Section 2 (CPUID prologue) — 7 Builder calls + CPUID raw
-- [ ] Section 3 (Loop setup) — 4 Builder calls
-- [ ] Section 4 (Loop body) — ~24 Builder calls + 2 test-imm raws
-- [ ] Section 5 (.no_match) — 2 Builder calls + SYSCALL
-- [ ] Section 6 (.matched + decrypt + JMP) — ~15 Builder calls + ~10 RawBytes (8-bit ops + SHL + JMP r/m)
+- [x] Section 1 (PIC trampoline) — RawBytes verbatim, V1 PIC byte-identical (commit pending)
+- [x] Section 2 (CPUID prologue) — Builder + cpuid RawBytes
+- [x] Section 3 (Loop setup) — Builder
+- [x] Section 4 (Loop body) — Builder + 2 test-imm RawBytes
+- [x] Section 5 (.no_match Linux) — Builder + SYSCALL
+- [x] Section 6 (.matched + decrypt + JMP) — Builder + 17 B 8-bit-ops RawBytes block
+
+**Phase 2 ✅ COMPLETE** — `bundleStubVendorAwareV2()` shipped in
+`pe/packer/bundle_stub_v2.go`. Outputs 204 bytes (V1 = 197, +7 byte
+delta from XORQ-uses-REX vs V1's 32-bit XOR).
+Bug found + fixed during V2 implementation: Builder.CMP/CMPL had
+operand-order bug (Plan 9 binaryOp emits `src - dst` instead of the
+documented `dst - src`). Fixed in same commit; pinned by
+TestBuilder_CMP_PlanFlagDirection.
 
 Bundle offset constants for post-encode patches:
 - `bundleOffsetImm32Pos` — already exists; the V2 emission must

@@ -1,6 +1,7 @@
 package amd64_test
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/oioio-space/maldev/pe/packer/stubgen/amd64"
@@ -86,6 +87,9 @@ func TestBuilder_AllMnemonics(t *testing.T) {
 		{"SYSCALL", func(b *amd64.Builder) error {
 			return b.SYSCALL()
 		}, x86asm.SYSCALL},
+		{"MOVZWL_RegMem", func(b *amd64.Builder) error {
+			return b.MOVZWL(amd64.RAX, amd64.MemOp{Base: amd64.R15, Disp: 6})
+		}, x86asm.MOVZX},
 		{"TEST_RegReg", func(b *amd64.Builder) error {
 			return b.TEST(amd64.RAX, amd64.RBX)
 		}, x86asm.TEST},
@@ -231,6 +235,30 @@ func TestBuilder_JMP_Reg(t *testing.T) {
 	// Intel Vol 2A: JMP r/m64 with REX.B+R15 = 41 FF E7
 	if len(out) < 3 || out[0] != 0x41 || out[1] != 0xFF || out[2] != 0xE7 {
 		t.Errorf("encoding % x, want 41 ff e7", out)
+	}
+}
+
+// TestBuilder_CMP_PlanFlagDirection pins the Intel-semantic operand
+// order for [Builder.CMP] / [Builder.CMPL]. Without the operand
+// swap inside CMP, golang-asm's Plan 9 binaryOp convention emits
+// the opposite flag direction (src - dst instead of dst - src) —
+// silently breaks any caller that relies on documented semantics.
+//
+// The test calls b.CMP(RAX, RCX) (= Intel `cmp rax, rcx`, flags =
+// RAX - RCX) and asserts the produced byte sequence matches the
+// canonical r/m=RAX, reg=RCX encoding (`48 39 c8`). If the operand
+// swap regresses, the bytes become `48 39 c1` instead and the test
+// fails loudly.
+func TestBuilder_CMP_PlanFlagDirection(t *testing.T) {
+	b, err := amd64.New()
+	require.NoError(t, err)
+	require.NoError(t, b.CMP(amd64.RAX, amd64.RCX), "CMP")
+	out, err := b.Encode()
+	require.NoError(t, err, "Encode")
+	want := []byte{0x48, 0x39, 0xc8} // CMPQ RAX, RCX (flags = RAX - RCX)
+	if !bytes.Equal(out, want) {
+		t.Errorf("CMP(RAX, RCX) = % x, want % x (Intel `cmp rax, rcx`, flags = RAX - RCX)",
+			out, want)
 	}
 }
 
