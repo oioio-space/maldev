@@ -412,11 +412,30 @@ where it landed.
 type BundlePayload struct {
     Binary      []byte               // executable bytes (PE / ELF / shellcode, mode-dependent)
     Fingerprint FingerprintPredicate // "what the host must look like for THIS payload to match"
+    CipherType  uint8                // 0/1 = XOR-rolling (default), 2 = AES-128-CTR (v0.92+)
+    Key         []byte               // operator-supplied 16-byte key, nil = pack-time random (v0.92+)
 }
 ```
 
-Just a pair `(payload, firing rule)`. Assemble N of them, hand to
-`PackBinaryBundle`.
+Just a pair `(payload, firing rule)` plus two optional v0.92
+per-payload knobs:
+
+- **`CipherType`** picks the encrypt-then-decrypt algorithm for
+  THIS payload. Zero or 1 = the original XOR-rolling cipher
+  (~6-instruction stub-side decrypt loop, every host). 2 =
+  AES-128-CTR via AES-NI (Mode 5 all-asm V2NW stub decrypts at
+  runtime; AES-NI feature bit auto-injected into the entry's
+  `PT_CPUID_FEATURES` predicate so pre-AES-NI hosts skip cleanly).
+  Mix freely within one bundle — each PayloadEntry carries its own
+  type byte.
+- **`Key`** is the operator-supplied 16-byte encryption key. Leave
+  nil and pack-time generates a fresh crypto-random one (the
+  default — preserves per-payload secrecy). Non-nil 16 bytes is
+  used verbatim — enables reproducible packs across machines and
+  HKDF-from-deployment-secret workflows. Any other length returns
+  the `ErrBundleBadKeyLen` sentinel.
+
+Assemble N of them, hand to `PackBinaryBundle`.
 
 ##### `FingerprintPredicate` — the matching rule
 
@@ -538,6 +557,68 @@ Other payloads stay ciphertext on disk. Without their per-payload XOR
 keys, an analyst dumping the bundle sees noise at every non-active
 offset.
 
+##### `CipherType` — per-payload cipher (v0.92+)
+
+Pre-v0.92 the cipher was hard-coded to XOR-rolling; v0.92 shipped
+multi-cipher dispatch so each payload picks its own. The wire field
+is at `PayloadEntry[12]`; the runtime evaluator (host-side
+`SelectPayload`, Go-runtime launcher, AND the all-asm V2NW Windows
+stub) dispatches on it.
+
+| Value | Constant | Cipher | Stub cost | When |
+|---|---|---|---|---|
+| 0 (zero) | — | normalises to `CipherTypeXORRolling` for backward compat | — | bundles packed before v0.92 |
+| 1 | `CipherTypeXORRolling` | XOR with a 16-byte rolling key (byte XORed against `Key[i%16]`) | ~17 B decrypt loop | small budget, AES-NI absent, plaintext already self-validating |
+| 2 | `CipherTypeAESCTR` | AES-128-CTR, random IV per pack, 11 round keys shipped in-wire | +281 B in V2NW (148 B AES-NI block decrypt + counter management + dispatch) | proper crypto wanted; the host has AES-NI (every desktop x86-64 since ~2010) |
+
+**CipherType=2 wire layout** (per entry):
+
+```text
+[IV (16 B)] [AES-CTR ciphertext padded to 16-byte multiple] [11 × 16 B = 176 B round keys]
+```
+
+- `PayloadEntry.Key` (16 B) = AES-128 key.
+- `PayloadEntry.DataSize` = 16 + padded_ciphertext_len + 176.
+- `PayloadEntry.PlaintextSize` = ORIGINAL plaintext length (not the padded one).
+  `UnpackBundle` trims the decrypted output back to this.
+- Round keys are produced at pack-time via [`crypto.ExpandAESKey`](../crypto/payload-encryption.md);
+  the all-asm stub `MOVDQU`s them directly into XMM at runtime,
+  saving the in-stub key-expansion step (~50 B of asm).
+- Pack-time auto-injects the AES-NI feature bit (`0x02000000`) into
+  the entry's `PT_CPUID_FEATURES` mask + value via a strict OR
+  (operator-supplied feature constraints survive). Pre-AES-NI hosts
+  fail the predicate and skip the entry — no crash.
+
+**Constraints:**
+- Mutually exclusive with `BundleOptions.FixedKey` (the
+  test-determinism switch) — AES-CTR's random IV defeats fixed-key
+  determinism. Returns `ErrCipherTypeFixedKey`.
+- The all-asm Linux V2-Negate stub does NOT dispatch on CipherType
+  as of v0.92 — only V2NW (Windows) does. CipherType=2 + Linux
+  Wrap path = host-side via `cmd/bundle-launcher` only.
+
+**Worked example — AES-CTR payload:**
+
+```go
+bundle, _ := packer.PackBinaryBundle([]packer.BundlePayload{{
+    Binary:     shellcode,
+    CipherType: packer.CipherTypeAESCTR,
+    Fingerprint: packer.FingerprintPredicate{
+        PredicateType: packer.PTMatchAll,
+        // No need to set CPUIDFeatureMask/Value yourself —
+        // pack-time auto-injects the AES bit. If you DO set them
+        // for other constraints (e.g. SSE3 also required), the AES
+        // bit is OR'd in alongside yours, never overwritten.
+    },
+    // Key: nil — pack-time generates a fresh random 16 B AES key.
+}}, packer.BundleOptions{})
+
+exe, _ := packer.WrapBundleAsExecutableWindows(bundle)
+// Drop on any AES-NI Windows host → V2NW stub: scan loop →
+// matched entry → CipherType dispatch → AES-CTR decrypt loop →
+// JMP into plaintext.
+```
+
 ##### `BundleOptions` — bundle-level knobs
 
 ```go
@@ -656,9 +737,10 @@ os.WriteFile("app", out, 0o755)
 
 | Property | Value |
 |---|---|
-| Total size | **~470 B** (1-payload PTMatchAll) → **~550 B** (2-payload vendor-aware) |
-| Stub | 160 B hand-rolled x86-64 + Intel multi-byte NOP polymorphism |
-| Predicate evaluator | full — PT_MATCH_ALL + PT_CPUID_VENDOR + PT_WIN_BUILD (Windows V2NW) + PT_CPUID_FEATURES + `Negate` (v0.88.0) |
+| Total size | **~470 B** Linux PTMatchAll, **~740 B** Windows V2NW (XOR-rolling); **~2 KiB** wrapped PE with one AES-CTR payload (V2NW + 281 B AES-NI dispatch + 176 B round keys) |
+| Stub | Builder-emitted x86-64 + Intel multi-byte NOP polymorphism (3 slots A/B/C, v0.90+) |
+| Predicate evaluator | full — `PT_MATCH_ALL` + `PT_CPUID_VENDOR` + `PT_WIN_BUILD` (Windows V2NW) + `PT_CPUID_FEATURES` + `Negate` (v0.88+) |
+| Cipher dispatch | per-payload `CipherType`: XOR-rolling default + AES-128-CTR via AES-NI on Windows V2NW (v0.92+; Linux V2-Negate XOR-rolling only) |
 | Payload format | **Raw shellcode only** — stub JMPs into the bytes |
 | Process tree | 1 binary (no fork, no execve) |
 | Disk artefact | none |
