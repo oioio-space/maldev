@@ -103,12 +103,16 @@ Formats:
                Same -rounds/-seed knobs as windows-exe.
 
 Bundle spec syntax (-pl):
-  <file>:<vendor>:<min>-<max>
+  <file>:<vendor>:<min>-<max>[:negate]
     vendor ∈ {intel | amd | *}        (* = any vendor)
     min/max = Windows build number    (use * for "no bound")
+    negate  = optional trailing keyword; flips the predicate's
+              match outcome (v0.88.0+: requires V2-Negate /
+              V2NW stub, wired in v0.88.0)
   e.g. -pl payload-w11.exe:intel:22000-99999
        -pl payload-w10.exe:amd:10000-19999
        -pl fallback.exe:*:*-*
+       -pl exclude-vm.exe:intel:0-99999:negate  (Intel host EXCEPT)
   Fallback behaviour: exit (silent), crash (loud), first (always payload 0).
   Bundle workflows:
     - inspect:   packer bundle -inspect <bundle>
@@ -373,13 +377,27 @@ func runBundle(args []string) int {
 	return 0
 }
 
-// parseBundleSpec parses a `-pl <file>:<vendor>:<min>-<max>` spec.
+// parseBundleSpec parses a `-pl <file>:<vendor>:<min>-<max>[:negate]` spec.
+// The trailing `:negate` suffix (when present) flips the entire match
+// outcome of the FingerprintPredicate, enabling "match EXCEPT this"
+// semantics introduced by v0.88.0's V2-Negate stub.
 func parseBundleSpec(spec string) (packer.BundlePayload, error) {
-	parts := strings.SplitN(spec, ":", 3)
-	if len(parts) != 3 {
-		return packer.BundlePayload{}, fmt.Errorf("expected <file>:<vendor>:<min>-<max>, got %d colon-separated parts", len(parts))
+	parts := strings.SplitN(spec, ":", 4)
+	if len(parts) < 3 {
+		return packer.BundlePayload{}, fmt.Errorf("expected <file>:<vendor>:<min>-<max>[:negate], got %d colon-separated parts", len(parts))
 	}
 	file, vendorStr, rangeStr := parts[0], parts[1], parts[2]
+	negate := false
+	if len(parts) == 4 {
+		switch strings.ToLower(parts[3]) {
+		case "negate":
+			negate = true
+		case "":
+			// trailing-colon-empty-suffix — treat as no negate
+		default:
+			return packer.BundlePayload{}, fmt.Errorf("unknown trailing flag %q: want \"negate\" or omit", parts[3])
+		}
+	}
 
 	bin, err := os.ReadFile(file)
 	if err != nil {
@@ -432,6 +450,7 @@ func parseBundleSpec(spec string) (packer.BundlePayload, error) {
 	if pred.PredicateType == 0 {
 		pred.PredicateType = packer.PTMatchAll
 	}
+	pred.Negate = negate
 	return packer.BundlePayload{Binary: bin, Fingerprint: pred}, nil
 }
 

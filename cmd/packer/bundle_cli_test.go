@@ -51,14 +51,47 @@ func TestParseBundleSpec_Vendors(t *testing.T) {
 // missing payload file.
 func TestParseBundleSpec_Errors(t *testing.T) {
 	cases := []string{
-		"toofew",                 // missing colons
-		"f.bin:martian:0-0",      // unknown vendor
-		"/nonexistent:intel:0-0", // missing payload
-		"f.bin:intel:abc-def",    // un-parseable build
+		"toofew",                          // missing colons
+		"f.bin:martian:0-0",               // unknown vendor
+		"/nonexistent:intel:0-0",          // missing payload
+		"f.bin:intel:abc-def",             // un-parseable build
+		"f.bin:intel:0-99999:bogus",       // unknown trailing keyword
 	}
 	for _, spec := range cases {
 		if _, err := parseBundleSpec(spec); err == nil {
 			t.Errorf("spec %q: expected error, got nil", spec)
 		}
+	}
+}
+
+// TestParseBundleSpec_NegateFlag covers the v0.88.0 spec extension:
+// optional `:negate` trailing suffix flips the predicate.
+func TestParseBundleSpec_NegateFlag(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "p.bin")
+	if err := os.WriteFile(src, []byte("hi"), 0o644); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+
+	cases := []struct {
+		name       string
+		spec       string
+		wantNegate bool
+	}{
+		{"no suffix", src + ":intel:0-99999", false},
+		{"negate suffix", src + ":intel:0-99999:negate", true},
+		{"empty trailing", src + ":intel:0-99999:", false},
+		{"negate on wildcard", src + ":*:*-*:negate", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			bp, err := parseBundleSpec(c.spec)
+			if err != nil {
+				t.Fatalf("parseBundleSpec %q: %v", c.spec, err)
+			}
+			if got := bp.Fingerprint.Negate; got != c.wantNegate {
+				t.Errorf("Negate = %v, want %v", got, c.wantNegate)
+			}
+		})
 	}
 }
