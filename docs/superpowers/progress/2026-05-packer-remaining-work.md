@@ -37,7 +37,14 @@ box + record commit short-SHA + bump front-matter `last_updated`.
   PT_WIN_BUILD). Switch to `bundleStubV2NegateWinBuildWindows`. Win
   VM E2E re-dispatch. ~30 min.
 
-- [ ] **#1.3 PT_CPUID_FEATURES predicate**
+- [x] **#1.3 PT_CPUID_FEATURES predicate** (commit pending)
+  Added CPUID EAX=1 to V2-Negate + V2NW prologues; ECX features
+  saved to [rsi+12]. Per-entry test (`test r9b, 4`; mask + value
+  compare) inserted before .entry_done in both stubs.
+  Tests (all PASS):
+    - TestBundleStubV2N_E2E_PTCpuidFeaturesMatchExit42 (SSE3 match)
+    - TestBundleStubV2N_E2E_PTCpuidFeaturesMismatchExitClean (SSE3 mismatch → fallback)
+    - TestBundleStubV2NW_E2E_PTCpuidFeaturesWindows (Win VM SSE3 match)
   Bit 2 of `PredicateType` documented in wire format but never wired
   into any stub. Pattern same as PT_WIN_BUILD: `test r9b, 4; jz
   .skip_features; cmp ecx_from_cpuid, [r8+24] AND [r8+28]; if

@@ -96,9 +96,20 @@ func bundleStubV2NegateWinBuildWindows() ([]byte, int, error) {
 		return nil, 0, e
 	}
 	// mov r13d, eax — save build to callee-saved-ish R13.
-	// Encoding: 41 89 c5 (REX.B=1, 89 MOV r/m, r, ModRM=11_000_101
-	// reg=000=RAX rm=101=R13).
 	if e := check(b.RawBytes([]byte{0x41, 0x89, 0xc5}), "mov r13d eax"); e != nil {
+		return nil, 0, e
+	}
+
+	// === CPUID EAX=1 → save ECX features to [rdi+12] (Tier 🔴 #1.3) ===
+	// Same shape as V2-Negate's prologue extension. 4-byte feature
+	// flags fit in the unused tail of the 16-byte stack scratch.
+	if e := check(b.RawBytes([]byte{0xb8, 0x01, 0x00, 0x00, 0x00}), "mov eax 1"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.RawBytes([]byte{0x0f, 0xa2}), "cpuid #1"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.MOVL(amd64.MemOp{Base: amd64.RDI, Disp: 12}, amd64.RCX), "mov [rdi+12] ecx"); e != nil {
 		return nil, 0, e
 	}
 
@@ -275,8 +286,38 @@ func bundleStubV2NegateWinBuildWindows() ([]byte, int, error) {
 		return nil, 0, e
 	}
 
-	// .skip_winbuild: fall-through to .entry_done
+	// .skip_winbuild: PT_CPUID_FEATURES check (Tier 🔴 #1.3)
 	b.Label("skip_winbuild")
+	skipFeaturesLabel := amd64.LabelRef("skip_features")
+	// test r9b, 4  — PT_CPUID_FEATURES bit
+	if e := check(b.RawBytes([]byte{0x41, 0xf6, 0xc1, 0x04}), "test r9b 4"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.JE(skipFeaturesLabel), "jz skip_features"); e != nil {
+		return nil, 0, e
+	}
+	// mov r10d, [rsi+12]  — host CPUID[1].ECX features
+	if e := check(b.MOVL(amd64.R10, amd64.MemOp{Base: amd64.RSI, Disp: 12}), "mov r10d features"); e != nil {
+		return nil, 0, e
+	}
+	// and r10d, [r8+24]  — mask with CPUIDFeatureMask
+	if e := check(b.RawBytes([]byte{0x45, 0x23, 0x50, 0x18}), "and r10d [r8+24]"); e != nil {
+		return nil, 0, e
+	}
+	// cmp r10d, [r8+28]  — vs CPUIDFeatureValue
+	if e := check(b.CMPL(amd64.R10, amd64.MemOp{Base: amd64.R8, Disp: 28}), "cmpl r10d [r8+28]"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.JE(skipFeaturesLabel), "je skip_features (match)"); e != nil {
+		return nil, 0, e
+	}
+	// fall-through: mismatch → clear R12B
+	if e := check(b.RawBytes([]byte{0x45, 0x30, 0xe4}), "xor r12b r12b (features fail)"); e != nil {
+		return nil, 0, e
+	}
+
+	b.Label("skip_features")
+	// fall-through to .entry_done
 
 	// .entry_done: apply negate flag
 	b.Label("entry_done")

@@ -88,6 +88,26 @@ func bundleStubVendorAwareV2Negate() ([]byte, int, error) {
 		return nil, 0, e
 	}
 
+	// === Section 2.5: CPUID EAX=1 → save ECX features to [rdi+12] ===
+	// Used by the PT_CPUID_FEATURES predicate. The 16-byte stack
+	// scratch was pre-allocated for the 12-byte vendor; the
+	// remaining 4 bytes fit the feature ECX. Layout:
+	//   [rsi+0..11]   12-byte CPUID vendor (canonical)
+	//   [rsi+12..15]  4-byte CPUID[1].ECX (feature flags 1)
+	//
+	// mov eax, 1   (b8 01 00 00 00 — 5 bytes)
+	// cpuid        (0f a2 — 2 bytes)
+	// mov [rdi+12], ecx (89 4f 0c — 3 bytes)
+	if e := check(b.RawBytes([]byte{0xb8, 0x01, 0x00, 0x00, 0x00}), "mov eax 1"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.RawBytes([]byte{0x0f, 0xa2}), "cpuid #1"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.MOVL(amd64.MemOp{Base: amd64.RDI, Disp: 12}, amd64.RCX), "mov [rdi+12] ecx"); e != nil {
+		return nil, 0, e
+	}
+
 	// === Section 3: Loop setup ===
 	if e := check(b.MOVZWL(amd64.RCX, amd64.MemOp{Base: amd64.R15, Disp: 6}), "movzx ecx"); e != nil {
 		return nil, 0, e
@@ -209,8 +229,47 @@ func bundleStubVendorAwareV2Negate() ([]byte, int, error) {
 	}
 	// fallthrough to .skip_vendor
 
-	// .skip_vendor (placeholder for future PT_WIN_BUILD insertion)
+	// .skip_vendor — PT_CPUID_FEATURES check (Tier 🔴 #1.3)
 	b.Label("skip_vendor")
+	skipFeaturesLabel := amd64.LabelRef("skip_features")
+	// test r9b, 4  — PT_CPUID_FEATURES bit
+	if e := check(b.RawBytes([]byte{0x41, 0xf6, 0xc1, 0x04}), "test r9b 4"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.JE(skipFeaturesLabel), "jz skip_features"); e != nil {
+		return nil, 0, e
+	}
+	// mov r10d, [rsi+12]  — host CPUID[1].ECX features
+	if e := check(b.MOVL(amd64.R10, amd64.MemOp{Base: amd64.RSI, Disp: 12}), "mov r10d features"); e != nil {
+		return nil, 0, e
+	}
+	// and r10d, [r8+24]  — mask with CPUIDFeatureMask
+	// Encoding: 44 23 50 18 (REX.R=1, opcode 23 AND r32, r/m32,
+	// ModRM=mod=01 reg=010=R10 rm=000=RAX-base disp8=0x18... wait
+	// rm needs to be R8. Let me redo:
+	// AND r10d, [r8+24]:
+	//   REX: W=0, R=1 (R10 extension), X=0, B=1 (R8 base extension) → 0x45
+	//   Opcode: 23 (AND r32, r/m32)
+	//   ModRM: mod=01 reg=010 rm=000 → 01_010_000 = 0x50
+	//   Disp8: 0x18
+	if e := check(b.RawBytes([]byte{0x45, 0x23, 0x50, 0x18}), "and r10d [r8+24]"); e != nil {
+		return nil, 0, e
+	}
+	// cmp r10d, [r8+28]  — vs CPUIDFeatureValue
+	// Encoding via Builder.CMPL with the operand-swap convention.
+	if e := check(b.CMPL(amd64.R10, amd64.MemOp{Base: amd64.R8, Disp: 28}), "cmpl r10d [r8+28]"); e != nil {
+		return nil, 0, e
+	}
+	// je .skip_features  — masked features match value → keep R12B
+	if e := check(b.JE(skipFeaturesLabel), "je skip_features (match)"); e != nil {
+		return nil, 0, e
+	}
+	// fallthrough → no match → clear R12B
+	if e := check(b.RawBytes([]byte{0x45, 0x30, 0xe4}), "xor r12b r12b (features fail)"); e != nil {
+		return nil, 0, e
+	}
+
+	b.Label("skip_features")
 	// fallthrough to .entry_done
 
 	// .entry_done: apply negate flag
