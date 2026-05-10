@@ -106,13 +106,21 @@ Total Tier 1: ~3-4h supervised.
   before DecryptAESCTR. 3 new pin tests (round-key tail layout +
   auto-inject + auto-inject-is-OR) + existing 4 round-trip tests
   all green.
-  **Phase 3c (queued, needs Win VM E2E):** stub-side AES-CTR
-  dispatch — V2NW reads PayloadEntry[12], branches to a new
-  emit-time path that sets R8 = ciphertext_end (round keys), loads
-  IV into XMM0, loops emitAESCTRBlockDecrypt + counter increment
-  per 16-byte block, handles trailing partial block. Win VM E2E
-  test required (AES-NI semantics can't be runtime-validated on the
-  Fedora dev box).
+  **Phase 3c-prep (788decb):** BSWAP Builder primitive.
+  **Phase 3c-loop (pending commit):** `emitAESCTRDecryptLoop` —
+  243-byte stub-side AES-CTR loop helper. Composes 32 B setup
+  (load IV → XMM0, derive R8 round-keys pointer, RSI in-place
+  source, R9 remaining bytes) + loop body (test r9, jz aes_done,
+  emitAESCTRBlockDecrypt 148 B, BE counter increment via BSWAP
+  ~40 B, advance pointers, jmp aes_loop). Length sentinel + setup
+  prefix pinned by `TestEmitAESCTRDecryptLoop`. Padded plaintext
+  assumption: pack-time pads to 16-byte multiple (Phase 3c-wire).
+  **Phase 3c-wire (queued, needs Win VM E2E):** V2NW dispatch —
+  read CipherType byte at [RCX+12], branch to emitAESCTRDecryptLoop
+  for CipherType=2 OR fall through to existing emitDecryptStep XOR
+  loop. Pack-time padding of plaintext to 16-byte multiple +
+  PlaintextSize-trim on UnpackBundle. Win VM E2E test for an AES-CTR
+  exit42 bundle.
 
 - [x] **#2.3 Polymorphic slots B & C** (pending commit)
   Added `emitNopJunk` helper (Builder-time RawBytes NOP-run with

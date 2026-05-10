@@ -239,6 +239,154 @@ func emitAESCTRBlockDecrypt(b *amd64.Builder) error {
 	return nil
 }
 
+// emitAESCTRDecryptLoop emits the V2NW matched-payload AES-CTR
+// decrypt loop. Called from V2NW when the matched PayloadEntry's
+// CipherType byte == [CipherTypeAESCTR] (Tier 🟡 #2.2 Phase 3c).
+//
+// Register contract on entry:
+//   RCX = matched PayloadEntry pointer (canonical, set by matched
+//         block before this helper)
+//   RDI = absolute ciphertext-region start (= entry data RVA + R15;
+//         points at the IV bytes)
+//
+// Register contract on exit:
+//   Plaintext written in-place starting 16 bytes after the original
+//   RDI (i.e. immediately after the IV). RDI advanced to the
+//   round-key region. Caller's .jmp_payload epilogue reloads RDI
+//   from [RCX]+R15 (data RVA) before final JMP, so RDI's exit
+//   value is intentionally clobberable.
+//
+// Clobbers: XMM0 (counter), XMM1, XMM2 (per emitAESCTRBlockDecrypt),
+// RAX (counter-increment scratch), RDX (ciphertext length scratch),
+// R8 (round keys ptr), R9 (loop counter), RSI (ciphertext source).
+//
+// Sequence overview:
+//   movdqu xmm0, [rdi]         ; XMM0 = IV (128-bit BE counter init)
+//   add  rdi, 16               ; skip past IV
+//   mov  edx, [rcx+4]          ; edx = DataSize
+//   sub  rdx, 192              ; 16 IV + 176 round keys
+//   mov  r8, rdi
+//   add  r8, rdx               ; r8 = round-keys pointer
+//   mov  rsi, rdi              ; rsi = ciphertext source (in-place)
+//   mov  r9, rdx               ; r9 = remaining bytes
+//   .aes_loop:
+//     test r9, r9
+//     jz   .aes_done
+//     emitAESCTRBlockDecrypt   ; 148 B — decrypts 16-byte block
+//     ; counter increment (BE 64-bit low half via BSWAP)
+//     sub  rsp, 16
+//     movdqu [rsp], xmm0
+//     mov  rax, [rsp+8]
+//     bswap rax
+//     inc  rax
+//     bswap rax
+//     mov  [rsp+8], rax
+//     movdqu xmm0, [rsp]
+//     add  rsp, 16
+//     ; advance
+//     add  rdi, 16
+//     add  rsi, 16
+//     sub  r9, 16
+//     jmp  .aes_loop
+//   .aes_done:
+//
+// The 64-bit-only counter assumption holds for any plaintext shorter
+// than 2^64 * 16 B = 256 EB — every realistic maldev payload. Counter
+// wrap would require 32-bit-precision BE add with carry into the
+// high half; out of scope for v0.92.
+//
+// Uses labels "aes_loop" + "aes_done" — caller MUST NOT collide with
+// these names in its own b.Label() calls or the resolver hits an
+// "ambiguous label" panic at Encode time.
+func emitAESCTRDecryptLoop(b *amd64.Builder) error {
+	emit := func(op string, err error) error {
+		if err != nil {
+			return fmt.Errorf("packer: aes-ctr loop %s: %w", op, err)
+		}
+		return nil
+	}
+	// Setup.
+	if err := emit("movdqu xmm0 [rdi]", b.MOVDQULoad(amd64.X0, amd64.MemOp{Base: amd64.RDI})); err != nil {
+		return err
+	}
+	if err := emit("add rdi 16", b.ADD(amd64.RDI, amd64.Imm(16))); err != nil {
+		return err
+	}
+	if err := emit("mov edx [rcx+4]", b.MOVL(amd64.RDX, amd64.MemOp{Base: amd64.RCX, Disp: 4})); err != nil {
+		return err
+	}
+	if err := emit("sub rdx 192", b.SUB(amd64.RDX, amd64.Imm(192))); err != nil {
+		return err
+	}
+	if err := emit("mov r8 rdi", b.MOV(amd64.R8, amd64.RDI)); err != nil {
+		return err
+	}
+	if err := emit("add r8 rdx", b.ADD(amd64.R8, amd64.RDX)); err != nil {
+		return err
+	}
+	if err := emit("mov rsi rdi", b.MOV(amd64.RSI, amd64.RDI)); err != nil {
+		return err
+	}
+	if err := emit("mov r9 rdx", b.MOV(amd64.R9, amd64.RDX)); err != nil {
+		return err
+	}
+
+	loopLbl := b.Label("aes_loop")
+	doneLbl := amd64.LabelRef("aes_done")
+	if err := emit("test r9 r9", b.TEST(amd64.R9, amd64.R9)); err != nil {
+		return err
+	}
+	if err := emit("je aes_done", b.JE(doneLbl)); err != nil {
+		return err
+	}
+	if err := emitAESCTRBlockDecrypt(b); err != nil {
+		return fmt.Errorf("packer: aes-ctr loop body: %w", err)
+	}
+	// Counter increment.
+	if err := emit("sub rsp 16", b.SUB(amd64.RSP, amd64.Imm(16))); err != nil {
+		return err
+	}
+	if err := emit("movdqu [rsp] xmm0", b.MOVDQUStore(amd64.MemOp{Base: amd64.RSP}, amd64.X0)); err != nil {
+		return err
+	}
+	if err := emit("mov rax [rsp+8]", b.MOV(amd64.RAX, amd64.MemOp{Base: amd64.RSP, Disp: 8})); err != nil {
+		return err
+	}
+	if err := emit("bswap rax #1", b.BSWAP(amd64.RAX)); err != nil {
+		return err
+	}
+	if err := emit("inc rax", b.INC(amd64.RAX)); err != nil {
+		return err
+	}
+	if err := emit("bswap rax #2", b.BSWAP(amd64.RAX)); err != nil {
+		return err
+	}
+	if err := emit("mov [rsp+8] rax", b.MOV(amd64.MemOp{Base: amd64.RSP, Disp: 8}, amd64.RAX)); err != nil {
+		return err
+	}
+	if err := emit("movdqu xmm0 [rsp]", b.MOVDQULoad(amd64.X0, amd64.MemOp{Base: amd64.RSP})); err != nil {
+		return err
+	}
+	if err := emit("add rsp 16", b.ADD(amd64.RSP, amd64.Imm(16))); err != nil {
+		return err
+	}
+	// Advance pointers + remaining size.
+	if err := emit("add rdi 16 #2", b.ADD(amd64.RDI, amd64.Imm(16))); err != nil {
+		return err
+	}
+	if err := emit("add rsi 16", b.ADD(amd64.RSI, amd64.Imm(16))); err != nil {
+		return err
+	}
+	if err := emit("sub r9 16", b.SUB(amd64.R9, amd64.Imm(16))); err != nil {
+		return err
+	}
+	if err := emit("jmp aes_loop", b.JMP(loopLbl)); err != nil {
+		return err
+	}
+	b.Label("aes_done")
+	return nil
+}
+
 // emitNopJunk emits a small random sequence of Intel multi-byte NOPs
 // directly into the Builder stream. Used for in-stub polymorphism
 // slots (B and C) in V2-family bundle stubs — yara byte-pattern

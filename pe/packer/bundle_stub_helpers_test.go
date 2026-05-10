@@ -181,6 +181,49 @@ func TestEmitAESCTRBlockDecrypt(t *testing.T) {
 	}
 }
 
+// TestEmitAESCTRDecryptLoop pins the Phase 3c stub-side AES-CTR
+// decrypt loop's structure: setup prefix, single-block body via
+// emitAESCTRBlockDecrypt, BE-counter increment via BSWAP, and the
+// loop epilogue. Total length is the regression sentinel — a wrong
+// Builder primitive change or a missing label resolve surfaces here
+// before reaching V2NW integration.
+func TestEmitAESCTRDecryptLoop(t *testing.T) {
+	b, err := amd64.New()
+	if err != nil {
+		t.Fatalf("amd64.New: %v", err)
+	}
+	if err := emitAESCTRDecryptLoop(b); err != nil {
+		t.Fatalf("emitAESCTRDecryptLoop: %v", err)
+	}
+	out, err := b.Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+
+	// Length sentinel (243 B as of v0.92.0 Phase 3c-prep). Setup
+	// = 32 B; loop body = test r9 (3) + jz (2) + block-decrypt (148)
+	// + counter-inc (40) + advance (9) + jmp (5) + 4 B padding/labels.
+	if len(out) < 230 || len(out) > 260 {
+		t.Errorf("loop length = %d B, want ~243 (regression — Phase 3c stub-size budget shifted)", len(out))
+	}
+
+	// Setup prefix pin — first 8 instructions before the .aes_loop
+	// label. Stable byte sequence (no Jcc displacements yet):
+	wantPrefix := []byte{
+		0xf3, 0x0f, 0x6f, 0x07, // movdqu xmm0, [rdi]   (load IV)
+		0x48, 0x83, 0xc7, 0x10, // add rdi, 16          (skip past IV)
+		0x8b, 0x51, 0x04, // mov edx, [rcx+4]    (DataSize)
+		0x48, 0x81, 0xea, 0xc0, 0x00, 0x00, 0x00, // sub rdx, 192        (-16 IV -176 RK)
+		0x49, 0x89, 0xf8, // mov r8, rdi
+		0x49, 0x01, 0xd0, // add r8, rdx         (R8 = round keys)
+		0x48, 0x89, 0xfe, // mov rsi, rdi        (in-place source)
+		0x49, 0x89, 0xd1, // mov r9, rdx         (R9 = remaining)
+	}
+	if !bytes.Equal(out[:len(wantPrefix)], wantPrefix) {
+		t.Errorf("setup prefix:\n got % x\nwant % x", out[:len(wantPrefix)], wantPrefix)
+	}
+}
+
 // TestEmitBundleLoopSetup pins the 15-byte scan-loop initialiser:
 // reads entry count from BundleHeader (offset 6), entries RVA
 // (offset 8) + folds R15 to make it absolute, zeros loop counter.
