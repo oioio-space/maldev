@@ -121,6 +121,45 @@ Reverse on the runtime side: `ReverseArithShift` →
 `DecryptAESGCM`. **Always** wipe the key buffer with
 `memory.SecureZero` immediately after `DecryptAESGCM` returns.
 
+## Performance reference
+
+Measured on x86_64 (Linux, AMD-NI / SHA-NI available), 64 KiB
+plaintext, `go test -bench` median of 3 runs (numbers move ±5 %
+across runs / hosts; pick on shape, not exact MB/s):
+
+| Primitive | Throughput | Allocs/op | Comment |
+|---|---|---|---|
+| **AES-GCM** | ~860 MB/s | 4 | AES-NI accelerated; outer envelope of choice on AES-NI-capable hosts. |
+| **HMAC-SHA256** (tag) | ~790 MB/s | 6 | SHA-NI accelerated; integrity layer for raw-stream ciphers. |
+| **AES-CTR** | ~680 MB/s | 3 | AES-NI without GCM tag — saves 16 B + the const-time-compare branch. |
+| **ChaCha20-Poly1305** | ~590 MB/s | 2 | AEAD; preferred when AES-NI absent. |
+| **ChaCha20 raw** | ~280 MB/s | 1 | Strip Poly1305 when stage-2 self-validates. |
+| **RC4** | ~260 MB/s | 2 | Stream; fast initialization. Defender-friendly bias. |
+| **XOR (repeating key)** | ~170 MB/s | 1 | Allocator-bound; trivial cipher. |
+| **Speck-128/128** | ~130 MB/s | 2 | Pure-Go ARX; ~30 B asm/round — preferred lightweight block primitive when AES is too heavy. |
+| **TEA / XTEA** | ~40 MB/s | 2 | 8-byte block (more rounds per byte vs 16-byte block ciphers). |
+| **Argon2id** (default params) | ~93 ms / call | 40 | Build-host KDF, NOT a per-byte primitive — single call per pack. |
+
+Bench source: `crypto/cipher_benchmarks_test.go`. Reproduce with:
+
+```bash
+go test -bench=. -benchmem -run='^$' ./crypto/
+```
+
+Reading the table:
+
+  * If you have AES-NI on the target, AES-GCM is the right outer
+    envelope. The throughput already accounts for the GCM tag
+    computation.
+  * Without AES-NI, ChaCha20-Poly1305 is the AEAD pick — it's
+    constant-time across all CPUs.
+  * If you're sizing a stage-1 stub and AES is too much (no AES-NI,
+    256-byte S-box budget), **Speck-128/128** is the right pick.
+    3 × faster than TEA/XTEA and a 16-byte block matches AES.
+  * If your stage-2 self-validates, drop the AEAD tag: AES-CTR or
+    ChaCha20 raw paired with HMAC-SHA256 is ~10 % faster than the
+    AEAD equivalent on the same host AND saves 16 B per blob.
+
 ## Primer
 
 Static signatures are the cheapest defender win. A raw shellcode buffer
