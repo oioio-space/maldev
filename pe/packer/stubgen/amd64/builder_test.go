@@ -317,3 +317,76 @@ func TestBuilder_LabelAndJMP(t *testing.T) {
 		t.Errorf("got %v, want JMP", inst.Op)
 	}
 }
+
+// TestBuilder_ANDB verifies the 8-bit AND-with-immediate encoding used by
+// the bundle scan stub's decrypt loop (`and dl, 15`) and predicate-mask
+// path (`and r9b, 1`). Intel encoding: 80 /4 ib for ALU GPRs (no REX),
+// REX.B + 80 /4 ib for R8B-R15B.
+func TestBuilder_ANDB(t *testing.T) {
+	cases := []struct {
+		name string
+		dst  amd64.Reg
+		imm  amd64.Imm
+		want []byte
+	}{
+		{"and dl, 15", amd64.RDX, 0x0f, []byte{0x80, 0xe2, 0x0f}},
+		{"and r9b, 1", amd64.R9, 0x01, []byte{0x41, 0x80, 0xe1, 0x01}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			b, err := amd64.New()
+			require.NoError(t, err)
+			require.NoError(t, b.ANDB(c.dst, c.imm))
+			out, err := b.Encode()
+			require.NoError(t, err)
+			if !bytes.Equal(out, c.want) {
+				t.Errorf("encoding % x, want % x", out, c.want)
+			}
+			inst, err := x86asm.Decode(out, 64)
+			require.NoError(t, err, "Decode (bytes=% x)", out)
+			if inst.Op != x86asm.AND {
+				t.Errorf("got %v, want AND", inst.Op)
+			}
+		})
+	}
+}
+
+// TestBuilder_MOVZBL verifies the byte-register zero-extending move
+// (`movzx edx, dl` → 0F B6 D2). Used by the SGN decrypt loop to widen
+// the low-4-bit index into a clean 32-bit register before SIB lookup.
+func TestBuilder_MOVZBL(t *testing.T) {
+	b, err := amd64.New()
+	require.NoError(t, err)
+	require.NoError(t, b.MOVZBL(amd64.RDX, amd64.RDX))
+	out, err := b.Encode()
+	require.NoError(t, err)
+	want := []byte{0x0f, 0xb6, 0xd2}
+	if !bytes.Equal(out, want) {
+		t.Errorf("encoding % x, want % x", out, want)
+	}
+	inst, err := x86asm.Decode(out, 64)
+	require.NoError(t, err, "Decode (bytes=% x)", out)
+	if inst.Op != x86asm.MOVZX {
+		t.Errorf("got %v, want MOVZX", inst.Op)
+	}
+}
+
+// TestBuilder_XORB verifies the 8-bit XOR-with-SIB-memory encoding
+// (`xor al, [r8+rdx]` → 41 32 04 10). The decrypt loop's SBox indirection
+// needs SIB addressing because the index register varies.
+func TestBuilder_XORB(t *testing.T) {
+	b, err := amd64.New()
+	require.NoError(t, err)
+	require.NoError(t, b.XORB(amd64.RAX, amd64.MemOp{Base: amd64.R8, Index: amd64.RDX, Scale: 1}))
+	out, err := b.Encode()
+	require.NoError(t, err)
+	want := []byte{0x41, 0x32, 0x04, 0x10}
+	if !bytes.Equal(out, want) {
+		t.Errorf("encoding % x, want % x", out, want)
+	}
+	inst, err := x86asm.Decode(out, 64)
+	require.NoError(t, err, "Decode (bytes=% x)", out)
+	if inst.Op != x86asm.XOR {
+		t.Errorf("got %v, want XOR", inst.Op)
+	}
+}

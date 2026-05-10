@@ -368,14 +368,29 @@ func bundleStubVendorAwareV2Negate() ([]byte, int, error) {
 	if e := check(b.JE(jmpPayloadLabel), "dec jz jmp_payload"); e != nil {
 		return nil, 0, e
 	}
-	if e := check(b.RawBytes([]byte{
-		0x8a, 0x07,
-		0x44, 0x88, 0xca,
-		0x80, 0xe2, 0x0f,
-		0x0f, 0xb6, 0xd2,
-		0x41, 0x32, 0x04, 0x10,
-		0x88, 0x07,
-	}), "dec 8-bit ops"); e != nil {
+	// Decrypt 6-step (Builder-emitted; was RawBytes before #2.1):
+	//   mov al, [rdi]               ; load ciphertext byte
+	//   mov dl, r9b                 ; copy round index
+	//   and dl, 15                  ; SBox is 16 entries
+	//   movzx edx, dl               ; widen for SIB indexing
+	//   xor al, [r8+rdx]            ; SBox lookup XOR
+	//   mov [rdi], al               ; store plaintext byte
+	if e := check(b.MOVBReg(amd64.RAX, amd64.MemOp{Base: amd64.RDI}), "dec mov al [rdi]"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.MOVBReg(amd64.RDX, amd64.R9), "dec mov dl r9b"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.ANDB(amd64.RDX, amd64.Imm(0x0f)), "dec and dl 15"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.MOVZBL(amd64.RDX, amd64.RDX), "dec movzx edx dl"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.XORB(amd64.RAX, amd64.MemOp{Base: amd64.R8, Index: amd64.RDX, Scale: 1}), "dec xor al [r8+rdx]"); e != nil {
+		return nil, 0, e
+	}
+	if e := check(b.MOVB(amd64.MemOp{Base: amd64.RDI}, amd64.RAX), "dec mov [rdi] al"); e != nil {
 		return nil, 0, e
 	}
 	if e := check(b.INC(amd64.RDI), "dec inc rdi"); e != nil {

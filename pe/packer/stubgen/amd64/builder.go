@@ -214,6 +214,55 @@ func (bb *Builder) MOVB(dst MemOp, src Reg) error {
 	return nil
 }
 
+// ANDB emits AND r/m8, imm8 — 8-bit AND with sign-extended-not-applicable
+// immediate. Used by the bundle scan stub's decrypt loop (`and dl, 15`)
+// to mask the SBox index, and by the predicate path (`and r9b, 1`) to
+// isolate a bitmask bit. Plan 9 wart: AANDB encodes correctly only when
+// the destination is written via [regToByteReg]; without it, golang-asm
+// rejects the full 64-bit GPR as illegal.
+func (bb *Builder) ANDB(dst Reg, imm Imm) error {
+	p := bb.b.NewProg()
+	p.As = x86.AANDB
+	p.From.Type = obj.TYPE_CONST
+	p.From.Offset = int64(imm)
+	p.To.Type = obj.TYPE_REG
+	p.To.Reg = regToByteReg(dst)
+	bb.b.AddInstruction(p)
+	return nil
+}
+
+// MOVZBL emits MOVZX r32, r8 — zero-extend a byte register into a 32-bit
+// register (upper 32 bits implicitly cleared by x86-64). Distinct from
+// [MOVZX] which takes a memory source. Used by the SGN decoder loop to
+// widen the low-4-bit substitution index (`movzx edx, dl`) before the
+// SIB-indexed SBox lookup.
+func (bb *Builder) MOVZBL(dst Reg, src Reg) error {
+	p := bb.b.NewProg()
+	p.As = x86.AMOVBLZX
+	p.From.Type = obj.TYPE_REG
+	p.From.Reg = regToByteReg(src)
+	p.To.Type = obj.TYPE_REG
+	p.To.Reg = regToObj(dst)
+	bb.b.AddInstruction(p)
+	return nil
+}
+
+// XORB emits XOR r8, byte ptr [mem] — 8-bit XOR with memory source.
+// Used by the bundle decrypt loop's SBox indirection
+// (`xor al, [r8+rdx]`); src must be a [MemOp] (callers wanting reg-reg
+// XOR should use the 64-bit [XOR] with byte-aliased regs).
+func (bb *Builder) XORB(dst Reg, src MemOp) error {
+	p := bb.b.NewProg()
+	p.As = x86.AXORB
+	if err := setOperand(&p.From, src); err != nil {
+		return fmt.Errorf("amd64: XORB src: %w", err)
+	}
+	p.To.Type = obj.TYPE_REG
+	p.To.Reg = regToByteReg(dst)
+	bb.b.AddInstruction(p)
+	return nil
+}
+
 // binaryOp is the shared emitter for two-operand arithmetic (XOR/SUB/ADD).
 // golang-asm's Plan-9 convention is From=src, To=dst — same as MOV.
 func (bb *Builder) binaryOp(as obj.As, name string, dst, src Op) error {
