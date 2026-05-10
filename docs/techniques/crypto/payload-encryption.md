@@ -80,6 +80,8 @@ function.
 |---|---|---|---|---|---|---|---|---|---|
 | **AES-GCM** | AEAD outer | fast (AES-NI) | uniform high (256 bits) | 32 B | 12 B random | ✅ tag | yes | low (random) | Default outer envelope; tampering detection mandatory. |
 | **XChaCha20-Poly1305** | AEAD outer | fast | uniform high | 32 B | 24 B random | ✅ tag | yes | low | AES-NI absent; misuse-resistant nonce (24 B random ≈ unique). |
+| **AES-CTR raw** | Stream (CTR) | fast (AES-NI) | uniform high | 16/24/32 B | 16 B random | ❌ | yes | low | Stage-1 stub decrypts a stage-2 payload that self-validates; saves 16 B AEAD tag + the const-time-compare branch. Pair with `HMACSHA256` for integrity. |
+| **ChaCha20 raw** | Stream | fast | uniform high | 32 B | 24 B random | ❌ | yes | low | AES-NI absent + AEAD overhead unwanted. Constant-time across all CPUs (no S-box table lookups). Pair with `HMACSHA256`. |
 | **RC4** | Stream | very fast | uniform | 5–256 B | none | ❌ | yes | YARA: keystream bias | Cheap unpacker between layers; never as outer envelope. |
 | **TEA** | Block (64-bit) | very fast | uniform | 16 B | none (ECB) | ❌ | yes | low | Tiny block primitive when binary footprint matters. |
 | **XTEA** | Block (64-bit) | very fast | uniform | 16 B | none (ECB) | ❌ | yes | low | Same as TEA but with corrected key schedule. |
@@ -415,6 +417,110 @@ truncation case, as `ErrStreamTruncated`).
 - Required privileges: none.
 - Platform: any.
 
+### `EncryptAESCTR(key, plaintext []byte) ([]byte, error)`
+
+- godoc: AES-CTR raw stream cipher with random IV. Unauthenticated.
+- Description: counter-mode AES; same key sizes as AES-GCM (16/24/32 B for AES-128/192/256). Drops the GCM 16-byte authentication tag → smaller wire format, tighter critical path. Caller validates plaintext integrity downstream (next-stage self-validation, outer HMAC).
+- Parameters: `key` — 16, 24, or 32 bytes; `plaintext` — any length.
+- Returns: `IV (16 B) || ciphertext`. Plaintext length == ciphertext length - 16.
+- Side effects: allocates the output slice + reads 16 bytes from `crypto/rand`.
+- OPSEC: malleable — bit flips in ciphertext flip same-position plaintext bits silently. Pair with `HMACSHA256` if integrity matters.
+- Required privileges: none.
+- Platform: any.
+
+### `DecryptAESCTR(key, ciphertext []byte) ([]byte, error)`
+
+- godoc: inverse of `EncryptAESCTR`. No integrity check.
+- Description: rejects ciphertexts shorter than the 16-byte IV with an explicit error rather than silently returning empty plaintext.
+- Parameters: `key` — same key as encryption; `ciphertext` — `IV || body`.
+- Returns: plaintext (length == len(ciphertext) - 16).
+- Side effects: allocates the plaintext.
+- OPSEC: very-quiet.
+- Required privileges: none.
+- Platform: any.
+
+### `EncryptChaCha20Raw(key, plaintext []byte) ([]byte, error)`
+
+- godoc: raw XChaCha20 stream cipher (no Poly1305 authentication). 24-byte random nonce.
+- Description: pairs with `EncryptChaCha20` (XChaCha20-Poly1305 AEAD) the same way `EncryptAESCTR` pairs with `EncryptAESGCM`. Use when AES-NI is absent AND the stage-2 payload validates itself. ChaCha20 is constant-time across all CPUs (no S-box table lookups), so it doesn't leak timing info on cache-attack-prone targets.
+- Parameters: `key` — exactly 32 bytes; `plaintext` — any length.
+- Returns: `nonce (24 B) || ciphertext`.
+- Side effects: allocates output + 24 random bytes.
+- OPSEC: malleable; pair with `HMACSHA256` for integrity.
+- Required privileges: none.
+- Platform: any.
+
+### `DecryptChaCha20Raw(key, ciphertext []byte) ([]byte, error)`
+
+- godoc: inverse of `EncryptChaCha20Raw`. No integrity check.
+- Description: rejects ciphertexts shorter than the 24-byte nonce.
+- Parameters: `key` — 32 bytes; `ciphertext` — `nonce || body`.
+- Returns: plaintext (length == len(ciphertext) - 24).
+- Side effects: allocates the plaintext.
+- OPSEC: very-quiet.
+- Required privileges: none.
+- Platform: any.
+
+### `HMACSHA256(key, data []byte) []byte`
+
+- godoc: 32-byte HMAC-SHA256 tag of data under key (RFC 2104).
+- Description: pairs with the raw-stream ciphers (`EncryptAESCTR`, `EncryptChaCha20Raw`) for the encrypt-then-MAC pattern. Operator pattern: `tag = HMACSHA256(macKey, ciphertext); blob = ciphertext || tag`.
+- Parameters: `key` — any length (short keys zero-padded, long keys SHA-256-hashed per RFC 2104); `data` — any length.
+- Returns: 32-byte tag.
+- Side effects: allocates 32-byte output.
+- OPSEC: very-quiet.
+- Required privileges: none.
+- Platform: any.
+
+### `VerifyHMACSHA256(key, data, tag []byte) bool`
+
+- godoc: returns true iff `tag == HMACSHA256(key, data)`. **Constant-time** compare.
+- Description: use this instead of `bytes.Equal` to validate authentication tags — `bytes.Equal` short-circuits on first byte mismatch, leaking timing info that lets an attacker reconstruct the tag byte-by-byte.
+- Parameters: `key` / `data` — same as `HMACSHA256`; `tag` — candidate tag (any length; mismatched lengths return false).
+- Returns: bool.
+- Side effects: allocates the expected-tag slice via `HMACSHA256`.
+- OPSEC: very-quiet.
+- Required privileges: none.
+- Platform: any.
+
+### `DeriveKeyFromPassword(password, salt []byte, length uint32) ([]byte, error)`
+
+- godoc: Argon2id passphrase-to-key derivation with [`DefaultArgon2idParams`](#defaultargon2idparams) (RFC 9106 recommendation B: 64 MiB RAM, 1 iteration, 4 threads).
+- Description: operator passphrase + per-deployment salt → length-byte symmetric key. Memory-hard against GPU brute force. Use for the build-host master-key derivation step; pair with `DeriveKey` (HKDF) to fan out into per-purpose subkeys.
+- Parameters: `password` — non-empty; `salt` — ≥ 8 bytes (RFC 9106 floor), unique per deployment; `length` — output bytes, > 0.
+- Returns: `length`-byte key.
+- Side effects: allocates 64 MiB + the output. ~60 ms on modern x86_64.
+- OPSEC: very-quiet, build-host only.
+- Required privileges: none.
+- Platform: any.
+
+### `DeriveKeyFromPasswordWithParams(password, salt []byte, length uint32, params Argon2idParams) ([]byte, error)`
+
+- godoc: full-control variant of `DeriveKeyFromPassword`.
+- Description: pass [`DefaultArgon2idParams`](#defaultargon2idparams) when in doubt. Override for embedded build environments or faster CI test loops.
+- Parameters: same as `DeriveKeyFromPassword` plus an explicit `Argon2idParams` struct (Time, Memory KiB, Threads — all must be non-zero).
+- Returns: `length`-byte key; error on invalid input or zero-valued params.
+- Side effects: allocates `params.Memory * 1024` bytes during derivation.
+- OPSEC: very-quiet.
+- Required privileges: none.
+- Platform: any.
+
+### `Argon2idParams`
+
+```go
+type Argon2idParams struct {
+    Time    uint32 // iterations (RFC 9106 recommends 1)
+    Memory  uint32 // memory cost in KiB (RFC 9106 rec B: 65_536)
+    Threads uint8  // parallelism (4 for modern multi-core)
+}
+```
+
+Configuration struct for `DeriveKeyFromPasswordWithParams`. Zero-valued fields are rejected at call time.
+
+### `DefaultArgon2idParams() Argon2idParams`
+
+Returns the build-host-friendly defaults: 64 MiB / 1 iteration / 4 threads. Passes the OWASP 2024 Argon2id verifier (memory ≥ 19 MiB).
+
 ### `DeriveKey(secret []byte, label string, length int) ([]byte, error)`
 
 - godoc: HKDF-SHA256 subkey derivation (RFC 5869) with empty salt — produces statistically independent length-byte subkeys from a single master secret based on a per-purpose label.
@@ -476,6 +582,17 @@ Sentinel returned by [`DeriveKey`](#derivekeysecret-byte-label-string-length-int
 - Parameters: none.
 - Returns: forward permutation table, inverse permutation table, `error` wrapping `crypto/rand` failure.
 - Side effects: 256 CSPRNG reads (Fisher-Yates shuffle).
+- OPSEC: invisible.
+- Required privileges: none.
+- Platform: any.
+
+### `SeededSBox(seed []byte) (sbox [256]byte, inverse [256]byte, err error)`
+
+- godoc: deterministic byte permutation derived from `seed` via HKDF-SHA256 + Fisher-Yates.
+- Description: same shape as `NewSBox` but reproducible — same seed always yields the same `(sbox, inverse)` pair. Operationally enables stage-1 stub decoders to **re-derive** the 256-byte table from a 16-byte seed instead of embedding the full table (saves 240 bytes per layer in the wire format). Pack-time and stub-time call this with the same seed; HKDF guarantees the output is statistically uniform.
+- Parameters: `seed` — any length, typically 16+ bytes from `random.Bytes` or `DeriveKey(masterSecret, "sbox-pack-N", 16)`.
+- Returns: same triple as `NewSBox`, plus `error` only on HKDF underflow (impossible for the fixed 256-byte extraction).
+- Side effects: HKDF expansion of the seed (one HMAC-SHA256 chain).
 - OPSEC: invisible.
 - Required privileges: none.
 - Platform: any.

@@ -1,31 +1,46 @@
 // Package crypto provides cryptographic primitives for payload
 // encryption / decryption and lightweight obfuscation.
 //
-// Three layers:
+// Four layers:
 //
-//   - **Strong AEAD**: AES-256-GCM (`EncryptAESGCM` / `DecryptAESGCM`)
-//     and XChaCha20-Poly1305 (`EncryptChaCha20` / `DecryptChaCha20`).
+//   - **Strong AEAD** (encrypt + authenticate, single primitive):
+//     AES-256-GCM (`EncryptAESGCM` / `DecryptAESGCM`) and
+//     XChaCha20-Poly1305 (`EncryptChaCha20` / `DecryptChaCha20`).
 //     Random nonce prepended to ciphertext.
-//   - **Lightweight stream / block**: RC4 (`EncryptRC4`), TEA / XTEA
-//     16-byte block ciphers, Speck-128/128 (ARX block cipher, ~30 B
-//     of asm per round — preferred when stage-1 stubs need a real
-//     block primitive without AES's S-box footprint), ArithShift
+//   - **Raw stream / CTR** (encrypt only, integrity bring-your-own):
+//     AES-CTR (`EncryptAESCTR` / `DecryptAESCTR`) and raw XChaCha20
+//     (`EncryptChaCha20Raw` / `DecryptChaCha20Raw`). Drops the 16-byte
+//     AEAD tag — useful when stage-2 payload self-validates or when
+//     stub-size budget matters.
+//   - **Lightweight block** (compact asm decoders for stage-1 stubs):
+//     TEA / XTEA (8-byte block, 16-byte key), Speck-128/128 (ARX,
+//     ~30 B asm per round), RC4 stream cipher, ArithShift
 //     (position-dependent byte add), XOR with repeating key.
-//   - **Signature-breaking transforms**: SBox (random 256-byte
-//     permutation + inverse), MatrixTransform (Hill cipher mod 256,
-//     n ∈ {2,3,4}). Not strong cryptography — used to break static
-//     signatures on payloads.
+//   - **Signature-breaking transforms**: SBox (`NewSBox` random,
+//     `SeededSBox` deterministic-from-seed), MatrixTransform (Hill
+//     cipher mod 256, n ∈ {2,3,4}). Break static byte-frequency YARA
+//     signatures on payloads — not strong cryptography.
 //
-// Helpers: `NewAESKey`, `NewChaChaKey` for sane-default key
-// generation. `DeriveKey` / `DeriveKeySalted` for HKDF-SHA256
-// subkey derivation (RFC 5869) — the standard way to expand a
-// single shared secret into multiple independent purpose-bound
-// keys without manual hash slicing. `Wipe` zeros a buffer using
-// the same compiler-resistant memclear as `cleanup/memory.SecureZero`.
-// `UseDecrypted(decrypt, fn)` runs `decrypt`, hands the
-// plaintext to `fn`, and zeroes the buffer via defer before
-// returning — closes the "did the operator remember to wipe?"
-// footgun.
+// Key-derivation helpers:
+//
+//   - `NewAESKey`, `NewChaChaKey` — sane-default random key generation.
+//   - `DeriveKey` / `DeriveKeySalted` (HKDF-SHA256, RFC 5869) — expand
+//     one shared secret into multiple per-purpose subkeys via labels.
+//   - `DeriveKeyFromPassword` / `DeriveKeyFromPasswordWithParams`
+//     (Argon2id, RFC 9106 / OWASP 2024) — operator passphrase →
+//     32-byte AES key for build-host packing flows.
+//
+// Integrity helpers:
+//
+//   - `HMACSHA256` / `VerifyHMACSHA256` — encrypt-then-MAC pattern
+//     pairing with raw-stream ciphers. Constant-time tag compare.
+//
+// Cleanup helpers:
+//
+//   - `Wipe` — compiler-resistant memclear (mirrors cleanup/memory.SecureZero).
+//   - `UseDecrypted(decrypt, fn)` — runs decrypt, hands plaintext to fn,
+//     zeroes the buffer via defer. Closes the "did the operator
+//     remember to wipe?" footgun.
 //
 // # Entropy + layering
 //
