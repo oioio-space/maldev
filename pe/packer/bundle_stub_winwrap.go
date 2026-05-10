@@ -14,15 +14,23 @@ import (
 // Windows symmetry of [WrapBundleAsExecutableLinux]. PHASE A shipped
 // 2026-05-10.
 //
-// **Runtime status**: byte-shape pinned via unit tests
-// (TestWrapBundleAsExecutableWindows_*). Windows VM E2E
-// TestWrapBundleAsExecutableWindows_E2E_RunsExit42Windows reports
-// ACCESS_VIOLATION (0xc0000005) — the wrapped PE crashes before
-// reaching the matched payload. Diagnosis requires routing the stub
-// bytes through the asmtrace VEH harness (mmap + VEH) for the
-// register dump; the kernel-loaded PE path opaques the crash.
-// QUEUED for supervised debug. The Linux variant
-// [WrapBundleAsExecutableLinux] remains GREEN and is unaffected.
+// **Runtime status**: ✅ GREEN on win10 VM —
+// TestWrapBundleAsExecutableWindows_E2E_RunsExit42Windows passes
+// (matched payload's `mov eax,42; ret` reaches RtlUserThreadStart's
+// ExitProcess thunk → process exits 42).
+//
+// Bug story (preserved for posterity): the first dispatch
+// ACCESS_VIOLATIONed (0xc0000005). Routing the stub bytes through
+// the asmtrace VEH harness produced a register dump showing
+// RIP inside the bundle data, RAX=42 (shellcode HAD run), and
+// stack pointer 16 bytes higher than expected. Diagnosis: the
+// CPUID prologue's `sub rsp, 16` was never restored before the
+// matched payload's `ret` — `ret` popped the host-vendor literal
+// bytes ("GenuineIntel") as the return address and JMPed there.
+// Fix: insert `add rsp, 16` (4 bytes: 48 83 c4 10) immediately
+// before `jmp rdi` in the matched-tail patcher. Linux is
+// unaffected because Linux payloads end with `syscall` (exit_group),
+// not `ret`.
 //
 // What this PHASE delivers:
 //
@@ -79,7 +87,37 @@ func bundleStubVendorAwareWindows() ([]byte, error) {
 		return nil, fmt.Errorf("packer: encode ExitProcess: %w", err)
 	}
 
-	matchedTail := linux[124:]
+	// Patch the matched-tail to insert `add rsp, 16` (48 83 c4 10)
+	// immediately before the trailing `jmp rdi` (ff e7).
+	//
+	// Why this is needed on Windows but not Linux:
+	//
+	//   - The CPUID prologue does `sub rsp, 16` to allocate the
+	//     12-byte host-vendor scratch buffer. The Linux stub never
+	//     restores RSP because Linux payloads end with `syscall`
+	//     (exit_group) — they don't `ret`, so the residual stack
+	//     allocation is irrelevant.
+	//   - Windows shellcode that ends in `ret` (the canonical
+	//     pattern, where ntdll!RtlUserThreadStart calls
+	//     ExitProcess(rax) on return) pops a return address from
+	//     [RSP] expecting the kernel-supplied RtlUserThreadStart
+	//     address. Without `add rsp, 16` first, `ret` pops 8 bytes
+	//     from the CPUID buffer (the host-vendor literal bytes,
+	//     e.g. "GenuineIntel") and JMPs to that garbage address.
+	//
+	// Caught 2026-05-10 via the asmtrace VEH harness — the
+	// register dump showed RIP inside the bundle data at offset
+	// matching `bundle+0x75`, RAX=42 (the shellcode HAD run), and
+	// the stack pointing 16 bytes higher than expected.
+	rawTail := linux[124:]
+	if len(rawTail) < 2 || rawTail[len(rawTail)-2] != 0xff || rawTail[len(rawTail)-1] != 0xe7 {
+		return nil, fmt.Errorf("packer: linux stub does not end in `jmp rdi` (ff e7); rawTail tail bytes = % x",
+			rawTail[len(rawTail)-min(len(rawTail), 4):])
+	}
+	matchedTail := make([]byte, 0, len(rawTail)+4)
+	matchedTail = append(matchedTail, rawTail[:len(rawTail)-2]...)
+	matchedTail = append(matchedTail, 0x48, 0x83, 0xc4, 0x10) // add rsp, 16
+	matchedTail = append(matchedTail, rawTail[len(rawTail)-2:]...) // jmp rdi
 	matchedLen := uint32(len(matchedTail))
 
 	out := make([]byte, 0, 115+5+len(matchedTail)+len(exitBlock))

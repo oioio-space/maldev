@@ -237,7 +237,7 @@ The Windows stub must:
 Total Windows-stub additional asm vs Linux: ~50 bytes (PEB read +
 build-range check).
 
-### §4. WrapBundleAsExecutableWindows — PHASE A: byte-shape shipped, runtime debug queued (2026-05-10)
+### §4. WrapBundleAsExecutableWindows — PHASE A: ✅ RUNTIME GREEN (2026-05-10)
 
 > Shipped 2026-05-10:
 >

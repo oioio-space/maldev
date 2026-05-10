@@ -36,16 +36,13 @@ import (
 //
 // VM-gated via scripts/vm-run-tests.sh windows.
 //
-// SKIPPED 2026-05-10: PHASE A runtime is not green — first VM
-// dispatch under the asmtrace-less PE path returned 0xc0000005.
-// The PE-wrapped path can't be VEH-instrumented from inside the
-// test process; debug requires manually routing the stub bytes
-// through the asmtrace harness (mmap + VEH) which is queued for the
-// supervised pickup. The byte-shape unit tests pin the encoding;
-// this skip removes the known-red runtime gate from the standard
-// VM dispatch until debug lands.
+// History: gated 2026-05-10 with t.Skip after the first dispatch
+// returned 0xc0000005 — diagnosed via the asmtrace VEH harness
+// (TestWrapBundleAsExecutableWindows_StubAsmtrace_Diagnostic) as a
+// missing `add rsp, 16` to balance the CPUID prologue's stack
+// allocation before the matched payload's `ret`. Fix landed in
+// bundle_stub_winwrap.go's matched-tail patching. Skip removed.
 func TestWrapBundleAsExecutableWindows_E2E_RunsExit42Windows(t *testing.T) {
-	t.Skip("§4 PHASE A runtime debug pending — see bundle_stub_winwrap.go runtime-status note")
 	bundle, err := packer.PackBinaryBundle(
 		[]packer.BundlePayload{{
 			Binary: testutil.WindowsExit42ShellcodeX64,
