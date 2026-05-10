@@ -61,3 +61,31 @@ type MemOp struct {
 // LabelRef points at a Label instruction in the same Builder.
 // Used as a JMP / Jcc target.
 type LabelRef string
+
+// XmmReg names a 128-bit x86 SSE/AVX-128 register. Separate from
+// [Reg] (general-purpose 64-bit) because the encoding tables differ:
+// XMM lives in its own register class and many AES-NI / SIMD
+// mnemonics accept ONLY XMM operands. Builder methods that take XMM
+// operands declare them as [XmmReg] explicitly.
+type XmmReg uint8
+
+const (
+	X0 XmmReg = iota
+	X1
+	X2
+	X3
+	X4
+	X5
+	X6
+	X7
+	X8
+	X9
+	X10
+	X11
+	X12
+	X13
+	X14
+	X15
+)
+
+func (XmmReg) isOp() {}

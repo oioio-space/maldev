@@ -265,6 +265,86 @@ func (bb *Builder) XORB(dst Reg, src MemOp) error {
 	return nil
 }
 
+// xmmToObj maps a [XmmReg] to golang-asm's REG_X* constant.
+func xmmToObj(r XmmReg) int16 {
+	return x86.REG_X0 + int16(r)
+}
+
+// AESENC emits AESENC dst, src — one round of the AES forward
+// cipher: ShiftRows + SubBytes + MixColumns + XOR with src (the
+// round key, by convention). 128-bit operation on XMM registers.
+// Used by AES-CTR keystream derivation in the bundle stub when
+// CipherType=2 (Tier 🟡 #2.2).
+func (bb *Builder) AESENC(dst, src XmmReg) error {
+	return bb.aesOp(x86.AAESENC, "AESENC", dst, src)
+}
+
+// AESENCLAST emits AESENCLAST dst, src — final round of the AES
+// forward cipher (omits MixColumns). Same operand shape as
+// [AESENC]; called once per 16-byte block after 9 AESENC rounds
+// for AES-128.
+func (bb *Builder) AESENCLAST(dst, src XmmReg) error {
+	return bb.aesOp(x86.AAESENCLAST, "AESENCLAST", dst, src)
+}
+
+// aesOp is the shared emitter for two-XMM-operand AES-NI rounds.
+// Plan-9 operand order is From=src, To=dst (matching the rest of
+// binaryOp).
+func (bb *Builder) aesOp(as obj.As, name string, dst, src XmmReg) error {
+	p := bb.b.NewProg()
+	p.As = as
+	p.From.Type = obj.TYPE_REG
+	p.From.Reg = xmmToObj(src)
+	p.To.Type = obj.TYPE_REG
+	p.To.Reg = xmmToObj(dst)
+	bb.b.AddInstruction(p)
+	_ = name // reserved for future error-wrapping symmetry with binaryOp
+	return nil
+}
+
+// PXOR emits PXOR dst, src — 128-bit XOR of XMM registers. Used by
+// AES-CTR to (a) seed the initial state with round key 0 and (b) XOR
+// the keystream into the ciphertext block in place.
+func (bb *Builder) PXOR(dst, src XmmReg) error {
+	p := bb.b.NewProg()
+	p.As = x86.APXOR
+	p.From.Type = obj.TYPE_REG
+	p.From.Reg = xmmToObj(src)
+	p.To.Type = obj.TYPE_REG
+	p.To.Reg = xmmToObj(dst)
+	bb.b.AddInstruction(p)
+	return nil
+}
+
+// MOVDQULoad emits MOVDQU xmm, [mem] — load 16 unaligned bytes from
+// memory into an XMM register. Golang-asm's Plan 9 mnemonic for this
+// is MOVOU (Move 16-Byte Unaligned), encoded as f3 0f 6f /r.
+func (bb *Builder) MOVDQULoad(dst XmmReg, src MemOp) error {
+	p := bb.b.NewProg()
+	p.As = x86.AMOVOU
+	if err := setOperand(&p.From, src); err != nil {
+		return fmt.Errorf("amd64: MOVDQULoad src: %w", err)
+	}
+	p.To.Type = obj.TYPE_REG
+	p.To.Reg = xmmToObj(dst)
+	bb.b.AddInstruction(p)
+	return nil
+}
+
+// MOVDQUStore emits MOVDQU [mem], xmm — store 16 unaligned bytes
+// from an XMM register to memory. Encoded as f3 0f 7f /r.
+func (bb *Builder) MOVDQUStore(dst MemOp, src XmmReg) error {
+	p := bb.b.NewProg()
+	p.As = x86.AMOVOU
+	p.From.Type = obj.TYPE_REG
+	p.From.Reg = xmmToObj(src)
+	if err := setOperand(&p.To, dst); err != nil {
+		return fmt.Errorf("amd64: MOVDQUStore dst: %w", err)
+	}
+	bb.b.AddInstruction(p)
+	return nil
+}
+
 // binaryOp is the shared emitter for two-operand arithmetic (XOR/SUB/ADD).
 // golang-asm's Plan-9 convention is From=src, To=dst — same as MOV.
 func (bb *Builder) binaryOp(as obj.As, name string, dst, src Op) error {

@@ -390,3 +390,103 @@ func TestBuilder_XORB(t *testing.T) {
 		t.Errorf("got %v, want XOR", inst.Op)
 	}
 }
+
+// TestBuilder_AESENC pins AES-NI single-round encoding
+// (66 0f 38 dc /r). Used by AES-CTR keystream emission in the
+// bundle stub when CipherType=2 (Tier 🟡 #2.2).
+func TestBuilder_AESENC(t *testing.T) {
+	b, err := amd64.New()
+	require.NoError(t, err)
+	require.NoError(t, b.AESENC(amd64.X0, amd64.X1))
+	out, err := b.Encode()
+	require.NoError(t, err)
+	want := []byte{0x66, 0x0f, 0x38, 0xdc, 0xc1}
+	if !bytes.Equal(out, want) {
+		t.Errorf("encoding % x, want % x", out, want)
+	}
+	inst, err := x86asm.Decode(out, 64)
+	require.NoError(t, err, "Decode (% x)", out)
+	if inst.Op != x86asm.AESENC {
+		t.Errorf("op = %v, want AESENC", inst.Op)
+	}
+}
+
+// TestBuilder_AESENCLAST pins AES-NI final-round encoding
+// (66 0f 38 dd /r) — called once per 16-byte AES block after 9
+// AESENC rounds for AES-128.
+func TestBuilder_AESENCLAST(t *testing.T) {
+	b, err := amd64.New()
+	require.NoError(t, err)
+	require.NoError(t, b.AESENCLAST(amd64.X0, amd64.X1))
+	out, err := b.Encode()
+	require.NoError(t, err)
+	want := []byte{0x66, 0x0f, 0x38, 0xdd, 0xc1}
+	if !bytes.Equal(out, want) {
+		t.Errorf("encoding % x, want % x", out, want)
+	}
+	inst, err := x86asm.Decode(out, 64)
+	require.NoError(t, err, "Decode (% x)", out)
+	if inst.Op != x86asm.AESENCLAST {
+		t.Errorf("op = %v, want AESENCLAST", inst.Op)
+	}
+}
+
+// TestBuilder_PXOR pins 128-bit XOR of XMM registers
+// (66 0f ef /r). Two uses in the AES-CTR loop: seed initial state
+// with round key 0, and XOR keystream into ciphertext block.
+func TestBuilder_PXOR(t *testing.T) {
+	b, err := amd64.New()
+	require.NoError(t, err)
+	require.NoError(t, b.PXOR(amd64.X0, amd64.X1))
+	out, err := b.Encode()
+	require.NoError(t, err)
+	want := []byte{0x66, 0x0f, 0xef, 0xc1}
+	if !bytes.Equal(out, want) {
+		t.Errorf("encoding % x, want % x", out, want)
+	}
+	inst, err := x86asm.Decode(out, 64)
+	require.NoError(t, err, "Decode (% x)", out)
+	if inst.Op != x86asm.PXOR {
+		t.Errorf("op = %v, want PXOR", inst.Op)
+	}
+}
+
+// TestBuilder_MOVDQULoad pins MOVDQU xmm, [r/m] (f3 0f 6f /r).
+// Used to load round keys, the AES-CTR counter, and ciphertext
+// blocks into XMM registers.
+func TestBuilder_MOVDQULoad(t *testing.T) {
+	b, err := amd64.New()
+	require.NoError(t, err)
+	require.NoError(t, b.MOVDQULoad(amd64.X0, amd64.MemOp{Base: amd64.RDI}))
+	out, err := b.Encode()
+	require.NoError(t, err)
+	want := []byte{0xf3, 0x0f, 0x6f, 0x07}
+	if !bytes.Equal(out, want) {
+		t.Errorf("encoding % x, want % x", out, want)
+	}
+	inst, err := x86asm.Decode(out, 64)
+	require.NoError(t, err, "Decode (% x)", out)
+	if inst.Op != x86asm.MOVDQU {
+		t.Errorf("op = %v, want MOVDQU", inst.Op)
+	}
+}
+
+// TestBuilder_MOVDQUStore pins MOVDQU [r/m], xmm (f3 0f 7f /r).
+// Used to write the decrypted plaintext block back to the payload
+// buffer after PXOR with the keystream.
+func TestBuilder_MOVDQUStore(t *testing.T) {
+	b, err := amd64.New()
+	require.NoError(t, err)
+	require.NoError(t, b.MOVDQUStore(amd64.MemOp{Base: amd64.RDI}, amd64.X0))
+	out, err := b.Encode()
+	require.NoError(t, err)
+	want := []byte{0xf3, 0x0f, 0x7f, 0x07}
+	if !bytes.Equal(out, want) {
+		t.Errorf("encoding % x, want % x", out, want)
+	}
+	inst, err := x86asm.Decode(out, 64)
+	require.NoError(t, err, "Decode (% x)", out)
+	if inst.Op != x86asm.MOVDQU {
+		t.Errorf("op = %v, want MOVDQU", inst.Op)
+	}
+}

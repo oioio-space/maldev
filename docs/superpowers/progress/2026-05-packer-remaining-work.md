@@ -75,12 +75,15 @@ Total Tier 1: ~3-4h supervised.
   (`TestBuilder_ANDB` / `TestBuilder_MOVZBL` / `TestBuilder_XORB`)
   + Linux runtime E2E green.
 
-- [ ] **#2.2 Multi-cipher support (`CipherType` field)**
-  `PayloadEntry.CipherType` is hardcoded `=1` (XOR-rolling). Wire
-  format reserves the field; spec mentions AES/ChaCha as planned.
-  Implement `CipherType=2` (AES-CTR via AES-NI; uses crypto/
-  primitives already shipped in v0.79+). ~50 B asm. Win VM test.
-  ~2-3h.
+- [~] **#2.2 Multi-cipher support (`CipherType` field) — Phase 1: Builder primitives** (pending commit)
+  Phase 1 lands the AES-NI building blocks needed for the stub-side
+  AES-CTR decrypt loop. New amd64 Builder primitives (all byte-pinned):
+  AESENC, AESENCLAST, PXOR (XMM-XMM), MOVDQULoad, MOVDQUStore.
+  New `XmmReg` type with X0..X15 constants (separate from the GPR
+  `Reg` enum because XMM encoding tables differ).
+  Phase 2 (queued): pack-time AES-CTR encrypt pipeline +
+  `CipherType=2` wire-format dispatch + stub asm decrypt loop
+  emitter. Phase 3: Win VM AES-NI runtime test.
 
 - [x] **#2.3 Polymorphic slots B & C** (pending commit)
   Added `emitNopJunk` helper (Builder-time RawBytes NOP-run with
