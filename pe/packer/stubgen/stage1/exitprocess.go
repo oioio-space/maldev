@@ -24,36 +24,38 @@ import (
 // exit-code immediate so the encoded stream is per-call deterministic
 // (different exit codes ⇒ different byte pattern at offset 0x67).
 //
-// Operational status (2026-05-10): byte-shape pinned via
-// [TestEmitNtdllRtlExitUserProcess_BytesShape]. Runtime validation
-// on Windows VM is **NOT YET GREEN** — two attempts under autonomy
-// produced ACCESS_VIOLATION (0xc0000005) before reaching the call.
-// The first iteration walked InMemoryOrderModuleList (sorted by
-// memory address — wrong assumption); switching to InLoadOrderModuleList
-// (the structurally-stable list) did not resolve the second attempt.
-// Likely remaining suspects (in order of investigation cost):
+// Operational status (2026-05-10): RUNTIME GREEN on Win10 VM.
 //
-//	1. The export-table walk RVAs (0x18 NumberOfNames, 0x20
-//	   AddressOfNames, 0x24 AddressOfNameOrdinals, 0x1c
-//	   AddressOfFunctions) — verify against IMAGE_EXPORT_DIRECTORY
-//	   in current ntdll dumps.
-//	2. The 16-byte string compare may match a non-RtlExitUserProcess
-//	   prefix; switch to a 19-byte cmp or a ROR-13 hash check.
-//	3. The MS x64 ABI requires xmm0..xmm5 to be preserved across the
-//	   call site — our asm clobbers no xmm but the call target may
-//	   read xmm spill space we didn't reserve.
-//	4. RtlExitUserProcess may not be exported by name at all on
-//	   modern ntdll — newer Windows ships it as a forwarder. Verify
-//	   with `dumpbin /exports ntdll.dll` on the target.
+//	- Byte-shape pinned via [TestEmitNtdllRtlExitUserProcess_BytesShape]
+//	  + [TestEmitNtdllRtlExitUserProcess_ImmediatePatching].
+//	- Runtime exercise via [TestEmitNtdllRtlExitUserProcess_RuntimeExits42Windows]
+//	  through the VEH-instrumented `asmtrace` harness. Asm is mmap'd
+//	  RX, registered with AddVectoredExceptionHandler, called as a
+//	  function pointer; on crash the harness dumps RIP + 16 GP regs
+//	  + faulting address + access-violation operation type.
 //
-// Debug path requires a supervised session with WinDbg or x64dbg
-// attached — autonomy cannot iterate on silent ACCESS_VIOLATION.
-// The byte-shape primitive ships as-is so a future debug session
-// has an existing call site to step through.
+// Bug history captured for posterity:
 //
-// NOT WIRED into the bundle-stub fallback path. Integration is
-// queued for the supervised Windows-tiny-exe §4 work pending
-// runtime green from this primitive.
+//	1. First attempt walked InMemoryOrderModuleList (sorted by memory
+//	   address ⇒ ASLR-dependent ordering). Switched to InLoadOrderModuleList
+//	   for structurally-stable {EXE, ntdll, kernel32, ...} order.
+//	2. Second attempt still ACCESS_VIOLATION'd. VEH harness pinpointed
+//	   `mov eax, [r10+r11*4]` at RIP+0x3d with R10 holding an RVA
+//	   instead of an absolute pointer — meaning `add r10, rdx` two
+//	   instructions earlier had no effect. Root cause: REX byte
+//	   `0x4c` (W=1, R=1, B=0) at offset 0x32 encoded `add rdx, r10`
+//	   (extending the source register field), not `add r10, rdx`
+//	   (which needs B=1, R=0 → REX `0x49`). One-byte fix.
+//
+// Lesson: AMD64 REX-prefix asymmetry between R (source/reg field
+// extension) and B (destination/rm field extension) is an easy
+// off-by-one for hand-encoding. The byte-shape unit test cannot
+// catch this kind of semantic encoding bug — only runtime + VEH-
+// trace can.
+//
+// NOT YET WIRED into the bundle-stub fallback path. §4
+// (WrapBundleAsExecutableWindows) is now unblocked for the
+// supervised pickup.
 
 // EmitNtdllRtlExitUserProcess appends the PEB-walk + export-table-walk +
 // indirect-call sequence to b. The exit code is baked into the emitted
@@ -182,7 +184,11 @@ func assembleExitProcess(exitCode uint32) []byte {
 		// 0x2e: mov r10d, [r8+0x20]   ; AddressOfNames RVA
 		0x45, 0x8b, 0x50, 0x20,
 		// 0x32: add r10, rdx          ; AddressOfNames absolute
-		0x4c, 0x01, 0xd2,
+		// REX = 0x49 (W=1, B=1 — extend RM field for r10 destination).
+		// PRIOR BUG: 0x4c (R=1) encoded `add rdx, r10` instead — caught
+		// 2026-05-10 via VEH diag harness reading R10=0x15479c (RVA, not
+		// the expected absolute pointer).
+		0x49, 0x01, 0xd2,
 		// 0x35: xor r11, r11          ; i = 0
 		0x4d, 0x31, 0xdb,
 

@@ -135,9 +135,31 @@ loader accepts varies by version — start at 240-byte Optional Header
 - TLS callbacks and base relocation directory must be valid even if
   empty.
 
-### §2. ExitProcess via PEB walk — STATUS: byte-shape shipped, runtime NOT GREEN (2026-05-10)
+### §2. ExitProcess via PEB walk — STATUS: ✅ RUNTIME GREEN (2026-05-10)
 
-> Attempted under autonomy 2026-05-10. Shipped:
+> Shipped under autonomy 2026-05-10. Runtime validated via VEH-
+> instrumented diagnostic harness on win10 VM —
+> `TestEmitNtdllRtlExitUserProcess_RuntimeExits42Windows PASS (6.82s)`.
+>
+> Bug pinpointed by the Solution-B VEH harness:
+>
+>   - VEH dump showed `R10 = faulting addr = 0x15479c` (an RVA, not
+>     the expected absolute pointer). Diagnosis: `add r10, rdx` at
+>     offset 0x32 had no effect.
+>   - Root cause: REX-prefix encoding mistake. `0x4c` (W=1, R=1, B=0)
+>     extends the source register field, encoding `add rdx, r10`.
+>     Correct encoding for `add r10, rdx` is `0x49` (W=1, R=0, B=1)
+>     to extend the destination/rm field instead. One byte fix.
+>
+> Lesson: AMD64 REX-prefix asymmetry between R (source extension) and
+> B (destination extension) is an easy off-by-one for hand-encoding.
+> Byte-shape unit tests cannot catch this — they pin what IS encoded,
+> not whether the encoding has the intended semantic. Runtime + VEH
+> trace is the only practical detector.
+>
+> §4 (WrapBundleAsExecutableWindows) is now unblocked.
+>
+> Earlier history of attempts (preserved for the lesson):
 >
 >   - `pe/packer/stubgen/stage1/exitprocess.go` —
 >     `EmitNtdllRtlExitUserProcess(b, exitCode)` 143-byte primitive
