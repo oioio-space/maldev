@@ -46,3 +46,55 @@ func ExampleXORWithRepeatingKey() {
 	fmt.Println(string(original))
 	// Output: hidden
 }
+
+// Example_passphraseToCiphertextPipeline shows the canonical operator
+// pipeline for the v0.79.0 crypto stack:
+//
+//	Argon2id (passphrase + salt → master key)
+//	  ↓
+//	HKDF       (master → encKey + macKey)
+//	  ↓
+//	AES-CTR + HMAC-SHA256 (encrypt-then-MAC)
+//
+// Use this when an operator types a passphrase and the build pipeline
+// needs both confidentiality and integrity over a payload, without
+// the AEAD-tag wire-format overhead AES-GCM would add.
+func Example_passphraseToCiphertextPipeline() {
+	passphrase := []byte("operator-passphrase-2026")
+	salt := []byte("per-deploy-salt-16b") // ≥ 8 bytes, deployment-unique
+
+	// 1. Argon2id: passphrase → 32-byte master key (memory-hard).
+	master, err := crypto.DeriveKeyFromPassword(passphrase, salt, 32)
+	if err != nil {
+		fmt.Println("argon2:", err)
+		return
+	}
+
+	// 2. HKDF: split master into two purpose-bound subkeys.
+	encKey, _ := crypto.DeriveKey(master, "payload-encrypt", 32)
+	macKey, _ := crypto.DeriveKey(master, "payload-mac", 32)
+
+	// 3. AES-CTR encrypt + HMAC over the ciphertext.
+	plaintext := []byte("shellcode bytes")
+	ct, err := crypto.EncryptAESCTR(encKey, plaintext)
+	if err != nil {
+		fmt.Println("encrypt:", err)
+		return
+	}
+	tag := crypto.HMACSHA256(macKey, ct)
+	blob := append(ct, tag...) // ciphertext || tag (16 IV + body + 32 tag)
+
+	// 4. Stub-side: verify tag in constant time, then decrypt.
+	if !crypto.VerifyHMACSHA256(macKey, blob[:len(blob)-32], blob[len(blob)-32:]) {
+		fmt.Println("integrity check failed")
+		return
+	}
+	pt, err := crypto.DecryptAESCTR(encKey, blob[:len(blob)-32])
+	if err != nil {
+		fmt.Println("decrypt:", err)
+		return
+	}
+	fmt.Printf("recovered: %s\n", pt)
+
+	// Output: recovered: shellcode bytes
+}
