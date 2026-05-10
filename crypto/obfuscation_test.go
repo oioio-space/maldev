@@ -96,3 +96,72 @@ func TestMatrixTransformRoundtrip(t *testing.T) {
 		}
 	}
 }
+
+// TestSeededSBox_Deterministic asserts the central contract: same
+// seed → same (sbox, inverse). Stub-side decoders depend on this
+// reproducibility; if it ever breaks, every per-pack-seed bundle
+// stops decoding.
+func TestSeededSBox_Deterministic(t *testing.T) {
+	seed := []byte{0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xba, 0xbe}
+	a, ainv, err := SeededSBox(seed)
+	if err != nil {
+		t.Fatalf("SeededSBox: %v", err)
+	}
+	b, binv, err := SeededSBox(seed)
+	if err != nil {
+		t.Fatalf("SeededSBox: %v", err)
+	}
+	if a != b {
+		t.Error("non-deterministic sbox for same seed")
+	}
+	if ainv != binv {
+		t.Error("non-deterministic inverse for same seed")
+	}
+}
+
+// TestSeededSBox_DifferentSeedsDifferentBoxes catches a regression
+// where the seed parameter would be ignored / hashed away.
+func TestSeededSBox_DifferentSeedsDifferentBoxes(t *testing.T) {
+	a, _, _ := SeededSBox([]byte("seed-a"))
+	b, _, _ := SeededSBox([]byte("seed-b"))
+	if a == b {
+		t.Error("identical sbox for different seeds")
+	}
+}
+
+// TestSeededSBox_IsValidPermutation checks the output is a valid
+// permutation of [0,255] (every value present exactly once) and
+// that inverse[sbox[i]] == i for all i.
+func TestSeededSBox_IsValidPermutation(t *testing.T) {
+	sbox, inv, err := SeededSBox([]byte("any-seed"))
+	if err != nil {
+		t.Fatalf("SeededSBox: %v", err)
+	}
+	var seen [256]bool
+	for _, v := range sbox {
+		if seen[v] {
+			t.Errorf("sbox not a permutation — value %d repeats", v)
+		}
+		seen[v] = true
+	}
+	for i := 0; i < 256; i++ {
+		if int(inv[sbox[i]]) != i {
+			t.Errorf("inverse mismatch at %d: inv[sbox[%d]] = %d", i, i, inv[sbox[i]])
+		}
+	}
+}
+
+// TestSeededSBox_RoundtripSubstitute exercises the full pipeline
+// expected of operators: SubstituteBytes → ReverseSubstituteBytes
+// recovers the plaintext exactly.
+func TestSeededSBox_RoundtripSubstitute(t *testing.T) {
+	sbox, inv, _ := SeededSBox([]byte("opx"))
+	pt := []byte{0x00, 0x01, 0x02, 0x55, 0xaa, 0xff, 0xff, 0xfe}
+	ct := SubstituteBytes(pt, sbox)
+	got := ReverseSubstituteBytes(ct, inv)
+	for i := range pt {
+		if pt[i] != got[i] {
+			t.Errorf("roundtrip byte %d: pt=%#x → ct=%#x → got=%#x", i, pt[i], ct[i], got[i])
+		}
+	}
+}
