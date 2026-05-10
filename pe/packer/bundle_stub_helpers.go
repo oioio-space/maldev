@@ -155,6 +155,90 @@ func emitBundleLoopSetup(b *amd64.Builder) error {
 	return nil
 }
 
+// emitAESCTRBlockDecrypt emits one 16-byte AES-CTR block-decrypt
+// step. Used by Tier 🟡 #2.2 Phase 3b (stub asm dispatch — queued)
+// when the matched PayloadEntry's CipherType field is
+// [CipherTypeAESCTR].
+//
+// Register contract (caller-set):
+//
+//	RDI  → plaintext-output cursor (16 bytes will be written)
+//	RSI  → ciphertext-input cursor (16 bytes will be read)
+//	R8   → AES-128 expanded round keys (11 × 16 B = 176 B,
+//	       host-side via crypto/aes pre-expansion)
+//	XMM0 = current 128-bit counter (caller increments per block)
+//
+// Clobbers: XMM1 (working keystream), XMM2 (round-key + ciphertext
+// scratch). The XMM0 counter is read-only here — the increment lives
+// in the caller's loop (operator may want little-endian byte-wise
+// increment matching RFC 3686 or big-endian per NIST SP 800-38A;
+// the choice belongs to the pack-time IV layout).
+//
+// Sequence (AES-128, 10 rounds):
+//
+//	pxor   xmm1, xmm1                 ; zero keystream working reg
+//	pxor   xmm1, xmm0                 ; copy counter
+//	movdqu xmm2, [r8 + 0]             ; round key 0
+//	pxor   xmm1, xmm2                 ; initial whitening
+//	for round = 1..9:
+//	    movdqu xmm2, [r8 + 16*round]
+//	    aesenc xmm1, xmm2
+//	movdqu xmm2, [r8 + 160]           ; round key 10
+//	aesenclast xmm1, xmm2             ; xmm1 = AES_K(counter)
+//	movdqu xmm2, [rsi]                ; ciphertext block
+//	pxor   xmm2, xmm1                 ; XOR keystream
+//	movdqu [rdi], xmm2                ; plaintext out
+//
+// Total: 148 bytes of asm per block. AES-NI is mandatory — caller
+// MUST gate this path on the CPUID AES bit (PT_CPUID_FEATURES with
+// mask 0x02000000 covers it).
+func emitAESCTRBlockDecrypt(b *amd64.Builder) error {
+	// Copy counter (xmm0) → working register (xmm1) via clear+xor.
+	// (golang-asm doesn't expose a clean MOVDQA reg-reg in our
+	// wrapper; pxor self + pxor src is one byte longer than movdqa
+	// but stays inside Builder's existing surface.)
+	if err := b.PXOR(amd64.X1, amd64.X1); err != nil {
+		return fmt.Errorf("packer: aes-ctr clear xmm1: %w", err)
+	}
+	if err := b.PXOR(amd64.X1, amd64.X0); err != nil {
+		return fmt.Errorf("packer: aes-ctr copy counter: %w", err)
+	}
+	// Round 0 whitening.
+	if err := b.MOVDQULoad(amd64.X2, amd64.MemOp{Base: amd64.R8, Disp: 0}); err != nil {
+		return fmt.Errorf("packer: aes-ctr load rk0: %w", err)
+	}
+	if err := b.PXOR(amd64.X1, amd64.X2); err != nil {
+		return fmt.Errorf("packer: aes-ctr whiten: %w", err)
+	}
+	// Rounds 1..9 — full AESENC.
+	for round := 1; round <= 9; round++ {
+		if err := b.MOVDQULoad(amd64.X2, amd64.MemOp{Base: amd64.R8, Disp: int32(16 * round)}); err != nil {
+			return fmt.Errorf("packer: aes-ctr load rk%d: %w", round, err)
+		}
+		if err := b.AESENC(amd64.X1, amd64.X2); err != nil {
+			return fmt.Errorf("packer: aes-ctr aesenc round %d: %w", round, err)
+		}
+	}
+	// Round 10 — AESENCLAST.
+	if err := b.MOVDQULoad(amd64.X2, amd64.MemOp{Base: amd64.R8, Disp: 160}); err != nil {
+		return fmt.Errorf("packer: aes-ctr load rk10: %w", err)
+	}
+	if err := b.AESENCLAST(amd64.X1, amd64.X2); err != nil {
+		return fmt.Errorf("packer: aes-ctr aesenclast: %w", err)
+	}
+	// Apply keystream + store.
+	if err := b.MOVDQULoad(amd64.X2, amd64.MemOp{Base: amd64.RSI}); err != nil {
+		return fmt.Errorf("packer: aes-ctr load ciphertext: %w", err)
+	}
+	if err := b.PXOR(amd64.X2, amd64.X1); err != nil {
+		return fmt.Errorf("packer: aes-ctr xor keystream: %w", err)
+	}
+	if err := b.MOVDQUStore(amd64.MemOp{Base: amd64.RDI}, amd64.X2); err != nil {
+		return fmt.Errorf("packer: aes-ctr store plaintext: %w", err)
+	}
+	return nil
+}
+
 // emitNopJunk emits a small random sequence of Intel multi-byte NOPs
 // directly into the Builder stream. Used for in-stub polymorphism
 // slots (B and C) in V2-family bundle stubs — yara byte-pattern

@@ -89,11 +89,16 @@ Total Tier 1: ~3-4h supervised.
   `DataSize` includes IV, `PlaintextSize` does not. Tests cover
   round-trip, mixed XOR + AES-CTR within one bundle, FixedKey
   rejection, and legacy backward compat.
-  **Phase 3 (queued):** stub asm AES-CTR decrypt-loop emitter (uses
-  Phase 1 primitives) + per-entry CipherType dispatch in the stub +
-  Win VM runtime test. The cleanest seam is a new
-  `emitAESCTRDecryptStep` helper sitting next to `emitDecryptStep`,
-  selected by reading the CipherType byte from PayloadEntry.
+  **Phase 3a (pending commit):** `emitAESCTRBlockDecrypt` helper +
+  byte-pin test. 148-byte single-block AES-128-CTR decryption asm
+  sequence composed from Phase 1 primitives; register contract
+  documented (RDI=plaintext-out, RSI=ciphertext-in, R8=round keys,
+  XMM0=counter). Caller responsible for counter increment +
+  outer loop. Not yet wired into V2-Negate / V2NW stubs.
+  **Phase 3b (queued):** per-entry CipherType dispatch in the stub
+  scan loop + round-key expansion via crypto/aes at pack-time +
+  Win VM runtime test. Phase 3a's pinned bytes are the
+  contract Phase 3b will glue around.
 
 - [x] **#2.3 Polymorphic slots B & C** (pending commit)
   Added `emitNopJunk` helper (Builder-time RawBytes NOP-run with
