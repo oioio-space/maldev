@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -418,8 +419,8 @@ func TestDeriveBundleProfile_Empty(t *testing.T) {
 	}
 }
 
-// TestDeriveBundleProfile_Deterministic asserts the SHA-256-derived
-// profile is stable for a given secret.
+// TestDeriveBundleProfile_Deterministic asserts the HKDF-SHA256-derived
+// profile (v0.83.0+) is stable for a given secret.
 func TestDeriveBundleProfile_Deterministic(t *testing.T) {
 	secret := []byte("ops-cycle-2026-05-deployment-A")
 	a := packer.DeriveBundleProfile(secret)
@@ -432,9 +433,40 @@ func TestDeriveBundleProfile_Deterministic(t *testing.T) {
 	}
 }
 
+// TestDeriveBundleProfile_PinHKDFVector pins the v0.83.0 HKDF-derived
+// values for a fixed secret. Catches accidental drift in the HKDF
+// label strings, the underlying crypto.DeriveKey API, or the bit
+// transformations applied to Version / Vaddr.
+//
+// IF THIS TEST FAILS YOU HAVE BROKEN WIRE COMPATIBILITY. Bundles
+// produced under the old derivation cannot be matched against
+// bundles produced under the new one. Bump the minor SEMVER and
+// document the migration path before merging.
+func TestDeriveBundleProfile_PinHKDFVector(t *testing.T) {
+	p := packer.DeriveBundleProfile([]byte("ops-cycle-2026-05-deployment-A"))
+	const (
+		wantMagic    = 0x191857be
+		wantVersion  = 0xfe9d
+		wantVaddr    = 0x196ef3ddb000
+		wantFooterHx = "cfb292b5490e0fca"
+	)
+	if p.Magic != wantMagic {
+		t.Errorf("Magic = %#x, want %#x", p.Magic, wantMagic)
+	}
+	if p.Version != wantVersion {
+		t.Errorf("Version = %#x, want %#x", p.Version, wantVersion)
+	}
+	if p.Vaddr != wantVaddr {
+		t.Errorf("Vaddr = %#x, want %#x", p.Vaddr, wantVaddr)
+	}
+	if got := fmt.Sprintf("%x", p.FooterMagic); got != wantFooterHx {
+		t.Errorf("FooterMagic = %s, want %s", got, wantFooterHx)
+	}
+}
+
 // TestDeriveBundleProfile_DifferentSecretsDistinct asserts two
 // distinct secrets yield distinct profiles (collision-resistant via
-// SHA-256).
+// HKDF-SHA256).
 func TestDeriveBundleProfile_DifferentSecretsDistinct(t *testing.T) {
 	a := packer.DeriveBundleProfile([]byte("alpha"))
 	b := packer.DeriveBundleProfile([]byte("bravo"))

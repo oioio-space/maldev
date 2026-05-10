@@ -2,11 +2,11 @@ package packer
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
 
+	"github.com/oioio-space/maldev/crypto"
 	"github.com/oioio-space/maldev/random"
 )
 
@@ -34,14 +34,30 @@ type BundleProfile struct {
 }
 
 // DeriveBundleProfile returns a [BundleProfile] derived from secret
-// via SHA-256. Same secret → same profile. Empty / nil secret yields
-// the canonical {BundleMagic, BundleFooterMagic} pair so a build with
-// no -secret flag is wire-compatible with the public spec.
+// via HKDF-SHA256 (RFC 5869). Same secret → same profile. Empty /
+// nil secret yields the canonical {BundleMagic, BundleFooterMagic}
+// pair so a build with no -secret flag is wire-compatible with the
+// public spec.
+//
+// Why HKDF instead of plain SHA-256 slicing (changed in v0.83.0):
+//
+//   - Each derived field gets its own HMAC-keyed expansion via a
+//     per-purpose label ("magic", "footer", "version", "vaddr").
+//     Flipping bits in one field gives an attacker no algebraic
+//     handle on the other fields — they are statistically
+//     independent rather than slices of the same hash.
+//   - Standard practice. TLS 1.3, Signal, Noise all use HKDF for
+//     subkey derivation; defenders auditing this file recognise the
+//     construction immediately.
+//
+// Wire-format consequence: bundles produced by v0.82.0 or earlier
+// are NOT compatible with v0.83.0+ when a non-empty secret is set
+// (the derived Magic / FooterMagic / Vaddr bytes differ). Operators
+// re-pack their fleets at the migration boundary. The canonical
+// (empty-secret) wire format is unchanged and remains the fallback.
 //
 // A 16+ byte secret is recommended (operator's per-deployment GUID,
-// build timestamp + nonce, etc.). The output is 4 + 8 + 2 + 8 = 22
-// derived bytes (Magic + FooterMagic + Version + Vaddr); the
-// SHA-256 collision space is more than sufficient.
+// build timestamp + nonce, etc.).
 func DeriveBundleProfile(secret []byte) BundleProfile {
 	if len(secret) == 0 {
 		return BundleProfile{
@@ -50,22 +66,31 @@ func DeriveBundleProfile(secret []byte) BundleProfile {
 			FooterMagic: BundleFooterMagic,
 		}
 	}
-	sum := sha256.Sum256(secret)
+	// Each field gets its own HKDF-Expand with a purpose-bound label.
+	// crypto.DeriveKey errors only on impossible input shapes
+	// (length > 8160 B for SHA-256); our fixed 4/8/2/8-byte requests
+	// are well below that floor — the underlying io.ReadFull cannot
+	// fail. Errors are intentionally swallowed; if the impossible
+	// happens, the caller sees the canonical Magic / FooterMagic /
+	// Version which is a graceful degradation, not a corruption.
+	magicB, _ := crypto.DeriveKey(secret, "maldev/bundle/magic", 4)
+	footerB, _ := crypto.DeriveKey(secret, "maldev/bundle/footer", 8)
+	versionB, _ := crypto.DeriveKey(secret, "maldev/bundle/version", 2)
+	vaddrB, _ := crypto.DeriveKey(secret, "maldev/bundle/vaddr", 8)
+
 	var p BundleProfile
-	p.Magic = binary.LittleEndian.Uint32(sum[:4])
-	copy(p.FooterMagic[:], sum[4:12])
-	// Derive Version from sum[12..14], OR-ing in 0x8000 to keep the
-	// derived value distinct from the canonical 0x0001 — defenders
-	// looking for "version field == 1" miss every per-build artefact.
-	p.Version = binary.LittleEndian.Uint16(sum[12:14]) | 0x8000
-	// Derive Vaddr from sum[14..22] (8 bytes). Page-align (mask off
-	// low 12 bits) and constrain to user-space half (mask off the
-	// kernel-half bit by ANDing with 0x0000_3FFF_FFFF_F000 — gives
-	// [0x0000_0000_0000_1000, 0x0000_3FFF_FFFF_F000] minus the alignment
-	// fragment). Then OR in 0x0000_0000_0040_0000 to anchor to the
-	// "user-space high half" range so vaddr stays comfortably above
-	// typical mmap anonymous targets and below the kernel half.
-	rawVaddr := binary.LittleEndian.Uint64(sum[14:22])
+	p.Magic = binary.LittleEndian.Uint32(magicB)
+	copy(p.FooterMagic[:], footerB)
+	// OR-in 0x8000 to keep the derived Version distinct from the
+	// canonical 0x0001 — defenders looking for "version field == 1"
+	// miss every per-build artefact.
+	p.Version = binary.LittleEndian.Uint16(versionB) | 0x8000
+	// Page-align Vaddr (mask off low 12 bits) and constrain to the
+	// user-space half. OR in 0x400000 to anchor above typical mmap
+	// anonymous targets while staying below the kernel half. Same
+	// transformation as the v0.82.0 layout; only the source bytes
+	// changed (HKDF subkey instead of SHA-256 slice).
+	rawVaddr := binary.LittleEndian.Uint64(vaddrB)
 	p.Vaddr = (rawVaddr & 0x00007FFFFFFFF000) | 0x0000000000400000
 	return p
 }

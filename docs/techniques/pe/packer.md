@@ -164,8 +164,10 @@ $ build-payload-w10.sh
 $ build-fallback.sh
 
 # Pack the bundle. -secret derives a per-build BundleMagic + footer
-# magic via SHA-256 so two operators using different secrets ship
-# byte-distinct bundles.
+# magic via HKDF-SHA256 (RFC 5869, v0.83.0+) so two operators using
+# different secrets ship byte-distinct bundles. Each derived field
+# uses its own purpose-bound HKDF label, so flipping bits in one
+# field gives an attacker no algebraic handle on the others.
 $ packer bundle -out bundle.bin -secret "$SECRET" \
     -pl payload-w11.exe:intel:22000-99999 \
     -pl payload-w10.exe:amd:10000-19999   \
@@ -767,14 +769,22 @@ Per Kerckhoffs's principle: the algorithm is public; only the secret
 is the operator's. The wire format spec is in
 `docs/superpowers/specs/2026-05-08-packer-multi-target-bundle.md` —
 reproducible by anyone. The **per-build secret** (any string the
-operator picks per deployment) derives via SHA-256 to:
+operator picks per deployment) derives via HKDF-SHA256 (RFC 5869,
+v0.83.0+) to:
 
 | IOC byte layer | What it is | Derivation |
 |---|---|---|
-| `BundleMagic` (4 B at offset 0) | Bundle blob magic | `sha256(secret)[0:4]` |
-| `FooterMagic` (8 B at end of wrap) | Launcher trailer sentinel | `sha256(secret)[4:12]` |
-| `BundleVersion` (2 B at offset 4) | Wire format version field | `sha256(secret)[12:14] | 0x8000` |
-| `Vaddr` (8 B in p_vaddr/p_paddr) | All-asm ELF load address | `sha256(secret)[14:22]` (page-aligned, user-space half) |
+| `BundleMagic` (4 B at offset 0) | Bundle blob magic | `HKDF(secret, "maldev/bundle/magic", 4)` |
+| `FooterMagic` (8 B at end of wrap) | Launcher trailer sentinel | `HKDF(secret, "maldev/bundle/footer", 8)` |
+| `BundleVersion` (2 B at offset 4) | Wire format version field | `HKDF(secret, "maldev/bundle/version", 2) | 0x8000` |
+| `Vaddr` (8 B in p_vaddr/p_paddr) | All-asm ELF load address | `HKDF(secret, "maldev/bundle/vaddr", 8)` (page-aligned, user-space half) |
+
+Each field's HKDF expansion uses a purpose-bound label, so flipping
+bits in one field gives an attacker no algebraic handle on the
+others — they are statistically independent rather than slices of
+the same hash. Pre-v0.83.0 builds used `sha256(secret)[a:b]` slicing;
+bundles produced under that scheme are NOT compatible with v0.83.0+
+when a non-empty secret is set. Re-pack at the migration boundary.
 
 A defender writing yara on canonical builds matches "MLDV at offset
 0", "version field == 1", "PT_LOAD at vaddr 0x400000". A
