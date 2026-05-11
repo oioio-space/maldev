@@ -7,7 +7,48 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
-### Packer DLL chantier — v0.110.0 → v0.120.0 (2026-05-11 → 2026-05-12)
+### Packer DLL chantier — v0.110.0 → v0.121.0 (2026-05-11 → 2026-05-12)
+
+#### v0.121.0 — Slice 5 EXE→DLL closure: callee-saved spill + 4 ablation gates (slice 5.5.y)
+
+Slice 5.5.y diagnostic E2E bisection isolated the residual 4th root
+cause of `ERROR_DLL_INIT_FAILED` after the slice-5.5.x fixes:
+
+- **Diagnostic infrastructure (~170 LOC).** Added three finer-grained
+  ablation flags routed through `stage1.EmitOptions` →
+  `stubgen.Options` → `PackBinaryOptions`:
+  - `DiagSkipConvertedPayload` — omit SGN + resolver + spawn entirely
+    (minimal prologue/flag/return).
+  - `DiagSkipConvertedResolver` — keep SGN, omit resolver + spawn.
+  - `DiagSkipConvertedSpawn` — keep SGN + resolver, omit CreateThread
+    frame.
+  Diagnostic E2E uses `fmt.Fprintln(os.Stderr, ...)` rather than
+  `t.Logf` (stdlib buffer is lost on abrupt Win32 termination; vmtest
+  streams stderr eagerly into its host-side log).
+- **Bisection result.** `NoPayload` PASS, `NoSpawn` FAIL with
+  `ERROR_DLL_INIT_FAILED` (no AV, just BOOL=FALSE) → non-volatile
+  register corruption.
+- **Fix.** The shared DllMain prologue only spilled `RCX/RDX/R8/R15`
+  (args + textBase). Win64 ABI requires DllMain to preserve
+  `RBX/RBP/RDI/RSI/R12-R15`. The kernel32 resolver clobbers `RBX` and
+  `R12` (and the SGN poly engine churns `R12-R14`), so the loader
+  observed corrupted callee-saved state on return and flagged the
+  DLL as init-failed. Added a converted-DLL-specific
+  `convertedExtraSpills` set (RBX/RDI/RSI/R12/R13/R14) at
+  `[rbp-0x28..0x50]`; frame grew `0x40 → 0x60`. Pinned byte count
+  bumped 465 → 509 (3 rounds, +44 B for the 12 mov ops).
+- **Win10 VM E2E full suite GREEN.** `LoadLibrary_E2E` PASS (2.96 s,
+  marker `"OK\n"` written by the spawned thread), `_NoPayload_E2E` /
+  `_SGNOnly_E2E` / `_NoSpawn_E2E` all PASS. Confirms the full slice-5
+  pipeline: pack EXE → DllMain stub → SGN-decrypt `.text` → PEB-walk
+  kernel32 → resolve `CreateThread` → spawn thread at OEP → original
+  `main()` runs.
+
+Slice 5 of `packer-exe-to-dll-plan.md` is structurally complete.
+Operators can now `PackBinary(ConvertEXEtoDLL=true)` to wrap any
+no-CRT-or-CRT-friendly EXE as a DLL whose `DllMain` decrypts and
+spawns the original entry point — sideloaded via `LoadLibrary`,
+classic DLL injection, or `rundll32` LOLBAS chains.
 
 #### v0.120.0 — Real-loader LoadLibrary diagnostics + 3 root-cause fixes (slice 5.5.x of EXE→DLL)
 
