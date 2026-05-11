@@ -20,10 +20,16 @@ const (
 	RelTypeDir64 uint16 = 10
 )
 
-// dirBaseReloc is the DataDirectory index for the base-relocation
+// DirBaseReloc is the DataDirectory index for the base-relocation
 // table (IMAGE_DIRECTORY_ENTRY_BASERELOC). The entry holds an RVA
 // + size pointing at a sequence of IMAGE_BASE_RELOCATION blocks.
-const dirBaseReloc = 5
+// Exported so test helpers + sibling packages don't re-hardcode `5`.
+const DirBaseReloc = 5
+
+// dirBaseReloc is the unexported alias retained for in-package
+// brevity; new code in sibling packages should reference
+// [DirBaseReloc] directly.
+const dirBaseReloc = DirBaseReloc
 
 // BaseRelocEntry is one decoded relocation: RVA of the patched
 // location, the type code, and the index of the entry within

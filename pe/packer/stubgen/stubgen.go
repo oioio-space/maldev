@@ -54,6 +54,12 @@ var (
 	ErrInvalidRounds = errors.New("stubgen: rounds out of range")
 	// ErrNoInput fires when Options.Input is nil or empty.
 	ErrNoInput = errors.New("stubgen: no input bytes")
+	// ErrCompressDLLUnsupported fires when Options.Compress is true
+	// AND the input is a DLL. The DllMain stub layout doesn't yet
+	// embed the LZ4 inflate / scratch buffer path the EXE stub uses
+	// — slice-4 limitation, tracked in
+	// docs/refactor-2026-doc/packer-dll-format-plan.md.
+	ErrCompressDLLUnsupported = errors.New("stubgen: Compress=true is not supported on DLL inputs")
 )
 
 // Generate runs the UPX-style transform pipeline:
@@ -97,15 +103,27 @@ func Generate(opts Options) ([]byte, []byte, error) {
 		seed = s
 	}
 
-	// 1. Detect format + Plan
+	// 1. Detect format + Plan. PE inputs split further into EXE
+	// (PlanPE) and DLL (PlanDLL); the latter selects the DllMain-
+	// shaped stub at step 5 below.
 	format := transform.DetectFormat(opts.Input)
 	var plan transform.Plan
 	switch format {
 	case transform.FormatPE:
 		var err error
-		plan, err = transform.PlanPE(opts.Input, stubMaxSize)
-		if err != nil {
-			return nil, nil, fmt.Errorf("stubgen: PlanPE: %w", err)
+		if transform.IsDLL(opts.Input) {
+			plan, err = transform.PlanDLL(opts.Input, stubMaxSize)
+			if err != nil {
+				return nil, nil, fmt.Errorf("stubgen: PlanDLL: %w", err)
+			}
+			if opts.Compress {
+				return nil, nil, ErrCompressDLLUnsupported
+			}
+		} else {
+			plan, err = transform.PlanPE(opts.Input, stubMaxSize)
+			if err != nil {
+				return nil, nil, fmt.Errorf("stubgen: PlanPE: %w", err)
+			}
 		}
 		// Forward operator-supplied section name (Phase 2-A). Zero
 		// value preserves the canonical ".mldv\x00\x00\x00" default.
@@ -230,12 +248,17 @@ func Generate(opts Options) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("stubgen: EncodePayload: %w", err)
 	}
 
-	// 5. Emit stub asm
+	// 5. Emit stub asm — DLL inputs use the DllMain-shaped emitter,
+	// everything else the EXE emitter.
 	b, err := amd64.New()
 	if err != nil {
 		return nil, nil, fmt.Errorf("stubgen: amd64.New: %w", err)
 	}
-	if err := stage1.EmitStub(b, plan, polyRounds, emitOpts); err != nil {
+	if plan.IsDLL {
+		if err := stage1.EmitDLLStub(b, plan, polyRounds); err != nil {
+			return nil, nil, fmt.Errorf("stubgen: EmitDLLStub: %w", err)
+		}
+	} else if err := stage1.EmitStub(b, plan, polyRounds, emitOpts); err != nil {
 		return nil, nil, fmt.Errorf("stubgen: EmitStub: %w", err)
 	}
 
@@ -247,17 +270,29 @@ func Generate(opts Options) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("%w: %d > %d", transform.ErrStubTooLarge, len(stubBytes), plan.StubMaxSize)
 	}
 
-	// 6. Patch CALL+POP+ADD prologue: replace sentinel with real displacement
+	// 6. Patch CALL+POP+ADD prologue: replace sentinel with real
+	// displacement. Shared between EXE and DLL stub layouts — both
+	// use the same emitTextBasePrologue idiom.
 	if _, err := stage1.PatchTextDisplacement(stubBytes, plan); err != nil {
 		return nil, nil, fmt.Errorf("stubgen: PatchTextDisplacement: %w", err)
 	}
+	// DLL stubs carry two extra R15-relative disp sentinels (flag +
+	// slot) that PatchDLLStubDisplacements rewrites once the
+	// trailing-data offsets are known.
+	if plan.IsDLL {
+		if _, err := stage1.PatchDLLStubDisplacements(stubBytes, plan); err != nil {
+			return nil, nil, fmt.Errorf("stubgen: PatchDLLStubDisplacements: %w", err)
+		}
+	}
 
-	// 7. Inject into input
+	// 7. Inject into input. DLL inputs route through InjectStubDLL.
 	var out []byte
-	switch format {
-	case transform.FormatPE:
+	switch {
+	case plan.IsDLL:
+		out, err = transform.InjectStubDLL(opts.Input, finalEncoded, stubBytes, plan)
+	case format == transform.FormatPE:
 		out, err = transform.InjectStubPE(opts.Input, finalEncoded, stubBytes, plan)
-	case transform.FormatELF:
+	case format == transform.FormatELF:
 		out, err = transform.InjectStubELF(opts.Input, finalEncoded, stubBytes, plan)
 	}
 	if err != nil {

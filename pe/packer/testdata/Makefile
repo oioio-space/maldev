@@ -2,9 +2,9 @@
 # TestPackBinary_WindowsPE_PackTimeMultiSeed. Cross-build only —
 # nothing here runs on Windows.
 
-.PHONY: all winhello winpanic winhello_w32 clean
+.PHONY: all winhello winpanic winhello_w32 testlib clean
 
-all: winhello winpanic winhello_w32
+all: winhello winpanic winhello_w32 testlib
 
 winhello: winhello.exe
 
@@ -31,5 +31,19 @@ winhello_w32.exe: winhello_w32.c
 	x86_64-w64-mingw32-gcc -nostdlib -O2 -e main -Wl,--strip-all \
 		-o $@ ./winhello_w32.c -lkernel32
 
+# Slice-4 DLL fixture: mingw -nostdlib library exporting `add`. Used
+# by TestPackBinary_WindowsDLL_E2E to validate FormatWindowsDLL.
+testlib: testlib.dll
+
+testlib.dll: testlib.c
+	# --dynamicbase preserves the BASERELOC table that InjectStubDLL
+	# extends with the DllMain-slot DIR64 entry. NO -Wl,-s here:
+	# stripping symbols on this mingw toolchain also strips the
+	# .reloc section even with --dynamicbase, leaving the fixture
+	# with an empty BASERELOC directory.
+	x86_64-w64-mingw32-gcc -nostdlib -shared -O2 \
+		-Wl,--dynamicbase \
+		-o $@ ./testlib.c -lkernel32
+
 clean:
-	rm -f winhello.exe winpanic.exe winhello_w32.exe
+	rm -f winhello.exe winpanic.exe winhello_w32.exe testlib.dll

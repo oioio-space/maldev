@@ -333,6 +333,18 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 			return nil, nil, fmt.Errorf("%w: opts.Format=%s but input is %s",
 				ErrUnsupportedFormat, opts.Format, detected)
 		}
+		// EXE vs DLL share the FormatPE byte signature, so the
+		// DetectFormat cross-check above can't tell them apart. The
+		// switch keys off IMAGE_FILE_DLL to enforce the PE sub-variant.
+		isDLL := transform.IsDLL(input)
+		switch {
+		case opts.Format == FormatWindowsDLL && !isDLL:
+			return nil, nil, fmt.Errorf("%w: opts.Format=%s but input lacks IMAGE_FILE_DLL",
+				ErrUnsupportedFormat, opts.Format)
+		case opts.Format == FormatWindowsExe && isDLL:
+			return nil, nil, fmt.Errorf("%w: opts.Format=%s but input is a DLL",
+				ErrUnsupportedFormat, opts.Format)
+		}
 	}
 
 	rounds := opts.Stage1Rounds

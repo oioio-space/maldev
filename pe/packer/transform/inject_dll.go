@@ -7,6 +7,29 @@ import (
 	"fmt"
 )
 
+// IsDLL reports whether `input` is a PE32+ with IMAGE_FILE_DLL set
+// in COFF Characteristics. Returns false (no error) when the input
+// is not a PE at all, when it's too short, or when the bit is clear.
+//
+// Cheap pre-flight for dispatchers that need to pick between
+// [PlanPE] (EXE path) and [PlanDLL] (DLL path) without paying the
+// full Plan computation.
+func IsDLL(input []byte) bool {
+	if DetectFormat(input) != FormatPE {
+		return false
+	}
+	if len(input) < int(PEELfanewOffset)+4 {
+		return false
+	}
+	peOff := binary.LittleEndian.Uint32(input[PEELfanewOffset:])
+	coffOff := peOff + PESignatureSize
+	if int(coffOff)+PECOFFHdrSize > len(input) {
+		return false
+	}
+	c := binary.LittleEndian.Uint16(input[coffOff+0x12:])
+	return c&ImageFileDLL != 0
+}
+
 // DLLStubSlotByteOffsetFromEnd is the byte offset (counted from
 // the end of [stage1.EmitDLLStub]'s output) where the 8-byte
 // orig_dllmain_slot lives. The slot always sits at the very end:

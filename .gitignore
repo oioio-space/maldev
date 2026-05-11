@@ -83,3 +83,4 @@ workspace.xml
 .mcp.json
 .worktrees/
 /asmtrace
+/pe/packer/testdata/testlib.dll
