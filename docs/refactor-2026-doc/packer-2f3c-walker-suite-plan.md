@@ -128,18 +128,45 @@ Each slice ships:
 4. `/simplify` review of the diff.
 5. Tech-md `packer.md` update + commit + push + tag.
 
-### 2-F-3-c-3 — EXCEPTION walker (high priority)
+### 2-F-3-c-3 — EXCEPTION walker (REPRIORITISED — see empirical finding below)
 
-- Walker: `WalkExceptionDirectoryRVAs` — yields BeginAddress,
-  EndAddress, UnwindData per `RUNTIME_FUNCTION` (12 bytes each,
-  array length = `directorySize / 12`). UnwindData itself
-  points at `UNWIND_INFO` blocks; the version-1 layout has
-  `ExceptionHandler` (RVA) at the end if `UNW_FLAG_EHANDLER`
-  is set in the flags. Recursive walk for chained handlers.
-- Fixtures: build `winpanic.exe` + `wincallers.exe`.
-- E2E gate: both fixtures pass `RandomizeAll`.
-- Estimated scope: ~120 LOC walker + 100 LOC tests + Makefile rule.
-- Tag: v0.105.0.
+**Empirical finding 2026-05-11 (15:08):** Built `winpanic.exe`
+fixture (Go static-PIE that nil-derefs + recovers via
+`defer/recover`). Packed it with `RandomizeAll` (which includes
+`RandomizeImageVAShift` since v0.104.0) — **PASSES** without
+any EXCEPTION walker. Stale `.pdata` is harmless for Go-built
+binaries because Go uses its own pclntab-based unwinder for
+panic/recover, NOT Win32 SEH / `RtlVirtualUnwind`.
+
+`.pdata` only matters when:
+- Native C/C++ code uses `try/__except` (SEH) — Win32 unwinder
+  walks `.pdata`
+- Debuggers/profilers call `StackWalk64` from outside the
+  process — they read `.pdata`
+- The Go runtime walks STD library code that's been linked in
+  (rare for static-PIE)
+
+For the typical offensive-packer use case (Go static-PIE
+payload that exits cleanly OR panics internally), the
+EXCEPTION walker is OPTIONAL defense-in-depth. Reprioritise:
+
+- **Original plan:** -c-3 EXCEPTION first (high priority).
+- **Revised plan:** -c-3 demoted to LOW priority. Ship only
+  if a C/C++ fixture lights up the failure. Move LOAD_CONFIG
+  (-c-4) up to next slice — Win10 validates LOAD_CONFIG
+  fields early in the loader, before any user code runs.
+
+- Walker (when shipped): `WalkExceptionDirectoryRVAs` — yields
+  BeginAddress, EndAddress, UnwindData per `RUNTIME_FUNCTION`
+  (12 bytes each, array length = `directorySize / 12`).
+  UnwindData → `UNWIND_INFO` blocks; the variable-length tail
+  is one of:
+  - 0 bytes if `Flags & 0b111 == 0` (NHANDLER)
+  - 4 bytes RVA if `EHANDLER` (1) or `UHANDLER` (2)
+  - 12 bytes (full RUNTIME_FUNCTION inlined) if `CHAININFO` (4)
+  Recursive walk for chained handlers, depth cap 8 + visited set.
+- Fixture (when needed): a C app with a `try/__except` block.
+- Tag: v0.105.0 — when shipped.
 
 ### 2-F-3-c-4 — LOAD_CONFIG walker
 
