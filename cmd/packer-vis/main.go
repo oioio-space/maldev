@@ -33,6 +33,8 @@ Usage:
   packer-vis bundle  <bundle.bin>                 Bundle wire-format viz
   packer-vis round-diff <file> [-rounds N] [-seed S]
                                                   SGN per-round byte-evolution table
+  packer-vis directories <file>                   PE DataDirectory inventory (which
+                                                  walkers a payload would need)
   packer-vis sections <file>                      PE section table + COFF pointers
                                                   (debugging companion for the
                                                   Phase 2-F transforms — shows
@@ -87,6 +89,12 @@ func main() {
 			os.Exit(2)
 		}
 		os.Exit(runSections(os.Args[2]))
+	case "directories":
+		if len(os.Args) != 3 {
+			fmt.Fprint(os.Stderr, usage)
+			os.Exit(2)
+		}
+		os.Exit(runDirectories(os.Args[2]))
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)

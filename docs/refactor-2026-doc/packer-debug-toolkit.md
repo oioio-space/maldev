@@ -56,22 +56,40 @@ Investigating `RandomizeImageBase` returning
 **Total time:** ~15 minutes including the fix. No debugger,
 no MSDN deep-dive, no VM cycles needed.
 
-## When to add heavier tools to the VM provision
+## In-tree diagnostic CLIs (preferred over external tools)
 
-If a future crash resists empirical bisection, consider
-installing on the Win10 VM:
+Today's debug session was solved entirely with these. Reach
+for an external debugger only if these aren't enough.
 
-| Tool | Use case | Source |
+| Subcommand | What it shows | Built today? |
 |---|---|---|
-| **cdb.exe** | Command-line crash analyzer (parses minidumps WER captured) | Windows SDK Debugging Tools (`x64\Debuggers\cdb.exe`) |
-| **windbg** | Same as cdb but with TUI; for deep stack traces | Windows SDK Debugging Tools |
-| **Process Monitor (procmon)** | Filesystem/registry/network trace at OS level — catches missing-DLL / missing-file before the crash | Sysinternals Suite, single .exe |
-| **gflags + page heap** | Heap corruption detection at allocation boundary | Windows SDK |
-| **dumpbin /headers** | PE structure inspection (already covered by `packer-vis sections`) | MSVC build tools |
+| `packer-vis sections <file>` | Section table + COFF.PointerToSymbolTable. Used to confirm structural shape between two packs. | shipped earlier (Phase 2-F-2 follow-up) |
+| `packer-vis directories <file>` | DataDirectory inventory — which of the 16 entries are populated, RVA + size. Tells you which walkers a payload would need. | yes (this commit, promoted from `ignore/dump_loadconfig.go` after it proved its keep) |
+| `packer-vis entropy <file>` | Shannon-entropy heatmap. Useful for confirming `.text` is encrypted (high entropy) vs plain (low). | shipped earlier |
+| `packer-vis compare <a> <b>` | Stacked entropy heatmaps with delta. The "see the packer at work" view. | shipped earlier |
 
-Sketch installation script: `scripts/vm-debug-tools.ps1`
-(see beside this doc) — run on the Win10 VM via the existing
-`scripts/vm-provision.sh` plumbing if needed.
+These three are what an operator actually needs when a packed
+binary misbehaves: section structure, directory inventory,
+entropy distribution. Three terminals, no SDK install.
+
+## When external tools would actually help
+
+Only if the in-tree CLIs don't isolate the failure:
+
+- **WER minidump in `C:\Dumps`** (already configured) tells
+  you the crash address + register state. Read with any
+  debugger that consumes minidumps; on the Win10 VM the
+  Defender-bundled `werfault.exe` can show a basic dialog,
+  or copy the .dmp back to host and load in Visual Studio /
+  WinDbg if installed locally.
+- **Process Monitor (Sysinternals)** when you suspect a
+  missing-DLL or registry-access issue rather than a code
+  bug. Single .exe, no installer needed.
+- **`dumpbin /headers`** is already covered by
+  `packer-vis sections` + `directories` for our use case.
+
+No need to balloon the VM snapshot with debugging tools that
+won't get used.
 
 ## Operator-recognisable failure codes
 
