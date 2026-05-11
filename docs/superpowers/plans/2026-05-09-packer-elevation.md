@@ -50,8 +50,8 @@ linux/windows/darwin amd64.
 | 2 — All-asm stub | 2.5 Tag v0.69.0 | ✅ | — | **v0.69.0** |
 | 2 — All-asm stub | 2.6 Bundle stub asm — scan loop (PT_MATCH_ALL only) | ✅ | c0b58ce | **v0.71.0** |
 | 2 — All-asm stub | 2.7 Bundle stub asm — vendor-aware dispatch | ✅ | 873f365 | **v0.72.0** |
-| 2 — All-asm stub | 2.8 Minimal PE32+ writer (Windows symmetry) | ⏳ | | |
-| 2 — All-asm stub | 2.9 PT_WIN_BUILD predicate in Windows stub | ⏳ | | |
+| 2 — All-asm stub | 2.8 Minimal PE32+ writer (Windows symmetry) | ✅ | `transform/pe_minimal.go` + tests | (rolled into v0.82 series) |
+| 2 — All-asm stub | 2.9 PT_WIN_BUILD predicate in Windows stub | ✅ | `bundle_stub_v2_winbuild_e2e_windows_test.go` | (rolled into v0.85+ series) |
 | 3 — packer-vis | 3.1 Entropy heatmap rendering | ✅ | eab7429 | — |
 | 3 — packer-vis | 3.3 Bundle wire-format viz | ✅ | eab7429 | — |
 | 3 — packer-vis | 3.2 SGN round byte-diff display (deferred — needs hooks in poly engine) | ⏳ | | |
@@ -61,7 +61,7 @@ linux/windows/darwin amd64.
 | 4 — Kerckhoffs | 4.2 Launcher + CLI: -secret end-to-end | ✅ | 3f61fb2 | **v0.73.0** |
 | 4 — Kerckhoffs | 4.3 All-asm WrapBundleAsExecutableLinuxWith | ✅ | 2c2a5c2 | — |
 | 5 — Polymorphism | 5.1 Intel multi-byte NOP injection in stub (per pack random) | ✅ | 655ccff | **v0.74.0** |
-| 5 — Polymorphism | 5.2 Negate flag in stub asm | ⏳ (Go-side covered; closes spec gap) | | |
+| 5 — Polymorphism | 5.2 Negate flag in stub asm | ✅ | `bundle_stub_v2_negate.go` (commit 539527a) | (V2-Negate stub series) |
 | 6 — Defender pair | 6.1 cmd/packerscope — detect/dump/extract | ✅ | f233c26 | **v0.75.0** |
 | 7 — Pedagogy | 7.1 Elevation tour worked example | ✅ | df2de82 | — |
 | 7 — Pedagogy | 7.2 README PE-row refresh | ✅ | 45a5dbc | — |
