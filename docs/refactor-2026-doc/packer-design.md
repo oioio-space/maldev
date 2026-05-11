@@ -253,7 +253,8 @@ safe wins first and keep the loader-contract churn isolated:
 | 2-F-2 | Append [1, 5] zero-byte separator section headers AFTER the stub (BSS-style: SizeOfRawData=0). Bumps NumberOfSections + SizeOfImage; file size unchanged. Stub VA preserved (its body uses RIP-relative addressing). | Medium — but tests + Win10 E2E green | ✅ v0.100.0 |
 | 2-F-3-a | **Base-relocation table walker** (read-only `WalkBaseRelocs(pe, cb) error` helper). Iterates IMAGE_BASE_RELOCATION blocks under DataDirectory[5], yields (rva, type) per entry. Uses pattern proven by runtime/runtime_windows.go::applyRelocations. Pure enumeration — no data movement. Foundation for 2-F-3-c. | Low — read-only | ✅ v0.101.0 |
 | 2-F-3-b | **File-order permutation of section DATA** (not VAs). PE/COFF allows section file-layout in any order, with arbitrary gaps, as long as each `PointerToRawData` stays `FileAlign`-aligned. Permute the file order of host sections [0..N-2], rewrite each section's `PointerToRawData`, copy section bodies to new file offsets. **No VA change, no reloc fixup, no DataDirectory update, no OEP update.** Defeats YARA rules anchored at file offsets ("file 0x400 = decryption key bytes"). | Low-medium — only file-byte rearrangement | next |
-| 2-F-3-c | Full pre-stub VA permutation: apply a permutation to sections [0..N-2], rebuild VA layout ascending, move section data, walk relocs to update absolute pointer values + repack entries into different page blocks, update DataDirectory entries that referenced moved sections, update OEP if .text moved. Stub stays last (its VA must not move). Requires `IMAGE_FILE_RELOCS_STRIPPED=0` in COFF Characteristics — bail early if stripped. | High — touches loader contract via reloc + DataDirectory mutation | after 2-F-3-b |
+| 2-F-3-c | **Whole-image VA shift**: pick a random delta D = N×SectionAlignment (small N, e.g. [1, 8]), bump every section's VirtualAddress by D, walk relocs to add D to every absolute pointer value AND to every block's PageRVA, bump every non-zero DataDirectory entry's RVA by D, bump OEP by D, bump SizeOfImage. Inter-section deltas preserved → all RIP-relative refs (including the stub→.text reach) still work without re-patching. Requires `IMAGE_FILE_RELOCS_STRIPPED=0` — bail when stripped. | Medium — touches reloc value patches but no data movement | next |
+| 2-F-3-d | Full per-section VA permutation. Would need to re-emit RIP-relative instructions inside .text whose targets cross sections (not covered by the reloc table — the linker bakes them as raw displacements). Significantly larger scope: needs disassembly + re-encoding of .text. Not worth chasing while 2-F-3-c achieves the operational goal of "every VA in the binary differs from a vanilla pack". | Very high | deferred |
 
 - **2-F (legacy) — Section shuffle** (full RVA reassignment): Randomise
   host PE section order. Adjusts file offsets, RVAs,
@@ -390,7 +391,8 @@ ratio. Stack with HexAlphabet (or accept the 50% size cost of
 | 2-F-2 | Random zero-byte separator sections | ✅ v0.100.0 |
 | 2-F-3-a | Base-relocation table walker (read-only helper) | ✅ v0.101.0 |
 | 2-F-3-b | File-order permutation of host section DATA (no VA change) | ✅ v0.102.0 |
-| 2-F-3-c | Full pre-stub VA permutation (reloc + DataDirectory + OEP fixup) | scoped |
+| 2-F-3-c | Whole-image VA shift (single global delta, reloc + DataDirectory + OEP fixup) | next |
+| 2-F-3-d | Full per-section VA permutation (deferred — would need to repair RIP-relative inter-section refs that aren't reloc-covered) | deferred |
 | 2-G | IAT scramble (hash-resolved imports) | deferred |
 | 3 | Junk sections + stub control-flow obfuscation | deferred |
 
