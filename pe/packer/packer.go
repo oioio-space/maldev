@@ -91,6 +91,14 @@ const (
 	FormatUnknown    Format = iota // zero value; rejected by PackBinary
 	FormatWindowsExe               // Phase 1e (v0.61.x): PE32+ Windows executable
 	FormatLinuxELF                 // Phase 1e (v0.61.x): ELF64 Linux static-PIE
+	// FormatWindowsDLL — Phase 2-F-3-c follow-up (scoped in
+	// docs/refactor-2026-doc/packer-dll-format-plan.md). The
+	// Format constant is wired through here so PlanPE's DLL
+	// rejection can route to the correct error message, but
+	// the actual DLL stub implementation is a separate slice.
+	// Selecting this format today still produces ErrIsDLL until
+	// the stub work lands.
+	FormatWindowsDLL
 )
 
 // String returns the canonical lowercase format name.
@@ -100,6 +108,8 @@ func (f Format) String() string {
 		return "windows-exe"
 	case FormatLinuxELF:
 		return "linux-elf"
+	case FormatWindowsDLL:
+		return "windows-dll"
 	default:
 		return fmt.Sprintf("format(%d)", uint8(f))
 	}
@@ -544,7 +554,11 @@ const (
 // transform package's internal Format constant.
 func transformFormatFor(f Format) transform.Format {
 	switch f {
-	case FormatWindowsExe:
+	case FormatWindowsExe, FormatWindowsDLL:
+		// Both flow through the PE detector at the byte level.
+		// The DLL-specific dispatch happens deeper in PlanPE
+		// (IMAGE_FILE_DLL bit check) and stubgen (DLL stub
+		// emission, planned in packer-dll-format-plan.md).
 		return transform.FormatPE
 	case FormatLinuxELF:
 		return transform.FormatELF
