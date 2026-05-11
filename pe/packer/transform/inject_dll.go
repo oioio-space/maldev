@@ -7,6 +7,32 @@ import (
 	"fmt"
 )
 
+// SetIMAGEFILEDLL flips the IMAGE_FILE_DLL bit in the COFF
+// Characteristics field of a PE32+ buffer. OR-only: any other
+// flags (EXECUTABLE_IMAGE, LARGE_ADDRESS_AWARE, …) are preserved.
+//
+// Used by [InjectConvertedDLL] in production and by test fixtures
+// that need to synthesise a DLL from a minimal EXE template
+// (`testutil.BuildDLLWithReloc`, `plan_dll_test.setDLLBit`).
+// Centralising the byte math here avoids drift across 3 sites.
+//
+// Returns an error if the buffer is too short to carry a valid PE
+// header — caller-owned validation rather than a silent no-op.
+func SetIMAGEFILEDLL(buf []byte) error {
+	if len(buf) < int(PEELfanewOffset)+4 {
+		return fmt.Errorf("transform: SetIMAGEFILEDLL: buffer too short for e_lfanew")
+	}
+	peOff := binary.LittleEndian.Uint32(buf[PEELfanewOffset:])
+	coffOff := peOff + PESignatureSize
+	charsOff := coffOff + 0x12
+	if int(charsOff)+2 > len(buf) {
+		return fmt.Errorf("transform: SetIMAGEFILEDLL: buffer too short for COFF Characteristics")
+	}
+	chars := binary.LittleEndian.Uint16(buf[charsOff:])
+	binary.LittleEndian.PutUint16(buf[charsOff:], chars|ImageFileDLL)
+	return nil
+}
+
 // IsDLL reports whether `input` is a PE32+ with IMAGE_FILE_DLL set
 // in COFF Characteristics. Returns false (no error) when the input
 // is not a PE at all, when it's too short, or when the bit is clear.

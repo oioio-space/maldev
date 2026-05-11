@@ -36,16 +36,16 @@ func TestPlanPE_RejectsDLL(t *testing.T) {
 	}
 }
 
-// setDLLBit ORs IMAGE_FILE_DLL into the COFF Characteristics field
-// of a PE buffer, converting a synthetic EXE built by
-// [transform.BuildMinimalPE32Plus] into a synthetic DLL.
+// setDLLBit converts a synthetic EXE built by
+// [transform.BuildMinimalPE32Plus] into a synthetic DLL by ORing
+// the IMAGE_FILE_DLL bit. Thin wrapper around the shared
+// [transform.SetIMAGEFILEDLL] helper so test fixtures + the
+// production InjectConvertedDLL flip stay in sync.
 func setDLLBit(t *testing.T, pe []byte) {
 	t.Helper()
-	peOff := binary.LittleEndian.Uint32(pe[transform.PEELfanewOffset:])
-	coffOff := peOff + transform.PESignatureSize
-	off := coffOff + 0x12
-	c := binary.LittleEndian.Uint16(pe[off:])
-	binary.LittleEndian.PutUint16(pe[off:], c|transform.ImageFileDLL)
+	if err := transform.SetIMAGEFILEDLL(pe); err != nil {
+		t.Fatalf("setDLLBit: %v", err)
+	}
 }
 
 // TestPlanDLL_AcceptsDLL — the symmetric of TestPlanPE_RejectsDLL.

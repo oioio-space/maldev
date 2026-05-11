@@ -44,9 +44,10 @@ func BuildDLLWithReloc(t *testing.T, bodySize int) []byte {
 	coffOff := peOff + transform.PESignatureSize
 	optOff := coffOff + transform.PECOFFHdrSize
 
-	// IMAGE_FILE_DLL bit.
-	c := binary.LittleEndian.Uint16(base[coffOff+0x12:])
-	binary.LittleEndian.PutUint16(base[coffOff+0x12:], c|transform.ImageFileDLL)
+	// IMAGE_FILE_DLL bit via the shared transform helper.
+	if err := transform.SetIMAGEFILEDLL(base); err != nil {
+		t.Fatalf("testutil: SetIMAGEFILEDLL: %v", err)
+	}
 
 	// One DIR64 reloc entry covering textRVA+0x10.
 	textRVA := binary.LittleEndian.Uint32(base[optOff+transform.OptAddrEntryOffset:])
