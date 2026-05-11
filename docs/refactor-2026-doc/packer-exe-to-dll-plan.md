@@ -1,5 +1,5 @@
 ---
-status: planning
+status: in-progress (sub-slice 5.1 of 5 shipped)
 created: 2026-05-11
 last_reviewed: 2026-05-11
 constraint: pure-Go pack-time (no toolchain, no CGO, no linker, no Go runtime in the stub)
@@ -148,7 +148,7 @@ Key differences from the slice-2 DllMain stub:
 
 | Sub-slice | Surface | LOC | Status | Tag |
 |---|---|---|---|---|
-| 5.1 | `PackBinaryOptions.ConvertEXEtoDLL` + `transform.PlanEXEasDLL` (accepts EXE inputs, returns `Plan{IsDLL: false, IsConvertedDLL: true}` — a new flag distinguishing native-DLL from converted-EXE so stub + injector dispatch correctly). Cross-check in `PackBinary`: refuse `ConvertEXEtoDLL=true` for non-EXE inputs. | ~120 | ⏳ | — |
+| 5.1 | `PackBinaryOptions.ConvertEXEtoDLL` + `transform.PlanConvertedDLL` (accepts EXE inputs, returns `Plan{IsDLL: false, IsConvertedDLL: true}`). Cross-check in `PackBinary` (refactored into `validatePackBinaryInput` — kills duplicated `transform.IsDLL` calls) + `stubgen.ErrConvertEXEtoDLLUnsupported` sentinel for the in-flight state. **Simplify bonus:** extraction of the admission helper consolidates Format / IsDLL / ConvertEXEtoDLL gates into one place; sentinel located with the future implementation (stubgen), consistent with `ErrCompressDLLUnsupported` precedent. | ~150 | ✅ shipped | v0.114.0 |
 | 5.2 | `stage1.EmitResolveKernel32Export(b, exportName string)` — generic PEB walk + InLoadOrderModuleList traversal + EAT walk, leaving the resolved function VA in a chosen register. Builds on `stage1/fingerprint.go` (which already walks part of the PEB for CPUID-vendor / build-range checks). | ~200 | ⏳ | — |
 | 5.3 | `stage1.EmitConvertedDLLStub(b, plan, rounds)` — DllMain prologue → SGN → resolve CreateThread → spawn → return TRUE. Reuses `emitTextBasePrologue` (shared CALL+POP+ADD), the SGN rounds body, and the decrypted-flag pattern from `EmitDLLStub`. | ~300 | ⏳ | — |
 | 5.4 | `transform.InjectConvertedDLL` — clone of `InjectStubDLL` but: (a) sets IMAGE_FILE_DLL on output, (b) flips OptionalHeader DllCharacteristics to include DYNAMIC_BASE, (c) **synthesises a `.reloc` section from scratch** when the input EXE lacks one (Go static-PIE), with one Absolute padding entry if no real relocs are needed. | ~200 | ⏳ | — |

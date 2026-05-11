@@ -7,6 +7,37 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Packer DLL chantier — v0.110.0 → v0.114.0 (2026-05-11)
+
+#### v0.114.0 — `PackBinaryOptions.ConvertEXEtoDLL` API surface (slice 5.1 of EXE→DLL)
+
+- `pe/packer.PackBinaryOptions.ConvertEXEtoDLL` — opt-in flag that
+  signals "convert this EXE input into a DLL output". Operationally
+  unlocks DLL sideloading + classic injection + LOLBAS rundll32.
+  Mutually exclusive with `Format=FormatWindowsDLL`.
+- `pe/packer/transform.PlanConvertedDLL(input, stubMaxSize)` —
+  EXE-as-DLL planner. Thin wrapper over `planPECore(expectEXE)` that
+  sets the new `Plan.IsConvertedDLL` flag (mutex with `Plan.IsDLL`).
+- `pe/packer/transform.Plan.IsConvertedDLL` — surfaces the EXE→DLL
+  intent so the stub emitter (slice 5.2) and injector (slice 5.3)
+  can dispatch accordingly.
+- `pe/packer/stubgen.ErrConvertEXEtoDLLUnsupported` — sentinel for
+  the in-flight 5.2–5.5 state. Located in stubgen (consistent with
+  `ErrCompressDLLUnsupported` precedent) since the implementation
+  will land there.
+- **Simplify pass:**
+  - `validatePackBinaryInput(opts, input) error` helper extracted
+    from `PackBinary` — collapses Format / IsDLL / ConvertEXEtoDLL
+    admission gates into one place, hoists the `transform.IsDLL`
+    call once per invocation.
+  - `PlanConvertedDLL` named with the noun-form convention shared
+    with `PlanPE` / `PlanDLL` (was `PlanEXEasDLL` mid-iteration).
+- 7 tests: `TestPlanConvertedDLL_{AcceptsEXE,RejectsDLL,ExclusiveWithIsDLL}`,
+  `TestPackBinary_ConvertEXEtoDLL_{NotImplementedYet,RejectsDLLInput,RejectsNonPE,RejectsFormatWindowsDLL}`.
+- Slice 5.2 (`stage1.EmitResolveKernel32Export`) is the next pickup;
+  see `docs/refactor-2026-doc/packer-exe-to-dll-plan.md` sub-slice
+  tracker.
+
 ### Packer DLL chantier — v0.110.0 → v0.113.0 (2026-05-11)
 
 #### v0.113.0 — `PackBinary(Format=FormatWindowsDLL)` (slice 4 of `FormatWindowsDLL`)
