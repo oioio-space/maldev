@@ -7,6 +7,56 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Packer DLL chantier — v0.110.0 → v0.119.0 (2026-05-11)
+
+#### v0.119.0 — `PackBinary(ConvertEXEtoDLL=true)` end-to-end (slice 5.5 of EXE→DLL)
+
+Final wiring slice: the EXE→DLL conversion is now operator-callable
+through `PackBinary` and produces a parseable PE32+ DLL bout-en-bout
+through the chain
+PlanConvertedDLL → EmitConvertedDLLStub → PatchConvertedDLLStubDisplacements
+→ InjectConvertedDLL.
+
+- `pe/packer/stubgen.Options.ConvertEXEtoDLL` — new field
+  forwarded from `packer.PackBinaryOptions.ConvertEXEtoDLL`.
+  Routes the input through `transform.PlanConvertedDLL` instead
+  of `PlanPE`, then through the slice-5.3 emitter + slice-5.4
+  injector. Mutually exclusive with `Compress` (slice-5.3 stub
+  doesn't embed the LZ4 inflate path); ELF inputs with this flag
+  are refused with `ErrUnsupportedInputFormat`.
+- `pe/packer/stubgen.Generate` — three-way PE dispatch (native
+  DLL → ConvertEXEtoDLL → plain EXE) replaces the slice-4 boolean
+  branch. Each path picks its own planner, emitter, displacement
+  patcher, and injector.
+- `pe/packer.PackBinary` — the slice-5.1
+  `ErrConvertEXEtoDLLUnsupported` gate is gone; ConvertEXEtoDLL
+  is now forwarded to stubgen.Generate. Existing admission
+  cross-checks (in `validatePackBinaryInput`) still gate the EXE
+  shape and the FormatWindowsDLL mutual exclusion.
+- Tests: `TestPackBinary_ConvertEXEtoDLL_NotImplementedYet`
+  superseded by `TestPackBinary_ConvertEXEtoDLL_HappyPath`
+  (parses output with debug/pe, asserts IMAGE_FILE_DLL + entry
+  inside the appended stub section). New
+  `TestPackBinary_ConvertEXEtoDLL_RejectsCompress` confirms the
+  Compress mutual exclusion surfaces the right sentinel.
+- Win10 VM EXE-regression E2E green: the new dispatch doesn't
+  touch the EXE path (verified via the 7
+  `TestPackBinary_WindowsPE_*_E2E` tests + 16-seed
+  `TestPackBinary_WindowsPE_PackTimeMultiSeed`).
+- **Deferred (slice 5.5.x):** real-loader `LoadLibrary` round-trip
+  on Win10. The pack-time test proves byte-correctness; the gap
+  is the real-loader trip (does the spawned thread reach the
+  original OEP and produce the expected side effect?). Needs a
+  probe-EXE harness with observable side effects — non-trivial
+  fixture setup. Scoped in
+  `docs/refactor-2026-doc/packer-exe-to-dll-plan.md`.
+
+The pack-time byte pipeline of the EXE→DLL chantier is now
+structurally complete. Operationally unlocks DLL sideloading +
+classic injection + LOLBAS rundll32 chains starting from a Go
+or no-CRT EXE source — pure-Go end-to-end, no toolchain at pack
+time.
+
 ### Packer DLL chantier — v0.110.0 → v0.118.0 (2026-05-11)
 
 #### v0.118.0 — `transform.InjectConvertedDLL` (slice 5.4 of EXE→DLL)
