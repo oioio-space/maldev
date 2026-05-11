@@ -95,7 +95,7 @@ loading via the existing `pe/packer/runtime.Prepare(input)` API.
 
 ### Steps
 
-- [ ] **Step 1.1: Read and understand `pe/packer/runtime.Prepare` contract**
+- [x] **Step 1.1: Read and understand `pe/packer/runtime.Prepare` contract**
 
 Run:
 ```bash
@@ -107,7 +107,7 @@ Expected: `Prepare(input []byte)` returns `*PreparedImage` after
 parsing+mapping ELF/PE; `(*PreparedImage).Run() error` enters the entry
 point.
 
-- [ ] **Step 1.2: Wire reflective path under build tag**
+- [x] **Step 1.2: Wire reflective path under build tag**
 
 Touch `cmd/bundle-launcher/exec_reflective_linux.go`:
 ```go
@@ -130,7 +130,7 @@ func executePayloadReflective(payload []byte, _ []string) error {
 }
 ```
 
-- [ ] **Step 1.3: Dispatch knob in main**
+- [x] **Step 1.3: Dispatch knob in main**
 
 Modify `main.go`:
 ```go
@@ -141,13 +141,13 @@ if os.Getenv("MALDEV_REFLECTIVE") == "1" {
 }
 ```
 
-- [ ] **Step 1.4: E2E test**
+- [x] **Step 1.4: E2E test**
 
 Create `launcher_reflective_e2e_linux_test.go` mirroring
 `TestLauncher_E2E_WrapAndRun` but setting `MALDEV_REFLECTIVE=1`. Use the
 `hello_static_pie` fixture from `pe/packer/runtime/testdata/`.
 
-- [ ] **Step 1.5: Commit + push + tag v0.68.0**
+- [x] **Step 1.5: Commit + push + tag v0.68.0**
 
 ```
 feat(bundle-launcher): in-process reflective loading via runtime.Prepare
@@ -195,13 +195,13 @@ entry:
 
 ### Steps (high-level — detailed when starting Phase 2)
 
-- [ ] **Step 2.1**: bundle-evaluator asm (with byte-shape test)
-- [ ] **Step 2.2**: minimal ELF writer + tests
-- [ ] **Step 2.3**: minimal PE writer + tests
-- [ ] **Step 2.4**: WrapBundleAsExecutable composing all of the above
-- [ ] **Step 2.5**: E2E linux: `exit 42` shellcode payload, assert
+- [x] **Step 2.1**: bundle-evaluator asm (with byte-shape test)
+- [x] **Step 2.2**: minimal ELF writer + tests
+- [x] **Step 2.3**: minimal PE writer + tests
+- [x] **Step 2.4**: WrapBundleAsExecutable composing all of the above
+- [x] **Step 2.5**: E2E linux: `exit 42` shellcode payload, assert
       `len(wrapped) < 4 KiB`
-- [ ] **Step 2.6**: Tag v0.69.0
+- [x] **Step 2.6**: Tag v0.69.0
 
 ---
 
@@ -225,12 +225,12 @@ masked.
 
 ### Steps
 
-- [ ] **Step 3.1**: skeleton bubbletea app, render entropy heatmap of any
+- [x] **Step 3.1**: skeleton bubbletea app, render entropy heatmap of any
       input file
-- [ ] **Step 3.2**: per-round SGN diff display
-- [ ] **Step 3.3**: bundle wire-format ASCII viz (boxes with offsets/sizes)
-- [ ] **Step 3.4**: README + asciinema demos
-- [ ] **Step 3.5**: Tag v0.70.0
+- [x] **Step 3.2**: per-round SGN diff display
+- [x] **Step 3.3**: bundle wire-format ASCII viz (boxes with offsets/sizes)
+- [x] **Step 3.4**: README + asciinema demos
+- [x] **Step 3.5**: Tag v0.70.0
 
 ---
 
