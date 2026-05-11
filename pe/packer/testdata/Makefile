@@ -2,9 +2,9 @@
 # TestPackBinary_WindowsPE_PackTimeMultiSeed. Cross-build only —
 # nothing here runs on Windows.
 
-.PHONY: all winhello winpanic winhello_w32 testlib clean
+.PHONY: all winhello winpanic winhello_w32 testlib probe_converted clean
 
-all: winhello winpanic winhello_w32 testlib
+all: winhello winpanic winhello_w32 testlib probe_converted
 
 winhello: winhello.exe
 
@@ -45,5 +45,15 @@ testlib.dll: testlib.c
 		-Wl,--dynamicbase \
 		-o $@ ./testlib.c -lkernel32
 
+# Slice-5.5.x EXE→DLL real-loader probe. Mingw -nostdlib (no TLS
+# callbacks so PlanConvertedDLL accepts it). Same flags as
+# winhello_w32. The test that drives it lives in
+# packer_e2e_converted_dll_windows_test.go.
+probe_converted: probe_converted.exe
+
+probe_converted.exe: probe_converted.c
+	x86_64-w64-mingw32-gcc -nostdlib -O2 -e main -Wl,--strip-all \
+		-o $@ ./probe_converted.c -lkernel32
+
 clean:
-	rm -f winhello.exe winpanic.exe winhello_w32.exe testlib.dll
+	rm -f winhello.exe winpanic.exe winhello_w32.exe testlib.dll probe_converted.exe

@@ -2,9 +2,42 @@ package transform
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 )
+
+// addStubSectionWrite ORs IMAGE_SCN_MEM_WRITE into the last
+// section's Characteristics. InjectStubPE appends the stub section
+// as the last one and marks it CODE|EXEC|READ (correct for EXE
+// stubs that only decrypt .text in place); the converted-DLL stub
+// additionally latches a `decrypted_flag` byte inside its own
+// section on PROCESS_ATTACH, which requires writable mapping.
+//
+// Same byte math as the inline OR-flip InjectStubPE does for .text
+// — just targeted at the last section header instead of the
+// .text header.
+func addStubSectionWrite(buf []byte) error {
+	peOff := binary.LittleEndian.Uint32(buf[PEELfanewOffset:])
+	coffOff := peOff + PESignatureSize
+	if int(coffOff)+PECOFFHdrSize > len(buf) {
+		return fmt.Errorf("transform/converted: buffer too short for COFF header")
+	}
+	numSections := binary.LittleEndian.Uint16(buf[coffOff+COFFNumSectionsOffset:])
+	if numSections == 0 {
+		return fmt.Errorf("transform/converted: zero sections — nothing to mark RW")
+	}
+	sizeOfOptHdr := binary.LittleEndian.Uint16(buf[coffOff+COFFSizeOfOptHdrOffset:])
+	secTableOff := coffOff + PECOFFHdrSize + uint32(sizeOfOptHdr)
+	lastHdrOff := secTableOff + uint32(numSections-1)*PESectionHdrSize
+	charsOff := lastHdrOff + SecCharacteristicsOffset
+	if int(charsOff)+4 > len(buf) {
+		return fmt.Errorf("transform/converted: buffer too short for last section header")
+	}
+	c := binary.LittleEndian.Uint32(buf[charsOff:])
+	binary.LittleEndian.PutUint32(buf[charsOff:], c|0x80000000) // IMAGE_SCN_MEM_WRITE
+	return nil
+}
 
 // ErrPlanNotConverted fires when [InjectConvertedDLL] gets a Plan
 // that wasn't produced by [PlanConvertedDLL] — i.e.
@@ -82,6 +115,32 @@ func InjectConvertedDLL(input, encryptedText, stubBytes []byte, plan Plan) ([]by
 	// as the EXE entry and called once at process start.
 	if err := SetIMAGEFILEDLL(out); err != nil {
 		return nil, fmt.Errorf("transform/converted: flip IMAGE_FILE_DLL: %w", err)
+	}
+
+	// Mark the appended stub section MEM_WRITE. The converted-DLL
+	// stub latches a `decrypted_flag` byte INSIDE its own section
+	// via a R15-relative MOVB on the first PROCESS_ATTACH call.
+	// InjectStubPE created the stub section as CODE|EXEC|READ
+	// (read-only executable — fine for EXE stubs that only decrypt
+	// .text, never themselves); writing to it triggers a page-level
+	// access violation at runtime.
+	//
+	// Discovered slice 5.5.x at the LoadLibrary E2E: PC inside the
+	// stub at the flag-latch MOVB, fault address inside .mldv.
+	if err := addStubSectionWrite(out); err != nil {
+		return nil, fmt.Errorf("transform/converted: add stub MEM_WRITE: %w", err)
+	}
+
+	// Clear DYNAMIC_BASE + HIGH_ENTROPY_VA on the converted output.
+	// Mingw / Go EXEs ship with DYNAMIC_BASE set, but converted DLLs
+	// don't carry a synthesised BASERELOC table — the loader would
+	// try ASLR, fail to relocate (no reloc entries), and reject the
+	// image with STATUS_CONFLICTING_ADDRESSES (observed at slice
+	// 5.5.x: kernel32!LoadLibrary AV crash on Win10). Forcing the
+	// preferred ImageBase is the right semantic until reloc synth
+	// lands.
+	if err := ClearDllCharacteristics(out, dllCharDynamicBase|dllCharHighEntropyVA); err != nil {
+		return nil, fmt.Errorf("transform/converted: clear DYNAMIC_BASE: %w", err)
 	}
 
 	return out, nil

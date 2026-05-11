@@ -379,11 +379,25 @@ func patchSentinel(haystack, needle, value []byte, allowMulti bool, name string)
 }
 
 func PatchTextDisplacement(stubBytes []byte, plan transform.Plan) (int, error) {
-	// CALL+POP+ADD: %r15 = address of POP (= StubRVA + 5) after the
-	// 5-byte CALL. ADD imm32 is added to %r15 directly — NOT
-	// RIP-relative. Displacement reference point is the POP's address.
-	const popOffset = 5
-	popAddr := plan.StubRVA + popOffset
+	// Locate the sentinel imm32 first so we can derive the POP
+	// instruction's byte offset within the stub. The CALL+POP+ADD
+	// idiom encodes as:
+	//   E8 00 00 00 00   ; CALL .next  (5 B)
+	//   41 5F            ; POP r15     (2 B)
+	//   49 81 C7 <imm32> ; ADD r15, imm32 (7 B, sentinel = imm32)
+	// So sentinel starts 5 bytes after POP starts: popOffset =
+	// sentinelOff - 5. This works for any CALL+POP+ADD position —
+	// the EXE stub places it at the start (sentinelOff=10 →
+	// popOffset=5), the DLL stubs place it after a prologue
+	// (sentinelOff=34+ → popOffset=29+). Slice 5.5.x: a hardcoded
+	// popOffset=5 produced an R15 24 B above textBase on DLL
+	// stubs → all flag/slot accesses miss → kernel32!LoadLibrary
+	// AV crash on the first MOVB.
+	sentinelOff := bytes.Index(stubBytes, callPopSentinel)
+	if sentinelOff < 0 {
+		return 0, fmt.Errorf("stage1: prologueSentinel 0xCAFEBABE not found")
+	}
+	popAddr := plan.StubRVA + uint32(sentinelOff) - 5
 	disp := uint32(int32(plan.TextRVA) - int32(popAddr))
 	value := binary.LittleEndian.AppendUint32(nil, disp)
 	_, count, err := patchSentinel(stubBytes, callPopSentinel, value, false, "prologueSentinel 0xCAFEBABE")

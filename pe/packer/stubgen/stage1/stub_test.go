@@ -329,15 +329,21 @@ func TestPatchTextDisplacement_HappyPath(t *testing.T) {
 		TextRVA: 0x1000,
 		StubRVA: 0x2000,
 	}
-	// Craft stub bytes: 7-byte ADD R15, imm32 prefix then sentinel.
-	// Real stub prefix: 49 81 C7 BE BA FE CA (ADD R15, 0xCAFEBABE).
-	// Here we use a minimal buffer: just [prefix(3)] + [sentinel(4)].
-	const prefixLen = 3 // 49 81 C7
-	stub := make([]byte, prefixLen+4)
-	stub[0] = 0x49
-	stub[1] = 0x81
-	stub[2] = 0xC7
-	binary.LittleEndian.PutUint32(stub[prefixLen:], 0xCAFEBABE)
+	// Craft a real CALL+POP+ADD prologue so the patcher's
+	// popOffset derivation (sentinel position − 5) lands on the
+	// correct byte. The slice-5.5.x fix replaced a hardcoded
+	// popOffset=5 with sentinelOff-5; the fixture must therefore
+	// model the actual stub layout:
+	//   E8 00 00 00 00   ; CALL .next   (5 B at offsets 0..4)
+	//   41 5F            ; POP r15      (2 B at offsets 5..6)
+	//   49 81 C7         ; ADD r15 prefix (3 B at offsets 7..9)
+	//   <imm32 sentinel> ; 0xCAFEBABE  (4 B at offsets 10..13)
+	stub := []byte{
+		0xE8, 0x00, 0x00, 0x00, 0x00, // CALL .next
+		0x41, 0x5F, // POP r15
+		0x49, 0x81, 0xC7, // ADD r15, imm32
+		0xBE, 0xBA, 0xFE, 0xCA, // sentinel imm32 (little-endian 0xCAFEBABE)
+	}
 
 	n, err := stage1.PatchTextDisplacement(stub, plan)
 	if err != nil {
@@ -347,14 +353,61 @@ func TestPatchTextDisplacement_HappyPath(t *testing.T) {
 		t.Errorf("patches = %d, want 1", n)
 	}
 
-	// Verify the patched displacement using the CALL+POP+ADD reference
-	// point: r15 = StubRVA + popOffset (= +5) after the 5-byte CALL.
-	// The synthetic buffer here represents only the ADD instruction in
-	// isolation, so the patch formula uses the known stub-internal
-	// constant popOffset = 5 regardless of this buffer's layout.
+	// At runtime POP r15 lands its operand (the pushed return address)
+	// at the byte right after CALL — stub offset 5. So
+	// popAddr = StubRVA + 5; disp = TextRVA - popAddr.
 	const popOffset = 5
 	expectedDisp := int32(plan.TextRVA) - int32(plan.StubRVA+popOffset)
-	got := int32(binary.LittleEndian.Uint32(stub[prefixLen:]))
+	const sentinelOff = 10
+	got := int32(binary.LittleEndian.Uint32(stub[sentinelOff:]))
+	if got != expectedDisp {
+		t.Errorf("patched displacement = %d (0x%x), want %d (0x%x)",
+			got, uint32(got), expectedDisp, uint32(expectedDisp))
+	}
+}
+
+// TestPatchTextDisplacement_DLLPrologue — DLL-shaped stubs place
+// the CALL+POP+ADD idiom AFTER a 24-byte DllMain prologue (push
+// rbp / mov rbp,rsp / sub rsp,N / 4 spills). The sentinel lands
+// at offset 24+10=34, NOT at offset 10 like the EXE stub. The
+// slice-5.5.x derivation popOffset=sentinelOff-5 must handle
+// both layouts.
+//
+// Pre-fix bug: hardcoded popOffset=5 produced an R15 24 B above
+// textBase at runtime → kernel32!LoadLibrary AV crash on the
+// first MOVB inside the flag check.
+func TestPatchTextDisplacement_DLLPrologue(t *testing.T) {
+	plan := transform.Plan{TextRVA: 0x1000, StubRVA: 0x6000}
+	// 24 bytes of dummy prologue + 5 B CALL + 2 B POP + 3 B ADD prefix
+	// + 4 B sentinel = 38 total. The actual prologue bytes don't matter
+	// to the patcher (it locates by the sentinel), but the count does
+	// — sentinelOff = 34 in this layout.
+	prologue := make([]byte, 24)
+	for i := range prologue {
+		prologue[i] = 0x90 // NOPs
+	}
+	stub := append([]byte{}, prologue...)
+	stub = append(stub,
+		0xE8, 0x00, 0x00, 0x00, 0x00, // CALL .next
+		0x41, 0x5F, // POP r15
+		0x49, 0x81, 0xC7, // ADD r15, imm32
+		0xBE, 0xBA, 0xFE, 0xCA, // sentinel imm32
+	)
+
+	n, err := stage1.PatchTextDisplacement(stub, plan)
+	if err != nil {
+		t.Fatalf("PatchTextDisplacement: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("patches = %d, want 1", n)
+	}
+
+	// popAddr at runtime = StubRVA + 29 (CALL at stub offset 24 ⇒ POP
+	// at offset 29). disp = TextRVA − popAddr = 0x1000 − 0x602D = -0x502D.
+	const sentinelOff = 34
+	const popOffset = sentinelOff - 5 // 29
+	expectedDisp := int32(plan.TextRVA) - int32(plan.StubRVA+popOffset)
+	got := int32(binary.LittleEndian.Uint32(stub[sentinelOff:]))
 	if got != expectedDisp {
 		t.Errorf("patched displacement = %d (0x%x), want %d (0x%x)",
 			got, uint32(got), expectedDisp, uint32(expectedDisp))

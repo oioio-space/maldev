@@ -7,6 +7,40 @@ import (
 	"fmt"
 )
 
+// PE32+ Optional Header field offsets used by the DllCharacteristics
+// patcher below. Values from Microsoft PE/COFF spec §3.4.2 (PE32+).
+const (
+	optDllCharacteristicsOffset = 0x46
+	dllCharHighEntropyVA        = 0x0020
+	dllCharDynamicBase          = 0x0040
+)
+
+// ClearDllCharacteristics ANDs out the given bits from the
+// PE32+ Optional Header DllCharacteristics field. Used by
+// [InjectConvertedDLL] to drop DYNAMIC_BASE + HIGH_ENTROPY_VA on
+// the converted output: without a synthesised BASERELOC table the
+// loader cannot relocate the image, so it must use the preferred
+// ImageBase. ASLR with an empty reloc table fails with
+// STATUS_CONFLICTING_ADDRESSES on modern Windows.
+//
+// Returns an error when the buffer is too short to carry a valid
+// PE32+ Optional Header (defensive — callers in production always
+// supply a buffer that just came back from InjectStubPE).
+func ClearDllCharacteristics(buf []byte, bits uint16) error {
+	if len(buf) < int(PEELfanewOffset)+4 {
+		return fmt.Errorf("transform: ClearDllCharacteristics: buffer too short for e_lfanew")
+	}
+	peOff := binary.LittleEndian.Uint32(buf[PEELfanewOffset:])
+	optOff := peOff + PESignatureSize + PECOFFHdrSize
+	off := optOff + optDllCharacteristicsOffset
+	if int(off)+2 > len(buf) {
+		return fmt.Errorf("transform: ClearDllCharacteristics: buffer too short for DllCharacteristics")
+	}
+	c := binary.LittleEndian.Uint16(buf[off:])
+	binary.LittleEndian.PutUint16(buf[off:], c&^bits)
+	return nil
+}
+
 // SetIMAGEFILEDLL flips the IMAGE_FILE_DLL bit in the COFF
 // Characteristics field of a PE32+ buffer. OR-only: any other
 // flags (EXECUTABLE_IMAGE, LARGE_ADDRESS_AWARE, …) are preserved.
