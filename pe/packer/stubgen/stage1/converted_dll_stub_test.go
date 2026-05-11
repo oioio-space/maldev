@@ -110,11 +110,13 @@ func TestEmitConvertedDLLStub_NoSlotSentinel(t *testing.T) {
 // (slice 5.2: 196 B) or any prologue/SGN/epilogue tweak — would
 // otherwise hide under a loose budget window for 50%+ regressions.
 //
-// Measured 2026-05-11; bump deliberately if the asm changes.
-// Reference for sizing other round-counts: 1 round = 390 B,
-// 3 rounds = 465 B, 10 rounds = 741 B.
+// Measured 2026-05-12; bumped by +44 B (slice 5.5.y) when the
+// prologue grew to spill the full Win64 callee-saved GPR set
+// (RBX, RDI, RSI, R12, R13, R14). Bump deliberately if the asm
+// changes. Reference for sizing other round-counts: the +44 B
+// delta applies uniformly across round counts.
 func TestEmitConvertedDLLStub_PinnedByteCount(t *testing.T) {
-	const want = 465 // 3-round stub
+	const want = 509 // 3-round stub
 	b, _ := amd64.New()
 	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(3), stage1.EmitOptions{}); err != nil {
 		t.Fatalf("EmitConvertedDLLStub: %v", err)

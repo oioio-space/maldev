@@ -16,9 +16,37 @@ import (
 // alignment pad; the inner frame allocated around CreateThread
 // holds 32 B shadow space + 16 B for the two stack-passed args.
 const (
-	convertedDLLFrameSize     = 0x40 // 4 × 8 B spills + 16 B pad
+	// convertedDLLFrameSize covers the 4 shared spill slots (rcx, rdx,
+	// r8, r15 = 32 B) plus 6 extra callee-saved spills (rbx, rdi, rsi,
+	// r12, r13, r14 = 48 B) plus 16 B alignment pad. The Win64 ABI
+	// requires DllMain to preserve all callee-saved GPRs (RBX, RBP,
+	// RDI, RSI, R12-R15) across the call — RBP is handled by the
+	// `push rbp` in the shared prologue, R15 by the slot list. The
+	// rest must be saved here because the SGN poly engine and the
+	// kernel32 resolver clobber RBX, R12 (+ work-clobber R13, R14).
+	// Without these spills the loader observes corrupted non-volatile
+	// state on return → ERROR_DLL_INIT_FAILED even with RAX=1.
+	// Slice 5.5.y root-cause.
+	convertedDLLFrameSize     = 0x60 // 4 + 6 spills (80 B) + 16 B pad
 	createThreadCallFrameSize = 0x30 // 32 B shadow + 16 B for 5th/6th args
 )
+
+// convertedExtraSpills lists the callee-saved registers the shared
+// prologue/restore does NOT handle but the converted-DLL stub must
+// still preserve. Slots are addressed [rbp - disp]; disps start
+// past the shared spill range (0x20) and grow downward.
+var convertedExtraSpills = []struct {
+	reg  amd64.Reg
+	disp int32
+	name string
+}{
+	{amd64.RBX, -0x28, "rbx"},
+	{amd64.RDI, -0x30, "rdi"},
+	{amd64.RSI, -0x38, "rsi"},
+	{amd64.R12, -0x40, "r12"},
+	{amd64.R13, -0x48, "r13"},
+	{amd64.R14, -0x50, "r14"},
+}
 
 // ErrConvertedDLLPlanMissing fires when [EmitConvertedDLLStub] is
 // called with a Plan that doesn't have IsConvertedDLL=true.
@@ -60,6 +88,14 @@ func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.R
 	// --- prologue: stack frame + spill rcx/edx/r8/r15 (shared helper) ---
 	if err := emitDllMainPrologue(b, convertedDLLFrameSize, "stage1/converted"); err != nil {
 		return err
+	}
+
+	// Spill the remaining callee-saved GPRs into slots beyond the
+	// shared spill range. See convertedExtraSpills doc for why.
+	for _, s := range convertedExtraSpills {
+		if err := b.MOV(amd64.MemOp{Base: amd64.RBP, Disp: s.disp}, s.reg); err != nil {
+			return fmt.Errorf("stage1/converted: spill %s: %w", s.name, err)
+		}
 	}
 
 	// --- CALL+POP+ADD: R15 := textRVA at runtime (shared idiom) ---
@@ -180,6 +216,15 @@ func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.R
 	if err := b.MOV(amd64.RAX, amd64.Imm(1)); err != nil {
 		return fmt.Errorf("stage1/converted: mov rax,1: %w", err)
 	}
+	// Restore the extra callee-saved GPRs before the shared restore
+	// tears the frame down. Order doesn't matter — each slot is
+	// independent — so we mirror the spill order for readability.
+	for _, s := range convertedExtraSpills {
+		if err := b.MOV(s.reg, amd64.MemOp{Base: amd64.RBP, Disp: s.disp}); err != nil {
+			return fmt.Errorf("stage1/converted: restore %s: %w", s.name, err)
+		}
+	}
+
 	// restore spilled args + r15, tear down frame (shared helper)
 	if err := emitDllMainRestore(b, convertedDLLFrameSize, "stage1/converted"); err != nil {
 		return err
