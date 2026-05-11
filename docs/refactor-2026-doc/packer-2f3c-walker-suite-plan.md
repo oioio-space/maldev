@@ -6,6 +6,34 @@ last_reviewed: 2026-05-11
 
 # Phase 2-F-3-c — Full Coverage Plan: Walker Suite + Fixture Corpus + E2E Matrix
 
+## ⚡ EMPIRICAL FINDING 2026-05-11 (15:16) — Microsoft CFG binaries are off-limits
+
+Tried packing `C:\Windows\System32\winver.exe` (Microsoft-shipped
+PE32+ EXE with full directory inventory: IMPORT + RESOURCE +
+EXCEPTION + BASERELOC + DEBUG + **LOAD_CONFIG** + IAT). Results:
+
+  | Pack mode    | Result                                        |
+  |--------------|-----------------------------------------------|
+  | **vanilla**  | crash `0xC0000409` (STATUS_STACK_BUFFER_OVERRUN) |
+  | **RandomizeAll** | "is not a valid Win32 application" (load reject) |
+
+The vanilla pack failing tells us this **isn't a walker
+problem** — it's the CFG cookie validation rejecting our
+modified `.text` integrity before any user code runs.
+Microsoft CFG-protected binaries are out of the operational
+envelope regardless of what walkers we ship.
+
+**Implication for plan:** LOAD_CONFIG walker (slice -c-4)
+wouldn't help here. CFG-protected binaries need a different
+pack strategy (e.g., wrap+exec rather than in-place encrypt)
+or simply aren't a supported payload class.
+
+**Documented in tech md as a limitation.** When the user packs
+a Microsoft binary and sees `0xC0000409`, they know the
+boundary they hit.
+
+---
+
 ## ⚡ EMPIRICAL FINDING 2026-05-11 (15:13) — Plan dramatically reduced
 
 Reconnaissance on the actual fixtures (`winhello.exe`,
