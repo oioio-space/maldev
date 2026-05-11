@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/oioio-space/maldev/pe/packer"
+	"github.com/oioio-space/maldev/pe/packer/transform"
 )
 
 // Sentinels surfaced by [LoadPE] / [Prepare].
@@ -43,8 +44,6 @@ const (
 	pe32Magic     = 0x10B
 
 	machineAMD64 = 0x8664
-
-	dllCharacteristic = 0x2000 // IMAGE_FILE_DLL
 
 	dirImport     = 1
 	dirReloc      = 5
@@ -237,7 +236,7 @@ func parseHeaders(pe []byte) (*peHeaders, error) {
 	if h.machine != machineAMD64 || h.optMagic != pe32PlusMagic {
 		return nil, fmt.Errorf("%w: machine=0x%x optMagic=0x%x", ErrUnsupportedArch, h.machine, h.optMagic)
 	}
-	if h.characteristics&dllCharacteristic != 0 {
+	if h.characteristics&transform.ImageFileDLL != 0 {
 		return nil, ErrNotEXE
 	}
 

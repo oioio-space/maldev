@@ -91,6 +91,17 @@ type Plan struct {
 	// PE only; ELF section names live in .shstrtab and are not
 	// load-relevant.
 	StubSectionName [8]byte
+
+	// IsDLL is set by [PlanDLL] when the input PE has the
+	// IMAGE_FILE_DLL bit in COFF Characteristics. Stub emitters
+	// switch to the DllMain prologue/epilogue layout (preserve
+	// rcx/edx/r8, decrypt-once sentinel, tail-call to the
+	// original DllMain) instead of the EXE CALL+POP+ADD →
+	// JMP-OEP → ExitProcess pattern.
+	//
+	// [PlanPE] never sets this flag (it rejects DLLs with
+	// [ErrIsDLL] upfront). PE only.
+	IsDLL bool
 }
 
 // Sentinels surfaced by PlanPE / PlanELF / InjectStubPE / InjectStubELF.
@@ -122,6 +133,13 @@ var (
 	// process instead of returning TRUE. Out of scope for v1 —
 	// see HANDOFF-2026-05-11 "DLL packing" open question.
 	ErrIsDLL = errors.New("transform: input is a DLL (PackBinary only supports EXE — use PackBinaryBundle to wrap DLLs)")
+
+	// ErrIsEXE is the mirror of [ErrIsDLL]: [PlanDLL] returns it
+	// when the input PE lacks the IMAGE_FILE_DLL bit (i.e. it's
+	// an EXE). The DLL stub layout requires the loader's DllMain
+	// calling convention; an EXE entry point reading rcx/edx/r8
+	// would dereference garbage and crash.
+	ErrIsEXE = errors.New("transform: input is an EXE (PlanDLL requires IMAGE_FILE_DLL — use PlanPE for EXEs)")
 
 	// ErrStubTooLarge fires when emitted stub bytes exceed
 	// Plan.StubMaxSize.

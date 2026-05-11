@@ -41,11 +41,38 @@ const (
 	scnMemWrite = 0x80000000
 )
 
-// PlanPE inspects an input PE32+ and computes the transform layout.
+// planExpect selects which COFF Characteristics admission rule
+// planPECore applies — see [PlanPE] / [PlanDLL].
+type planExpect uint8
+
+const (
+	expectEXE planExpect = iota // input must NOT carry IMAGE_FILE_DLL
+	expectDLL                   // input MUST carry IMAGE_FILE_DLL
+)
+
+// PlanPE inspects an input PE32+ EXE and computes the transform layout.
 // Doesn't modify input. Returns ErrTLSCallbacks if the input has
 // TLS callbacks, ErrOEPOutsideText if the entry point isn't within
-// .text, ErrNoTextSection if .text is missing.
+// .text, ErrNoTextSection if .text is missing, ErrIsDLL when the
+// input carries IMAGE_FILE_DLL (route those through [PlanDLL] instead).
 func PlanPE(input []byte, stubMaxSize uint32) (Plan, error) {
+	return planPECore(input, stubMaxSize, expectEXE)
+}
+
+// PlanDLL is the DLL counterpart of [PlanPE]: it requires the
+// input to carry the IMAGE_FILE_DLL bit and returns a [Plan]
+// with [Plan.IsDLL] set so the stub emitter selects the DllMain
+// prologue/epilogue layout (see docs/refactor-2026-doc/packer-dll-format-plan.md).
+//
+// Sentinels match [PlanPE], with one inversion: PlanDLL returns
+// [ErrIsEXE] when handed an EXE (mirror of PlanPE's [ErrIsDLL]
+// rejection).
+func PlanDLL(input []byte, stubMaxSize uint32) (Plan, error) {
+	return planPECore(input, stubMaxSize, expectDLL)
+}
+
+// planPECore is the shared body of PlanPE and PlanDLL.
+func planPECore(input []byte, stubMaxSize uint32, expect planExpect) (Plan, error) {
 	if DetectFormat(input) != FormatPE {
 		return Plan{}, ErrUnsupportedInputFormat
 	}
@@ -62,12 +89,17 @@ func PlanPE(input []byte, stubMaxSize uint32) (Plan, error) {
 	}
 
 	coffOff := peOff + peSigSize
-	// Reject DLLs upfront — the stub design assumes EXE entry-point
-	// semantics (arg-less call from kernel + ExitProcess at end).
-	// IMAGE_FILE_DLL is bit 0x2000 of COFF Characteristics (offset
-	// +0x12 from coffOff).
-	if binary.LittleEndian.Uint16(input[coffOff+0x12:coffOff+0x14])&0x2000 != 0 {
+	// IMAGE_FILE_DLL admission. EXE path refuses DLLs because the
+	// stub design assumes EXE entry-point semantics (arg-less call
+	// from kernel + ExitProcess at end). DLL path refuses EXEs
+	// because the DllMain stub layout would overwrite a valid EXE
+	// entry point with a trampoline reading bogus rcx/edx/r8 args.
+	hasDLLBit := binary.LittleEndian.Uint16(input[coffOff+0x12:coffOff+0x14])&ImageFileDLL != 0
+	switch {
+	case hasDLLBit && expect == expectEXE:
 		return Plan{}, ErrIsDLL
+	case !hasDLLBit && expect == expectDLL:
+		return Plan{}, ErrIsEXE
 	}
 	numSections := binary.LittleEndian.Uint16(input[coffOff+coffNumSectionsOffset : coffOff+coffNumSectionsOffset+2])
 	sizeOfOptHdr := binary.LittleEndian.Uint16(input[coffOff+coffSizeOfOptionalHdrOffset : coffOff+coffSizeOfOptionalHdrOffset+2])
@@ -153,6 +185,7 @@ func PlanPE(input []byte, stubMaxSize uint32) (Plan, error) {
 		StubRVA:     stubRVA,
 		StubFileOff: stubFileOff,
 		StubMaxSize: stubMaxSize,
+		IsDLL:       expect == expectDLL,
 	}, nil
 }
 

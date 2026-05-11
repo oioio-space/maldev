@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/oioio-space/maldev/pe/packer/runtime"
+	"github.com/oioio-space/maldev/pe/packer/transform"
 )
 
 // TestPrepare_RejectsBadMagic feeds garbage and confirms the
@@ -47,7 +48,7 @@ func TestPrepare_RejectsDLL(t *testing.T) {
 	pe := buildHeaderOnlyPE(t, headerOpts{
 		Machine:         0x8664,
 		OptMagic:        0x20B,
-		Characteristics: 0x2000, // IMAGE_FILE_DLL
+		Characteristics: transform.ImageFileDLL,
 	})
 	_, err := runtime.Prepare(pe)
 	if !errors.Is(err, runtime.ErrNotEXE) {

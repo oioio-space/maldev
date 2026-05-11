@@ -95,4 +95,8 @@ const (
 	// [ScnMemRead] — the read-only-data Characteristics value
 	// that cover-layer junk sections carry.
 	ScnMemReadInitData uint32 = ScnCntInitData | ScnMemRead
+
+	// ImageFileDLL is bit 0x2000 of COFF Characteristics —
+	// IMAGE_FILE_DLL, distinguishing a DLL from an EXE.
+	ImageFileDLL uint16 = 0x2000
 )
