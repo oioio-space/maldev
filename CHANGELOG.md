@@ -7,7 +7,42 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
-### Packer DLL chantier — v0.110.0 → v0.111.0 (2026-05-11)
+### Packer DLL chantier — v0.110.0 → v0.112.0 (2026-05-11)
+
+#### v0.112.0 — `transform.InjectStubDLL` (slice 3 of `FormatWindowsDLL`)
+
+- `pe/packer/transform.InjectStubDLL` — DLL counterpart of
+  `InjectStubPE`. Beyond the EXE flow (overwrite .text with the
+  encrypted payload, mark .text RWX, append a stub section, rewrite
+  OEP to the stub), it also:
+  1. Pre-fills the stub's 8-byte orig_dllmain_slot with
+     `ImageBase + plan.OEPRVA` via the new `PatchDLLStubSlot`.
+  2. Builds a merged base-relocation table (host blocks copied
+     verbatim + one new DIR64 block covering the slot RVA) and
+     places it in a freshly-appended `.mldrel` section.
+  3. Re-points `DataDirectory[BASERELOC]` at the new section. Under
+     ASLR the loader rebases the slot via the new DIR64 entry, so
+     the absolute VA we baked at pack time stays consistent with
+     the actual mapped image base.
+- `pe/packer/transform.PatchDLLStubSlot` — sentinel-scan-rewrite
+  for the 8-byte `DLLStubSentinel` (0xDEADC0DEDEADBABE) inside a
+  stub buffer. Two-pass: uniqueness violation leaves the buffer
+  untouched.
+- `pe/packer/transform.{DLLStubSentinel, DLLStubSentinelBytes,
+  DLLStubSlotByteOffsetFromEnd}` — promoted to `transform` so the
+  stage1 stub emitter and the transform injector can't drift apart.
+  `stage1.PatchDllMainSlot` and `stage1.dllStubSentinel*` are now
+  thin aliases (single source of truth).
+- `pe/packer/transform.ErrNoExistingRelocDir` — surfaces when the
+  input DLL has no `BASERELOC` directory at all (refusing rather
+  than producing a partially-relocatable output).
+- 6 unit tests against a hand-built synthetic DLL fixture: happy
+  path (debug/pe parses, IMAGE_FILE_DLL preserved, 4-section
+  output, .mldrel present), slot patched with the absolute VA,
+  merged reloc table covers the slot RVA, host's original DIR64
+  entries preserved, EXE-plan rejection, no-reloc-dir rejection.
+- Win10 VM E2E (7 packer tests + 16 multi-seed): green — no
+  regression on the EXE path through the shared sentinel patcher.
 
 #### v0.111.0 — `stage1.EmitDLLStub` (slice 2 of `FormatWindowsDLL`)
 

@@ -1,5 +1,5 @@
 ---
-status: in-progress (slice 2 of 4 shipped)
+status: in-progress (slice 3 of 4 shipped)
 created: 2026-05-11
 last_reviewed: 2026-05-11
 reflects_commit: HEAD
@@ -13,8 +13,8 @@ reflects_commit: HEAD
 |---|---|---|---|
 | 1 | `transform.PlanDLL` + `Plan.IsDLL` + `ErrIsEXE` + `ImageFileDLL` (promoted to `peconst.go`, dedup'd against `pe/packer/runtime`) | ✅ shipped | v0.110.0 (`a8f66b4`) |
 | 2 | `stubgen/stage1/dll_stub.go` — DllMain prologue/epilogue (preserve rcx/edx/r8 + r15, decrypt-once sentinel, tail-call to original DllMain) + `PatchDLLStubDisplacements` + `PatchDllMainSlot`. **Bonus from /simplify:** shared `emitTextBasePrologue` + `patchSentinel` helpers extracted from `EmitStub`/`PatchTextDisplacement` — EXE and DLL paths now share both the CALL+POP+ADD idiom and the sentinel scan-rewrite. | ✅ shipped | v0.111.0 |
-| 3 | `transform.InjectStubDLL` — append section + reloc cover on `orig_dllmain_addr` slot | ⏳ next | — |
-| 4 | `packer.go` dispatch `FormatWindowsDLL` → `PlanDLL` / `GenerateDLL` / `InjectStubDLL` + Win10 VM E2E with `testlib.dll` | ⏳ | — |
+| 3 | `transform.InjectStubDLL` — writes encrypted .text, appends the stub section, appends a `.mldrel` section carrying the merged reloc table (host blocks + a new DIR64 entry covering the DllMain slot), re-points `DataDirectory[BASERELOC]`, pre-fills the slot with `ImageBase + OEPRVA`. **Simplify bonus:** the DllMain sentinel + slot patcher moved to `transform` (`DLLStubSentinel`, `DLLStubSentinelBytes`, `PatchDLLStubSlot`); `stage1.PatchDllMainSlot` now wraps it — single source of truth, no cross-package drift. | ✅ shipped | v0.112.0 |
+| 4 | `packer.go` dispatch `FormatWindowsDLL` → `PlanDLL` / `GenerateDLL` / `InjectStubDLL` + Win10 VM E2E with `testlib.dll` | ⏳ next | — |
 
 ## Why this exists
 
