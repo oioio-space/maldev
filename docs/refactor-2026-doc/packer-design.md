@@ -215,14 +215,43 @@ func Unpack(packed []byte, key []byte) (orig []byte, err error)  // for tests
 
 ### Phase 2 — section shuffle + IAT scramble
 
-**Scope:**
-- Randomise host PE section order. Adjusts file offsets,
-  RVAs, optional-header `SizeOfImage` / `SizeOfHeaders` /
-  `BaseOfCode`. Never touch `.maldev` placement (stub must
-  reach it).
-- Replace import directory entries with hash-resolved imports
-  (the stub reconstructs the IAT at runtime via PEB walk +
-  ROR13). Removes plaintext API names from the on-disk file.
+> **Status (2026-05-11):** Phase 2 sub-items 2-A through 2-E
+> are ✅ shipped. Phase 2-F (full section reorder) and 2-G
+> (IAT scramble) remain deferred — they touch the loader contract
+> + the stub runtime resolver respectively. The shipped 2-A/B/C/D
+> opt-ins together defeat temporal/tooling-clustering pivots
+> without touching execution semantics.
+
+**Sub-items shipped:**
+
+| Sub-item | Field | API | Tag |
+|---|---|---|---|
+| 2-A | Stub section name (`.mldv` → `.xxxxx`) | `RandomizeStubSectionName` | v0.94.0 |
+| 2-B | COFF TimeDateStamp | `RandomizeTimestamp` | v0.95.0 |
+| 2-C | Optional Header LinkerVersion | `RandomizeLinkerVersion` | v0.96.0 |
+| 2-D | Optional Header ImageVersion | `RandomizeImageVersion` | v0.97.0 |
+| 2-E | Convenience aggregator | `RandomizeAll` | v0.98.0 |
+
+Each opt-in defaults `false` — packs stay byte-reproducible
+unless the operator opts in. RNG seed offsets (+0/+1/+2)
+keep the four version-style randomisers de-correlated when
+fired from the same `opts.Seed`.
+
+**Sub-items deferred (original Phase 2 scope):**
+
+- **2-F — Section shuffle** (full RVA reassignment): Randomise
+  host PE section order. Adjusts file offsets, RVAs,
+  optional-header `SizeOfImage` / `SizeOfHeaders` /
+  `BaseOfCode`. Never touch the stub section's placement
+  (stub must reach it). Loader-contract risk: section table
+  must stay sorted by virtual address; full reorder needs
+  VA reassignment + DataDirectory updates + reloc fixups.
+- **2-G — IAT scramble**: Replace import directory entries
+  with hash-resolved imports (the stub reconstructs the IAT
+  at runtime via PEB walk + ROR13). Removes plaintext API
+  names from the on-disk file. Stub-runtime risk: the stub
+  MUST resolve everything it needs WITHOUT looking it up by
+  name. Plumbing reuse: same trick `runtime/bof` uses today.
 - Optional: insert a randomised number of zero-byte separator
   sections to push offsets around.
 
@@ -335,7 +364,13 @@ ratio. Stack with HexAlphabet (or accept the 50% size cost of
 | **1d** | **Anti-entropy** — `OpEntropyCover` step with three algorithms: `EntropyCoverInterleave` (low-entropy padding spliced between ciphertext chunks; default 33% padding lands at ~7.4 bits/byte; stack with HexAlphabet for <5), `EntropyCoverCarrier` (PNG-shaped 32-byte prefix), `EntropyCoverHexAlphabet` (byte → 2-byte code-like alphabet pair; apparent entropy ≤ 4 bits/byte). | ✅ this commit |
 | 1e | UPX-style in-place transform (v0.61.0). Architectural pivot from host-wrapper + stage-2 Go EXE (v0.59.0/v0.60.0, broken) to single-binary in-place encryption: `.text` encrypted with SGN polymorphic encoding, polymorphic CALL+POP+ADD-prologue decoder stub appended as a new R+W+X section, entry-point rewritten. Kernel loads the output normally. Ship gate: `TestPackBinary_LinuxELF_E2E` green (commit `8771e95`). Phase 1e-C (Windows DLL), 1e-D (BOF), 1e-E (.NET) staged separately. | ✅ v0.61.0 |
 | 1f | Linux ELF reflective loader for any self-contained static-PIE (Stage A: parser + dispatch; Stage B: mmap + RELATIVE; Stage C+D: Go static-PIE gate + Run() jump-to-entry; Stage E: broadened gate to non-Go static-PIE — hand-rolled asm, C/Rust built with -static-pie — gated by structural ET_DYN + no DT_NEEDED + ≥1 PT_LOAD). Stage F (full ld.so emulation for libc-using binaries) out of scope. | ✅ Stages A+B+C+D+E |
-| 2 | Section shuffle + IAT scramble (host PE) | deferred |
+| 2-A | Stub section name randomisation | ✅ v0.94.0 |
+| 2-B | TimeDateStamp randomisation | ✅ v0.95.0 |
+| 2-C | LinkerVersion randomisation | ✅ v0.96.0 |
+| 2-D | ImageVersion randomisation | ✅ v0.97.0 |
+| 2-E | RandomizeAll convenience aggregator | ✅ v0.98.0 |
+| 2-F | Section shuffle (full reorder) | deferred |
+| 2-G | IAT scramble (hash-resolved imports) | deferred |
 | 3 | Junk sections + stub control-flow obfuscation | deferred |
 
 ## Tracking

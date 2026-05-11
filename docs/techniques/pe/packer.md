@@ -294,6 +294,15 @@ packed, _, err := packer.PackBinary(input, packer.PackBinaryOptions{
     Seed:         0,                        // 0 = crypto-random per pack
     Compress:     true,
     AntiDebug:    true,
+
+    // Phase 2 PE-only fingerprint defeats — all opt-in, all
+    // default false (preserves byte-reproducible packs).
+    RandomizeAll: true,
+    // Or pick selectively:
+    //   RandomizeStubSectionName  — `.mldv` → `.xxxxx` (Phase 2-A)
+    //   RandomizeTimestamp        — COFF TimeDateStamp     (Phase 2-B)
+    //   RandomizeLinkerVersion    — Optional Header        (Phase 2-C)
+    //   RandomizeImageVersion     — Optional Header        (Phase 2-D)
 })
 ```
 
