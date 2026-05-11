@@ -56,9 +56,11 @@ func EmitResolveKernel32Export(b *amd64.Builder, exportName string) error {
 	//   DllBase           [r12 + 0x20]   (entry+0x30)
 	//   BaseDllName.Length [r12 + 0x48]  (entry+0x58, USHORT)
 	//   BaseDllName.Buffer [r12 + 0x50]  (entry+0x60, PWSTR)
+	// mov rax, gs:[0x60]  → PEB pointer  (shared GSLoadPEBBytes)
+	if err := b.RawBytes(GSLoadPEBBytes[:]); err != nil {
+		return fmt.Errorf("stage1: emit PEB GS load: %w", err)
+	}
 	if err := b.RawBytes([]byte{
-		// mov rax, gs:[0x60]              ; PEB
-		0x65, 0x48, 0x8B, 0x04, 0x25, 0x60, 0x00, 0x00, 0x00,
 		// mov rax, [rax + 0x18]           ; PEB.Ldr (PEB_LDR_DATA*)
 		0x48, 0x8B, 0x40, 0x18,
 		// mov r12, [rax + 0x20]           ; InMemoryOrderModuleList.Flink

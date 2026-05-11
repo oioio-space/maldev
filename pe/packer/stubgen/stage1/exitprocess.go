@@ -101,9 +101,9 @@ const ExitProcessImmediateOffset = 0x89
 // `[rax] - rbx` — sets ZF=1 iff [rax] == rbx, which is what
 // the test wants.
 func assembleExitProcess(exitCode uint32) []byte {
-	out := []byte{
-		// 0x00: mov rax, gs:[0x60]
-		0x65, 0x48, 0x8b, 0x04, 0x25, 0x60, 0x00, 0x00, 0x00,
+	// Offsets 0x00-0x08: `mov rax, gs:[0x60]` (shared GSLoadPEBBytes).
+	out := append([]byte(nil), GSLoadPEBBytes[:]...)
+	out = append(out, []byte{
 		// 0x09: mov rax, [rax+0x18]   ; PEB.Ldr
 		0x48, 0x8b, 0x40, 0x18,
 		// 0x0d: mov rax, [rax+0x10]   ; Ldr.InLoadOrderModuleList.Flink
@@ -197,7 +197,7 @@ func assembleExitProcess(exitCode uint32) []byte {
 		0xb9, 0x00, 0x00, 0x00, 0x00,
 		// 0x8d: call rax
 		0xff, 0xd0,
-	}
+	}...)
 	// Patch the exit-code immediate at the well-known offset.
 	out[ExitProcessImmediateOffset+0] = byte(exitCode)
 	out[ExitProcessImmediateOffset+1] = byte(exitCode >> 8)

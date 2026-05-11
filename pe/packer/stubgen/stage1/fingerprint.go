@@ -38,13 +38,21 @@ var cpuidVendorBytes = [...]byte{
 	0x89, 0x4f, 0x08, // mov [rdi+8], ecx — bytes 8–11
 }
 
+// GSLoadPEBBytes encodes the 9-byte `mov rax, gs:[0x60]` instruction —
+// loading the Process Environment Block pointer through the GS segment
+// register (x64 NT convention). Every stub that walks the PEB starts
+// with this same sequence; deduplicated here so emitters reference one
+// canonical encoding instead of pasting magic bytes in 5 places.
+//
+//	mov rax, gs:[0x60]   ; 65 48 8b 04 25 60 00 00 00
+var GSLoadPEBBytes = [9]byte{0x65, 0x48, 0x8b, 0x04, 0x25, 0x60, 0x00, 0x00, 0x00}
+
 // pebBuildBytes reads the Windows OSBuildNumber (DWORD at PEB+0x120) and
-// returns it in EAX. The PEB is fetched from the GS segment register at
-// offset 0x60 (x64 NT convention).
+// returns it in EAX.
 //
 // Encoding (15 bytes):
 //
-//	mov rax, gs:[0x60]      ; 65 48 8b 04 25 60 00 00 00
+//	mov rax, gs:[0x60]      ; 65 48 8b 04 25 60 00 00 00   (GSLoadPEBBytes)
 //	mov eax, [rax + 0x120]  ; 8b 80 20 01 00 00
 //
 // PEB offsets (Win10+, x64) confirmed against ReactOS + WinDbg dumps:
@@ -52,10 +60,9 @@ var cpuidVendorBytes = [...]byte{
 //	0x118 OSMajorVersion    (DWORD)
 //	0x11C OSMinorVersion    (DWORD)
 //	0x120 OSBuildNumber     (DWORD)
-var pebBuildBytes = [...]byte{
-	0x65, 0x48, 0x8b, 0x04, 0x25, 0x60, 0x00, 0x00, 0x00, // mov rax, gs:[0x60]
+var pebBuildBytes = append(append([]byte(nil), GSLoadPEBBytes[:]...),
 	0x8b, 0x80, 0x20, 0x01, 0x00, 0x00, // mov eax, [rax+0x120]
-}
+)
 
 // EmitCPUIDVendorRead appends the 12-byte CPUID-vendor reader to b.
 //

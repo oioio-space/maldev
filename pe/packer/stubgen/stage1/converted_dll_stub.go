@@ -57,29 +57,9 @@ func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.R
 		return ErrNoRounds
 	}
 
-	// --- prologue: stack frame + spill rcx/edx/r8/r15 ---
-	if err := b.RawBytes([]byte{0x55}); err != nil { // push rbp
-		return fmt.Errorf("stage1/converted: push rbp: %w", err)
-	}
-	if err := b.MOV(amd64.RBP, amd64.RSP); err != nil {
-		return fmt.Errorf("stage1/converted: mov rbp,rsp: %w", err)
-	}
-	if err := b.SUB(amd64.RSP, amd64.Imm(convertedDLLFrameSize)); err != nil {
-		return fmt.Errorf("stage1/converted: sub rsp,frame: %w", err)
-	}
-	for _, spill := range []struct {
-		disp int32
-		reg  amd64.Reg
-		name string
-	}{
-		{-0x08, amd64.RCX, "rcx"},
-		{-0x10, amd64.RDX, "rdx"},
-		{-0x18, amd64.R8, "r8"},
-		{-0x20, amd64.R15, "r15"},
-	} {
-		if err := b.MOV(amd64.MemOp{Base: amd64.RBP, Disp: spill.disp}, spill.reg); err != nil {
-			return fmt.Errorf("stage1/converted: spill %s: %w", spill.name, err)
-		}
+	// --- prologue: stack frame + spill rcx/edx/r8/r15 (shared helper) ---
+	if err := emitDllMainPrologue(b, convertedDLLFrameSize, "stage1/converted"); err != nil {
+		return err
 	}
 
 	// --- CALL+POP+ADD: R15 := textRVA at runtime (shared idiom) ---
@@ -116,37 +96,9 @@ func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.R
 		return fmt.Errorf("stage1/converted: movb flag,al: %w", err)
 	}
 
-	// --- SGN rounds (same body as EmitStub / EmitDLLStub) ---
-	for i := len(rounds) - 1; i >= 0; i-- {
-		round := rounds[i]
-		if err := b.MOV(round.CntReg, amd64.Imm(int64(plan.TextSize))); err != nil {
-			return fmt.Errorf("stage1/converted: round %d MOV cnt: %w", i, err)
-		}
-		if err := b.MOV(round.KeyReg, amd64.Imm(int64(round.Key))); err != nil {
-			return fmt.Errorf("stage1/converted: round %d MOV key: %w", i, err)
-		}
-		if err := b.MOV(round.SrcReg, amd64.R15); err != nil {
-			return fmt.Errorf("stage1/converted: round %d MOV src: %w", i, err)
-		}
-		loopLbl := b.Label(fmt.Sprintf("converted_loop_%d", i))
-		if err := b.MOVZX(round.ByteReg, amd64.MemOp{Base: round.SrcReg}); err != nil {
-			return fmt.Errorf("stage1/converted: round %d MOVZBQ: %w", i, err)
-		}
-		if err := round.Subst.EmitDecoder(b, round.ByteReg, round.Key); err != nil {
-			return fmt.Errorf("stage1/converted: round %d subst: %w", i, err)
-		}
-		if err := b.MOVB(amd64.MemOp{Base: round.SrcReg}, round.ByteReg); err != nil {
-			return fmt.Errorf("stage1/converted: round %d MOVB: %w", i, err)
-		}
-		if err := b.ADD(round.SrcReg, amd64.Imm(1)); err != nil {
-			return fmt.Errorf("stage1/converted: round %d ADD src: %w", i, err)
-		}
-		if err := b.DEC(round.CntReg); err != nil {
-			return fmt.Errorf("stage1/converted: round %d DEC: %w", i, err)
-		}
-		if err := b.JNZ(loopLbl); err != nil {
-			return fmt.Errorf("stage1/converted: round %d JNZ: %w", i, err)
-		}
+	// SGN rounds — shared with EmitStub / EmitDLLStub.
+	if err := emitSGNRounds(b, plan, rounds, "converted_loop", "stage1/converted"); err != nil {
+		return err
 	}
 
 	// --- resolve kernel32!CreateThread → R13 ---
@@ -213,25 +165,9 @@ func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.R
 	if err := b.MOV(amd64.RAX, amd64.Imm(1)); err != nil {
 		return fmt.Errorf("stage1/converted: mov rax,1: %w", err)
 	}
-	for _, restore := range []struct {
-		reg  amd64.Reg
-		disp int32
-		name string
-	}{
-		{amd64.RCX, -0x08, "rcx"},
-		{amd64.RDX, -0x10, "rdx"},
-		{amd64.R8, -0x18, "r8"},
-		{amd64.R15, -0x20, "r15"},
-	} {
-		if err := b.MOV(restore.reg, amd64.MemOp{Base: amd64.RBP, Disp: restore.disp}); err != nil {
-			return fmt.Errorf("stage1/converted: restore %s: %w", restore.name, err)
-		}
-	}
-	if err := b.ADD(amd64.RSP, amd64.Imm(convertedDLLFrameSize)); err != nil {
-		return fmt.Errorf("stage1/converted: add rsp,frame: %w", err)
-	}
-	if err := b.RawBytes([]byte{0x5D}); err != nil { // pop rbp
-		return fmt.Errorf("stage1/converted: pop rbp: %w", err)
+	// restore spilled args + r15, tear down frame (shared helper)
+	if err := emitDllMainRestore(b, convertedDLLFrameSize, "stage1/converted"); err != nil {
+		return err
 	}
 	if err := b.RawBytes([]byte{0xC3}); err != nil { // ret
 		return fmt.Errorf("stage1/converted: ret: %w", err)

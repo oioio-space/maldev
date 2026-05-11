@@ -10,6 +10,90 @@ import (
 	"github.com/oioio-space/maldev/pe/packer/transform"
 )
 
+// dllMainSpillSlots is the fixed register-spill layout shared by
+// the native DLL stub ([EmitDLLStub], slice 2) and the converted
+// DLL stub ([EmitConvertedDLLStub], slice 5.3). The slots are
+// relative to RBP after the prologue's `mov rbp, rsp`:
+//
+//	[rbp - 0x08]  rcx  (hInst)
+//	[rbp - 0x10]  rdx  (reason)
+//	[rbp - 0x18]  r8   (reserved)
+//	[rbp - 0x20]  r15  (caller's textBase, non-volatile per ABI)
+//
+// Both stubs allocate a frame larger than 0x20 to keep RSP
+// 16-aligned — the slot layout itself is invariant.
+var dllMainSpillSlots = [...]struct {
+	disp int32
+	reg  amd64.Reg
+	name string
+}{
+	{-0x08, amd64.RCX, "rcx"},
+	{-0x10, amd64.RDX, "rdx"},
+	{-0x18, amd64.R8, "r8"},
+	{-0x20, amd64.R15, "r15"},
+}
+
+// emitDllMainPrologue writes the standard DllMain-shape prologue:
+//
+//	push rbp
+//	mov  rbp, rsp
+//	sub  rsp, frameSize
+//	mov  [rbp - 0x08], rcx     ; spill hInst
+//	mov  [rbp - 0x10], rdx     ; spill reason
+//	mov  [rbp - 0x18], r8      ; spill reserved
+//	mov  [rbp - 0x20], r15     ; spill non-volatile
+//
+// Shared between [EmitDLLStub] (frameSize=0x30) and
+// [EmitConvertedDLLStub] (frameSize=0x40); frameSize MUST be a
+// multiple of 16 to preserve RSP alignment before downstream CALLs.
+// `errPrefix` lets each caller surface failures under its own
+// "stage1/dll:" or "stage1/converted:" namespace.
+func emitDllMainPrologue(b *amd64.Builder, frameSize int64, errPrefix string) error {
+	if err := b.RawBytes([]byte{0x55}); err != nil { // push rbp
+		return fmt.Errorf("%s: push rbp: %w", errPrefix, err)
+	}
+	if err := b.MOV(amd64.RBP, amd64.RSP); err != nil {
+		return fmt.Errorf("%s: mov rbp,rsp: %w", errPrefix, err)
+	}
+	if err := b.SUB(amd64.RSP, amd64.Imm(frameSize)); err != nil {
+		return fmt.Errorf("%s: sub rsp,%#x: %w", errPrefix, frameSize, err)
+	}
+	for _, slot := range dllMainSpillSlots {
+		if err := b.MOV(amd64.MemOp{Base: amd64.RBP, Disp: slot.disp}, slot.reg); err != nil {
+			return fmt.Errorf("%s: spill %s: %w", errPrefix, slot.name, err)
+		}
+	}
+	return nil
+}
+
+// emitDllMainRestore reverses [emitDllMainPrologue]'s register
+// spills + tears down the stack frame:
+//
+//	mov  rcx, [rbp - 0x08]
+//	mov  rdx, [rbp - 0x10]
+//	mov  r8,  [rbp - 0x18]
+//	mov  r15, [rbp - 0x20]
+//	add  rsp, frameSize
+//	pop  rbp
+//
+// Does NOT emit the final RET or tail-call — that's a caller
+// decision (native DLL tail-calls into the original DllMain via
+// JMP; converted DLL returns BOOL via RET).
+func emitDllMainRestore(b *amd64.Builder, frameSize int64, errPrefix string) error {
+	for _, slot := range dllMainSpillSlots {
+		if err := b.MOV(slot.reg, amd64.MemOp{Base: amd64.RBP, Disp: slot.disp}); err != nil {
+			return fmt.Errorf("%s: restore %s: %w", errPrefix, slot.name, err)
+		}
+	}
+	if err := b.ADD(amd64.RSP, amd64.Imm(frameSize)); err != nil {
+		return fmt.Errorf("%s: add rsp,%#x: %w", errPrefix, frameSize, err)
+	}
+	if err := b.RawBytes([]byte{0x5D}); err != nil { // pop rbp
+		return fmt.Errorf("%s: pop rbp: %w", errPrefix, err)
+	}
+	return nil
+}
+
 // dllStubSentinel and dllStubSentinelBytes alias the canonical
 // definitions in package transform — exported there so the
 // transform-side [transform.PatchDLLStubSlot] and the stub
@@ -126,29 +210,9 @@ func EmitDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round) err
 		return ErrNoRounds
 	}
 
-	// --- prologue: stack frame + arg/r15 spill ---
-	if err := b.RawBytes([]byte{0x55}); err != nil { // push rbp
-		return fmt.Errorf("stage1/dll: push rbp: %w", err)
-	}
-	if err := b.MOV(amd64.RBP, amd64.RSP); err != nil {
-		return fmt.Errorf("stage1/dll: mov rbp,rsp: %w", err)
-	}
-	if err := b.SUB(amd64.RSP, amd64.Imm(0x30)); err != nil {
-		return fmt.Errorf("stage1/dll: sub rsp,0x30: %w", err)
-	}
-	for _, spill := range []struct {
-		disp int32
-		reg  amd64.Reg
-		name string
-	}{
-		{-0x08, amd64.RCX, "rcx"},
-		{-0x10, amd64.RDX, "rdx"},
-		{-0x18, amd64.R8, "r8"},
-		{-0x20, amd64.R15, "r15"},
-	} {
-		if err := b.MOV(amd64.MemOp{Base: amd64.RBP, Disp: spill.disp}, spill.reg); err != nil {
-			return fmt.Errorf("stage1/dll: spill %s: %w", spill.name, err)
-		}
+	// --- prologue: stack frame + arg/r15 spill (shared helper) ---
+	if err := emitDllMainPrologue(b, 0x30, "stage1/dll"); err != nil {
+		return err
 	}
 
 	// CALL+POP+ADD: R15 := textRVA at runtime. Shared with EmitStub —
@@ -192,37 +256,9 @@ func EmitDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round) err
 		return fmt.Errorf("stage1/dll: movb flag,al: %w", err)
 	}
 
-	// --- SGN rounds (clone of EmitStub's loop body) ---
-	for i := len(rounds) - 1; i >= 0; i-- {
-		round := rounds[i]
-		if err := b.MOV(round.CntReg, amd64.Imm(int64(plan.TextSize))); err != nil {
-			return fmt.Errorf("stage1/dll: round %d MOV cnt: %w", i, err)
-		}
-		if err := b.MOV(round.KeyReg, amd64.Imm(int64(round.Key))); err != nil {
-			return fmt.Errorf("stage1/dll: round %d MOV key: %w", i, err)
-		}
-		if err := b.MOV(round.SrcReg, amd64.R15); err != nil {
-			return fmt.Errorf("stage1/dll: round %d MOV src: %w", i, err)
-		}
-		loopLbl := b.Label(fmt.Sprintf("dll_loop_%d", i))
-		if err := b.MOVZX(round.ByteReg, amd64.MemOp{Base: round.SrcReg}); err != nil {
-			return fmt.Errorf("stage1/dll: round %d MOVZBQ: %w", i, err)
-		}
-		if err := round.Subst.EmitDecoder(b, round.ByteReg, round.Key); err != nil {
-			return fmt.Errorf("stage1/dll: round %d subst: %w", i, err)
-		}
-		if err := b.MOVB(amd64.MemOp{Base: round.SrcReg}, round.ByteReg); err != nil {
-			return fmt.Errorf("stage1/dll: round %d MOVB: %w", i, err)
-		}
-		if err := b.ADD(round.SrcReg, amd64.Imm(1)); err != nil {
-			return fmt.Errorf("stage1/dll: round %d ADD src: %w", i, err)
-		}
-		if err := b.DEC(round.CntReg); err != nil {
-			return fmt.Errorf("stage1/dll: round %d DEC: %w", i, err)
-		}
-		if err := b.JNZ(loopLbl); err != nil {
-			return fmt.Errorf("stage1/dll: round %d JNZ: %w", i, err)
-		}
+	// SGN rounds — shared with EmitStub / EmitConvertedDLLStub.
+	if err := emitSGNRounds(b, plan, rounds, "dll_loop", "stage1/dll"); err != nil {
+		return err
 	}
 
 	// --- forward: tail-call to original DllMain ---
@@ -233,26 +269,11 @@ func EmitDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round) err
 		return fmt.Errorf("stage1/dll: load orig dllmain slot: %w", err)
 	}
 	// restore args + r15
-	for _, restore := range []struct {
-		reg  amd64.Reg
-		disp int32
-		name string
-	}{
-		{amd64.RCX, -0x08, "rcx"},
-		{amd64.RDX, -0x10, "rdx"},
-		{amd64.R8, -0x18, "r8"},
-		{amd64.R15, -0x20, "r15"},
-	} {
-		if err := b.MOV(restore.reg, amd64.MemOp{Base: amd64.RBP, Disp: restore.disp}); err != nil {
-			return fmt.Errorf("stage1/dll: restore %s: %w", restore.name, err)
-		}
+	// restore spilled args + r15, tear down frame (shared helper)
+	if err := emitDllMainRestore(b, 0x30, "stage1/dll"); err != nil {
+		return err
 	}
-	if err := b.ADD(amd64.RSP, amd64.Imm(0x30)); err != nil {
-		return fmt.Errorf("stage1/dll: add rsp,0x30: %w", err)
-	}
-	if err := b.RawBytes([]byte{0x5D}); err != nil { // pop rbp
-		return fmt.Errorf("stage1/dll: pop rbp: %w", err)
-	}
+	// tail-call into the original DllMain — its RET returns BOOL to the loader
 	if err := b.JMP(amd64.RAX); err != nil {
 		return fmt.Errorf("stage1/dll: jmp rax (tail-call): %w", err)
 	}

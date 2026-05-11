@@ -46,7 +46,7 @@ func emitAntiDebugWindowsPE(b *amd64.Builder) error {
 
 	// Check 1: PEB.BeingDebugged ─────────────────────────────────────────
 	// mov rax, gs:[0x60]
-	if err := b.RawBytes([]byte{0x65, 0x48, 0x8B, 0x04, 0x25, 0x60, 0x00, 0x00, 0x00}); err != nil {
+	if err := b.RawBytes(GSLoadPEBBytes[:]); err != nil {
 		return fmt.Errorf("stage1: antidebug BeingDebugged gs load: %w", err)
 	}
 	// movzx eax, byte ptr [rax+2]
@@ -63,7 +63,7 @@ func emitAntiDebugWindowsPE(b *amd64.Builder) error {
 
 	// Check 2: PEB.NtGlobalFlag ──────────────────────────────────────────
 	// mov rax, gs:[0x60]
-	if err := b.RawBytes([]byte{0x65, 0x48, 0x8B, 0x04, 0x25, 0x60, 0x00, 0x00, 0x00}); err != nil {
+	if err := b.RawBytes(GSLoadPEBBytes[:]); err != nil {
 		return fmt.Errorf("stage1: antidebug NtGlobalFlag gs load: %w", err)
 	}
 	// mov eax, [rax+0xBC]

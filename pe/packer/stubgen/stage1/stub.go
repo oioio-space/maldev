@@ -132,41 +132,9 @@ func EmitStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round, opts E
 		return fmt.Errorf("stage1: text-base prologue: %w", err)
 	}
 
-	// Emit rounds[N-1] first: outermost SGN layer decodes first, innermost last.
-	for i := len(rounds) - 1; i >= 0; i-- {
-		round := rounds[i]
-		if err := b.MOV(round.CntReg, amd64.Imm(int64(plan.TextSize))); err != nil {
-			return fmt.Errorf("stage1: round %d MOV cnt: %w", i, err)
-		}
-		if err := b.MOV(round.KeyReg, amd64.Imm(int64(round.Key))); err != nil {
-			return fmt.Errorf("stage1: round %d MOV key: %w", i, err)
-		}
-		// src is reset to r15 each round so all N passes iterate the full range.
-		if err := b.MOV(round.SrcReg, baseReg); err != nil {
-			return fmt.Errorf("stage1: round %d MOV src: %w", i, err)
-		}
-
-		loopLbl := b.Label(fmt.Sprintf("loop_%d", i))
-
-		if err := b.MOVZX(round.ByteReg, amd64.MemOp{Base: round.SrcReg}); err != nil {
-			return fmt.Errorf("stage1: round %d MOVZBQ: %w", i, err)
-		}
-		if err := round.Subst.EmitDecoder(b, round.ByteReg, round.Key); err != nil {
-			return fmt.Errorf("stage1: round %d subst: %w", i, err)
-		}
-		// MOVB: write back only 1 byte; MOVQ would corrupt the 7 following bytes.
-		if err := b.MOVB(amd64.MemOp{Base: round.SrcReg}, round.ByteReg); err != nil {
-			return fmt.Errorf("stage1: round %d MOVB: %w", i, err)
-		}
-		if err := b.ADD(round.SrcReg, amd64.Imm(1)); err != nil {
-			return fmt.Errorf("stage1: round %d ADD src: %w", i, err)
-		}
-		if err := b.DEC(round.CntReg); err != nil {
-			return fmt.Errorf("stage1: round %d DEC: %w", i, err)
-		}
-		if err := b.JNZ(loopLbl); err != nil {
-			return fmt.Errorf("stage1: round %d JNZ: %w", i, err)
-		}
+	// SGN rounds — outermost layer decodes first (shared helper).
+	if err := emitSGNRounds(b, plan, rounds, "loop", "stage1"); err != nil {
+		return err
 	}
 
 	// LZ4 inflate decoder — runs after all SGN rounds have peeled the encoding.
@@ -272,6 +240,68 @@ func EmitStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round, opts E
 const prologueSentinel uint32 = 0xCAFEBABE
 
 var callPopSentinel = binary.LittleEndian.AppendUint32(nil, prologueSentinel)
+
+// emitSGNRounds writes the polymorphic-decoder loop body shared
+// by [EmitStub] (EXE), [EmitDLLStub] (native DLL), and
+// [EmitConvertedDLLStub] (converted DLL). Each round expands to:
+//
+//	MOV  cnt, TextSize
+//	MOV  key, round.Key
+//	MOV  src, R15           ; reset src to text base for this round
+//	loopLabel:
+//	  MOVZBQ byte ptr [src], byteReg
+//	  <substitution decoder>
+//	  MOVB   byteReg, byte ptr [src]
+//	  ADD    src, 1
+//	  DEC    cnt
+//	  JNZ    loopLabel
+//
+// Rounds are emitted in REVERSE order (rounds[N-1] first) so the
+// outermost SGN layer decodes first at runtime — matches
+// [poly.Engine.EncodePayload] ordering. R15 is hardcoded as the
+// text-base register (matches [baseReg]; see also the
+// EncodePayloadExcluding(BaseReg) protection at the call site).
+//
+// `labelPrefix` namespaces the per-round loop label so the same
+// Builder can hold multiple round-emitting blocks without collision
+// (in practice each emitter uses its own Builder, but the prefix
+// avoids string-matching hazards in tests). `errPrefix` lets each
+// caller surface failures under its own "stage1:" / "stage1/dll:"
+// namespace.
+func emitSGNRounds(b *amd64.Builder, plan transform.Plan, rounds []poly.Round, labelPrefix, errPrefix string) error {
+	for i := len(rounds) - 1; i >= 0; i-- {
+		round := rounds[i]
+		if err := b.MOV(round.CntReg, amd64.Imm(int64(plan.TextSize))); err != nil {
+			return fmt.Errorf("%s: round %d MOV cnt: %w", errPrefix, i, err)
+		}
+		if err := b.MOV(round.KeyReg, amd64.Imm(int64(round.Key))); err != nil {
+			return fmt.Errorf("%s: round %d MOV key: %w", errPrefix, i, err)
+		}
+		if err := b.MOV(round.SrcReg, baseReg); err != nil {
+			return fmt.Errorf("%s: round %d MOV src: %w", errPrefix, i, err)
+		}
+		loopLbl := b.Label(fmt.Sprintf("%s_%d", labelPrefix, i))
+		if err := b.MOVZX(round.ByteReg, amd64.MemOp{Base: round.SrcReg}); err != nil {
+			return fmt.Errorf("%s: round %d MOVZBQ: %w", errPrefix, i, err)
+		}
+		if err := round.Subst.EmitDecoder(b, round.ByteReg, round.Key); err != nil {
+			return fmt.Errorf("%s: round %d subst: %w", errPrefix, i, err)
+		}
+		if err := b.MOVB(amd64.MemOp{Base: round.SrcReg}, round.ByteReg); err != nil {
+			return fmt.Errorf("%s: round %d MOVB: %w", errPrefix, i, err)
+		}
+		if err := b.ADD(round.SrcReg, amd64.Imm(1)); err != nil {
+			return fmt.Errorf("%s: round %d ADD src: %w", errPrefix, i, err)
+		}
+		if err := b.DEC(round.CntReg); err != nil {
+			return fmt.Errorf("%s: round %d DEC: %w", errPrefix, i, err)
+		}
+		if err := b.JNZ(loopLbl); err != nil {
+			return fmt.Errorf("%s: round %d JNZ: %w", errPrefix, i, err)
+		}
+	}
+	return nil
+}
 
 // emitTextBasePrologue writes the CALL+POP+ADD PIC idiom into b,
 // leaving baseReg (R15) loaded with TextRVA at runtime once
