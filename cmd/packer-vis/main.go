@@ -28,9 +28,11 @@ import (
 const usage = `packer-vis — packer artefact introspection
 
 Usage:
-  packer-vis entropy <file>             Shannon entropy heatmap
-  packer-vis compare <before> <after>   Two heatmaps stacked, with delta
-  packer-vis bundle  <bundle.bin>       Bundle wire-format viz
+  packer-vis entropy <file>                       Shannon entropy heatmap
+  packer-vis compare <before> <after>             Two heatmaps stacked, with delta
+  packer-vis bundle  <bundle.bin>                 Bundle wire-format viz
+  packer-vis round-diff <file> [-rounds N] [-seed S]
+                                                  SGN per-round byte-evolution table
 
 Entropy heatmap reads each file in 256-byte windows, computes Shannon
 entropy in bits/byte (0 = perfectly redundant, 8 = perfectly random),
@@ -71,6 +73,8 @@ func main() {
 			os.Exit(2)
 		}
 		os.Exit(runBundleViz(os.Args[2]))
+	case "round-diff":
+		os.Exit(runRoundDiff(os.Args[2:]))
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
