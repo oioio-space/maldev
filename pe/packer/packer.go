@@ -172,6 +172,17 @@ type PackBinaryOptions struct {
 	// Phase 2-C of docs/refactor-2026-doc/packer-design.md.
 	// PE only — ELF carries no analogous field.
 	RandomizeLinkerVersion bool
+
+	// RandomizeImageVersion, when true, overwrites the Optional
+	// Header's MajorImageVersion + MinorImageVersion uint16
+	// fields with a plausible "small in-house project" pair
+	// (major ∈ [0, 9], minor ∈ [0, 99]). Defeats threat-intel
+	// pivots that cluster samples by per-binary version stamp.
+	// Per-pack uniqueness via fresh-seeded RNG.
+	//
+	// Phase 2-D of docs/refactor-2026-doc/packer-design.md.
+	// PE only.
+	RandomizeImageVersion bool
 }
 
 // ErrUnsupportedFormat fires when [PackBinary]'s opts.Format does not
@@ -275,6 +286,25 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		major, minor := transform.RandomLinkerVersion(rand.New(rand.NewSource(seed + 1)))
 		if perr := transform.PatchPELinkerVersion(out, major, minor); perr != nil {
 			return nil, nil, fmt.Errorf("packer: patch linker version: %w", perr)
+		}
+	}
+
+	// Phase 2-D: per-pack random ImageVersion on PE outputs only.
+	// Independent RNG (seed+2) so the three version-style opt-ins
+	// (timestamp / linker / image) don't correlate when fired
+	// from the same opts.Seed.
+	if opts.RandomizeImageVersion && transform.DetectFormat(out) == transform.FormatPE {
+		seed := opts.Seed
+		if seed == 0 {
+			s, ierr := random.Int64()
+			if ierr != nil {
+				return nil, nil, fmt.Errorf("packer: random image-version seed: %w", ierr)
+			}
+			seed = s
+		}
+		major, minor := transform.RandomImageVersion(rand.New(rand.NewSource(seed + 2)))
+		if perr := transform.PatchPEImageVersion(out, major, minor); perr != nil {
+			return nil, nil, fmt.Errorf("packer: patch image version: %w", perr)
 		}
 	}
 
