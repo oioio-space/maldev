@@ -7,7 +7,47 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
-### Packer DLL chantier — v0.110.0 (2026-05-11)
+### Packer DLL chantier — v0.110.0 → v0.111.0 (2026-05-11)
+
+#### v0.111.0 — `stage1.EmitDLLStub` (slice 2 of `FormatWindowsDLL`)
+
+- `pe/packer/stubgen/stage1.EmitDLLStub` — DllMain-shaped decoder
+  stub. Differs from the EXE `EmitStub` in three places:
+  1. Prologue spills rcx/edx/r8 (DllMain args) and r15 (callee-saved
+     under Windows x64 ABI) to a 0x30-byte stack frame so the SGN
+     rounds can clobber them freely.
+  2. Decrypt-once sentinel: a 1-byte trailing-data flag latched on
+     first PROCESS_ATTACH. Subsequent DllMain reasons (THREAD_*,
+     PROCESS_DETACH) skip the rounds and tail-call directly.
+  3. Epilogue tail-calls the original DllMain via
+     `jmp qword ptr [r15+slotDisp]` instead of jumping to OEP and
+     calling ExitProcess. The original DllMain's BOOL return value
+     reaches the loader unchanged.
+- `stage1.PatchDLLStubDisplacements` — rewrites the package-level
+  `flagDispSentinel` (0x7FFE0001) and `slotDispSentinel` (0x7FFE0002)
+  imm32 placeholders with the correct R15-relative offsets once the
+  stub byte layout is finalised. Flag sentinel appears twice in the
+  assembled stub (load + store); both rewritten with the same value.
+- `stage1.PatchDllMainSlot` — replaces the 8-byte `dllStubSentinel`
+  (0xDEADC0DEDEADBABE) in the trailing data with the absolute VA of
+  the original DllMain (ImageBase + OEPRVA). Two-pass scan so a
+  uniqueness violation leaves the buffer untouched.
+- 7 unit tests: EXE-plan rejection, zero-rounds rejection, sentinel
+  presence + uniqueness, stub-size budget (≤ 1 KiB), patch round-trip
+  for both displacement and DllMain slot.
+- **Simplify pass extracted shared helpers from `stub.go`:**
+  - `emitTextBasePrologue(b)` — the CALL+POP+ADD PIC idiom that
+    leaves R15 = textRVA at runtime. Used by both `EmitStub` (EXE)
+    and `EmitDLLStub` (DLL). Locks the popOffset=5 invariant in one
+    place so it can't silently drift apart from
+    `PatchTextDisplacement`.
+  - `patchSentinel(haystack, needle, value, allowMulti, name)` — the
+    "find every occurrence + rewrite each + enforce 1 or ≥1 count"
+    pattern that now backs `PatchTextDisplacement`,
+    `PatchDLLStubDisplacements`, and `PatchDllMainSlot`. Two-pass so
+    uniqueness errors leave the buffer untouched.
+- Win10 VM E2E suite (7 packer tests) green after the refactor —
+  EXE path byte-identical, no loader regression.
 
 #### v0.110.0 — `transform.PlanDLL` (slice 1 of `FormatWindowsDLL`)
 
