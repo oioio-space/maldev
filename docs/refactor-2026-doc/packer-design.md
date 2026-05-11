@@ -231,6 +231,7 @@ func Unpack(packed []byte, key []byte) (orig []byte, err error)  // for tests
 | 2-C | Optional Header LinkerVersion | `RandomizeLinkerVersion` | v0.96.0 |
 | 2-D | Optional Header ImageVersion | `RandomizeImageVersion` | v0.97.0 |
 | 2-E | Convenience aggregator | `RandomizeAll` | v0.98.0 |
+| 2-F-1 | Existing PE section names (`.text/.data/.rdata` → `.xxxxx`) | `RandomizeExistingSectionNames` | v0.99.0 |
 
 Each opt-in defaults `false` — packs stay byte-reproducible
 unless the operator opts in. RNG seed offsets (+0/+1/+2)
@@ -380,7 +381,7 @@ ratio. Stack with HexAlphabet (or accept the 50% size cost of
 | 2-C | LinkerVersion randomisation | ✅ v0.96.0 |
 | 2-D | ImageVersion randomisation | ✅ v0.97.0 |
 | 2-E | RandomizeAll convenience aggregator | ✅ v0.98.0 |
-| 2-F-1 | Existing-section name randomisation | next |
+| 2-F-1 | Existing-section name randomisation | ✅ v0.99.0 |
 | 2-F-2 | Random zero-byte separator sections | scoped |
 | 2-F-3 | Section data permutation (full reorder + reloc fixup) | deferred |
 | 2-G | IAT scramble (hash-resolved imports) | deferred |

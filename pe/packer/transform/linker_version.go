@@ -1,10 +1,6 @@
 package transform
 
-import (
-	"encoding/binary"
-	"fmt"
-	"math/rand"
-)
+import "math/rand"
 
 // Optional Header LinkerVersion field offsets (PE32+, relative to
 // the start of the Optional Header at coffOff + 20).
@@ -31,16 +27,12 @@ const (
 // Returns an error when `pe` is too short to contain the Optional
 // Header.
 func PatchPELinkerVersion(pe []byte, major, minor uint8) error {
-	if len(pe) < int(PEELfanewOffset)+4 {
-		return fmt.Errorf("transform: PE too short for e_lfanew")
+	l, err := parsePELayout(pe)
+	if err != nil {
+		return err
 	}
-	peOff := binary.LittleEndian.Uint32(pe[PEELfanewOffset : PEELfanewOffset+4])
-	optOff := peOff + PESignatureSize + PECOFFHdrSize
-	if int(optOff)+4 > len(pe) {
-		return fmt.Errorf("transform: PE too short for Optional Header")
-	}
-	pe[optOff+OptMajorLinkerVersionOffset] = major
-	pe[optOff+OptMinorLinkerVersionOffset] = minor
+	pe[l.optOff+OptMajorLinkerVersionOffset] = major
+	pe[l.optOff+OptMinorLinkerVersionOffset] = minor
 	return nil
 }
 

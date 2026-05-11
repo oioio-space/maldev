@@ -51,6 +51,20 @@ func TestPackBinary_RandomizeAll_DiffersFromDefaultOnAllFields(t *testing.T) {
 	if imaj1 == imaj2 && imin1 == imin2 {
 		t.Errorf("RandomizeAll did not change ImageVersion: both = %d.%d", imaj1, imin1)
 	}
+
+	// Phase 2-F-1: existing-section names must differ too. Compare
+	// host sections (excluding the appended stub on both sides).
+	allHost := hostSectionNames(t, allOut)
+	defHost := hostSectionNames(t, defaultOut)
+	identical := len(allHost) == len(defHost)
+	for i := 0; identical && i < len(allHost); i++ {
+		if allHost[i] != defHost[i] {
+			identical = false
+		}
+	}
+	if identical {
+		t.Errorf("RandomizeAll did not rename existing sections: both = %v", allHost)
+	}
 }
 
 // TestPackBinary_RandomizeAll_DeterministicGivenSeed confirms

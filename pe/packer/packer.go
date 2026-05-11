@@ -184,11 +184,30 @@ type PackBinaryOptions struct {
 	// PE only.
 	RandomizeImageVersion bool
 
+	// RandomizeExistingSectionNames, when true, overwrites every
+	// section header's 8-byte Name slot with a fresh ".xxxxx\x00\x00"
+	// label before the stub is appended. Section data, VAs, raw
+	// offsets, sizes, characteristics, the DataDirectory, and the
+	// relocation table are all untouched — Windows finds resources,
+	// imports, exports, relocations via the Optional Header
+	// DataDirectory (RVA-based), so renaming `.text` → `.xkqwz`
+	// doesn't break the loader contract. Defeats name-pattern
+	// heuristics ("section called .text is RWX — suspicious") and
+	// YARA rules keyed on the host binary's original section labels.
+	// Composes with RandomizeStubSectionName: the stub section is
+	// appended *after* this rename so its name is controlled by
+	// that flag.
+	//
+	// Phase 2-F-1 of docs/refactor-2026-doc/packer-design.md.
+	// PE only.
+	RandomizeExistingSectionNames bool
+
 	// RandomizeAll, when true, ORs every individual Randomize*
 	// flag above to true: stub section name, TimeDateStamp,
-	// LinkerVersion, ImageVersion. The four individual flags
-	// can still selectively turn additional behaviour on; this
-	// is the "everything Phase 2 ships today" shortcut.
+	// LinkerVersion, ImageVersion, existing section names. The
+	// individual flags can still selectively turn additional
+	// behaviour on; this is the "everything Phase 2 ships today"
+	// shortcut.
 	//
 	// Phase 2-E of docs/refactor-2026-doc/packer-design.md.
 	// PE only — opt-ins under the hood are PE-specific.
@@ -226,32 +245,41 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		rounds = 3
 	}
 
-	// Phase 2-E: RandomizeAll fans out to the four individual
-	// opt-ins. We OR rather than overwrite so an operator who
-	// sets both RandomizeAll AND a specific flag (a no-op) still
-	// gets the expected behaviour.
+	// Phase 2-E: RandomizeAll fans out to every individual opt-in.
+	// OR-style so an operator who sets both RandomizeAll AND a
+	// specific flag still gets the expected behaviour.
 	if opts.RandomizeAll {
 		opts.RandomizeStubSectionName = true
 		opts.RandomizeTimestamp = true
 		opts.RandomizeLinkerVersion = true
 		opts.RandomizeImageVersion = true
+		opts.RandomizeExistingSectionNames = true
 	}
 
-	// Phase 2-A: per-pack random stub section name. Generated only
-	// when the operator opts in via RandomizeStubSectionName so the
-	// default packer output stays byte-reproducible (a property
-	// existing tests depend on).
+	// Resolve the master seed once. When opts.Seed==0 and any
+	// randomiser is enabled, draw a fresh crypto seed; otherwise
+	// each opt-block would have its own /dev/urandom round-trip.
+	// Per-randomiser independence comes from a per-call seed
+	// offset (see seedOffset* constants) feeding distinct
+	// math/rand streams.
+	masterSeed := opts.Seed
+	anyRandomize := opts.RandomizeStubSectionName || opts.RandomizeTimestamp ||
+		opts.RandomizeLinkerVersion || opts.RandomizeImageVersion ||
+		opts.RandomizeExistingSectionNames
+	if anyRandomize && masterSeed == 0 {
+		s, err := random.Int64()
+		if err != nil {
+			return nil, nil, fmt.Errorf("packer: random master seed: %w", err)
+		}
+		masterSeed = s
+	}
+
+	// Phase 2-A: per-pack random stub section name. Default zero
+	// value preserves the canonical ".mldv\x00\x00\x00" — packs
+	// stay byte-reproducible unless the operator opts in.
 	var stubSectionName [8]byte
 	if opts.RandomizeStubSectionName {
-		seed := opts.Seed
-		if seed == 0 {
-			s, err := random.Int64()
-			if err != nil {
-				return nil, nil, fmt.Errorf("packer: random section-name seed: %w", err)
-			}
-			seed = s
-		}
-		stubSectionName = transform.RandomStubSectionName(rand.New(rand.NewSource(seed)))
+		stubSectionName = transform.RandomStubSectionName(rand.New(rand.NewSource(masterSeed + seedOffsetStubName)))
 	}
 
 	out, key, err := stubgen.Generate(stubgen.Options{
@@ -269,68 +297,71 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	// Phase 2-B: per-pack random TimeDateStamp on PE outputs only.
-	// Run AFTER stubgen.Generate so we patch the final byte buffer
-	// rather than mutating the input. Reproducible across packs of
-	// the same input + seed (RNG seeded from opts.Seed when non-zero).
-	if opts.RandomizeTimestamp && transform.DetectFormat(out) == transform.FormatPE {
-		seed := opts.Seed
-		if seed == 0 {
-			s, ierr := random.Int64()
-			if ierr != nil {
-				return nil, nil, fmt.Errorf("packer: random timestamp seed: %w", ierr)
-			}
-			seed = s
-		}
-		ts := transform.RandomTimeDateStamp(rand.New(rand.NewSource(seed)), uint32(time.Now().Unix()))
+	// All Phase 2-B/C/D/F-1 patches are PE-only; cache the format
+	// detection rather than re-walking the buffer per opt-block.
+	isPE := transform.DetectFormat(out) == transform.FormatPE
+
+	// Phase 2-B: per-pack random TimeDateStamp.
+	if opts.RandomizeTimestamp && isPE {
+		ts := transform.RandomTimeDateStamp(
+			rand.New(rand.NewSource(masterSeed+seedOffsetTimestamp)),
+			uint32(time.Now().Unix()))
 		if perr := transform.PatchPETimeDateStamp(out, ts); perr != nil {
 			return nil, nil, fmt.Errorf("packer: patch timestamp: %w", perr)
 		}
 	}
 
-	// Phase 2-C: per-pack random LinkerVersion on PE outputs only.
-	// Same seeding rule as the timestamp path; RNG state is
-	// independent so the two opts don't influence each other.
-	if opts.RandomizeLinkerVersion && transform.DetectFormat(out) == transform.FormatPE {
-		seed := opts.Seed
-		if seed == 0 {
-			s, ierr := random.Int64()
-			if ierr != nil {
-				return nil, nil, fmt.Errorf("packer: random linker-version seed: %w", ierr)
-			}
-			seed = s
-		}
-		// Seed offset (+1) keeps the LinkerVersion RNG distinct
-		// from the Timestamp RNG even when both opt-ins fire on
-		// the same opts.Seed — otherwise the two would derive from
-		// the same stream and feel correlated.
-		major, minor := transform.RandomLinkerVersion(rand.New(rand.NewSource(seed + 1)))
+	// Phase 2-C: per-pack random LinkerVersion.
+	if opts.RandomizeLinkerVersion && isPE {
+		major, minor := transform.RandomLinkerVersion(rand.New(rand.NewSource(masterSeed + seedOffsetLinkerVersion)))
 		if perr := transform.PatchPELinkerVersion(out, major, minor); perr != nil {
 			return nil, nil, fmt.Errorf("packer: patch linker version: %w", perr)
 		}
 	}
 
-	// Phase 2-D: per-pack random ImageVersion on PE outputs only.
-	// Independent RNG (seed+2) so the three version-style opt-ins
-	// (timestamp / linker / image) don't correlate when fired
-	// from the same opts.Seed.
-	if opts.RandomizeImageVersion && transform.DetectFormat(out) == transform.FormatPE {
-		seed := opts.Seed
-		if seed == 0 {
-			s, ierr := random.Int64()
-			if ierr != nil {
-				return nil, nil, fmt.Errorf("packer: random image-version seed: %w", ierr)
-			}
-			seed = s
-		}
-		major, minor := transform.RandomImageVersion(rand.New(rand.NewSource(seed + 2)))
+	// Phase 2-D: per-pack random ImageVersion.
+	if opts.RandomizeImageVersion && isPE {
+		major, minor := transform.RandomImageVersion(rand.New(rand.NewSource(masterSeed + seedOffsetImageVersion)))
 		if perr := transform.PatchPEImageVersion(out, major, minor); perr != nil {
 			return nil, nil, fmt.Errorf("packer: patch image version: %w", perr)
 		}
 	}
 
+	// Phase 2-F-1: per-pack rename of every existing PE section
+	// header (.text, .rdata, .data, …). Skip the LAST section
+	// (appended stub) so its name stays under
+	// RandomizeStubSectionName / the canonical ".mldv". Pure
+	// header mutation — Windows finds resources / imports /
+	// exports / relocs via the Optional Header DataDirectory, so
+	// the loader contract is untouched.
+	//
+	// Must run AFTER stubgen.Generate: PlanPE locates the text
+	// section by the literal ".text" name, so renaming before
+	// stubgen would defeat planning.
+	if opts.RandomizeExistingSectionNames && isPE {
+		if perr := transform.RandomizeExistingSectionNames(
+			out,
+			rand.New(rand.NewSource(masterSeed+seedOffsetExistingSectionNames)),
+			1, // skip the appended stub
+		); perr != nil {
+			return nil, nil, fmt.Errorf("packer: rename existing sections: %w", perr)
+		}
+	}
+
 	return out, key, nil
 }
+
+// Per-randomiser seed offsets keep each opt-block's math/rand
+// stream independent when multiple Randomize* flags fire on the
+// same opts.Seed. Without this, two opts would derive from the
+// same stream and feel correlated to a hunter sampling outputs.
+const (
+	seedOffsetStubName              int64 = 0
+	seedOffsetTimestamp             int64 = 0 // distinct domain (epoch) so collision with stubName is harmless
+	seedOffsetLinkerVersion         int64 = 1
+	seedOffsetImageVersion          int64 = 2
+	seedOffsetExistingSectionNames  int64 = 3
+)
 
 // transformFormatFor maps the operator-facing packer.Format to the
 // transform package's internal Format constant.

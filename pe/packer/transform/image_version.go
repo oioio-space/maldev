@@ -2,7 +2,6 @@ package transform
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math/rand"
 )
 
@@ -32,16 +31,12 @@ const (
 // Returns an error when `pe` is too short to contain the
 // Optional Header up to and including the ImageVersion fields.
 func PatchPEImageVersion(pe []byte, major, minor uint16) error {
-	if len(pe) < int(PEELfanewOffset)+4 {
-		return fmt.Errorf("transform: PE too short for e_lfanew")
+	l, err := parsePELayout(pe)
+	if err != nil {
+		return err
 	}
-	peOff := binary.LittleEndian.Uint32(pe[PEELfanewOffset : PEELfanewOffset+4])
-	optOff := peOff + PESignatureSize + PECOFFHdrSize
-	if int(optOff)+OptMinorImageVersionOffset+2 > len(pe) {
-		return fmt.Errorf("transform: PE too short for Optional Header ImageVersion")
-	}
-	binary.LittleEndian.PutUint16(pe[optOff+OptMajorImageVersionOffset:], major)
-	binary.LittleEndian.PutUint16(pe[optOff+OptMinorImageVersionOffset:], minor)
+	binary.LittleEndian.PutUint16(pe[l.optOff+OptMajorImageVersionOffset:], major)
+	binary.LittleEndian.PutUint16(pe[l.optOff+OptMinorImageVersionOffset:], minor)
 	return nil
 }
 

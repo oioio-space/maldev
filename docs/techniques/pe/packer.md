@@ -299,10 +299,13 @@ packed, _, err := packer.PackBinary(input, packer.PackBinaryOptions{
     // default false (preserves byte-reproducible packs).
     RandomizeAll: true,
     // Or pick selectively:
-    //   RandomizeStubSectionName  — `.mldv` → `.xxxxx` (Phase 2-A)
-    //   RandomizeTimestamp        — COFF TimeDateStamp     (Phase 2-B)
-    //   RandomizeLinkerVersion    — Optional Header        (Phase 2-C)
-    //   RandomizeImageVersion     — Optional Header        (Phase 2-D)
+    //   RandomizeStubSectionName       — `.mldv` → `.xxxxx`     (Phase 2-A)
+    //   RandomizeTimestamp             — COFF TimeDateStamp     (Phase 2-B)
+    //   RandomizeLinkerVersion         — Optional Header        (Phase 2-C)
+    //   RandomizeImageVersion          — Optional Header        (Phase 2-D)
+    //   RandomizeExistingSectionNames  — `.text/.data/.rdata`   (Phase 2-F-1)
+    //                                    → random `.xxxxx` per section,
+    //                                    appended stub name preserved.
 })
 ```
 

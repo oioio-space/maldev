@@ -2,7 +2,6 @@ package transform
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math/rand"
 )
 
@@ -26,15 +25,11 @@ const COFFTimeDateStampOffset = 0x04
 // Returns an error when `pe` is too short to contain the COFF
 // header (e.g. truncated input or a non-PE byte buffer).
 func PatchPETimeDateStamp(pe []byte, ts uint32) error {
-	if len(pe) < int(PEELfanewOffset)+4 {
-		return fmt.Errorf("transform: PE too short for e_lfanew")
+	l, err := parsePELayout(pe)
+	if err != nil {
+		return err
 	}
-	peOff := binary.LittleEndian.Uint32(pe[PEELfanewOffset : PEELfanewOffset+4])
-	tsOff := peOff + PESignatureSize + COFFTimeDateStampOffset
-	if int(tsOff)+4 > len(pe) {
-		return fmt.Errorf("transform: PE too short for COFF TimeDateStamp")
-	}
-	binary.LittleEndian.PutUint32(pe[tsOff:tsOff+4], ts)
+	binary.LittleEndian.PutUint32(pe[l.coffOff+COFFTimeDateStampOffset:], ts)
 	return nil
 }
 
