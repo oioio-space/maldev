@@ -245,7 +245,6 @@ type PackBinaryOptions struct {
 	// PE only.
 	RandomizePEFileOrder bool
 
-	// **EXPERIMENTAL** — not in RandomizeAll fan-out.
 	// RandomizeImageBase, when true, overwrites the PE32+ Optional
 	// Header's ImageBase (uint64 at +0x18) with a fresh random
 	// value drawn from the canonical user-mode EXE range
@@ -343,12 +342,7 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		opts.RandomizeJunkSections = true
 		opts.RandomizePEFileOrder = true
 		opts.RandomizeImageVAShift = true
-		// NOTE: RandomizeImageBase remains EXPERIMENTAL —
-		// excluded from the fan-out because random ImageBase
-		// values can trip an intermittent runtime
-		// STATUS_ACCESS_VIOLATION on Win10 even with the
-		// DYNAMIC_BASE guard. Operators can opt in explicitly
-		// after testing the chosen payload.
+		opts.RandomizeImageBase = true
 	}
 
 	// Resolve the master seed once. When opts.Seed==0 and any

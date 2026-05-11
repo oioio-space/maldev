@@ -82,6 +82,50 @@ func PatchPEImageBase(pe []byte, base uint64) error {
 	if int(l.optOff)+OptImageBase64Offset+8 > len(pe) {
 		return fmt.Errorf("transform: PE too short for Optional Header ImageBase")
 	}
+	// CRITICAL: writing a new preferred ImageBase without
+	// adjusting the in-file absolute pointer values would break
+	// the loader's rebase math. The loader computes
+	// `actual_addr = file_value + (actual_base - preferred_base)`.
+	// The file values were generated against `oldBase`, so they
+	// encode `oldBase + RVA`. If we change preferred to `base`,
+	// the loader's delta becomes `(actual - base)` — applied to
+	// `oldBase + RVA` it yields `actual + (oldBase - base) + RVA`,
+	// off by `(oldBase - base)` from the right answer.
+	//
+	// Fix: walk relocs and add `(base - oldBase)` to every DIR64
+	// / HIGHLOW patch target so post-rebase values land where
+	// the loader expects.
+	oldBase := binary.LittleEndian.Uint64(pe[l.optOff+OptImageBase64Offset:])
+	delta := base - oldBase
+	if delta != 0 {
+		if walkErr := WalkBaseRelocs(pe, func(e BaseRelocEntry) error {
+			fileOff, ferr := rvaToFileOff(pe, l, e.RVA)
+			if ferr != nil {
+				return fmt.Errorf("imagebase reloc at RVA 0x%x: %w", e.RVA, ferr)
+			}
+			switch e.Type {
+			case RelTypeAbsolute:
+				return nil
+			case RelTypeDir64:
+				if int(fileOff)+8 > len(pe) {
+					return fmt.Errorf("dir64 patch past EOF")
+				}
+				v := binary.LittleEndian.Uint64(pe[fileOff:])
+				binary.LittleEndian.PutUint64(pe[fileOff:], v+delta)
+			case RelTypeHighLow:
+				if int(fileOff)+4 > len(pe) {
+					return fmt.Errorf("highlow patch past EOF")
+				}
+				v := binary.LittleEndian.Uint32(pe[fileOff:])
+				binary.LittleEndian.PutUint32(pe[fileOff:], v+uint32(delta))
+			default:
+				return fmt.Errorf("unsupported reloc type 0x%x at RVA 0x%x", e.Type, e.RVA)
+			}
+			return nil
+		}); walkErr != nil {
+			return fmt.Errorf("transform: imagebase reloc walk: %w", walkErr)
+		}
+	}
 	binary.LittleEndian.PutUint64(pe[l.optOff+OptImageBase64Offset:], base)
 	return nil
 }

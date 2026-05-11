@@ -940,7 +940,7 @@ binaries. Operators can still set them per-payload.
 | `RandomizeExistingSectionNames` | Every host section name: `.text/.rdata/.data` → random `.xxxxx` | "section called .text is RWX → suspicious" + YARA rules pinned to host section labels | 2-F-1 | v0.99.0 |
 | `RandomizeJunkSections` | Append [1, 5] uninitialised BSS sections after the stub | "exact section count" heuristics + "stub is section[N-1]" patterns. **File size unchanged** (no file backing). | 2-F-2 | v0.100.0 |
 | `RandomizePEFileOrder` | Permute the file-layout order of host section bodies | YARA rules anchored at file offsets (`"bytes at file 0x400 = decryption key"`). **Runtime image byte-identical** (only file offsets change). | 2-F-3-b | v0.102.0 |
-| `RandomizeImageBase` ⚠️ | PE32+ Optional Header `ImageBase` | Heuristics on the canonical Go `0x140000000` preferred-base | 2-F-3-c | v0.103.0 (**EXPERIMENTAL** — opt-in only, can crash some payloads despite the DYNAMIC_BASE guard) |
+| `RandomizeImageBase` | PE32+ Optional Header `ImageBase` + reloc-fixed pointer values | Heuristics on the canonical Go `0x140000000` preferred-base | 2-F-3-c | v0.106.0 (in `RandomizeAll` since v0.106.0 — earlier intermittent crashes were caused by missing reloc value fixup, fixed empirically) |
 | `RandomizeImageVAShift` | Every section's VA + reloc-fixed pointer values + import-descriptor RVAs | Heuristics on canonical VA layout (`.text starts at 0x1000`, `OEP at 0x140001000`) | 2-F-3-c-2 | v0.104.0 (in `RandomizeAll` since the IMPORT walker landed; covers Go static-PIE binaries) |
 
 ### Concrete before/after
