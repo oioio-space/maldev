@@ -49,6 +49,14 @@ const (
 	// OptSizeOfImageOffset is the file offset of SizeOfImage.
 	OptSizeOfImageOffset = 0x38
 
+	// OptDataDirsStart is the file offset of the first DataDirectory
+	// entry inside the PE32+ Optional Header.
+	OptDataDirsStart = 0x70
+
+	// OptDataDirEntrySize is the byte size of one DataDirectory
+	// entry (uint32 RVA + uint32 Size).
+	OptDataDirEntrySize = 8
+
 	// OptSizeOfHeadersOffset is the file offset of SizeOfHeaders
 	// inside the PE32+ Optional Header. Bounds the byte range
 	// reserved for DOS stub + PE signature + COFF + Optional + the
