@@ -13,11 +13,13 @@ package packer
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 
 	"github.com/oioio-space/maldev/crypto"
 	"github.com/oioio-space/maldev/pe/packer/internal/elfgate"
 	"github.com/oioio-space/maldev/pe/packer/stubgen"
 	"github.com/oioio-space/maldev/pe/packer/transform"
+	"github.com/oioio-space/maldev/random"
 )
 
 // Options tunes [Pack]. The zero value selects sensible defaults
@@ -135,6 +137,17 @@ type PackBinaryOptions struct {
 	// runtime. Default false (conservative). See [stubgen.Options.Compress]
 	// for the full in-place inflate layout.
 	Compress bool
+
+	// RandomizeStubSectionName, when true, names the appended PE
+	// stub section with a fresh per-pack random label
+	// (`.xxxxx\x00\x00`) instead of the hardcoded ".mldv". Defeats
+	// YARA rules keyed on the literal default name. Default false
+	// (conservative — packs reproducibly across runs).
+	//
+	// Phase 2-A of docs/refactor-2026-doc/packer-design.md.
+	// PE only; ELF section names live in `.shstrtab` and aren't
+	// load-relevant.
+	RandomizeStubSectionName bool
 }
 
 // ErrUnsupportedFormat fires when [PackBinary]'s opts.Format does not
@@ -167,13 +180,32 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 	if rounds == 0 {
 		rounds = 3
 	}
+
+	// Phase 2-A: per-pack random stub section name. Generated only
+	// when the operator opts in via RandomizeStubSectionName so the
+	// default packer output stays byte-reproducible (a property
+	// existing tests depend on).
+	var stubSectionName [8]byte
+	if opts.RandomizeStubSectionName {
+		seed := opts.Seed
+		if seed == 0 {
+			s, err := random.Int64()
+			if err != nil {
+				return nil, nil, fmt.Errorf("packer: random section-name seed: %w", err)
+			}
+			seed = s
+		}
+		stubSectionName = transform.RandomStubSectionName(rand.New(rand.NewSource(seed)))
+	}
+
 	return stubgen.Generate(stubgen.Options{
-		Input:     input,
-		Rounds:    rounds,
-		Seed:      opts.Seed,
-		CipherKey: opts.Key,
-		AntiDebug: opts.AntiDebug,
-		Compress:  opts.Compress,
+		Input:           input,
+		Rounds:          rounds,
+		Seed:            opts.Seed,
+		CipherKey:       opts.Key,
+		AntiDebug:       opts.AntiDebug,
+		Compress:        opts.Compress,
+		StubSectionName: stubSectionName,
 		// StubMaxSize zero: stubgen.Generate picks 8192 (Compress=true) or
 		// 4096 (Compress=false) based on the Compress flag.
 	})

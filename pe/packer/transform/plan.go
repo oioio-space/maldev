@@ -77,6 +77,20 @@ type Plan struct {
 	// Scratch RVA = StubRVA + StubMaxSize. Stub asm references it via
 	// LEA reg, [R15 + (StubRVA + StubMaxSize − TextRVA)].
 	StubScratchSize uint32
+
+	// StubSectionName, when non-zero, names the appended stub
+	// section. The PE section name field is 8 bytes, NUL-padded.
+	// Zero-value leaves InjectStubPE to write the default
+	// ".mldv\x00\x00\x00" — preserving backwards-compatible
+	// output on callers that don't override.
+	//
+	// Operators set this (typically via [RandomStubSectionName])
+	// to defeat YARA rules keyed on the literal ".mldv" string —
+	// Phase 2-A of docs/refactor-2026-doc/packer-design.md.
+	//
+	// PE only; ELF section names live in .shstrtab and are not
+	// load-relevant.
+	StubSectionName [8]byte
 }
 
 // Sentinels surfaced by PlanPE / PlanELF / InjectStubPE / InjectStubELF.

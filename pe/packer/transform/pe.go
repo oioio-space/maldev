@@ -212,7 +212,15 @@ func InjectStubPE(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, er
 	if int(newHdrOff)+peSectionHdrSize > int(plan.TextFileOff) {
 		return nil, ErrSectionTableFull
 	}
-	copy(out[newHdrOff:newHdrOff+8], []byte(".mldv\x00\x00\x00"))
+	// Section name: caller-supplied via plan.StubSectionName, or
+	// the canonical ".mldv\x00\x00\x00" when left zero. Phase 2-A
+	// (docs/refactor-2026-doc/packer-design.md) lets operators
+	// override per-pack to defeat YARA on the literal name.
+	if plan.StubSectionName == ([8]byte{}) {
+		copy(out[newHdrOff:newHdrOff+8], []byte(".mldv\x00\x00\x00"))
+	} else {
+		copy(out[newHdrOff:newHdrOff+8], plan.StubSectionName[:])
+	}
 	// VirtualSize includes the StubScratchSize trailing region — when set,
 	// the loader maps that gap as zero (BSS). C3 compression uses it as the
 	// scratch buffer for non-in-place LZ4 inflate, sidestepping the

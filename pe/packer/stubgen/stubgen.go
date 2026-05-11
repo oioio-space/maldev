@@ -40,6 +40,12 @@ type Options struct {
 	// JMP. Plan.TextMemSize is set so the loader maps enough virtual memory
 	// for the in-place inflate to expand into. Default false (conservative).
 	Compress bool
+
+	// StubSectionName, when non-zero, names the appended PE stub
+	// section. Forwarded into [transform.Plan.StubSectionName]; see
+	// that field for the full semantics. Zero-value preserves the
+	// canonical ".mldv\x00\x00\x00" name. PE only.
+	StubSectionName [8]byte
 }
 
 // Sentinels surfaced by Generate.
@@ -101,6 +107,9 @@ func Generate(opts Options) ([]byte, []byte, error) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("stubgen: PlanPE: %w", err)
 		}
+		// Forward operator-supplied section name (Phase 2-A). Zero
+		// value preserves the canonical ".mldv\x00\x00\x00" default.
+		plan.StubSectionName = opts.StubSectionName
 	case transform.FormatELF:
 		var err error
 		plan, err = transform.PlanELF(opts.Input, stubMaxSize)
