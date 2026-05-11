@@ -1550,6 +1550,56 @@ blocking; tracked.
 
 ---
 
+## Tested-fixture matrix (2026-05-11)
+
+The empirical results below come from running each fixture
+through `Vanilla` (no opts) and `RandomizeAll` (every Phase 2
+opt) packs, then executing the result on a Win10 VM. All
+fixtures live under `pe/packer/testdata/` (force-tracked
+binaries; rebuild via `make winhello winpanic`).
+
+| Fixture | Class | Vanilla pack | `RandomizeAll` pack | Comment |
+|---|---|---|---|---|
+| `winhello.exe` | Go static-PIE, exits cleanly | ✅ runs + prints stdout | ✅ runs + prints stdout | the canonical happy path |
+| `winpanic.exe` | Go static-PIE, nil-deref + `defer/recover` | ✅ recovers + prints stack | ✅ recovers + prints stack | `.pdata` stale doesn't bite Go (Go uses pclntab unwinder, not Win32 SEH) |
+| `winver.exe` (Windows 11 stock) | MSVC PE, **CFG-protected** | ❌ crash `0xC0000409` STATUS_STACK_BUFFER_OVERRUN | ❌ load reject "is not a valid Win32 application" | **CFG cookie protection rejects modified .text** — see Known limitations below |
+
+**Operational envelope:** `PackBinary` is validated for
+**Go-built static-PIE Windows binaries**. Microsoft CFG-protected
+binaries are out of scope (see below). Non-CFG MSVC binaries
+and DLLs haven't been tested against the current walker
+coverage; a failure code other than `0xC0000409` would point
+at a missing walker per the
+[walker-suite plan](../../refactor-2026-doc/packer-2f3c-walker-suite-plan.md).
+
+## Known limitations
+
+### `0xC0000409` (STATUS_STACK_BUFFER_OVERRUN) on Windows execution
+
+**Symptom:** packed binary exits with exit code `3221226505`
+(`0xC0000409`) on Windows immediately after spawn, before any
+of your code runs.
+
+**Cause:** the input PE was compiled with Control Flow Guard
+(`/guard:cf` MSVC, default for many modern Microsoft binaries).
+CFG bakes a runtime check that validates `.text` integrity via
+the `__guard_check_icall_fptr` cookie + the
+`GuardCFFunctionTable` whitelist. PackBinary's SGN encryption
+of `.text` invalidates that signature; the runtime check
+catches it on the first indirect call and aborts.
+
+**Workaround:** wrap the binary instead of in-place encrypting
+it — use `PackBinaryBundle` + the `cmd/bundle-launcher` runtime,
+which preserves the original binary intact and reflectively
+loads it at runtime. The CFG cookie sees the unmodified `.text`
+and stays happy.
+
+**Why no walker fixes this:** CFG isn't an RVA-staleness
+problem. It's a cryptographic-style integrity check on the
+code section's BYTES. Any in-place mutation of `.text` (which
+is what `PackBinary` does by definition) trips it. The fix
+isn't a directory walker, it's a different pack mode.
+
 ## Limitations
 
 A complete planned-improvements list with implementation breakdown
