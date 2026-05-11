@@ -4,153 +4,290 @@ created: 2026-05-11
 last_reviewed: 2026-05-11
 ---
 
-# Phase 2-F-3-c — Directory Walker Suite Plan
+# Phase 2-F-3-c — Full Coverage Plan: Walker Suite + Fixture Corpus + E2E Matrix
 
-## Why this plan exists
+## Why this plan exists (revised)
 
-`transform.ShiftImageVA` (shipped 2026-05-11 as v0.103.0
-scaffolding, NOT in `RandomizeAll`) bumps every section's
-VirtualAddress by a single delta `D`, fixes up:
+`v0.104.0` shipped `RandomizeImageVAShift` in the `RandomizeAll`
+fan-out after the IMPORT walker landed. End-to-end test on
+`winhello.exe` is green. **But** that fixture exercises only a
+subset of the loader-relevant directories — see the at-a-glance
+table below. To make `RandomizeImageVAShift` safe across
+heterogeneous payloads (Go binaries that panic, MSVC binaries
+with CFG, DLLs, GUI apps with resources, etc.) we need:
 
-- Section table VirtualAddress fields
-- Optional Header: AddressOfEntryPoint, BaseOfCode, SizeOfImage, SizeOfHeaders
-- DataDirectory entry RVAs (top-level)
-- Base-relocation table: each block's PageRVA + each entry's
-  absolute pointer value
+1. **Every directory walker** that can hold a stale RVA after a
+   global VA shift.
+2. **A fixture corpus** that exercises each walker's failure
+   path before AND after that walker lands.
+3. **An E2E test matrix** running pack+execute on every fixture
+   so a regression in any walker fails CI loudly.
 
-But the kernel rejects the resulting PE with
-`STATUS_DLL_NOT_FOUND` (0xC0000135) on real Go binaries because
-**internal RVA fields inside the per-directory data structures
-remain stale**. The reloc table only covers ABSOLUTE pointers;
-RVAs baked as raw uint32 fields by the linker are NOT
-relocated.
+This document supersedes the previous walker-only plan.
 
-This plan enumerates the directory walkers needed to make the
-shift safe end-to-end and orders them by: required-for-loading
-first, required-for-running second, optional-for-tools last.
+## Why winhello passed with only IMPORT
+
+| Directory | Present in winhello? | Patched in v0.104.0? | Crash trigger when stale |
+|---|---|---|---|
+| IMPORT (1) | ✅ (97 RVAs) | ✅ | every load — kernel resolves imports first |
+| BASERELOC (5) | ✅ | ✅ | every load with non-default ImageBase |
+| EXCEPTION (3, `.pdata`) | ✅ | ❌ stale | only on stack unwind / exception / panic / `runtime.Callers` |
+| LOAD_CONFIG (10) | ✅ probable | ❌ stale | only if `/guard:cf`, SafeSEH, or RFG enabled |
+| EXPORT (0) | ❌ (EXE not DLL) | ❌ | only when consumer calls `GetProcAddress` |
+| RESOURCE (2) | ❌ (no icons/strings) | ❌ | only on `FindResourceA` |
+| DELAY_IMPORT (13) | ❌ | ❌ | only on first delay-load call |
+| DEBUG (6) | ✅ | ❌ stale | runtime fine, debug tools confused |
+| BOUND_IMPORT (11) | ❌ | n/a (offsets relative to directory itself) | n/a |
+| TLS (9) | ❌ (`PlanPE` rejects) | n/a | n/a |
+| ARCHITECTURE (7), GLOBAL_PTR (8), COM (14) | ❌ (rare/legacy) | n/a | n/a |
 
 ## Walker inventory
 
-| # | DataDir | Walker | Internal fields to bump | Severity |
+Each walker exposes one function with the same shape as
+`WalkImportDirectoryRVAs`:
+
+```go
+func WalkXxxDirectoryRVAs(pe []byte, cb func(rvaFileOff uint32) error) error
+```
+
+The wiring point in `transform.ShiftImageVA` is identical for
+every walker: `+= delta` on each yielded uint32.
+
+| # | Walker | Internal RVA fields | Severity | Slice |
 |---|---|---|---|---|
-| 1 | `IMPORT` (1) | `WalkImportDirectory` | per-descriptor: `OriginalFirstThunk` + `Name` + `FirstThunk` (RVAs); per-thunk-by-name: `Hint/Name` table RVA in each ILT entry whose high bit is clear | **Required for loading.** Without this the loader fails with `STATUS_DLL_NOT_FOUND`. |
-| 2 | `EXCEPTION` (3) | `WalkExceptionDirectory` | each `RUNTIME_FUNCTION` (12 bytes): `BeginAddress` + `EndAddress` + `UnwindData` (RVAs); `UnwindData` points at an `UNWIND_INFO` block which may itself contain RVAs to chained handlers | **Required for running.** Go runtime calls `RtlAddFunctionTable`-equivalent; missing handlers crash on first stack unwind. |
-| 3 | `LOAD_CONFIG` (10) | `WalkLoadConfigDirectory` | `IMAGE_LOAD_CONFIG_DIRECTORY64`: `LockPrefixTable`, `EditList`, `SecurityCookie` (VA, not RVA — handle separately if reloc'd), `SEHandlerTable`, `GuardCFFunctionTable`, `GuardLongJumpTargetTable`, `DynamicValueRelocTable`, `CHPEMetadataPointer` (PE32+ uses VAs for some, RVAs for others — verify per-field) | **Required for running.** Win10 validates `SecurityCookie` early; CFG-enabled binaries also check `GuardCFFunctionTable`. |
-| 4 | `IAT` (12) | implicit via `IMPORT` walker (the IAT array IS the FirstThunk arrays, already covered by #1) | n/a | covered transitively |
-| 5 | `EXPORT` (0) | `WalkExportDirectory` | `IMAGE_EXPORT_DIRECTORY`: `Name`, `AddressOfFunctions`, `AddressOfNames`, `AddressOfNameOrdinals` (all RVAs); plus the `AddressOfFunctions` array contents (each entry is an RVA), the `AddressOfNames` array contents (each entry is an RVA to a name string) | Required ONLY when packing DLLs. EXEs typically have no exports. |
-| 6 | `RESOURCE` (2) | `WalkResourceDirectory` | recursive tree of `IMAGE_RESOURCE_DIRECTORY` + `IMAGE_RESOURCE_DIRECTORY_ENTRY` + `IMAGE_RESOURCE_DATA_ENTRY` — leaf data entries hold an `OffsetToData` RVA | Required when binary uses `FindResource` etc. (icons, strings). Test fixture `winhello.exe` has empty resources. |
-| 7 | `DEBUG` (6) | `WalkDebugDirectory` | each `IMAGE_DEBUG_DIRECTORY`: `AddressOfRawData` (RVA) + `PointerToRawData` (file offset, NOT RVA — leave alone) | Optional for runtime; required for debug-tool consumption. |
-| 8 | `BOUND_IMPORT` (11) | `WalkBoundImportDirectory` | offsets relative to the directory itself (NOT RVAs) — leave alone IF directory itself didn't move; verify post-shift the directory is still at its declared RVA (it is — sections don't move data, only declared VAs change) | No-op for VA shift. |
-| 9 | `DELAY_IMPORT` (13) | `WalkDelayImportDirectory` | `IMAGE_DELAYLOAD_DESCRIPTOR`: `DllNameRVA`, `ModuleHandleRVA`, `ImportAddressTableRVA`, `ImportNameTableRVA`, `BoundImportAddressTableRVA`, `UnloadInformationTableRVA` (all RVAs) | Rare on Go binaries; required for binaries using `__declspec(dllimport)` with `/DELAYLOAD`. |
-| 10 | `TLS` (9) | n/a | `PlanPE` rejects PEs with TLS callbacks before any of this runs. | not reachable |
-| 11 | `ARCHITECTURE` (7), `GLOBAL_PTR` (8), `COM_DESCRIPTOR` (14) | n/a | rarely used outside of CLR / IA64; out of scope. | not implemented |
+| 1 | IMPORT | descriptor: OFT/Name/FT (×3); ILT+IAT by-name thunks (low 4B of uint64) | required for loading | ✅ shipped 2-F-3-c-2 (v0.104.0) |
+| 2 | EXCEPTION | each `RUNTIME_FUNCTION` (12B): BeginAddress, EndAddress, UnwindData (×3 RVAs/entry); UnwindData → `UNWIND_INFO` block which may chain to handler RVAs | required for stack unwind / panic / SEH | 2-F-3-c-3 |
+| 3 | LOAD_CONFIG | `IMAGE_LOAD_CONFIG_DIRECTORY64`: SEHandlerTable, GuardCFFunctionTable, GuardLongJumpTargetTable, DynamicValueRelocTable, CHPEMetadataPointer, GuardAddressTakenIatEntryTable, GuardEHContinuationTable (RVAs); SecurityCookie, LockPrefixTable, EditList (VAs — already covered by reloc table if reloc'd) | required for CFG / SafeSEH binaries | 2-F-3-c-4 |
+| 4 | EXPORT | `IMAGE_EXPORT_DIRECTORY`: Name, AddressOfFunctions, AddressOfNames, AddressOfNameOrdinals (×4 directory RVAs); each entry of AddressOfFunctions array (RVA per export); each entry of AddressOfNames array (RVA per name string) | required only when packing DLLs | 2-F-3-c-5 |
+| 5 | RESOURCE | recursive tree: `IMAGE_RESOURCE_DIRECTORY` (header) + `IMAGE_RESOURCE_DIRECTORY_ENTRY[]` (offsets relative to directory base — leave alone) + leaf `IMAGE_RESOURCE_DATA_ENTRY` (`OffsetToData` is an RVA — patch this) | required only when binary uses resources | 2-F-3-c-6 |
+| 6 | DEBUG | each `IMAGE_DEBUG_DIRECTORY`: AddressOfRawData (RVA — patch), PointerToRawData (file offset — leave alone) | optional (tools only, runtime unaffected) | 2-F-3-c-7 |
+| 7 | DELAY_IMPORT | `IMAGE_DELAYLOAD_DESCRIPTOR`: DllNameRVA, ModuleHandleRVA, ImportAddressTableRVA, ImportNameTableRVA, BoundImportAddressTableRVA, UnloadInformationTableRVA (×6 directory RVAs); same by-name thunk fixup as IMPORT for the IAT/INT arrays | required for delay-loaded DLLs | 2-F-3-c-8 |
+| 8 | TLS | `PlanPE` already rejects PEs with TLS callbacks before any of this runs | n/a | not implemented |
+| 9 | BOUND_IMPORT | `IMAGE_BOUND_IMPORT_DESCRIPTOR.OffsetModuleName` is relative to the directory itself, NOT an RVA — directory entry's RVA in DataDirectory is patched by top-level shift code, contents need NO walker | n/a | not implemented |
 
-## Implementation order
+## Test fixture corpus
 
-**Slice 2-F-3-c-2:** ship walker #1 (IMPORT). After this slice the
-packed binary loads (passes import resolution). It will still
-crash on first SEH unwind because exception data is stale, but
-that's a clearer signal to debug than `STATUS_DLL_NOT_FOUND`.
+We need fixtures that EXERCISE each directory's failure mode.
+"Exercise" means: at runtime, the binary touches code that
+walks the directory in question. Without that, a stale
+directory is harmless (the winhello story).
 
-Add an integration test that packs `winhello.exe` with
-`RandomizeImageVAShift` + `RandomizeImageBase` ON and asserts
-the kernel maps it AND import resolution succeeds (we can detect
-this by stub failing during decryption, not at load time). The
-Win10 VM E2E will fail at runtime but with a different code than
-0xC0000135 — that's the success signal for slice -c-2.
+All fixtures live under `pe/packer/testdata/fixtures/` and are
+built via a top-level Makefile. Build prerequisites:
+- Go (already required; cross-compile to GOOS=windows)
+- Windows VM with MSVC (for CFG/C-style binaries)
+- `windres` or RC.exe (for resource-bearing binaries)
 
-**Slice 2-F-3-c-3:** ship walker #2 (EXCEPTION). After this slice
-Win10 VM E2E should PASS for `RandomizeImageVAShift` on
-`winhello.exe` (no resources, no exports, no delay imports —
-imports + exception is the minimum quorum for a Go static-PIE).
+| Fixture | Builds | Exercises | Pre-walker behaviour | Post-walker behaviour |
+|---|---|---|---|---|
+| `winhello.exe` (existing) | Go static-PIE: `fmt.Println` then exit | IMPORT + BASERELOC | already PASS | regression check |
+| `winpanic.exe` | Go static-PIE: `panic("boom")` then runtime stack unwind | EXCEPTION (.pdata) | crashes during unwind without EXCEPTION walker | clean panic message + exit 2 |
+| `wincallers.exe` | Go static-PIE: `runtime.Callers(0, pcs); fmt.Println(pcs)` | EXCEPTION (.pdata) read-only path | crashes or prints empty stack without EXCEPTION walker | prints non-empty stack + exit 0 |
+| `wincfg.exe` | C compiled with `cl /guard:cf hello.c` | LOAD_CONFIG (CFG validation) | STATUS_INVALID_IMAGE_FORMAT or crash on first indirect call | clean `printf` + exit 0 |
+| `winexports.dll` | C DLL exporting 3 functions, exercised by a tiny driver `winexports_driver.exe` calling LoadLibrary + GetProcAddress | EXPORT | driver gets NULL from GetProcAddress (no walker) | driver prints function results + exit 0 |
+| `winres.exe` | C app embedding an icon + version-info via .rc, then calling `FindResourceW(NULL, MAKEINTRESOURCE(IDI_ICON1), RT_ICON)` | RESOURCE | FindResource returns NULL (no walker) | resource handle non-NULL + exit 0 |
+| `windelay.exe` | C app with `#pragma comment(linker, "/DELAYLOAD:user32.dll")` then calling MessageBoxA | DELAY_IMPORT | crash at first MessageBoxA call (no walker) | MessageBoxA returns + exit 0 |
+| `windbg.exe` | Standard `cl hello.c /Zi /DEBUG` (debug info embedded) | DEBUG (read-only — runtime unaffected) | runtime PASS but `dumpbin /headers` corrupted | runtime PASS + dumpbin clean |
+| `winminimal.exe` | C app linked with `/MERGE:.rdata=.text` (single-section, no IMPORT, no relocs) | edge case — `ErrRelocsStripped` rejection path | reject with `transform.ErrRelocsStripped` | same — never reaches any walker |
+| `winnpe.bin` | Random bytes 1 KiB | edge case — `parsePELayout` rejection | reject with "missing PE signature" | same |
 
-Add `RandomizeImageVAShift` + `RandomizeImageBase` to the
-`RandomizeAll` fan-out at this point.
+## E2E test matrix
 
-**Slice 2-F-3-c-4:** ship walker #3 (LOAD_CONFIG). Go binaries
-emit a load config; CFG validation might trip on stale fields.
-Verify by stress-testing on Defender-enabled VM.
+Each fixture × each pack mode = one Win10 VM E2E test. Build-tag
+`maldev_packer_run_e2e` gates them all out of CI; bash harness
+runs them via `scripts/vm-run-tests.sh`.
 
-**Slice 2-F-3-c-5+:** EXPORT, RESOURCE, DEBUG, DELAY_IMPORT —
-order driven by what the real-world payload corpus needs.
-Track which payloads fail at which directory and prioritise.
+| Fixture | `vanilla` (no opts) | `RandomizeAll` (current 7 opts) | `RandomizeImageBase` alone |
+|---|---|---|---|
+| `winhello.exe` | PASS (regression) | PASS (regression) | runs but verify exit 0 |
+| `winpanic.exe` | PASS — panics → exit 2 | will FAIL pre-2-F-3-c-3, PASS post | same |
+| `wincallers.exe` | PASS | will FAIL pre-2-F-3-c-3, PASS post | same |
+| `wincfg.exe` | PASS | will FAIL pre-2-F-3-c-4, PASS post | same |
+| `winexports.dll` + driver | PASS | will FAIL pre-2-F-3-c-5, PASS post | same |
+| `winres.exe` | PASS | will FAIL pre-2-F-3-c-6, PASS post | same |
+| `windelay.exe` | PASS | will FAIL pre-2-F-3-c-8, PASS post | same |
+| `windbg.exe` | PASS | PASS pre and post (DEBUG is read-only) | PASS |
+| `winminimal.exe` | PASS | rejected with `ErrRelocsStripped` | rejected |
+| `winnpe.bin` | rejected | rejected | rejected |
 
-## Walker template
+Naming convention for the test files:
 
-Each walker should expose two functions:
-
-```go
-// WalkXxxDirectory(pe []byte, cb func(rvaToPatch uint32) error) error
-//
-// Read-only enumeration: yields every internal RVA field by its
-// FILE OFFSET (not by RVA — caller patches the bytes directly).
-// cb signature mirrors the BaseRelocEntry pattern from 2-F-3-a:
-// returning a non-nil error stops the walk + propagates.
+```
+pe/packer/packer_e2e_<fixture>_windows_test.go
+  → TestPackBinary_WindowsPE_<Fixture>_Vanilla_E2E
+  → TestPackBinary_WindowsPE_<Fixture>_RandomizeAll_E2E
 ```
 
-Then the shift path becomes:
+## Implementation order — slices with explicit gates
 
-```go
-WalkImportDirectory(pe, func(rvaFileOff uint32) error {
-    cur := binary.LittleEndian.Uint32(out[rvaFileOff:])
-    if cur == 0 { return nil } // unset → leave alone
-    binary.LittleEndian.PutUint32(out[rvaFileOff:], cur+delta)
-    return nil
-})
-```
+Each slice ships:
+1. The walker(s) it owns + unit tests (synthetic fixture).
+2. The matching fixture in `testdata/fixtures/` + Makefile rule.
+3. New E2E test file(s) for the fixture, asserting both
+   `Vanilla` and `RandomizeAll` pass.
+4. `/simplify` review of the diff.
+5. Tech-md `packer.md` update + commit + push + tag.
 
-Uniform shape across all walkers. Each walker ~60-100 LOC + ~80
-LOC tests = ~150-200 LOC per slice. Estimated total: 1000-1500
-LOC across 5 slices, ~5-7 commits.
+### 2-F-3-c-3 — EXCEPTION walker (high priority)
 
-## Why not just disable the directories?
+- Walker: `WalkExceptionDirectoryRVAs` — yields BeginAddress,
+  EndAddress, UnwindData per `RUNTIME_FUNCTION` (12 bytes each,
+  array length = `directorySize / 12`). UnwindData itself
+  points at `UNWIND_INFO` blocks; the version-1 layout has
+  `ExceptionHandler` (RVA) at the end if `UNW_FLAG_EHANDLER`
+  is set in the flags. Recursive walk for chained handlers.
+- Fixtures: build `winpanic.exe` + `wincallers.exe`.
+- E2E gate: both fixtures pass `RandomizeAll`.
+- Estimated scope: ~120 LOC walker + 100 LOC tests + Makefile rule.
+- Tag: v0.105.0.
 
-A previous round of brainstorming considered "zero out the
-DataDirectory entries the packer doesn't need", e.g. clear
-EXPORT, RESOURCE, DEBUG. But:
+### 2-F-3-c-4 — LOAD_CONFIG walker
 
-- IMPORT is required for any non-trivial PE.
-- EXCEPTION is required for any Go binary (the runtime walks
-  `.pdata` for goroutine stack management).
-- LOAD_CONFIG is checked early by the loader on Win10.
+- Walker: `WalkLoadConfigDirectoryRVAs`. Tricky because
+  `IMAGE_LOAD_CONFIG_DIRECTORY64` has many fields and Microsoft
+  has extended it across Windows versions — newer fields exist
+  only when the directory's `Size` field exceeds the older
+  layout. Walker yields based on `Size` field (read at offset
+  0): patch fields whose offset < Size.
+- Fixture: `wincfg.exe` (C + `/guard:cf`).
+- E2E gate: fixture passes `RandomizeAll`.
+- Estimated scope: ~150 LOC walker + 120 LOC tests.
+- Tag: v0.106.0.
 
-So at minimum #1, #2, #3 walkers are non-negotiable.
+### 2-F-3-c-5 — EXPORT walker
 
-## Testing strategy
+- Walker: `WalkExportDirectoryRVAs`. Yields:
+  - 4 RVAs in the directory header
+  - each entry of AddressOfFunctions (RVA per function entry)
+  - each entry of AddressOfNames (RVA per name string)
+  - **NOT** AddressOfNameOrdinals entries (those are uint16
+    indices, not RVAs)
+- Fixture: `winexports.dll` + `winexports_driver.exe` (driver
+  packs the DLL with `RandomizeAll`, loads it, calls each
+  exported function).
+- E2E gate: driver prints expected outputs + exit 0.
+- Estimated scope: ~100 LOC walker + 100 LOC tests + DLL/driver
+  Makefile rules.
+- Tag: v0.107.0.
 
-Each walker:
-- Unit tests against synthetic minimal PE buffers (mirrors the
-  pattern used for `WalkBaseRelocs` in `base_relocs_test.go`).
-- Integration test against the real `winhello.exe` fixture:
-  call `WalkXxxDirectory` and assert the count of yielded RVAs
-  is non-zero (proves the walker found the directory).
-- After the IMPORT walker lands, integration tests pack
-  `winhello.exe` with `RandomizeImageVAShift` ON and verify the
-  result still parses via `debug/pe`.
-- After IMPORT + EXCEPTION ship, the Win10 VM E2E test goes
-  green for `RandomizeImageVAShift`. This is the gate for
-  flipping the `RandomizeAll` fan-out.
+### 2-F-3-c-6 — RESOURCE walker
 
-## Risks + mitigations
+- Walker: `WalkResourceDirectoryRVAs` — recursive walk through
+  `IMAGE_RESOURCE_DIRECTORY` → `IMAGE_RESOURCE_DIRECTORY_ENTRY[]`
+  → either nested directory or leaf `IMAGE_RESOURCE_DATA_ENTRY`.
+  Only the leaf's `OffsetToData` field is an RVA; intermediate
+  directory entries use offsets relative to the resource
+  directory base (NOT RVAs — leave alone).
+- Fixture: `winres.exe` (C + .rc embedding an icon).
+- E2E gate: fixture passes `RandomizeAll`.
+- Estimated scope: ~150 LOC walker (recursion is the cost) +
+  150 LOC tests.
+- Tag: v0.108.0.
 
-- **DataDirectory[i].VirtualAddress fixup happens in the
-  top-level shift code** (already shipped). The walkers operate
-  on the directory CONTENTS (the structures the directory's RVA
-  points at). The two patches are independent.
-- **Some directories overlap sections that have BSS tails**
-  (`SizeOfRawData < VirtualSize`). `rvaToFileOff` returns an
-  error in that case. The walker should propagate, not silently
-  ignore.
-- **The shift could push a DataDirectory entry's RVA past the
-  end of any section's VA range** if delta is too large. Bound
-  delta to `[1, 8] × SectionAlignment` per pack (already done
-  in the wiring) so SizeOfImage growth stays small.
+### 2-F-3-c-7 — DEBUG walker
 
-## Open questions
+- Walker: `WalkDebugDirectoryRVAs`. Yields one
+  `AddressOfRawData` per `IMAGE_DEBUG_DIRECTORY` entry. Skip
+  `PointerToRawData` (file offset, not RVA).
+- Fixture: `windbg.exe` (existing C app rebuilt with `/Zi /DEBUG`).
+- E2E gate: fixture passes `RandomizeAll` AND `dumpbin /headers
+  packed.exe` runs without complaint (verified by parsing its
+  output for "no errors").
+- Estimated scope: ~50 LOC walker + 80 LOC tests.
+- Tag: v0.109.0.
 
-- Do CFG (Control Flow Guard) PEs need additional fixup beyond
-  `LOAD_CONFIG`'s `GuardCFFunctionTable`? Investigate when the
-  walker lands on a CFG-enabled fixture.
-- Does Win10's `RtlImageNtHeaderEx` validate any RVA we haven't
-  enumerated above? Run with the `LDR` debug stream enabled to
-  trace.
+### 2-F-3-c-8 — DELAY_IMPORT walker
+
+- Walker: `WalkDelayImportDirectoryRVAs`. Mirrors the IMPORT
+  walker shape but on `IMAGE_DELAYLOAD_DESCRIPTOR` (32-byte
+  descriptors with 6 RVA fields each).
+- Fixture: `windelay.exe`.
+- E2E gate: fixture passes `RandomizeAll`.
+- Estimated scope: ~120 LOC walker + 100 LOC tests.
+- Tag: v0.110.0.
+
+### 2-F-3-c-9 — `RandomizeImageBase` debug + ASLR investigation
+
+- Not a walker. Existing `PatchPEImageBase` + DYNAMIC_BASE
+  guard ships in v0.103.0 but fails Win10 E2E with
+  intermittent STATUS_ACCESS_VIOLATION. Suspected cause:
+  HIGH_ENTROPY_VA flag missing or random base outside
+  47-bit user-mode VA. Investigation tasks:
+  - Read DllCharacteristics on winhello — is HIGH_ENTROPY_VA
+    set?
+  - Try restricting `RandomImageBase64` range to the 47-bit
+    span (`[0x140000000, 0x7FF40000000)`) — currently goes
+    to `0x7FF000000000` which might collide with system
+    allocations.
+  - Try clearing the `IMAGE_FILE_LARGE_ADDRESS_AWARE`
+    Characteristics bit when setting low bases.
+  - Investigate Defender interaction with non-canonical
+    bases.
+- E2E gate: `winhello.exe` passes `RandomizeImageBase: true`
+  alone.
+- Tag: v0.111.0.
+
+## Definition of Done (overall Phase 2-F-3-c)
+
+Phase 2-F-3-c is "DONE" when:
+
+1. Every walker in the inventory above is shipped + tested.
+2. Every fixture in the corpus builds reproducibly via Makefile.
+3. Every fixture × `RandomizeAll` E2E passes on Win10 VM.
+4. `RandomizeImageBase` joins `RandomizeAll` (or is documented
+   as permanently EXPERIMENTAL with rationale).
+5. `docs/techniques/pe/packer.md` has a "tested fixtures" table
+   listing every supported binary class with a green checkmark.
+6. README + `pe/packer/doc.go` mention the supported fixture
+   classes so operators know the deployment envelope.
+
+## Estimated scope
+
+| Slice | Walker LOC | Test LOC | Fixture LOC | Total |
+|---|---|---|---|---|
+| 2-F-3-c-3 EXCEPTION | 120 | 100 | 80 | 300 |
+| 2-F-3-c-4 LOAD_CONFIG | 150 | 120 | 50 | 320 |
+| 2-F-3-c-5 EXPORT | 100 | 100 | 100 | 300 |
+| 2-F-3-c-6 RESOURCE | 150 | 150 | 80 | 380 |
+| 2-F-3-c-7 DEBUG | 50 | 80 | 30 | 160 |
+| 2-F-3-c-8 DELAY_IMPORT | 120 | 100 | 60 | 280 |
+| 2-F-3-c-9 ImageBase debug | n/a | 80 | 0 | 80 |
+| **Total** | **690** | **730** | **400** | **~1820** |
+
+7 commits, 7 tags (v0.105.0 → v0.111.0), one fixture-corpus
+follow-up commit. Estimated 5-7 working sessions.
+
+## Risk register
+
+- **Walker bugs that pass unit tests but break real PEs.** The
+  synthetic-fixture unit tests can miss layout edge cases. The
+  Win10 VM E2E is the safety net — every walker must have its
+  fixture pass before the slice ships.
+- **MSVC build dependency.** Several fixtures need MSVC
+  (`/guard:cf`, .rc compilation, /DELAYLOAD pragma). The build
+  Makefile must skip these gracefully when MSVC isn't
+  available, with a warning that the fixture won't be tested
+  on this host. The Win10 VM has MSVC installed (per
+  vm-provision.sh), so CI / VM runs are unaffected.
+- **`IMAGE_LOAD_CONFIG_DIRECTORY64` versioning.** The structure
+  has been extended ~6 times since Win XP. Walker must use the
+  `Size` field at offset 0 to know how many fields are
+  present; reading past that into "future" fields is fine
+  (zero-initialised) but writing past it would corrupt the
+  next directory's header. Bound-check carefully.
+- **RESOURCE recursion depth.** Pathological PEs could have
+  deeply-nested resource trees. Cap recursion at e.g. 8 levels
+  to avoid stack overflow on a malicious input; real-world
+  PEs are 3 levels deep (Type → Name → Language → Data).
+
+## What this plan does NOT do
+
+- Does not address `RandomizeImageVAShift` on PE32 (32-bit) —
+  current code is PE32+ only. PE32 support would be a separate
+  slice if/when needed.
+- Does not address ARM64 PE binaries — current code assumes
+  AMD64 layouts. Would need DIR32 reloc type support + Arm64
+  unwind data layout.
+- Does not pursue 2-F-3-d (per-section permutation) — still
+  blocked on `.text` RIP-relative disassembly. Reconsider
+  after 2-F-3-c is fully complete.
