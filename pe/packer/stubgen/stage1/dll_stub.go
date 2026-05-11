@@ -10,13 +10,13 @@ import (
 	"github.com/oioio-space/maldev/pe/packer/transform"
 )
 
-// dllStubSentinel is the 8-byte placeholder EmitDLLStub bakes into
-// the trailing data slot that holds the original DllMain's absolute
-// VA. PatchDllMainSlot replaces it at pack time with ImageBase + OEPRVA.
-const dllStubSentinel uint64 = 0xDEADC0DEDEADBABE
+// dllStubSentinel and dllStubSentinelBytes alias the canonical
+// definitions in package transform — exported there so the
+// transform-side [transform.PatchDLLStubSlot] and the stub
+// emitter here can't drift apart silently.
+const dllStubSentinel = transform.DLLStubSentinel
 
-// dllStubSentinelBytes is the little-endian byte form for scan-and-patch.
-var dllStubSentinelBytes = binary.LittleEndian.AppendUint64(nil, dllStubSentinel)
+var dllStubSentinelBytes = transform.DLLStubSentinelBytes
 
 // flagDispSentinel and slotDispSentinel are imm32 placeholders baked
 // into the MOV operands that reference the decrypted_flag byte (R15-relative
@@ -37,15 +37,12 @@ const (
 // .text — the SGN rounds must run exactly once, on the first call.
 const dllReasonProcessAttach = 1
 
-// Errors surfaced by EmitDLLStub / PatchDllMainSlot.
+// ErrDLLStubSentinelNotFound + ErrDLLStubSentinelDuplicate are
+// aliases of the transform-side sentinels (single source of truth)
+// so existing callers can still errors.Is against the stage1 names.
 var (
-	// ErrDLLStubSentinelNotFound fires when PatchDllMainSlot can't
-	// find dllStubSentinel in the assembled bytes.
-	ErrDLLStubSentinelNotFound = errors.New("stage1: DllMain slot sentinel not found in stub bytes")
-
-	// ErrDLLStubSentinelDuplicate fires when more than one sentinel
-	// match is found — would break the single-patch contract.
-	ErrDLLStubSentinelDuplicate = errors.New("stage1: DllMain slot sentinel matched more than once")
+	ErrDLLStubSentinelNotFound  = transform.ErrDLLStubSlotNotFound
+	ErrDLLStubSentinelDuplicate = transform.ErrDLLStubSlotDuplicate
 
 	// ErrDLLStubPlanMissing fires when EmitDLLStub is called with a
 	// Plan that doesn't have IsDLL=true. Guards against accidentally
@@ -333,13 +330,5 @@ func PatchDLLStubDisplacements(stubBytes []byte, plan transform.Plan) (int, erro
 // any error. Errors wrap [ErrDLLStubSentinelNotFound] /
 // [ErrDLLStubSentinelDuplicate] so callers can errors.Is them.
 func PatchDllMainSlot(stubBytes []byte, absDllMainVA uint64) (int, error) {
-	value := binary.LittleEndian.AppendUint64(nil, absDllMainVA)
-	idx, count, _ := patchSentinel(stubBytes, dllStubSentinelBytes, value, false, "DllMain slot")
-	switch {
-	case count == 0:
-		return 0, ErrDLLStubSentinelNotFound
-	case count > 1:
-		return 0, ErrDLLStubSentinelDuplicate
-	}
-	return idx, nil
+	return transform.PatchDLLStubSlot(stubBytes, absDllMainVA)
 }
