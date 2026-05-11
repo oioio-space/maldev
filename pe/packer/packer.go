@@ -161,6 +161,17 @@ type PackBinaryOptions struct {
 	// PE only — ELF doesn't carry an analogous build-timestamp
 	// field the loader respects.
 	RandomizeTimestamp bool
+
+	// RandomizeLinkerVersion, when true, overwrites the Optional
+	// Header's MajorLinkerVersion + MinorLinkerVersion bytes with
+	// a random plausible MSVC pair (major ∈ [12, 15], minor ∈
+	// [0, 99]). Defeats threat-intel pivots that cluster samples
+	// by linker version ("all samples linked with VS2017 14.16").
+	// Per-pack uniqueness comes from a fresh-seeded RNG.
+	//
+	// Phase 2-C of docs/refactor-2026-doc/packer-design.md.
+	// PE only — ELF carries no analogous field.
+	RandomizeLinkerVersion bool
 }
 
 // ErrUnsupportedFormat fires when [PackBinary]'s opts.Format does not
@@ -242,6 +253,28 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		ts := transform.RandomTimeDateStamp(rand.New(rand.NewSource(seed)), uint32(time.Now().Unix()))
 		if perr := transform.PatchPETimeDateStamp(out, ts); perr != nil {
 			return nil, nil, fmt.Errorf("packer: patch timestamp: %w", perr)
+		}
+	}
+
+	// Phase 2-C: per-pack random LinkerVersion on PE outputs only.
+	// Same seeding rule as the timestamp path; RNG state is
+	// independent so the two opts don't influence each other.
+	if opts.RandomizeLinkerVersion && transform.DetectFormat(out) == transform.FormatPE {
+		seed := opts.Seed
+		if seed == 0 {
+			s, ierr := random.Int64()
+			if ierr != nil {
+				return nil, nil, fmt.Errorf("packer: random linker-version seed: %w", ierr)
+			}
+			seed = s
+		}
+		// Seed offset (+1) keeps the LinkerVersion RNG distinct
+		// from the Timestamp RNG even when both opt-ins fire on
+		// the same opts.Seed — otherwise the two would derive from
+		// the same stream and feel correlated.
+		major, minor := transform.RandomLinkerVersion(rand.New(rand.NewSource(seed + 1)))
+		if perr := transform.PatchPELinkerVersion(out, major, minor); perr != nil {
+			return nil, nil, fmt.Errorf("packer: patch linker version: %w", perr)
 		}
 	}
 
