@@ -7,6 +7,28 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Packer DLL chantier — v0.110.0 (2026-05-11)
+
+#### v0.110.0 — `transform.PlanDLL` (slice 1 of `FormatWindowsDLL`)
+
+- `pe/packer/transform.PlanDLL` — DLL counterpart of `PlanPE`.
+  Requires `IMAGE_FILE_DLL` (refuses EXE inputs), returns a
+  `Plan` with the new `Plan.IsDLL` flag set. Both paths share
+  `planPECore` parameterised by an unexported `planExpect` enum
+  (`expectEXE` / `expectDLL`); no boolean trap at the call site.
+- `transform.ErrIsEXE` — mirror sentinel of `ErrIsDLL`. Each
+  error now means exactly one thing: `ErrIsDLL` fires only on
+  EXE-route with DLL bit; `ErrIsEXE` fires only on DLL-route
+  with no DLL bit.
+- `transform.ImageFileDLL = 0x2000` promoted to `peconst.go`.
+  Sibling `pe/packer/runtime` deleted its private
+  `dllCharacteristic` copy and now consumes the exported name —
+  one source of truth for the COFF DLL bit across the packer
+  subtree.
+- Stub emitter + `InjectStubDLL` + `PackBinary` wiring + Win10
+  VM E2E land in slices 2–4; tracker in
+  `docs/refactor-2026-doc/packer-dll-format-plan.md`.
+
 ### Packer chantier — v0.88 → v0.92 (2026-05-10)
 
 **Note:** version-section discipline in this CHANGELOG drifted between
