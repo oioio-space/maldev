@@ -306,6 +306,12 @@ packed, _, err := packer.PackBinary(input, packer.PackBinaryOptions{
     //   RandomizeExistingSectionNames  — `.text/.data/.rdata`   (Phase 2-F-1)
     //                                    → random `.xxxxx` per section,
     //                                    appended stub name preserved.
+    //   RandomizeJunkSections          — append [1, 5] BSS sections (Phase 2-F-2)
+    //                                    after the stub. File size unchanged
+    //                                    (uninitialised, zero file backing);
+    //                                    only NumberOfSections + SizeOfImage
+    //                                    grow. Defeats "exact section count"
+    //                                    + "stub is the last header" patterns.
 })
 ```
 

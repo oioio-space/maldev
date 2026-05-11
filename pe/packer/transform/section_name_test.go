@@ -38,3 +38,23 @@ func TestRandomStubSectionName_DiffersAcrossSeeds(t *testing.T) {
 		t.Errorf("seeds 1 and 2 collided on %q — RNG seeded incorrectly?", a)
 	}
 }
+
+func TestRandomUniqueSectionName_AvoidsUsed(t *testing.T) {
+	// Stamp a slot that the seeded RNG would otherwise produce
+	// first, then check the helper retries past it.
+	rng := rand.New(rand.NewSource(42))
+	taken := transform.RandomStubSectionName(rng)
+	out := transform.RandomUniqueSectionName(rand.New(rand.NewSource(42)), [][8]byte{taken})
+	if out == taken {
+		t.Errorf("RandomUniqueSectionName returned %q despite it being in `used`", string(out[:]))
+	}
+}
+
+func TestRandomUniqueSectionName_EmptyUsedReturnsFirst(t *testing.T) {
+	a := transform.RandomUniqueSectionName(rand.New(rand.NewSource(7)), nil)
+	b := transform.RandomStubSectionName(rand.New(rand.NewSource(7)))
+	if a != b {
+		t.Errorf("with empty used set, helper should mirror RandomStubSectionName: %q vs %q",
+			string(a[:]), string(b[:]))
+	}
+}

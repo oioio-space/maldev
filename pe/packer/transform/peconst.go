@@ -33,6 +33,11 @@ const (
 	// SizeOfOptionalHeader inside the COFF header.
 	COFFSizeOfOptHdrOffset = 0x10
 
+	// OptAddrEntryOffset is the file offset of AddressOfEntryPoint
+	// (a.k.a. OEP) inside the PE32+ Optional Header. Value is an
+	// RVA — the loader adds ImageBase before transferring control.
+	OptAddrEntryOffset = 0x10
+
 	// OptSectionAlignOffset is the file offset of SectionAlignment
 	// inside the PE32+ Optional Header.
 	OptSectionAlignOffset = 0x20
@@ -43,6 +48,12 @@ const (
 
 	// OptSizeOfImageOffset is the file offset of SizeOfImage.
 	OptSizeOfImageOffset = 0x38
+
+	// OptSizeOfHeadersOffset is the file offset of SizeOfHeaders
+	// inside the PE32+ Optional Header. Bounds the byte range
+	// reserved for DOS stub + PE signature + COFF + Optional + the
+	// section table; new section headers must fit within it.
+	OptSizeOfHeadersOffset = 0x3C
 
 	// SecVirtualSizeOffset is the file offset of VirtualSize
 	// inside a section header.
@@ -61,6 +72,10 @@ const (
 	// SecCharacteristicsOffset is the file offset of
 	// Characteristics inside a section header.
 	SecCharacteristicsOffset = 0x24
+
+	// ScnCntUninitData is IMAGE_SCN_CNT_UNINITIALIZED_DATA — section
+	// has no file backing; the loader zero-fills the VA span.
+	ScnCntUninitData uint32 = 0x00000080
 
 	// ScnCntInitData is IMAGE_SCN_CNT_INITIALIZED_DATA.
 	ScnCntInitData uint32 = 0x00000040

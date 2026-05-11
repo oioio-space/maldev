@@ -202,6 +202,24 @@ type PackBinaryOptions struct {
 	// PE only.
 	RandomizeExistingSectionNames bool
 
+	// RandomizeJunkSections, when true, inserts a per-pack random
+	// number of zero-byte "separator" sections between the host
+	// PE's last existing section and the appended packer stub.
+	// Each separator is uninitialised data (SizeOfRawData=0,
+	// PointerToRawData=0, IMAGE_SCN_CNT_UNINITIALIZED_DATA |
+	// IMAGE_SCN_MEM_READ) so the file size doesn't grow — only
+	// SizeOfImage (the loader's RAM map) and NumberOfSections do.
+	// Separators get random `.xxxxx` names; the stub's declared
+	// VirtualAddress and OEP shift forward by count*SectionAlignment.
+	//
+	// Per-pack count drawn from [1, 5] using a fresh-seeded RNG
+	// (deterministic given opts.Seed).
+	//
+	// Phase 2-F-2 of docs/refactor-2026-doc/packer-design.md.
+	// Defeats heuristics keyed on "9 sections" or "stub is the
+	// last header" patterns. PE only.
+	RandomizeJunkSections bool
+
 	// RandomizeAll, when true, ORs every individual Randomize*
 	// flag above to true: stub section name, TimeDateStamp,
 	// LinkerVersion, ImageVersion, existing section names. The
@@ -254,6 +272,7 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		opts.RandomizeLinkerVersion = true
 		opts.RandomizeImageVersion = true
 		opts.RandomizeExistingSectionNames = true
+		opts.RandomizeJunkSections = true
 	}
 
 	// Resolve the master seed once. When opts.Seed==0 and any
@@ -265,7 +284,7 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 	masterSeed := opts.Seed
 	anyRandomize := opts.RandomizeStubSectionName || opts.RandomizeTimestamp ||
 		opts.RandomizeLinkerVersion || opts.RandomizeImageVersion ||
-		opts.RandomizeExistingSectionNames
+		opts.RandomizeExistingSectionNames || opts.RandomizeJunkSections
 	if anyRandomize && masterSeed == 0 {
 		s, err := random.Int64()
 		if err != nil {
@@ -348,6 +367,27 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		}
 	}
 
+	// Phase 2-F-2: insert a per-pack random number of zero-byte
+	// separator sections between the host's last existing section
+	// and the appended stub. Bumps NumberOfSections + SizeOfImage
+	// + the stub's declared VA (and OEP follows). File size
+	// unchanged — separators are uninitialised (BSS-style).
+	//
+	// Run AFTER the section-name rename so the rename pass sees
+	// the pre-insert section count and only renames host sections.
+	if opts.RandomizeJunkSections && isPE {
+		rng := rand.New(rand.NewSource(masterSeed + seedOffsetJunkSections))
+		// Per-pack count drawn from [1, 5] — enough to defeat
+		// "exact section count" heuristics without bloating the
+		// section table or risking SizeOfHeaders overflow.
+		count := 1 + rng.Intn(5)
+		newOut, perr := transform.AppendJunkSeparators(out, count, rng)
+		if perr != nil {
+			return nil, nil, fmt.Errorf("packer: insert junk separators: %w", perr)
+		}
+		out = newOut
+	}
+
 	return out, key, nil
 }
 
@@ -361,6 +401,7 @@ const (
 	seedOffsetLinkerVersion         int64 = 1
 	seedOffsetImageVersion          int64 = 2
 	seedOffsetExistingSectionNames  int64 = 3
+	seedOffsetJunkSections          int64 = 4
 )
 
 // transformFormatFor maps the operator-facing packer.Format to the

@@ -44,22 +44,7 @@ func RandomizeExistingSectionNames(pe []byte, rng *rand.Rand, skipLast int) erro
 	used := make([][8]byte, 0, renameUpTo)
 	for i := uint16(0); i < renameUpTo; i++ {
 		hdrOff := l.secTableOff + uint32(i)*PESectionHdrSize
-		var name [8]byte
-		// Bounded retry — 26^5 ≈ 11.8M unique names vs at most
-		// 96 sections, collision rate ~4e-4. Cap at 4 attempts.
-		for attempt := 0; attempt < 4; attempt++ {
-			name = RandomStubSectionName(rng)
-			collision := false
-			for _, u := range used {
-				if u == name {
-					collision = true
-					break
-				}
-			}
-			if !collision {
-				break
-			}
-		}
+		name := RandomUniqueSectionName(rng, used)
 		used = append(used, name)
 		copy(pe[hdrOff:hdrOff+8], name[:])
 	}
