@@ -237,15 +237,26 @@ unless the operator opts in. RNG seed offsets (+0/+1/+2)
 keep the four version-style randomisers de-correlated when
 fired from the same `opts.Seed`.
 
-**Sub-items deferred (original Phase 2 scope):**
+**2-F sub-plan (next slice, scoped 2026-05-11):**
 
-- **2-F — Section shuffle** (full RVA reassignment): Randomise
+Original 2-F = "full section reorder" was deferred as a single
+high-risk slice. Splitting into three sub-items lets us land the
+safe wins first and keep the loader-contract churn isolated:
+
+| Slice | What | Risk | Status |
+|---|---|---|---|
+| 2-F-1 | Randomise EXISTING section names (`.text` → `.xkqwz`, etc.). Names are pure convention; Windows finds resources / imports / exports / relocs via the Optional Header DataDirectory (RVA-based). Defeats name-pattern heuristics. | Low — no data movement, no offset change | next |
+| 2-F-2 | Insert random-count zero-byte separator sections between existing sections (push offsets around without permuting). Each separator costs `SectionAlign` virtual + `FileAlign` raw. | Medium — bumps `SizeOfImage`, must update headers; no reloc work because nothing existing moves in VA | after 2-F-1 |
+| 2-F-3 | True permutation: physically swap section data (e.g. `.rdata` ↔ `.data`). Requires reloc fixups for every cross-section pointer; if the input lacks `IMAGE_FILE_RELOCS_STRIPPED=0` we can't fix up — must skip. | High — touches reloc table | deferred until 2-F-1/2 ship |
+
+- **2-F (legacy) — Section shuffle** (full RVA reassignment): Randomise
   host PE section order. Adjusts file offsets, RVAs,
   optional-header `SizeOfImage` / `SizeOfHeaders` /
   `BaseOfCode`. Never touch the stub section's placement
   (stub must reach it). Loader-contract risk: section table
   must stay sorted by virtual address; full reorder needs
   VA reassignment + DataDirectory updates + reloc fixups.
+  See 2-F-3 above — landed only after 2-F-1/2 prove the safer wins.
 - **2-G — IAT scramble**: Replace import directory entries
   with hash-resolved imports (the stub reconstructs the IAT
   at runtime via PEB walk + ROR13). Removes plaintext API
@@ -369,7 +380,9 @@ ratio. Stack with HexAlphabet (or accept the 50% size cost of
 | 2-C | LinkerVersion randomisation | ✅ v0.96.0 |
 | 2-D | ImageVersion randomisation | ✅ v0.97.0 |
 | 2-E | RandomizeAll convenience aggregator | ✅ v0.98.0 |
-| 2-F | Section shuffle (full reorder) | deferred |
+| 2-F-1 | Existing-section name randomisation | next |
+| 2-F-2 | Random zero-byte separator sections | scoped |
+| 2-F-3 | Section data permutation (full reorder + reloc fixup) | deferred |
 | 2-G | IAT scramble (hash-resolved imports) | deferred |
 | 3 | Junk sections + stub control-flow obfuscation | deferred |
 
