@@ -1,6 +1,25 @@
 # Packer Improvements Plan — post-v0.61.1
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> ✅ **PLAN CLOSED — 2026-05-11.** Every chantier (C1-C7) shipped via the
+> v0.62 → v0.66 series and the subsequent V2-Negate / V2NW polymorphism
+> work (v0.85+). The 37 step checkboxes were retroactively ticked
+> 2026-05-11 after a file-inventory + CHANGELOG cross-check confirmed
+> the implementations landed:
+>
+> - **C1** PHT relocation v2: `cover_elf.go` + `cover_elf_reloc.go` (commit `c38787f`)
+> - **C2** Fake imports PE: `cover_imports.go` + `cover_imports_test.go`
+> - **C3** Compression in stub: `pe/packer/stubgen/stage1/lz4_inflate.go` + tests
+> - **C4** Anti-debug runtime: `pe/packer/stubgen/stage1/antidebug.go`, wired through `PackBinaryOptions.AntiDebug`
+> - **C5** Stub size reduction: V2-Negate + V2NW slimming series (post-v0.85 chantier)
+> - **C6** Multi-target bundle: `bundle.go` + `FingerprintPredicate` + the v0.88-v0.92 AES-CTR work
+> - **C7** API cleanup: `random.Int64()` (random/random.go:54), `ErrCorruptBlob` sentinel (format.go:240), `Generate` metadata cleanup
+>
+> Step-by-step granular ticks below are best-effort retro markers; the
+> chantier prose is the authoritative record. Do NOT use this plan to
+> drive new work — see the latest packer plans/specs in
+> `docs/superpowers/plans/` and `specs/` for current chantiers.
+
+> **For agentic workers (historical):** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Take the v0.61.1 UPX-style packer from "operationally correct, well-tested" to "operationally hard to detect" by closing the static-analysis cover gap, raising the runtime polymorphism, and shipping per-build variance levers operators can flip without re-architecting.
 
@@ -70,7 +89,7 @@ The kernel computes `AT_PHDR` as `first_PT_LOAD.vaddr + ehdr.e_phoff`. For Go st
 
 **Steps:**
 
-- [ ] **Step 1: Add the PHT-slack-fallback decision in AddCoverELF.**
+- [x] **Step 1: Add the PHT-slack-fallback decision in AddCoverELF.**
 
   Locate the slack check at `cover_elf.go` ~ line 70. Before returning `ErrCoverSectionTableFull`, branch into a new helper `relocatePHT(input []byte, opts CoverOptions) ([]byte, error)`. Existing behavior preserved when slack is sufficient.
 
@@ -81,7 +100,7 @@ The kernel computes `AT_PHDR` as `first_PT_LOAD.vaddr + ehdr.e_phoff`. For Go st
   }
   ```
 
-- [ ] **Step 2: Implement relocateAndCoverELF (new file: `cover_elf_reloc.go`).**
+- [x] **Step 2: Implement relocateAndCoverELF (new file: `cover_elf_reloc.go`).**
 
   Pseudo-code already in this plan's Architecture section. Plus 4 invariants to preserve:
   1. AT_PHDR = first_load_vaddr + new_e_phoff (math).
@@ -89,19 +108,19 @@ The kernel computes `AT_PHDR` as `first_PT_LOAD.vaddr + ehdr.e_phoff`. For Go st
   3. PT_LOAD entries must be sorted ascending by p_vaddr (ELF spec — kernel rejects).
   4. The new file is page-aligned at `F` so the new PT_LOAD's mmap doesn't fail.
 
-- [ ] **Step 3: Test it on a synthetic ELF that lacks slack.**
+- [x] **Step 3: Test it on a synthetic ELF that lacks slack.**
 
   Extend `minimalELF64WithSlack` to a sibling `minimalELF64NoSlack(textSize)` that places the first PT_LOAD at file offset 0 (mirroring Go static-PIE shape).
 
-- [ ] **Step 4: Test it on the real Go static-PIE fixture.**
+- [x] **Step 4: Test it on the real Go static-PIE fixture.**
 
   `TestAddCoverELF_RelocatesPHTOnGoStaticPIE`: load `pe/packer/runtime/testdata/hello_static_pie`, call `AddCoverELF`, assert: (a) `debug/elf` parses, (b) PT_LOAD count = preLoadCount + 1 (new PT_LOAD covering relocated PHT) + len(JunkSections) cover PT_LOADs, (c) `e_phoff` changed.
 
-- [ ] **Step 5: E2E runtime test on the relocated output.**
+- [x] **Step 5: E2E runtime test on the relocated output.**
 
   Add to `packer_e2e_seeds_linux_test.go`: pack `hello_static_pie`, run `ApplyDefaultCover` (now expected to succeed via the relocation path), exec the resulting binary, assert exit code 0 + "hello from packer" stdout.
 
-- [ ] **Step 6: Commit + push.**
+- [x] **Step 6: Commit + push.**
 
   ```bash
   git -c user.name=oioio-space -c user.email=oioio-space@users.noreply.github.com commit -m "feat(pe/packer): PHT relocation lifts cover layer's Go static-PIE blocker
@@ -128,7 +147,7 @@ The kernel computes `AT_PHDR` as `first_PT_LOAD.vaddr + ehdr.e_phoff`. For Go st
   Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
   ```
 
-- [ ] **Step 7: Tag v0.62.0 (minor — additive feature).**
+- [x] **Step 7: Tag v0.62.0 (minor — additive feature).**
 
 ---
 
@@ -170,11 +189,11 @@ var DefaultFakeImports = []FakeImport{
 
 **Steps:**
 
-- [ ] **Step 1: Define `FakeImport` + `IMAGE_IMPORT_DESCRIPTOR` byte layout constants.**
+- [x] **Step 1: Define `FakeImport` + `IMAGE_IMPORT_DESCRIPTOR` byte layout constants.**
 
   In a new `pe/packer/cover_imports.go`. Constants come from MSFT PE/COFF Spec Rev 12.0 § 6.4.
 
-- [ ] **Step 2: Read existing import directory + build merged descriptor list.**
+- [x] **Step 2: Read existing import directory + build merged descriptor list.**
 
   ```go
   func mergeImportDirectory(input []byte, fakes []FakeImport) (newSection []byte, err error) {
@@ -186,23 +205,23 @@ var DefaultFakeImports = []FakeImport{
   }
   ```
 
-- [ ] **Step 3: Add `AddFakeImportsPE(input []byte, fakes []FakeImport) ([]byte, error)`.**
+- [x] **Step 3: Add `AddFakeImportsPE(input []byte, fakes []FakeImport) ([]byte, error)`.**
 
   Calls `mergeImportDirectory`, appends the new section via existing `AddCoverPE`-style section-table-grow logic, patches `DataDirectory[1]` RVA + size in the optional header.
 
-- [ ] **Step 4: Tests on synthetic PE.**
+- [x] **Step 4: Tests on synthetic PE.**
 
   Synthetic input: `minimalPE32WithImports(numImports)` builds a PE with `numImports` existing entries. Verify `debug/pe` parses output, `len(parsed.imports) == numImports + len(fakes)`.
 
-- [ ] **Step 5: Test on real Windows PE fixture.**
+- [x] **Step 5: Test on real Windows PE fixture.**
 
   Pack `pe/packer/testdata/winhello.exe` with PackBinary, then chain `AddFakeImportsPE` with `DefaultFakeImports`, verify `debug/pe` round-trips + import count grew.
 
-- [ ] **Step 6: E2E runtime test on Windows VM.**
+- [x] **Step 6: E2E runtime test on Windows VM.**
 
   Add to `packer_packtime_pe_test.go` (rename to `packer_e2e_windows_test.go` build-tagged): pack winhello.exe with `AddFakeImportsPE`, transfer to Windows VM via `cmd/vmtest`, exec, assert exit 0.
 
-- [ ] **Step 7: Commit + push, tag v0.63.0.**
+- [x] **Step 7: Commit + push, tag v0.63.0.**
 
 ---
 
@@ -240,17 +259,17 @@ The stub gains a tiny inflate decoder (Go's pure-Go inflate isn't usable in the 
 
 **Steps:**
 
-- [ ] **Step 1: Add LZ4 compression path to `compress.go` (already partially scaffolded).**
+- [x] **Step 1: Add LZ4 compression path to `compress.go` (already partially scaffolded).**
 
   `CompressorLZ4` already exists as a placeholder. Wire it to a Go-side LZ4 encoder.
 
-- [ ] **Step 2: Hand-craft the LZ4 decoder asm bytes (~200 bytes).**
+- [x] **Step 2: Hand-craft the LZ4 decoder asm bytes (~200 bytes).**
 
   Reference: lz4.org/lz4_Block_format.md. Decoder fits in ~50 lines of amd64 asm.
 
-- [ ] **Step 3: Bump `StubMaxSize` to 8 KiB (was 4) to absorb the LZ4 decoder + room for 5+ SGN rounds.**
+- [x] **Step 3: Bump `StubMaxSize` to 8 KiB (was 4) to absorb the LZ4 decoder + room for 5+ SGN rounds.**
 
-- [ ] **Step 4: Wire compression into `stubgen.Generate`.**
+- [x] **Step 4: Wire compression into `stubgen.Generate`.**
 
   ```go
   encrypted := compress.Flate(textBytes)         // new
@@ -258,13 +277,13 @@ The stub gains a tiny inflate decoder (Go's pure-Go inflate isn't usable in the 
   // stub: SGN.Decode → LZ4.Inflate → JMP OEP
   ```
 
-- [ ] **Step 5: Test size reduction.**
+- [x] **Step 5: Test size reduction.**
 
   Pack `winhello.exe` with + without compression, assert `(packed_with_compression_size / packed_without_size) < 0.7` (≥30% reduction).
 
-- [ ] **Step 6: Multi-seed E2E + Windows VM E2E.**
+- [x] **Step 6: Multi-seed E2E + Windows VM E2E.**
 
-- [ ] **Step 7: Commit + push, tag v0.64.0.**
+- [x] **Step 7: Commit + push, tag v0.64.0.**
 
 ---
 
@@ -292,20 +311,20 @@ ELF stubs skip — Linux ptrace detection is signal-handler-heavy and would ball
 
 **Steps:**
 
-- [ ] **Step 1: Add `AntiDebug bool` to `PackBinaryOptions`.**
+- [x] **Step 1: Add `AntiDebug bool` to `PackBinaryOptions`.**
 
-- [ ] **Step 2: Emit anti-debug prologue when AntiDebug + Format=PE.**
+- [x] **Step 2: Emit anti-debug prologue when AntiDebug + Format=PE.**
 
   Insert AFTER the CALL+POP+ADD prologue, BEFORE the first SGN round. Branches negative continue; positive jumps to a `RET` (clean exit).
 
-- [ ] **Step 3: Test the asm without anti-debug active (via debug/pe round-trip).**
+- [x] **Step 3: Test the asm without anti-debug active (via debug/pe round-trip).**
 
-- [ ] **Step 4: Smoke against `winhello.exe` on Windows VM:**
+- [x] **Step 4: Smoke against `winhello.exe` on Windows VM:**
 
   - Pack with `AntiDebug=true`, exec normally → exit 0.
   - Pack with `AntiDebug=true`, exec under `windbg` → should fail-fast (exit code != 0 or no stdout).
 
-- [ ] **Step 5: Commit + push, tag v0.65.0.**
+- [x] **Step 5: Commit + push, tag v0.65.0.**
 
 ---
 
@@ -329,15 +348,15 @@ Three levers:
 
 **Steps:**
 
-- [ ] **Step 1: Audit current stub byte sizes per round.**
+- [x] **Step 1: Audit current stub byte sizes per round.**
 
-- [ ] **Step 2: Implement size-reducing substitution-aware emitter.**
+- [x] **Step 2: Implement size-reducing substitution-aware emitter.**
 
-- [ ] **Step 3: Confirm polymorphism preservation.**
+- [x] **Step 3: Confirm polymorphism preservation.**
 
-- [ ] **Step 4: Multi-seed E2E to confirm runtime correctness.**
+- [x] **Step 4: Multi-seed E2E to confirm runtime correctness.**
 
-- [ ] **Step 5: Commit + push, tag v0.66.0.**
+- [x] **Step 5: Commit + push, tag v0.66.0.**
 
 ---
 
@@ -361,9 +380,9 @@ Three levers:
 
 **Steps:**
 
-- [ ] **Step 1: Brainstorm spec at `docs/superpowers/specs/2026-05-08-packer-multi-target-bundle.md`.**
+- [x] **Step 1: Brainstorm spec at `docs/superpowers/specs/2026-05-08-packer-multi-target-bundle.md`.**
 
-- [ ] **Step 2: Implement post-spec.**
+- [x] **Step 2: Implement post-spec.**
 
 ---
 
@@ -381,15 +400,15 @@ Three levers:
 
 **Steps:**
 
-- [ ] **Step 1: Generate's `key` return drop (or rename).**
+- [x] **Step 1: Generate's `key` return drop (or rename).**
 
   Decision: rename to `metadata` (struct with seed, rounds, format) so callers have a richer artifact. Existing operators only used `key` for tracking; the new metadata is additive.
 
-- [ ] **Step 2: Pipeline ErrCorruptBlob sentinel.**
+- [x] **Step 2: Pipeline ErrCorruptBlob sentinel.**
 
-- [ ] **Step 3: random.CryptoInt64.**
+- [x] **Step 3: random.CryptoInt64.**
 
-- [ ] **Step 4: Commit + push as a single API-cleanup commit.**
+- [x] **Step 4: Commit + push as a single API-cleanup commit.**
 
 ---
 
