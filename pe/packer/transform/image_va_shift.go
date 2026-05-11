@@ -157,6 +157,26 @@ func ShiftImageVA(pe []byte, delta uint32) ([]byte, error) {
 	//    snapshot for entry-location lookups, and read/write
 	//    pointer values directly (no resolver needed since the
 	//    file offset was captured by the walker).
+	// 5b. Walk the IMPORT directory and bump every internal RVA
+	//     field. Without this the loader fails import resolution
+	//     with STATUS_DLL_NOT_FOUND because import descriptor
+	//     OriginalFirstThunk/Name/FirstThunk and the by-name
+	//     thunks they point at are RVAs the linker bakes as raw
+	//     uint32, NOT covered by the .reloc table.
+	if walkErr := WalkImportDirectoryRVAs(pe, func(rvaFileOff uint32) error {
+		if int(rvaFileOff)+4 > len(out) {
+			return fmt.Errorf("import RVA patch past EOF (file 0x%x)", rvaFileOff)
+		}
+		cur := binary.LittleEndian.Uint32(out[rvaFileOff:])
+		if cur == 0 {
+			return nil
+		}
+		binary.LittleEndian.PutUint32(out[rvaFileOff:], cur+delta)
+		return nil
+	}); walkErr != nil {
+		return nil, fmt.Errorf("transform: import directory fixup: %w", walkErr)
+	}
+
 	walkErr := WalkBaseRelocs(pe, func(e BaseRelocEntry) error {
 		// (a) Repack the block's PageRVA in `out`. We do this
 		//     once per block; the walker yields entries in

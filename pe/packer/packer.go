@@ -262,9 +262,6 @@ type PackBinaryOptions struct {
 	// PE only.
 	RandomizeImageBase bool
 
-	// **EXPERIMENTAL** — not in RandomizeAll fan-out. Requires the
-	// directory walker suite (Phase 2-F-3-c-2 onward) before it
-	// works on PEs with non-trivial imports / exception data.
 	// RandomizeImageVAShift, when true, shifts every section's
 	// VirtualAddress forward by a random delta D = N×SectionAlignment
 	// (N drawn from [1, 8] per pack, so D ∈ [4 KiB, 32 KiB] for the
@@ -345,14 +342,13 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		opts.RandomizeExistingSectionNames = true
 		opts.RandomizeJunkSections = true
 		opts.RandomizePEFileOrder = true
-		// NOTE: RandomizeImageBase + RandomizeImageVAShift are
-		// intentionally NOT in the fan-out (Phase 2-F-3-c
-		// experimental). Both can crash certain payloads:
-		// VA shift lacks the per-directory internal-RVA walker
-		// suite (see Phase 2-F-3-c-* in the design doc); ImageBase
-		// rando interacts poorly with some loader paths despite
-		// the DYNAMIC_BASE guard. Operators can still opt in
-		// explicitly per payload.
+		opts.RandomizeImageVAShift = true
+		// NOTE: RandomizeImageBase remains EXPERIMENTAL —
+		// excluded from the fan-out because random ImageBase
+		// values can trip an intermittent runtime
+		// STATUS_ACCESS_VIOLATION on Win10 even with the
+		// DYNAMIC_BASE guard. Operators can opt in explicitly
+		// after testing the chosen payload.
 	}
 
 	// Resolve the master seed once. When opts.Seed==0 and any
