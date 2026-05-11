@@ -7,6 +7,43 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Packer DLL chantier — v0.110.0 → v0.117.0 (2026-05-11)
+
+#### v0.117.0 — Tier 🟡 stage1 helper dedup (refactor)
+
+Behaviour-preserving refactor that consolidates 3 duplications
+flagged across slice-5.2 and slice-5.3 /simplify passes. Every
+emitted stub is byte-identical to its v0.116.0 output; the
+pinned-byte-count tests (`TestEmitResolveKernel32Export_PinnedByteCount`
+= 196 B, `TestEmitConvertedDLLStub_PinnedByteCount` = 465 B) +
+the Win10 VM E2E suite confirm this.
+
+- `stage1.GSLoadPEBBytes` — exported 9-byte `mov rax, gs:[0x60]`
+  constant. Replaces 5 inline copies in `antidebug.go` (×2),
+  `exitprocess.go`, `resolve_kernel32.go`, `fingerprint.go`
+  (the latter now derives `pebBuildBytes` from it at init).
+- `stage1.emitDllMainPrologue(b, frameSize, errPrefix)` +
+  `stage1.emitDllMainRestore(b, frameSize, errPrefix)` —
+  unexported helpers wrapping the standard `push rbp` + 4-slot
+  spill loop (and its symmetric restore). Replaces 2 copies in
+  `dll_stub.go` (frame=0x30) and `converted_dll_stub.go`
+  (frame=0x40). The slot layout itself (`dllMainSpillSlots`)
+  is a package-level var so future stubs reference one
+  definition.
+- `stage1.emitSGNRounds(b, plan, rounds, labelPrefix, errPrefix)` —
+  unexported helper for the polymorphic-decoder loop body shared
+  by `EmitStub` (EXE), `EmitDLLStub` (DLL), and
+  `EmitConvertedDLLStub` (converted DLL). 3 copies collapsed
+  to one definition. The "loop-label prefix" + "error-wrap prefix"
+  parameters let each caller keep its diagnostic namespace.
+
+Net delta: −100 LOC of duplication, +60 LOC of shared helpers
+(annotated). No new exported surface beyond `GSLoadPEBBytes`;
+the behavioural contract of every emitter is byte-preserved.
+
+Backlog memos closed: `gs_load_peb_dedup_backlog.md` +
+`stage1_stub_helpers_dedup_backlog.md`.
+
 ### Packer DLL chantier — v0.110.0 → v0.116.0 (2026-05-11)
 
 #### v0.116.0 — `EmitConvertedDLLStub` + DllMain spawn (slice 5.3 of EXE→DLL)
