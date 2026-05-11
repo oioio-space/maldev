@@ -128,20 +128,8 @@ func EmitStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round, opts E
 		}
 	}
 
-	// golang-asm cannot resolve a forward CALL to the immediately following
-	// instruction without a linker symbol, so CALL rel32=0 is emitted as raw
-	// bytes. E8 00 00 00 00 pushes &.after_call and falls through — exactly
-	// what the PIC idiom requires.
-	if err := b.RawBytes([]byte{0xE8, 0x00, 0x00, 0x00, 0x00}); err != nil {
-		return fmt.Errorf("stage1: prologue CALL: %w", err)
-	}
-	if err := b.POP(baseReg); err != nil {
-		return fmt.Errorf("stage1: prologue POP: %w", err)
-	}
-	// 0xCAFEBABE is a sentinel replaced by PatchTextDisplacement once
-	// Encode() has fixed the byte layout and we know the imm32 file offset.
-	if err := b.ADD(baseReg, amd64.Imm(int64(prologueSentinel))); err != nil {
-		return fmt.Errorf("stage1: prologue ADD sentinel: %w", err)
+	if err := emitTextBasePrologue(b); err != nil {
+		return fmt.Errorf("stage1: text-base prologue: %w", err)
 	}
 
 	// Emit rounds[N-1] first: outermost SGN layer decodes first, innermost last.
@@ -275,9 +263,9 @@ func EmitStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round, opts E
 //
 // Returns the number of patches applied. A well-formed stub has exactly
 // one sentinel; the function returns an error for zero or more than one.
-// prologueSentinel is the imm32 placeholder EmitStub bakes into
-// the prologue ADD so PatchTextDisplacement can find and replace
-// it with the real text-relative displacement after Encode().
+// prologueSentinel is the imm32 placeholder EmitStub and EmitDLLStub
+// bake into the prologue ADD so PatchTextDisplacement can find and
+// replace it with the real text-relative displacement after Encode().
 // callPopSentinel is its little-endian byte form for bytes.Index
 // scanning. The init derives one from the other so they cannot
 // silently drift between what's emitted and what's searched for.
@@ -285,26 +273,89 @@ const prologueSentinel uint32 = 0xCAFEBABE
 
 var callPopSentinel = binary.LittleEndian.AppendUint32(nil, prologueSentinel)
 
-func PatchTextDisplacement(stubBytes []byte, plan transform.Plan) (int, error) {
-	i := bytes.Index(stubBytes, callPopSentinel)
-	if i < 0 {
-		return 0, fmt.Errorf("stage1: sentinel 0xCAFEBABE not found in stub bytes")
+// emitTextBasePrologue writes the CALL+POP+ADD PIC idiom into b,
+// leaving baseReg (R15) loaded with TextRVA at runtime once
+// [PatchTextDisplacement] has rewritten the sentinel.
+//
+// Shared between [EmitStub] (EXE path) and [EmitDLLStub] (DLL path)
+// so the popOffset=5 invariant baked into [PatchTextDisplacement]
+// can't silently drift apart from the emitter. Both call sites
+// pass through the same sentinel + patcher.
+//
+// Layout (10 bytes):
+//
+//	E8 00 00 00 00      CALL .next       (next instruction)
+//	41 5F               POP  r15
+//	49 81 C7 BE BA FE CA  ADD  r15, 0xCAFEBABE (sentinel)
+func emitTextBasePrologue(b *amd64.Builder) error {
+	// golang-asm cannot resolve a forward CALL to the immediately
+	// following instruction without a linker symbol, so CALL rel32=0
+	// is emitted as raw bytes. E8 00 00 00 00 pushes the address of
+	// the next instruction (the POP) — exactly what the idiom needs.
+	if err := b.RawBytes([]byte{0xE8, 0x00, 0x00, 0x00, 0x00}); err != nil {
+		return fmt.Errorf("stage1: prologue CALL: %w", err)
 	}
-	// Verify no second occurrence — two matches means a collision in the
-	// encoded payload, which breaks the single-patch contract.
-	if bytes.Index(stubBytes[i+4:], callPopSentinel) >= 0 {
-		return 0, fmt.Errorf("stage1: multiple sentinel 0xCAFEBABE matches; expected exactly 1")
+	if err := b.POP(baseReg); err != nil {
+		return fmt.Errorf("stage1: prologue POP: %w", err)
 	}
+	if err := b.ADD(baseReg, amd64.Imm(int64(prologueSentinel))); err != nil {
+		return fmt.Errorf("stage1: prologue ADD sentinel: %w", err)
+	}
+	return nil
+}
 
+// patchSentinel scans haystack for every occurrence of needle (the
+// little-endian byte form of a 4- or 8-byte sentinel), rewrites
+// each with value (same length as needle), and returns the byte
+// offset of the FIRST match plus the total occurrence count.
+//
+// When allowMulti is false, exactly one match is required —
+// zero or more than one returns an error. When allowMulti is true,
+// at least one match is required.
+//
+// Used by [PatchTextDisplacement] (single uint32 match),
+// [PatchDLLStubDisplacements] (uint32 sentinels, multiple matches),
+// and [PatchDllMainSlot] (single uint64 match).
+func patchSentinel(haystack, needle, value []byte, allowMulti bool, name string) (firstIdx, count int, err error) {
+	if len(needle) != len(value) {
+		return -1, 0, fmt.Errorf("stage1: patchSentinel %s: needle/value length mismatch (%d vs %d)",
+			name, len(needle), len(value))
+	}
+	// First pass: locate every occurrence. We don't mutate yet so a
+	// uniqueness-violation error leaves haystack untouched.
+	var positions []int
+	off := 0
+	for {
+		i := bytes.Index(haystack[off:], needle)
+		if i < 0 {
+			break
+		}
+		i += off
+		positions = append(positions, i)
+		off = i + len(needle)
+	}
+	count = len(positions)
+	switch {
+	case count == 0:
+		return -1, 0, fmt.Errorf("stage1: %s sentinel not found", name)
+	case !allowMulti && count > 1:
+		return positions[0], count, fmt.Errorf("stage1: %s sentinel matched %d times, want exactly 1", name, count)
+	}
+	// Second pass: patch each occurrence in place.
+	for _, i := range positions {
+		copy(haystack[i:i+len(needle)], value)
+	}
+	return positions[0], count, nil
+}
+
+func PatchTextDisplacement(stubBytes []byte, plan transform.Plan) (int, error) {
 	// CALL+POP+ADD: %r15 = address of POP (= StubRVA + 5) after the
 	// 5-byte CALL. ADD imm32 is added to %r15 directly — NOT
 	// RIP-relative. Displacement reference point is the POP's address.
 	const popOffset = 5
 	popAddr := plan.StubRVA + popOffset
 	disp := uint32(int32(plan.TextRVA) - int32(popAddr))
-	stubBytes[i] = byte(disp)
-	stubBytes[i+1] = byte(disp >> 8)
-	stubBytes[i+2] = byte(disp >> 16)
-	stubBytes[i+3] = byte(disp >> 24)
-	return 1, nil
+	value := binary.LittleEndian.AppendUint32(nil, disp)
+	_, count, err := patchSentinel(stubBytes, callPopSentinel, value, false, "prologueSentinel 0xCAFEBABE")
+	return count, err
 }
