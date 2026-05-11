@@ -46,6 +46,22 @@ type Options struct {
 	// that field for the full semantics. Zero-value preserves the
 	// canonical ".mldv\x00\x00\x00" name. PE only.
 	StubSectionName [8]byte
+
+	// ConvertEXEtoDLL, when true, routes the input EXE through the
+	// EXE→DLL conversion pipeline: [transform.PlanConvertedDLL] +
+	// [stage1.EmitConvertedDLLStub] +
+	// [stage1.PatchConvertedDLLStubDisplacements] +
+	// [transform.InjectConvertedDLL]. The output is a DLL whose
+	// DllMain decrypts .text and spawns the original EXE entry
+	// point on a fresh thread via PEB-walked kernel32!CreateThread.
+	//
+	// Mutually exclusive with non-PE inputs (silently ignored on
+	// ELF) and with `Compress` (slice-5.3 stub doesn't embed the
+	// LZ4 inflate path — caught via [ErrConvertEXEtoDLLUnsupported]
+	// while that limitation stands).
+	//
+	// Slice 5.5 of docs/refactor-2026-doc/packer-exe-to-dll-plan.md.
+	ConvertEXEtoDLL bool
 }
 
 // Sentinels surfaced by Generate.
@@ -111,15 +127,19 @@ func Generate(opts Options) ([]byte, []byte, error) {
 		seed = s
 	}
 
-	// 1. Detect format + Plan. PE inputs split further into EXE
-	// (PlanPE) and DLL (PlanDLL); the latter selects the DllMain-
-	// shaped stub at step 5 below.
+	// 1. Detect format + Plan. PE inputs split three ways:
+	//   - native DLL input  → PlanDLL          (slice 2 chantier)
+	//   - EXE + ConvertEXEtoDLL=true → PlanConvertedDLL (slice 5)
+	//   - plain EXE         → PlanPE
+	// The downstream emit/inject branches off the corresponding
+	// Plan.IsDLL / Plan.IsConvertedDLL flags.
 	format := transform.DetectFormat(opts.Input)
 	var plan transform.Plan
 	switch format {
 	case transform.FormatPE:
 		var err error
-		if transform.IsDLL(opts.Input) {
+		switch {
+		case transform.IsDLL(opts.Input):
 			plan, err = transform.PlanDLL(opts.Input, stubMaxSize)
 			if err != nil {
 				return nil, nil, fmt.Errorf("stubgen: PlanDLL: %w", err)
@@ -127,7 +147,15 @@ func Generate(opts Options) ([]byte, []byte, error) {
 			if opts.Compress {
 				return nil, nil, ErrCompressDLLUnsupported
 			}
-		} else {
+		case opts.ConvertEXEtoDLL:
+			plan, err = transform.PlanConvertedDLL(opts.Input, stubMaxSize)
+			if err != nil {
+				return nil, nil, fmt.Errorf("stubgen: PlanConvertedDLL: %w", err)
+			}
+			if opts.Compress {
+				return nil, nil, ErrConvertEXEtoDLLUnsupported
+			}
+		default:
 			plan, err = transform.PlanPE(opts.Input, stubMaxSize)
 			if err != nil {
 				return nil, nil, fmt.Errorf("stubgen: PlanPE: %w", err)
@@ -137,6 +165,9 @@ func Generate(opts Options) ([]byte, []byte, error) {
 		// value preserves the canonical ".mldv\x00\x00\x00" default.
 		plan.StubSectionName = opts.StubSectionName
 	case transform.FormatELF:
+		if opts.ConvertEXEtoDLL {
+			return nil, nil, fmt.Errorf("%w: ConvertEXEtoDLL requires a PE input", transform.ErrUnsupportedInputFormat)
+		}
 		var err error
 		plan, err = transform.PlanELF(opts.Input, stubMaxSize)
 		if err != nil {
@@ -262,12 +293,19 @@ func Generate(opts Options) ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("stubgen: amd64.New: %w", err)
 	}
-	if plan.IsDLL {
+	switch {
+	case plan.IsDLL:
 		if err := stage1.EmitDLLStub(b, plan, polyRounds); err != nil {
 			return nil, nil, fmt.Errorf("stubgen: EmitDLLStub: %w", err)
 		}
-	} else if err := stage1.EmitStub(b, plan, polyRounds, emitOpts); err != nil {
-		return nil, nil, fmt.Errorf("stubgen: EmitStub: %w", err)
+	case plan.IsConvertedDLL:
+		if err := stage1.EmitConvertedDLLStub(b, plan, polyRounds); err != nil {
+			return nil, nil, fmt.Errorf("stubgen: EmitConvertedDLLStub: %w", err)
+		}
+	default:
+		if err := stage1.EmitStub(b, plan, polyRounds, emitOpts); err != nil {
+			return nil, nil, fmt.Errorf("stubgen: EmitStub: %w", err)
+		}
 	}
 
 	stubBytes, err := b.Encode()
@@ -284,20 +322,30 @@ func Generate(opts Options) ([]byte, []byte, error) {
 	if _, err := stage1.PatchTextDisplacement(stubBytes, plan); err != nil {
 		return nil, nil, fmt.Errorf("stubgen: PatchTextDisplacement: %w", err)
 	}
-	// DLL stubs carry two extra R15-relative disp sentinels (flag +
-	// slot) that PatchDLLStubDisplacements rewrites once the
-	// trailing-data offsets are known.
-	if plan.IsDLL {
+	// DLL stubs carry extra R15-relative disp sentinels that the
+	// per-flavour patchers rewrite once the trailing-data offsets
+	// are known. Native DLL: flag + slot. Converted DLL: flag only
+	// (no orig_dllmain slot — there's no tail-call target).
+	switch {
+	case plan.IsDLL:
 		if _, err := stage1.PatchDLLStubDisplacements(stubBytes, plan); err != nil {
 			return nil, nil, fmt.Errorf("stubgen: PatchDLLStubDisplacements: %w", err)
 		}
+	case plan.IsConvertedDLL:
+		if _, err := stage1.PatchConvertedDLLStubDisplacements(stubBytes, plan); err != nil {
+			return nil, nil, fmt.Errorf("stubgen: PatchConvertedDLLStubDisplacements: %w", err)
+		}
 	}
 
-	// 7. Inject into input. DLL inputs route through InjectStubDLL.
+	// 7. Inject into input. DLL inputs route through InjectStubDLL;
+	// EXE+ConvertEXEtoDLL through InjectConvertedDLL (delegate-and-
+	// flip); plain EXE/ELF through their format-native injectors.
 	var out []byte
 	switch {
 	case plan.IsDLL:
 		out, err = transform.InjectStubDLL(opts.Input, finalEncoded, stubBytes, plan)
+	case plan.IsConvertedDLL:
+		out, err = transform.InjectConvertedDLL(opts.Input, finalEncoded, stubBytes, plan)
 	case format == transform.FormatPE:
 		out, err = transform.InjectStubPE(opts.Input, finalEncoded, stubBytes, plan)
 	case format == transform.FormatELF:

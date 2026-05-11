@@ -339,13 +339,6 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 	if err := validatePackBinaryInput(opts, input); err != nil {
 		return nil, nil, err
 	}
-	if opts.ConvertEXEtoDLL {
-		// Slice 5.1 wired the API + cross-checks; sub-slices 5.2-5.5
-		// (stub emitter, injector, stubgen dispatch) carry the
-		// implementation. Return the in-flight sentinel rather than
-		// silently routing through the EXE path.
-		return nil, nil, stubgen.ErrConvertEXEtoDLLUnsupported
-	}
 
 	rounds := opts.Stage1Rounds
 	if rounds == 0 {
@@ -403,6 +396,7 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		AntiDebug:       opts.AntiDebug,
 		Compress:        opts.Compress,
 		StubSectionName: stubSectionName,
+		ConvertEXEtoDLL: opts.ConvertEXEtoDLL,
 		// StubMaxSize zero: stubgen.Generate picks 8192 (Compress=true) or
 		// 4096 (Compress=false) based on the Compress flag.
 	})
