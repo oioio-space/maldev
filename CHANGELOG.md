@@ -7,6 +7,56 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Packer DLL chantier — v0.110.0 → v0.116.0 (2026-05-11)
+
+#### v0.116.0 — `EmitConvertedDLLStub` + DllMain spawn (slice 5.3 of EXE→DLL)
+
+- `pe/packer/stubgen/stage1.EmitConvertedDLLStub(b, plan, rounds)` —
+  pack-time emitter producing a 465 B (3-round) DllMain-shaped stub
+  that, on `DLL_PROCESS_ATTACH`:
+  1. Spills `rcx/rdx/r8/r15` to a 0x40-byte stack frame (Windows x64
+     ABI alignment preserved).
+  2. Runs the slice-1 CALL+POP+ADD prologue to materialise `R15 =
+     textRVA`.
+  3. Latches the decrypted_flag sentinel (decrypt-once across
+     subsequent reasons).
+  4. Runs the SGN rounds to peel the .text encryption.
+  5. Calls slice-5.2's `EmitResolveKernel32Export("CreateThread")`
+     to resolve `kernel32!CreateThread` via PEB+EAT walk (no IAT
+     entry).
+  6. Calls `CreateThread(NULL, 0, OEP, NULL, 0, NULL)` to spawn
+     the original EXE entry point on a fresh thread; the spawned
+     thread runs the original Go runtime in parallel.
+  7. Returns `TRUE` to the loader on every reason.
+- `stage1.PatchConvertedDLLStubDisplacements(stub, plan)` —
+  rewrites the flag-disp imm32 sentinel after `Encode()` once the
+  trailing-data offset is known. Mirrors the slice-2 patcher but
+  handles only the 1-byte flag (no 8-byte orig_dllmain slot — the
+  converted-DLL stub doesn't tail-call).
+- `stage1.ConvertedDLLStubFlagByteOffsetFromEnd` — exposed constant
+  for transform.InjectConvertedDLL (slice 5.4) to compute reloc
+  RVAs.
+- `stage1.ErrConvertedDLLPlanMissing` — admission sentinel for the
+  `Plan.IsConvertedDLL` route.
+- 7 unit tests (admission rejection, zero-rounds rejection, decode
+  round-trip, flag-sentinel presence, no slot-sentinel leak from
+  the native-DLL stub, pinned byte count, patcher round-trip).
+- **Simplify pass:** named the magic frame sizes
+  (`convertedDLLFrameSize = 0x40` / `createThreadCallFrameSize = 0x30`)
+  with alignment-derivation comments; documented the OEP-disp ≤ 2 GiB
+  invariant (PE32+ SizeOfImage cap); dropped the test-only
+  `EnsureNoSlotSentinel` helper from prod (inlined as `bytes.Contains`
+  in the test file); pinned the budget at exact 465 B (3 rounds).
+- **Deferred to a follow-up Tier 🟡 cleanup commit:** SGN-rounds
+  body (now 3 copies across EmitStub / EmitDLLStub / EmitConvertedDLLStub)
+  + DllMain spill/restore (2 copies) → shared `emitSGNRounds` +
+  `emitDllMainSpill` / `emitDllMainRestore` helpers. Touches EXE-path
+  code → its own VM E2E gate.
+- Slice 5.3 is pack-time + emitter only; the stub is wired into
+  the EXE→DLL pipeline by slice 5.4 (transform.InjectConvertedDLL
+  — synthesises `.reloc`, flips IMAGE_FILE_DLL, adds DYNAMIC_BASE).
+  No Win VM E2E needed for this commit.
+
 ### Packer DLL chantier — v0.110.0 → v0.115.0 (2026-05-11)
 
 #### v0.115.0 — `EmitResolveKernel32Export` + ROR-13 hashes (slice 5.2 of EXE→DLL)
