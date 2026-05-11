@@ -6,7 +6,42 @@ last_reviewed: 2026-05-11
 
 # Phase 2-F-3-c — Full Coverage Plan: Walker Suite + Fixture Corpus + E2E Matrix
 
-## Why this plan exists (revised)
+## ⚡ EMPIRICAL FINDING 2026-05-11 (15:13) — Plan dramatically reduced
+
+Reconnaissance on the actual fixtures (`winhello.exe`,
+`winpanic.exe`) shows that **Go static-PIE binaries populate
+only 4 DataDirectory entries**:
+
+| Directory | Present in Go static-PIE? | Walker status |
+|---|---|---|
+| IMPORT (1) | ✅ ~1.4 KiB | ✅ shipped v0.104.0 |
+| EXCEPTION (3) | ✅ ~19 KiB (.pdata) | empirically harmless when stale (Go uses pclntab unwinder) |
+| BASERELOC (5) | ✅ ~16 KiB | ✅ shipped (base reloc walker) |
+| IAT (12) | ✅ same memory as FirstThunk | covered transitively by IMPORT walker |
+| **ALL OTHERS** (EXPORT, RESOURCE, LOAD_CONFIG, DEBUG, DELAY_IMPORT, BOUND_IMPORT, TLS, …) | ❌ **empty (RVA=0, Size=0)** | walker not needed for Go targets |
+
+**Conclusion:** v0.104.0 already covers 100% of Go static-PIE
+payloads end-to-end. The 7-slice walker suite below is **only
+necessary when an operator packs non-Go payloads**: MSVC EXEs
+(LOAD_CONFIG), DLLs (EXPORT), GUI apps with resources, apps
+using `/DELAYLOAD`, etc.
+
+**Revised strategy:** ship walkers **on-demand**, driven by
+real payload failures. Each future slice is gated on:
+1. An operator hits a payload that fails RandomizeAll.
+2. We capture the failure code (DLL_NOT_FOUND, ACCESS_VIOLATION,
+   INVALID_IMAGE_FORMAT, …) and the directory inventory of the
+   failing input.
+3. Implement only the walker(s) needed to fix that class.
+
+This avoids ~1500 LOC of speculative work that wouldn't move
+the needle for the dominant use case. The slice descriptions
+below remain as a reference roadmap for when a non-Go payload
+demands them.
+
+---
+
+## Why this plan exists (revised — original framing)
 
 `v0.104.0` shipped `RandomizeImageVAShift` in the `RandomizeAll`
 fan-out after the IMPORT walker landed. End-to-end test on
