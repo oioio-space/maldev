@@ -183,6 +183,16 @@ type PackBinaryOptions struct {
 	// Phase 2-D of docs/refactor-2026-doc/packer-design.md.
 	// PE only.
 	RandomizeImageVersion bool
+
+	// RandomizeAll, when true, ORs every individual Randomize*
+	// flag above to true: stub section name, TimeDateStamp,
+	// LinkerVersion, ImageVersion. The four individual flags
+	// can still selectively turn additional behaviour on; this
+	// is the "everything Phase 2 ships today" shortcut.
+	//
+	// Phase 2-E of docs/refactor-2026-doc/packer-design.md.
+	// PE only — opt-ins under the hood are PE-specific.
+	RandomizeAll bool
 }
 
 // ErrUnsupportedFormat fires when [PackBinary]'s opts.Format does not
@@ -214,6 +224,17 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 	rounds := opts.Stage1Rounds
 	if rounds == 0 {
 		rounds = 3
+	}
+
+	// Phase 2-E: RandomizeAll fans out to the four individual
+	// opt-ins. We OR rather than overwrite so an operator who
+	// sets both RandomizeAll AND a specific flag (a no-op) still
+	// gets the expected behaviour.
+	if opts.RandomizeAll {
+		opts.RandomizeStubSectionName = true
+		opts.RandomizeTimestamp = true
+		opts.RandomizeLinkerVersion = true
+		opts.RandomizeImageVersion = true
 	}
 
 	// Phase 2-A: per-pack random stub section name. Generated only
