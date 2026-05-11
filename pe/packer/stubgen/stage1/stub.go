@@ -58,6 +58,15 @@ type EmitOptions struct {
 	CompressedSize      uint32 // length of the LZ4 block in bytes
 	OriginalSize        uint32 // decompressed .text size (memcpy count)
 	ScratchDispFromText int32  // signed displacement from R15 to scratch base
+
+	// DiagSkipConvertedPayload is interpreted by [EmitConvertedDLLStub]
+	// only: when true the emitter writes a minimal prologue + flag
+	// latch + return-TRUE shape, omitting the SGN rounds + kernel32
+	// resolver + CreateThread call. Slice 5.5.y diagnostic — bisects
+	// the converted-DLL DllMain to find which stage causes
+	// ERROR_DLL_INIT_FAILED at LoadLibrary time. Production code
+	// MUST leave this false.
+	DiagSkipConvertedPayload bool
 }
 
 // baseReg is the callee-saved register the prologue loads with the

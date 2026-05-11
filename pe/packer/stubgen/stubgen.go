@@ -62,6 +62,15 @@ type Options struct {
 	//
 	// Slice 5.5 of docs/refactor-2026-doc/packer-exe-to-dll-plan.md.
 	ConvertEXEtoDLL bool
+
+	// DiagSkipConvertedPayload, when true alongside ConvertEXEtoDLL,
+	// emits a minimal converted-DLL stub: prologue + CALL+POP+ADD +
+	// reason check + flag latch + return TRUE. Everything past the
+	// flag latch (SGN rounds, kernel32-resolver, CreateThread call)
+	// is skipped. Used by slice 5.5.y's bisection to isolate which
+	// stage causes the real-loader ERROR_DLL_INIT_FAILED. Production
+	// code MUST leave this false.
+	DiagSkipConvertedPayload bool
 }
 
 // Sentinels surfaced by Generate.
@@ -210,6 +219,7 @@ func Generate(opts Options) ([]byte, []byte, error) {
 		compressedSize uint32
 	)
 	emitOpts.AntiDebug = opts.AntiDebug
+	emitOpts.DiagSkipConvertedPayload = opts.DiagSkipConvertedPayload
 
 	if opts.Compress {
 		dst := make([]byte, lz4.CompressBlockBound(len(originalTextBytes)))
@@ -299,7 +309,7 @@ func Generate(opts Options) ([]byte, []byte, error) {
 			return nil, nil, fmt.Errorf("stubgen: EmitDLLStub: %w", err)
 		}
 	case plan.IsConvertedDLL:
-		if err := stage1.EmitConvertedDLLStub(b, plan, polyRounds); err != nil {
+		if err := stage1.EmitConvertedDLLStub(b, plan, polyRounds, emitOpts); err != nil {
 			return nil, nil, fmt.Errorf("stubgen: EmitConvertedDLLStub: %w", err)
 		}
 	default:

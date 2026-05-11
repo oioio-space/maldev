@@ -49,7 +49,7 @@ var ErrConvertedDLLPlanMissing = errors.New("stage1: EmitConvertedDLLStub requir
 // the stub returns TRUE immediately without decrypting or spawning.
 //
 // Slice 5.3 of docs/refactor-2026-doc/packer-exe-to-dll-plan.md.
-func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round) error {
+func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.Round, opts EmitOptions) error {
 	if !plan.IsConvertedDLL {
 		return ErrConvertedDLLPlanMissing
 	}
@@ -96,10 +96,17 @@ func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.R
 		return fmt.Errorf("stage1/converted: movb flag,al: %w", err)
 	}
 
-	// SGN rounds — shared with EmitStub / EmitDLLStub.
-	if err := emitSGNRounds(b, plan, rounds, "converted_loop", "stage1/converted"); err != nil {
-		return err
-	}
+	// Slice 5.5.y diagnostic: skip SGN + resolver + CreateThread
+	// entirely (dead-code-free) so we can verify the prologue +
+	// flag latch + return-TRUE path in isolation. The diagnostic
+	// gate covers everything from the SGN rounds to the
+	// CreateThread call below — falls through to the returnTrue
+	// label anchor.
+	if !opts.DiagSkipConvertedPayload {
+		// SGN rounds — shared with EmitStub / EmitDLLStub.
+		if err := emitSGNRounds(b, plan, rounds, "converted_loop", "stage1/converted"); err != nil {
+			return err
+		}
 
 	// --- resolve kernel32!CreateThread → R13 ---
 	// EmitResolveKernel32Export clobbers RAX, RBX, RCX, RDX, R8, R9,
@@ -158,6 +165,7 @@ func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.R
 	if err := b.ADD(amd64.RSP, amd64.Imm(createThreadCallFrameSize)); err != nil {
 		return fmt.Errorf("stage1/converted: add rsp,createThreadCallFrameSize: %w", err)
 	}
+	} // end of `if !opts.DiagSkipConvertedPayload`
 
 	// --- return TRUE: restore args + r15, leave rax=1 ---
 	_ = b.Label(returnTrueLabel)

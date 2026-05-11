@@ -35,7 +35,7 @@ func TestEmitConvertedDLLStub_RejectsExePlan(t *testing.T) {
 	}
 	plan := stdConvertedDLLPlan
 	plan.IsConvertedDLL = false
-	err = stage1.EmitConvertedDLLStub(b, plan, makeRounds(1))
+	err = stage1.EmitConvertedDLLStub(b, plan, makeRounds(1), stage1.EmitOptions{})
 	if !errors.Is(err, stage1.ErrConvertedDLLPlanMissing) {
 		t.Errorf("got %v, want ErrConvertedDLLPlanMissing", err)
 	}
@@ -45,7 +45,7 @@ func TestEmitConvertedDLLStub_RejectsExePlan(t *testing.T) {
 // the other stub emitters.
 func TestEmitConvertedDLLStub_RejectsZeroRounds(t *testing.T) {
 	b, _ := amd64.New()
-	err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, nil)
+	err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, nil, stage1.EmitOptions{})
 	if !errors.Is(err, stage1.ErrNoRounds) {
 		t.Errorf("got %v, want ErrNoRounds", err)
 	}
@@ -55,7 +55,7 @@ func TestEmitConvertedDLLStub_RejectsZeroRounds(t *testing.T) {
 // must decode without errors through x86asm.
 func TestEmitConvertedDLLStub_AssemblesCleanly(t *testing.T) {
 	b, _ := amd64.New()
-	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(3)); err != nil {
+	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(3), stage1.EmitOptions{}); err != nil {
 		t.Fatalf("EmitConvertedDLLStub: %v", err)
 	}
 	out, err := b.Encode()
@@ -80,7 +80,7 @@ func TestEmitConvertedDLLStub_AssemblesCleanly(t *testing.T) {
 // it). PatchConvertedDLLStubDisplacements rewrites every occurrence.
 func TestEmitConvertedDLLStub_HasFlagSentinel(t *testing.T) {
 	b, _ := amd64.New()
-	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(2)); err != nil {
+	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(2), stage1.EmitOptions{}); err != nil {
 		t.Fatalf("EmitConvertedDLLStub: %v", err)
 	}
 	out, _ := b.Encode()
@@ -95,7 +95,7 @@ func TestEmitConvertedDLLStub_HasFlagSentinel(t *testing.T) {
 // native-DLL stub uses. Different trailing data layout.
 func TestEmitConvertedDLLStub_NoSlotSentinel(t *testing.T) {
 	b, _ := amd64.New()
-	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(2)); err != nil {
+	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(2), stage1.EmitOptions{}); err != nil {
 		t.Fatalf("EmitConvertedDLLStub: %v", err)
 	}
 	out, _ := b.Encode()
@@ -116,7 +116,7 @@ func TestEmitConvertedDLLStub_NoSlotSentinel(t *testing.T) {
 func TestEmitConvertedDLLStub_PinnedByteCount(t *testing.T) {
 	const want = 465 // 3-round stub
 	b, _ := amd64.New()
-	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(3)); err != nil {
+	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(3), stage1.EmitOptions{}); err != nil {
 		t.Fatalf("EmitConvertedDLLStub: %v", err)
 	}
 	out, _ := b.Encode()
@@ -133,7 +133,7 @@ func TestEmitConvertedDLLStub_PinnedByteCount(t *testing.T) {
 // correct R15-relative offset.
 func TestPatchConvertedDLLStubDisplacements_RewritesFlagDisp(t *testing.T) {
 	b, _ := amd64.New()
-	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(1)); err != nil {
+	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(1), stage1.EmitOptions{}); err != nil {
 		t.Fatalf("EmitConvertedDLLStub: %v", err)
 	}
 	out, _ := b.Encode()

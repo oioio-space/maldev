@@ -163,6 +163,14 @@ type PackBinaryOptions struct {
 	// Slice 5 of docs/refactor-2026-doc/packer-exe-to-dll-plan.md.
 	ConvertEXEtoDLL bool
 
+	// DiagSkipConvertedPayload is a slice-5.5.y diagnostic flag.
+	// When true alongside ConvertEXEtoDLL, the converted-DLL stub
+	// omits SGN rounds + kernel32-resolver + CreateThread call —
+	// emits only prologue + flag latch + return TRUE. Used to
+	// bisect which stage causes ERROR_DLL_INIT_FAILED at LoadLibrary
+	// time. Production code MUST leave this false.
+	DiagSkipConvertedPayload bool
+
 	// RandomizeStubSectionName, when true, names the appended PE
 	// stub section with a fresh per-pack random label
 	// (`.xxxxx\x00\x00`) instead of the hardcoded ".mldv". Defeats
@@ -396,7 +404,8 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		AntiDebug:       opts.AntiDebug,
 		Compress:        opts.Compress,
 		StubSectionName: stubSectionName,
-		ConvertEXEtoDLL: opts.ConvertEXEtoDLL,
+		ConvertEXEtoDLL:          opts.ConvertEXEtoDLL,
+		DiagSkipConvertedPayload: opts.DiagSkipConvertedPayload,
 		// StubMaxSize zero: stubgen.Generate picks 8192 (Compress=true) or
 		// 4096 (Compress=false) based on the Compress flag.
 	})
