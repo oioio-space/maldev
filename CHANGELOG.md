@@ -7,6 +7,89 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Packer DLL chantier — v0.110.0 → v0.120.0 (2026-05-11 → 2026-05-12)
+
+#### v0.120.0 — Real-loader LoadLibrary diagnostics + 3 root-cause fixes (slice 5.5.x of EXE→DLL)
+
+Slice 5.5.x: stood up the converted-DLL LoadLibrary E2E harness
+(probe + test) and ran it on Win10. The trip uncovered 3 distinct
+root causes that the pack-time tests didn't catch. Each fix is
+unit-tested at the byte level and progresses the crash to a
+different stage — the E2E now reaches a 4th residual failure
+(deferred to slice 5.5.y with file-based instrumentation).
+
+**Fix 1 — `transform.ClearDllCharacteristics` + auto-clear in
+`InjectConvertedDLL`:**
+- Symptom: `LoadLibrary` AV inside `kernel32!LdrLoadDll` (loader
+  refuses the image).
+- Root cause: converted output kept DYNAMIC_BASE + HIGH_ENTROPY_VA
+  in DllCharacteristics inherited from the mingw / Go EXE source.
+  Win10 mandatory ASLR sees ASLR-capable flag → tries to relocate
+  → no BASERELOC entries (we don't synth them) → fails with
+  STATUS_CONFLICTING_ADDRESSES.
+- Fix: `InjectConvertedDLL` calls
+  `ClearDllCharacteristics(out, DynamicBase | HighEntropyVA)`
+  after the IMAGE_FILE_DLL flip. Forces preferred-ImageBase load.
+
+**Fix 2 — `stage1.PatchTextDisplacement` derives `popOffset` from
+sentinel position:**
+- Symptom: PC inside our stub at the flag-latch MOVB
+  (`mov [r15+disp], al`), faulting at an address 24 B above the
+  expected flag byte.
+- Root cause: the patcher hardcoded `popOffset = 5`, which only
+  matches the EXE stub layout (CALL+POP+ADD at byte 0). DLL stubs
+  (slice 2 + slice 5.3) place a 24-B prologue before CALL+POP+ADD;
+  POP is then at byte 29, but the patcher computed displacements
+  assuming POP at byte 5 → R15 ended up 24 B above textBase at
+  runtime → every flag/slot access missed.
+- Fix: derive `popOffset = sentinelOff - 5` (the sentinel imm32
+  starts 5 bytes after POP, regardless of where CALL+POP+ADD sits
+  in the stub). Byte-identical for EXE stubs (sentinelOff=10
+  ⇒ popOffset=5); correct for DLL stubs (sentinelOff=34
+  ⇒ popOffset=29). New `TestPatchTextDisplacement_DLLPrologue`
+  pins the DLL-shaped layout.
+
+**Fix 3 — `transform.addStubSectionWrite` in `InjectConvertedDLL`:**
+- Symptom: page-level write violation at the flag-latch MOVB
+  (post-fix-2, address now correctly resolves to the flag byte
+  inside .mldv).
+- Root cause: `InjectStubPE` creates the appended stub section
+  `CODE|EXEC|READ` (right for EXE stubs that only decrypt .text
+  in place). The converted-DLL stub additionally latches a
+  `decrypted_flag` byte INSIDE its own section on PROCESS_ATTACH;
+  the page-level READ-only mapping rejects the write.
+- Fix: `InjectConvertedDLL` ORs MEM_WRITE on the last section's
+  Characteristics after the InjectStubPE delegate. New
+  `TestInjectConvertedDLL_StubSectionIsWritable` pins the bit.
+
+**Real-loader trip status (slice 5.5.y):**
+- Pre-LoadLibrary phases (read probe / pack / write temp DLL /
+  clear marker) all succeed. The `syscall.LoadLibrary` call kills
+  the test process abruptly — no Exception trace, no step-5
+  log, no `--- FAIL: ...` line. Go's `t.Logf` buffers until the
+  test prints PASS/FAIL, so the abrupt Win32 termination loses
+  the diagnostic.
+- Test now `t.Skip()`s with the full progress-log embedded in the
+  source for future-pickup context.
+- Slice 5.5.y will replace `t.Logf` with file-based diagnostic
+  writes (survive abrupt process death) OR ship a probe stub that
+  returns TRUE immediately without CreateThread (isolates whether
+  the residual fault is in our CreateThread call versus the
+  spawned-thread side).
+
+**Other shipping:**
+- New test fixture `pe/packer/testdata/probe_converted.c` (mingw
+  -nostdlib EXE writing `OK` to `C:\maldev-probe-marker.txt`,
+  Sleep INFINITE so the spawned thread stays alive) +
+  `make probe_converted` recipe + committed `probe_converted.exe`.
+- `pe/packer/packer_e2e_converted_dll_windows_test.go` (build tag
+  `windows && maldev_packer_run_e2e`).
+
+Win VM EXE-regression suite green throughout: the 3 fixes are
+byte-identical on the EXE path (pinned tests confirm
+`TestPatchTextDisplacement_HappyPath` value unchanged after the
+derivation refactor since sentinelOff=10 for EXE stubs).
+
 ### Packer DLL chantier — v0.110.0 → v0.119.0 (2026-05-11)
 
 #### v0.119.0 — `PackBinary(ConvertEXEtoDLL=true)` end-to-end (slice 5.5 of EXE→DLL)
