@@ -391,8 +391,8 @@ ratio. Stack with HexAlphabet (or accept the 50% size cost of
 | 2-F-2 | Random zero-byte separator sections | ✅ v0.100.0 |
 | 2-F-3-a | Base-relocation table walker (read-only helper) | ✅ v0.101.0 |
 | 2-F-3-b | File-order permutation of host section DATA (no VA change) | ✅ v0.102.0 |
-| 2-F-3-c | Whole-image VA shift (single global delta, reloc + DataDirectory + OEP fixup) | next |
-| 2-F-3-d | Full per-section VA permutation (deferred — would need to repair RIP-relative inter-section refs that aren't reloc-covered) | deferred |
+| 2-F-3-c | Whole-image VA shift (scaffolding shipped v0.103.0, gated EXPERIMENTAL until walker-suite completes) | walker-suite plan in `packer-2f3c-walker-suite-plan.md` |
+| 2-F-3-d | Full per-section VA permutation (blocked on 2-F-3-c walker suite + RIP-relative disassembler in .text) | deferred until 2-F-3-c-3 ships |
 | 2-G | IAT scramble (hash-resolved imports) | deferred |
 | 3 | Junk sections + stub control-flow obfuscation | deferred |
 

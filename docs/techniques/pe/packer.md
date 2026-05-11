@@ -911,6 +911,164 @@ get one mental model regardless of payload shape.
 
 ---
 
+## Per-pack randomisation (Phase 2 opts)
+
+The `Mode 3 PackBinary` example above shows a long list of
+`Randomize*` flags. Each one defeats a specific class of
+fingerprinting heuristic. None of them change the **runtime
+behavior** of the packed binary — only its **on-disk shape**
+or the **VAs/headers a static analyst sees**. They're all
+opt-in (default `false`) so the "vanilla pack" stays
+byte-reproducible, which several CI integrations rely on.
+
+The shortcut `RandomizeAll: true` enables every opt that the
+Win10 VM E2E test confirms is safe across heterogeneous
+payloads. Two opts (`RandomizeImageBase`, `RandomizeImageVAShift`)
+are deliberately NOT in the fan-out — they're EXPERIMENTAL,
+gated on an unfinished walker suite, and can crash certain
+binaries. Operators can still set them per-payload.
+
+### What each opt defeats — at a glance
+
+| Opt | What changes in the file | What detection it defeats | Phase | Tag |
+|---|---|---|---|---|
+| `RandomizeStubSectionName` | Last (stub) section name: `.mldv` → `.xkqwz` | YARA rules pinned to the literal `.mldv` byte sequence | 2-A | v0.94.0 |
+| `RandomizeTimestamp` | COFF `TimeDateStamp` field | Threat-intel pivots clustering samples by linker timestamp (`"all linked Tue 14:32 UTC"`) | 2-B | v0.95.0 |
+| `RandomizeLinkerVersion` | Optional Header `MajorLinker` + `MinorLinker` | Pivots like `"all samples linked with VS2017 14.16"` | 2-C | v0.96.0 |
+| `RandomizeImageVersion` | Optional Header `MajorImage` + `MinorImage` | Per-binary version-stamp clustering | 2-D | v0.97.0 |
+| `RandomizeAll` | Every opt above + every opt below | Convenience aggregator (excludes EXPERIMENTAL) | 2-E | v0.98.0 |
+| `RandomizeExistingSectionNames` | Every host section name: `.text/.rdata/.data` → random `.xxxxx` | "section called .text is RWX → suspicious" + YARA rules pinned to host section labels | 2-F-1 | v0.99.0 |
+| `RandomizeJunkSections` | Append [1, 5] uninitialised BSS sections after the stub | "exact section count" heuristics + "stub is section[N-1]" patterns. **File size unchanged** (no file backing). | 2-F-2 | v0.100.0 |
+| `RandomizePEFileOrder` | Permute the file-layout order of host section bodies | YARA rules anchored at file offsets (`"bytes at file 0x400 = decryption key"`). **Runtime image byte-identical** (only file offsets change). | 2-F-3-b | v0.102.0 |
+| `RandomizeImageBase` ⚠️ | PE32+ Optional Header `ImageBase` | Heuristics on the canonical Go `0x140000000` preferred-base | 2-F-3-c | v0.103.0 (**EXPERIMENTAL** — opt-in only, can crash some payloads despite the DYNAMIC_BASE guard) |
+| `RandomizeImageVAShift` ⚠️ | Every section's VA + reloc-fixed pointer values | Heuristics on canonical VA layout (`.text starts at 0x1000`) | 2-F-3-c | v0.103.0 (**EXPERIMENTAL** — needs the Phase 2-F-3-c walker suite before it works on PEs with non-trivial imports / exception data; documented in `docs/refactor-2026-doc/packer-2f3c-walker-suite-plan.md`) |
+
+### Concrete before/after
+
+Pack `winhello.exe` twice from the same input + seed: once
+vanilla, once with `RandomizeAll`. Then dump section tables
+with the diagnostic CLI:
+
+```bash
+$ go run ./cmd/packer-vis sections vanilla.exe
+file: vanilla.exe (1676288 bytes)
+NumberOfSections: 9
+COFF.PointerToSymbolTable: 0x198200  NumberOfSymbols: 0
+
+#    Name        VA          VirtSize    RawOff      RawSize     Characteristics
+0    .text       0x00001000  0x000a3ab1  0x00000600  0x000a3c00  0xe0000020 [CODE RWX]
+1    .rdata      0x000a5000  0x000dd008  0x000a4200  0x000dd200  0x40000040 [DATA R]
+2    .data       0x00183000  0x00057a28  0x00181400  0x0000dc00  0xc0000040 [DATA RW]
+3    .pdata      0x001db000  0x00004be4  0x0018f000  0x00004c00  0x40000040 [DATA R]
+4    .xdata      0x001e0000  0x000000a8  0x00193c00  0x00000200  0x40000040 [DATA R]
+5    .idata      0x001e1000  0x0000055a  0x00193e00  0x00000600  0xc0000040 [DATA RW]
+6    .reloc      0x001e2000  0x00003d4c  0x00194400  0x00003e00  0x42000040 [DATA R]
+7    .symtab     0x001e6000  0x00000004  0x00198200  0x00000200  0x42000000 [R]
+8    .mldv       0x001e7000  0x00001000  0x00198400  0x00001000  0x60000020 [CODE RX]
+
+$ go run ./cmd/packer-vis sections randomized.exe
+file: randomized.exe (1676288 bytes)
+NumberOfSections: 11               # ← +2 from RandomizeJunkSections
+COFF.PointerToSymbolTable: 0xe2800 # ← moved by RandomizePEFileOrder
+
+#    Name        VA          VirtSize    RawOff      RawSize     Characteristics
+0    .jgvcc      0x00001000  0x000a3ab1  0x000e7c00  0x000a3c00  0xe0000020 [CODE RWX]
+1    .tzmsj      0x000a5000  0x000dd008  0x00000600  0x000dd200  0x40000040 [DATA R]
+2    .vwwcw      0x00183000  0x00057a28  0x0018b800  0x0000dc00  0xc0000040 [DATA RW]
+3    .soffy      0x001db000  0x00004be4  0x000e2a00  0x00004c00  0x40000040 [DATA R]
+4    .lnfio      0x001e0000  0x000000a8  0x000dd800  0x00000200  0x40000040 [DATA R]
+5    .raoac      0x001e1000  0x0000055a  0x000e7600  0x00000600  0xc0000040 [DATA RW]
+6    .dinxv      0x001e2000  0x00003d4c  0x000dda00  0x00003e00  0x42000040 [DATA R]
+7    .etahy      0x001e6000  0x00000004  0x000e2800  0x00000200  0x42000000 [R]
+8    .hrukp      0x001e7000  0x00001000  0x000e1800  0x00001000  0x60000020 [CODE RX]
+9    .rsnnn      0x001e8000  0x00001000  0x00000000  0x00000000  0x40000080 [BSS R]
+10   .klvpv      0x001e9000  0x00001000  0x00000000  0x00000000  0x40000080 [BSS R]
+```
+
+What changed on disk:
+
+- **Names** — every section, including the appended stub, got a
+  random `.xxxxx` name (Phase 2-F-1 + 2-A).
+- **File layout** — `.jgvcc` (was `.text`) is now at file offset
+  `0xe7c00` instead of `0x600`; `.tzmsj` (was `.rdata`) is at
+  `0x600` instead of `0xa4200` (Phase 2-F-3-b).
+- **Section count** — 9 → 11; `.rsnnn` and `.klvpv` are zero-byte
+  BSS placeholders the loader maps as zero-filled but consume
+  no file bytes (Phase 2-F-2).
+- **COFF.PointerToSymbolTable** correctly tracks the new file
+  position of the section that carried it.
+
+What did NOT change:
+
+- Every section's `VA` and `VirtSize` is **identical** between
+  the two packs. The runtime memory image is byte-identical.
+- File size: identical (1676288 bytes). Phase 2-F-2 separators
+  carry no file bytes; Phase 2-F-3-b just shuffles existing
+  bodies.
+- The stub still runs, the `.text` still decrypts, the
+  payload still prints `"hello from windows"` (validated by
+  Win10 VM E2E `TestPackBinary_WindowsPE_RandomizeAll_E2E`).
+
+### Recipes — common operator goals
+
+| Goal | Opt combo |
+|---|---|
+| **Cheapest "looks different"** — defeat shallow YARA + sample-clustering by linker metadata, ~zero risk | `RandomizeStubSectionName + RandomizeTimestamp + RandomizeLinkerVersion + RandomizeImageVersion` |
+| **All defaults defeated** — ship one variant per target with maximum on-disk + structural variance, validated end-to-end | `RandomizeAll: true` |
+| **File-offset YARA only** — the rule says `at offset 0x400 expect bytes XX YY ZZ` and we need to defeat just that | `RandomizePEFileOrder: true` (one opt; no header changes, runtime image untouched) |
+| **Section-count hunting** — analyst keys on "Go binary always has 8 sections" | `RandomizeJunkSections: true` (per-pack count drawn from [1, 5]) |
+| **Reproducible build** — operator-supplied `Seed` produces deterministic output across runs of `PackBinary` (useful for diff tooling, batch-pack pipelines) | Set `opts.Seed` to any non-zero `int64`. All `Randomize*` opts seed from this value with per-opt offsets so they decorrelate. |
+| **Maximum stealth, accept the experimental risk** — also push VAs around | `RandomizeAll: true` + `RandomizeImageBase: true`. Test on the actual payload before deploying — VA experiments can crash some Go versions. |
+
+### Composing with the operator-side `Seed`
+
+When `opts.Seed != 0`, every randomiser derives its math/rand
+stream from `Seed + perOptOffset`. The offsets (defined as
+`seedOffset*` constants in `pe/packer/packer.go`) are fixed per
+opt, so two packs with the same `Seed` produce byte-identical
+outputs. Two packs with different `Seed` values produce
+different outputs even when only ONE opt is enabled.
+
+When `opts.Seed == 0`, the packer draws ONE crypto-random seed
+from `random.Int64()` at the top of `PackBinary` and feeds it
+to every enabled randomiser via the same offset scheme. Result:
+crypto-random output across runs, but still single-syscall on
+the random source.
+
+This means an operator scripting a batch pack can choose between:
+
+- `Seed: 0` (default) — fresh per-pack crypto-random output, no
+  operator state to track.
+- `Seed: <some int64>` — deterministic output, useful when the
+  same artefact must be regenerated bit-for-bit on a different
+  machine.
+- `Seed: <derived from per-target string>` — a poor man's
+  "fingerprint as seed" that produces the same artefact for the
+  same target without storing any state.
+
+### Validation
+
+Two safety nets keep the per-pack randomisation honest:
+
+1. **Unit + integration tests in `pe/packer/`** — every opt has
+   a `_PreservesInput` test (default-off → byte-stable behaviour
+   matches v0.93 baseline) and a `_DeterministicGivenSeed` test
+   (same seed → same output).
+2. **Win10 VM end-to-end test** —
+   `TestPackBinary_WindowsPE_RandomizeAll_E2E` (build-tag gated)
+   packs `winhello.exe` with `RandomizeAll: true`, executes the
+   resulting PE on a real Windows VM, and asserts stdout
+   contains `"hello from windows"`. This is the gate before
+   adding any new opt to the `RandomizeAll` fan-out.
+
+The Phase 2-F-3-c experimental opts (`RandomizeImageBase`,
+`RandomizeImageVAShift`) are excluded from `RandomizeAll`
+precisely because they don't yet pass this Win10 E2E. The
+walker-suite roadmap that will let them join is in
+`docs/refactor-2026-doc/packer-2f3c-walker-suite-plan.md`.
+
+---
+
 ## Per-build IOC randomisation — Kerckhoffs
 
 Per Kerckhoffs's principle: the algorithm is public; only the secret
