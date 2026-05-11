@@ -54,7 +54,7 @@ linux/windows/darwin amd64.
 | 2 — All-asm stub | 2.9 PT_WIN_BUILD predicate in Windows stub | ✅ | `bundle_stub_v2_winbuild_e2e_windows_test.go` | (rolled into v0.85+ series) |
 | 3 — packer-vis | 3.1 Entropy heatmap rendering | ✅ | eab7429 | — |
 | 3 — packer-vis | 3.3 Bundle wire-format viz | ✅ | eab7429 | — |
-| 3 — packer-vis | 3.2 SGN round byte-diff display (deferred — needs hooks in poly engine) | ⏳ | | |
+| 3 — packer-vis | 3.2 SGN round byte-diff display | ✅ | `cmd/packer-vis round-diff` subcommand + 4 unit tests (commit 3504eb8) | — |
 | 3 — packer-vis | 3.4 Tag v0.70.0 | ✅ | — | **v0.70.0** |
 | 3 — packer-vis | 3.5 `compare` verb — side-by-side entropy + delta | ✅ | 764a29e | — |
 | 4 — Kerckhoffs | 4.1 Library: BundleProfile + 7 *With variants | ✅ | 6072eb4 | — |
