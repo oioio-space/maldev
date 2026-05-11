@@ -220,6 +220,29 @@ type PackBinaryOptions struct {
 	// last header" patterns. PE only.
 	RandomizeJunkSections bool
 
+	// RandomizePEFileOrder, when true, permutes the FILE order of
+	// host PE section bodies (not their VAs). PE/COFF allows the
+	// file layout of section bodies to be in any order with
+	// arbitrary FileAlignment-padded gaps; the loader maps each
+	// section by its PointerToRawData / SizeOfRawData fields, not
+	// by file ordering. So permuting the file order changes every
+	// section body's on-disk offset without touching the runtime
+	// image: VAs, relocations, the DataDirectory, OEP, and the
+	// stub's RIP-relative addressing all stay byte-identical to a
+	// vanilla pack.
+	//
+	// Defeats YARA rules anchored at file offsets ("file offset
+	// 0x400 contains the decryption key bytes") with zero
+	// loader-contract risk.
+	//
+	// The appended packer stub is exempt from the permutation
+	// (skipLast=1), so the stub's file offset stays predictable
+	// for any future stub-introspection work.
+	//
+	// Phase 2-F-3-b of docs/refactor-2026-doc/packer-design.md.
+	// PE only.
+	RandomizePEFileOrder bool
+
 	// RandomizeAll, when true, ORs every individual Randomize*
 	// flag above to true: stub section name, TimeDateStamp,
 	// LinkerVersion, ImageVersion, existing section names. The
@@ -273,6 +296,7 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		opts.RandomizeImageVersion = true
 		opts.RandomizeExistingSectionNames = true
 		opts.RandomizeJunkSections = true
+		opts.RandomizePEFileOrder = true
 	}
 
 	// Resolve the master seed once. When opts.Seed==0 and any
@@ -284,7 +308,8 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 	masterSeed := opts.Seed
 	anyRandomize := opts.RandomizeStubSectionName || opts.RandomizeTimestamp ||
 		opts.RandomizeLinkerVersion || opts.RandomizeImageVersion ||
-		opts.RandomizeExistingSectionNames || opts.RandomizeJunkSections
+		opts.RandomizeExistingSectionNames || opts.RandomizeJunkSections ||
+		opts.RandomizePEFileOrder
 	if anyRandomize && masterSeed == 0 {
 		s, err := random.Int64()
 		if err != nil {
@@ -388,6 +413,21 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		out = newOut
 	}
 
+	// Phase 2-F-3-b: permute the FILE order of host section
+	// bodies. Last to run because we want every prior phase's
+	// header mutations (names, separators, etc.) reflected in
+	// the section table BEFORE we shuffle the file layout —
+	// otherwise a later phase would clobber the new file
+	// offsets we just wrote.
+	if opts.RandomizePEFileOrder && isPE {
+		rng := rand.New(rand.NewSource(masterSeed + seedOffsetPEFileOrder))
+		newOut, perr := transform.PermuteSectionFileOrder(out, rng, 1)
+		if perr != nil {
+			return nil, nil, fmt.Errorf("packer: permute file order: %w", perr)
+		}
+		out = newOut
+	}
+
 	return out, key, nil
 }
 
@@ -402,6 +442,7 @@ const (
 	seedOffsetImageVersion          int64 = 2
 	seedOffsetExistingSectionNames  int64 = 3
 	seedOffsetJunkSections          int64 = 4
+	seedOffsetPEFileOrder           int64 = 5
 )
 
 // transformFormatFor maps the operator-facing packer.Format to the

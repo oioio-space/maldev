@@ -33,6 +33,12 @@ Usage:
   packer-vis bundle  <bundle.bin>                 Bundle wire-format viz
   packer-vis round-diff <file> [-rounds N] [-seed S]
                                                   SGN per-round byte-evolution table
+  packer-vis sections <file>                      PE section table + COFF pointers
+                                                  (debugging companion for the
+                                                  Phase 2-F transforms — shows
+                                                  Name/VA/VirtSize/RawOff/RawSize/
+                                                  Char per section + COFF
+                                                  PointerToSymbolTable)
 
 Entropy heatmap reads each file in 256-byte windows, computes Shannon
 entropy in bits/byte (0 = perfectly redundant, 8 = perfectly random),
@@ -75,6 +81,12 @@ func main() {
 		os.Exit(runBundleViz(os.Args[2]))
 	case "round-diff":
 		os.Exit(runRoundDiff(os.Args[2:]))
+	case "sections":
+		if len(os.Args) != 3 {
+			fmt.Fprint(os.Stderr, usage)
+			os.Exit(2)
+		}
+		os.Exit(runSections(os.Args[2]))
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)

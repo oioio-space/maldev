@@ -312,6 +312,15 @@ packed, _, err := packer.PackBinary(input, packer.PackBinaryOptions{
     //                                    only NumberOfSections + SizeOfImage
     //                                    grow. Defeats "exact section count"
     //                                    + "stub is the last header" patterns.
+    //   RandomizePEFileOrder           — permute the FILE order of host
+    //                                    section bodies (Phase 2-F-3-b). VAs,
+    //                                    relocs, DataDirectory, OEP all
+    //                                    unchanged — runtime image byte-
+    //                                    identical. Defeats YARA rules
+    //                                    anchored at file offsets ("file
+    //                                    0x400 = decryption key bytes").
+    //                                    COFF.PointerToSymbolTable is updated
+    //                                    when the carrier section moves.
 })
 ```
 
