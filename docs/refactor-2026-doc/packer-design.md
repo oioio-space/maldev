@@ -247,9 +247,11 @@ safe wins first and keep the loader-contract churn isolated:
 
 | Slice | What | Risk | Status |
 |---|---|---|---|
-| 2-F-1 | Randomise EXISTING section names (`.text` → `.xkqwz`, etc.). Names are pure convention; Windows finds resources / imports / exports / relocs via the Optional Header DataDirectory (RVA-based). Defeats name-pattern heuristics. | Low — no data movement, no offset change | next |
-| 2-F-2 | Insert random-count zero-byte separator sections between existing sections (push offsets around without permuting). Each separator costs `SectionAlign` virtual + `FileAlign` raw. | Medium — bumps `SizeOfImage`, must update headers; no reloc work because nothing existing moves in VA | after 2-F-1 |
-| 2-F-3 | True permutation: physically swap section data (e.g. `.rdata` ↔ `.data`). Requires reloc fixups for every cross-section pointer; if the input lacks `IMAGE_FILE_RELOCS_STRIPPED=0` we can't fix up — must skip. | High — touches reloc table | deferred until 2-F-1/2 ship |
+| 2-F-1 | Randomise EXISTING section names (`.text` → `.xkqwz`, etc.). Names are pure convention; Windows finds resources / imports / exports / relocs via the Optional Header DataDirectory (RVA-based). Defeats name-pattern heuristics. | Low — no data movement, no offset change | ✅ v0.99.0 |
+| 2-F-2 | Append [1, 5] zero-byte separator section headers AFTER the stub (BSS-style: SizeOfRawData=0). Bumps NumberOfSections + SizeOfImage; file size unchanged. Stub VA preserved (its body uses RIP-relative addressing). | Medium — but tests + Win10 E2E green | ✅ v0.100.0 |
+| 2-F-3-a | **Base-relocation table walker** (read-only `WalkBaseRelocs(pe, cb) error` helper). Iterates IMAGE_BASE_RELOCATION blocks under DataDirectory[5], yields (rva, type) per entry. Uses pattern proven by runtime/runtime_windows.go::applyRelocations. Pure enumeration — no data movement. Foundation for 2-F-3-b/c. | Low — read-only | next |
+| 2-F-3-b | Single-section VA-shift: pick ONE pre-stub section, push its VA forward by N×SectionAlign, move its file data, fix up reloc entries pointing INTO it (rewrite the absolute address values) and entries WITHIN it (repack the (block_va, offset) tuples into a different page block if needed). Update OEP if the moved section was .text. Update DataDirectory entries that referenced the moved section. | High — needs DataDirectory walker too; cannot fix non-reloc absolute pointers (data-driven jump tables, switch-statement targets) | after 2-F-3-a |
+| 2-F-3-c | Full pre-stub section permutation: apply a random permutation to sections [0..N-2], rebuild VA layout in ascending order, repeat 2-F-3-b's machinery N times. The stub stays last (its VA must not move). Requires `IMAGE_FILE_RELOCS_STRIPPED=0` in COFF Characteristics — bail early if stripped. | High | after 2-F-3-b |
 
 - **2-F (legacy) — Section shuffle** (full RVA reassignment): Randomise
   host PE section order. Adjusts file offsets, RVAs,
@@ -384,7 +386,9 @@ ratio. Stack with HexAlphabet (or accept the 50% size cost of
 | 2-E | RandomizeAll convenience aggregator | ✅ v0.98.0 |
 | 2-F-1 | Existing-section name randomisation | ✅ v0.99.0 |
 | 2-F-2 | Random zero-byte separator sections | ✅ v0.100.0 |
-| 2-F-3 | Section data permutation (full reorder + reloc fixup) | deferred |
+| 2-F-3-a | Base-relocation table walker (read-only helper) | next |
+| 2-F-3-b | Single-section VA-shift with reloc fixup | scoped |
+| 2-F-3-c | Full pre-stub section permutation | scoped |
 | 2-G | IAT scramble (hash-resolved imports) | deferred |
 | 3 | Junk sections + stub control-flow obfuscation | deferred |
 
