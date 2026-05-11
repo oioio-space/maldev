@@ -60,6 +60,14 @@ var (
 	// — slice-4 limitation, tracked in
 	// docs/refactor-2026-doc/packer-dll-format-plan.md.
 	ErrCompressDLLUnsupported = errors.New("stubgen: Compress=true is not supported on DLL inputs")
+	// ErrConvertEXEtoDLLUnsupported fires while the EXE→DLL chantier
+	// sub-slices 5.2 (stub emitter), 5.3 (injector), 5.4 (stubgen
+	// dispatch) are in flight. Slice 5.1 wired the API surface +
+	// admission cross-checks; the conversion pipeline itself lands
+	// in 5.2-5.5.
+	//
+	// See docs/refactor-2026-doc/packer-exe-to-dll-plan.md.
+	ErrConvertEXEtoDLLUnsupported = errors.New("stubgen: ConvertEXEtoDLL not yet implemented (slice 5.2-5.5 in flight)")
 )
 
 // Generate runs the UPX-style transform pipeline:

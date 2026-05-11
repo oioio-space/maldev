@@ -115,6 +115,74 @@ func TestPackBinary_FormatWindowsDLL_RejectsCompress(t *testing.T) {
 	}
 }
 
+// TestPackBinary_ConvertEXEtoDLL_NotImplementedYet — slice 5.1
+// landed the API surface + admission cross-checks; the stub
+// emitter / injector / dispatch (sub-slices 5.2-5.5) are still
+// in flight. Validate that a shape-valid invocation surfaces
+// stubgen.ErrConvertEXEtoDLLUnsupported rather than silently
+// routing through the EXE path.
+func TestPackBinary_ConvertEXEtoDLL_NotImplementedYet(t *testing.T) {
+	exe, err := transform.BuildMinimalPE32Plus([]byte{0xC3})
+	if err != nil {
+		t.Fatalf("BuildMinimalPE32Plus: %v", err)
+	}
+	_, _, err = packerpkg.PackBinary(exe, packerpkg.PackBinaryOptions{
+		Format:          packerpkg.FormatWindowsExe,
+		ConvertEXEtoDLL: true,
+		Stage1Rounds:    3,
+	})
+	if !errors.Is(err, stubgen.ErrConvertEXEtoDLLUnsupported) {
+		t.Errorf("got %v, want stubgen.ErrConvertEXEtoDLLUnsupported", err)
+	}
+}
+
+// TestPackBinary_ConvertEXEtoDLL_RejectsDLLInput — slice 5.1
+// cross-check: ConvertEXEtoDLL requires an EXE input. Feeding a
+// DLL must fail at the admission stage with ErrUnsupportedFormat
+// before the "not implemented yet" sentinel fires.
+func TestPackBinary_ConvertEXEtoDLL_RejectsDLLInput(t *testing.T) {
+	dll := testutil.BuildDLLWithReloc(t, 0x100)
+	_, _, err := packerpkg.PackBinary(dll, packerpkg.PackBinaryOptions{
+		ConvertEXEtoDLL: true,
+		Stage1Rounds:    3,
+	})
+	if !errors.Is(err, packerpkg.ErrUnsupportedFormat) {
+		t.Errorf("got %v, want ErrUnsupportedFormat", err)
+	}
+}
+
+// TestPackBinary_ConvertEXEtoDLL_RejectsNonPE — ELF / garbage
+// inputs must also fail at admission with ErrUnsupportedFormat.
+func TestPackBinary_ConvertEXEtoDLL_RejectsNonPE(t *testing.T) {
+	elfMagic := []byte{0x7F, 'E', 'L', 'F', 0, 0, 0, 0}
+	_, _, err := packerpkg.PackBinary(elfMagic, packerpkg.PackBinaryOptions{
+		ConvertEXEtoDLL: true,
+		Stage1Rounds:    3,
+	})
+	if !errors.Is(err, packerpkg.ErrUnsupportedFormat) {
+		t.Errorf("got %v, want ErrUnsupportedFormat", err)
+	}
+}
+
+// TestPackBinary_ConvertEXEtoDLL_RejectsFormatWindowsDLL — the
+// two opts are mutually exclusive: FormatWindowsDLL assumes a
+// native DLL input, ConvertEXEtoDLL transforms an EXE input.
+// Asking for both is a programming error.
+func TestPackBinary_ConvertEXEtoDLL_RejectsFormatWindowsDLL(t *testing.T) {
+	exe, err := transform.BuildMinimalPE32Plus([]byte{0xC3})
+	if err != nil {
+		t.Fatalf("BuildMinimalPE32Plus: %v", err)
+	}
+	_, _, err = packerpkg.PackBinary(exe, packerpkg.PackBinaryOptions{
+		Format:          packerpkg.FormatWindowsDLL,
+		ConvertEXEtoDLL: true,
+		Stage1Rounds:    3,
+	})
+	if !errors.Is(err, packerpkg.ErrUnsupportedFormat) {
+		t.Errorf("got %v, want ErrUnsupportedFormat", err)
+	}
+}
+
 // TestIsDLL_DetectsBitCorrectly — package-level guard for the
 // dispatcher's IsDLL pre-flight.
 func TestIsDLL_DetectsBitCorrectly(t *testing.T) {

@@ -151,6 +151,18 @@ type PackBinaryOptions struct {
 	// for the full in-place inflate layout.
 	Compress bool
 
+	// ConvertEXEtoDLL, when true, converts a PE32+ EXE input into a
+	// PE32+ DLL output at pack time. Mutually exclusive with
+	// FormatWindowsDLL. Rejected with [ErrUnsupportedFormat] when
+	// the input isn't a PE32+ EXE.
+	//
+	// Operationally unlocks sideloading (drop the converted DLL
+	// next to a signed legit EXE that LoadLibrary's it), classic
+	// DLL injection, and LOLBAS rundll32 / regsvr32 chains.
+	//
+	// Slice 5 of docs/refactor-2026-doc/packer-exe-to-dll-plan.md.
+	ConvertEXEtoDLL bool
+
 	// RandomizeStubSectionName, when true, names the appended PE
 	// stub section with a fresh per-pack random label
 	// (`.xxxxx\x00\x00`) instead of the hardcoded ".mldv". Defeats
@@ -324,27 +336,15 @@ var ErrUnsupportedFormat = errors.New("packer: unsupported format")
 // [stubgen.ErrNoInput], plus transform sentinels
 // (ErrNoTextSection, ErrOEPOutsideText, ErrTLSCallbacks, …).
 func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
-	// When caller specifies a Format, cross-check against magic detection so
-	// mismatches are caught before the more expensive planning pass.
-	if opts.Format != FormatUnknown {
-		detected := transform.DetectFormat(input)
-		expected := transformFormatFor(opts.Format)
-		if detected != expected {
-			return nil, nil, fmt.Errorf("%w: opts.Format=%s but input is %s",
-				ErrUnsupportedFormat, opts.Format, detected)
-		}
-		// EXE vs DLL share the FormatPE byte signature, so the
-		// DetectFormat cross-check above can't tell them apart. The
-		// switch keys off IMAGE_FILE_DLL to enforce the PE sub-variant.
-		isDLL := transform.IsDLL(input)
-		switch {
-		case opts.Format == FormatWindowsDLL && !isDLL:
-			return nil, nil, fmt.Errorf("%w: opts.Format=%s but input lacks IMAGE_FILE_DLL",
-				ErrUnsupportedFormat, opts.Format)
-		case opts.Format == FormatWindowsExe && isDLL:
-			return nil, nil, fmt.Errorf("%w: opts.Format=%s but input is a DLL",
-				ErrUnsupportedFormat, opts.Format)
-		}
+	if err := validatePackBinaryInput(opts, input); err != nil {
+		return nil, nil, err
+	}
+	if opts.ConvertEXEtoDLL {
+		// Slice 5.1 wired the API + cross-checks; sub-slices 5.2-5.5
+		// (stub emitter, injector, stubgen dispatch) carry the
+		// implementation. Return the in-flight sentinel rather than
+		// silently routing through the EXE path.
+		return nil, nil, stubgen.ErrConvertEXEtoDLLUnsupported
 	}
 
 	rounds := opts.Stage1Rounds
@@ -544,6 +544,57 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 	}
 
 	return out, key, nil
+}
+
+// validatePackBinaryInput runs every admission cross-check
+// [PackBinary] applies before the expensive planning pass: format
+// magic, PE EXE-vs-DLL sub-variant, and the ConvertEXEtoDLL
+// preconditions. Pulled out of the call site so the matrix of
+// opt × input shape rules lives in one place.
+//
+// One `transform.IsDLL(input)` call per invocation; the result is
+// reused across every PE sub-variant check.
+func validatePackBinaryInput(opts PackBinaryOptions, input []byte) error {
+	detected := transform.DetectFormat(input)
+	var isDLL bool
+	if detected == transform.FormatPE {
+		isDLL = transform.IsDLL(input)
+	}
+
+	if opts.Format != FormatUnknown {
+		expected := transformFormatFor(opts.Format)
+		if detected != expected {
+			return fmt.Errorf("%w: opts.Format=%s but input is %s",
+				ErrUnsupportedFormat, opts.Format, detected)
+		}
+		// EXE vs DLL share the FormatPE byte signature; the IsDLL bit
+		// disambiguates the two PE sub-variants.
+		switch {
+		case opts.Format == FormatWindowsDLL && !isDLL:
+			return fmt.Errorf("%w: opts.Format=%s but input lacks IMAGE_FILE_DLL",
+				ErrUnsupportedFormat, opts.Format)
+		case opts.Format == FormatWindowsExe && isDLL:
+			return fmt.Errorf("%w: opts.Format=%s but input is a DLL",
+				ErrUnsupportedFormat, opts.Format)
+		}
+	}
+
+	if opts.ConvertEXEtoDLL {
+		if opts.Format == FormatWindowsDLL {
+			return fmt.Errorf("%w: ConvertEXEtoDLL is mutually exclusive with Format=FormatWindowsDLL",
+				ErrUnsupportedFormat)
+		}
+		if detected != transform.FormatPE {
+			return fmt.Errorf("%w: ConvertEXEtoDLL requires a PE32+ EXE input",
+				ErrUnsupportedFormat)
+		}
+		if isDLL {
+			return fmt.Errorf("%w: ConvertEXEtoDLL requires an EXE input but got a DLL",
+				ErrUnsupportedFormat)
+		}
+	}
+
+	return nil
 }
 
 // Per-randomiser seed offsets keep each opt-block's math/rand

@@ -71,6 +71,22 @@ func PlanDLL(input []byte, stubMaxSize uint32) (Plan, error) {
 	return planPECore(input, stubMaxSize, expectDLL)
 }
 
+// PlanConvertedDLL accepts a PE32+ EXE and returns a [Plan] flagged
+// for the EXE→DLL conversion path ([Plan.IsConvertedDLL] set;
+// [Plan.IsDLL] clear). Same admission rules + sentinels as [PlanPE]
+// (rejects DLL inputs with [ErrIsDLL]); the actual format flip
+// happens at injection time.
+//
+// See docs/refactor-2026-doc/packer-exe-to-dll-plan.md.
+func PlanConvertedDLL(input []byte, stubMaxSize uint32) (Plan, error) {
+	plan, err := planPECore(input, stubMaxSize, expectEXE)
+	if err != nil {
+		return Plan{}, err
+	}
+	plan.IsConvertedDLL = true
+	return plan, nil
+}
+
 // planPECore is the shared body of PlanPE and PlanDLL.
 func planPECore(input []byte, stubMaxSize uint32, expect planExpect) (Plan, error) {
 	if DetectFormat(input) != FormatPE {

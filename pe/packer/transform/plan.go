@@ -102,6 +102,14 @@ type Plan struct {
 	// [PlanPE] never sets this flag (it rejects DLLs with
 	// [ErrIsDLL] upfront). PE only.
 	IsDLL bool
+
+	// IsConvertedDLL is set by [PlanConvertedDLL] for the EXE→DLL
+	// conversion path (PackBinaryOptions.ConvertEXEtoDLL). The input
+	// is an EXE; InjectConvertedDLL flips IMAGE_FILE_DLL on the
+	// output. Mutually exclusive with [IsDLL].
+	//
+	// Slice 5 of docs/refactor-2026-doc/packer-exe-to-dll-plan.md.
+	IsConvertedDLL bool
 }
 
 // Sentinels surfaced by PlanPE / PlanELF / InjectStubPE / InjectStubELF.
