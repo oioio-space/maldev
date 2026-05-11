@@ -67,6 +67,18 @@ type EmitOptions struct {
 	// ERROR_DLL_INIT_FAILED at LoadLibrary time. Production code
 	// MUST leave this false.
 	DiagSkipConvertedPayload bool
+
+	// DiagSkipConvertedSpawn keeps the SGN rounds + kernel32 resolver
+	// but skips the CreateThread call frame. Lets us tell whether
+	// the crash sits in SGN/resolver or in CreateThread invocation.
+	// Slice 5.5.y; production MUST leave false.
+	DiagSkipConvertedSpawn bool
+
+	// DiagSkipConvertedResolver keeps the SGN rounds but skips the
+	// resolver + CreateThread frame. If LoadLibrary succeeds with this
+	// flag and fails with DiagSkipConvertedSpawn, the bug lives in the
+	// resolver. Slice 5.5.y; production MUST leave false.
+	DiagSkipConvertedResolver bool
 }
 
 // baseReg is the callee-saved register the prologue loads with the

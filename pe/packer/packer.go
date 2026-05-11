@@ -171,6 +171,12 @@ type PackBinaryOptions struct {
 	// time. Production code MUST leave this false.
 	DiagSkipConvertedPayload bool
 
+	// DiagSkipConvertedResolver and DiagSkipConvertedSpawn are the
+	// finer-grained slice-5.5.y bisection flags forwarded to
+	// [stubgen.Options]. Production code MUST leave both false.
+	DiagSkipConvertedResolver bool
+	DiagSkipConvertedSpawn    bool
+
 	// RandomizeStubSectionName, when true, names the appended PE
 	// stub section with a fresh per-pack random label
 	// (`.xxxxx\x00\x00`) instead of the hardcoded ".mldv". Defeats
@@ -405,7 +411,9 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		Compress:        opts.Compress,
 		StubSectionName: stubSectionName,
 		ConvertEXEtoDLL:          opts.ConvertEXEtoDLL,
-		DiagSkipConvertedPayload: opts.DiagSkipConvertedPayload,
+		DiagSkipConvertedPayload:  opts.DiagSkipConvertedPayload,
+		DiagSkipConvertedResolver: opts.DiagSkipConvertedResolver,
+		DiagSkipConvertedSpawn:    opts.DiagSkipConvertedSpawn,
 		// StubMaxSize zero: stubgen.Generate picks 8192 (Compress=true) or
 		// 4096 (Compress=false) based on the Compress flag.
 	})

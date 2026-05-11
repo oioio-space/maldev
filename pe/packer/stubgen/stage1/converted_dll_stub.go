@@ -107,16 +107,23 @@ func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.R
 		if err := emitSGNRounds(b, plan, rounds, "converted_loop", "stage1/converted"); err != nil {
 			return err
 		}
-
-	// --- resolve kernel32!CreateThread → R13 ---
-	// EmitResolveKernel32Export clobbers RAX, RBX, RCX, RDX, R8, R9,
-	// R10, R11, R12 but preserves R13, R14, R15. R15 (our textBase)
-	// stays intact, so the OEP-computation below still works.
-	if err := EmitResolveKernel32Export(b, "CreateThread"); err != nil {
-		return fmt.Errorf("stage1/converted: resolve CreateThread: %w", err)
 	}
 
-	// --- CreateThread(NULL, 0, OEP, NULL, 0, NULL) ---
+	// Resolver + spawn live behind two finer ablation gates. The
+	// outer DiagSkipConvertedPayload still wins (it returns early
+	// before SGN); these only skip the downstream pieces.
+	if !opts.DiagSkipConvertedPayload && !opts.DiagSkipConvertedResolver {
+		// --- resolve kernel32!CreateThread → R13 ---
+		// EmitResolveKernel32Export clobbers RAX, RBX, RCX, RDX, R8, R9,
+		// R10, R11, R12 but preserves R13, R14, R15. R15 (our textBase)
+		// stays intact, so the OEP-computation below still works.
+		if err := EmitResolveKernel32Export(b, "CreateThread"); err != nil {
+			return fmt.Errorf("stage1/converted: resolve CreateThread: %w", err)
+		}
+	}
+
+	if !opts.DiagSkipConvertedPayload && !opts.DiagSkipConvertedResolver && !opts.DiagSkipConvertedSpawn {
+		// --- CreateThread(NULL, 0, OEP, NULL, 0, NULL) ---
 	// Windows x64 ABI:
 	//   rcx = lpThreadAttributes      (NULL)
 	//   rdx = dwStackSize             (0)
@@ -165,7 +172,7 @@ func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.R
 	if err := b.ADD(amd64.RSP, amd64.Imm(createThreadCallFrameSize)); err != nil {
 		return fmt.Errorf("stage1/converted: add rsp,createThreadCallFrameSize: %w", err)
 	}
-	} // end of `if !opts.DiagSkipConvertedPayload`
+	} // end of CreateThread-spawn gate
 
 	// --- return TRUE: restore args + r15, leave rax=1 ---
 	_ = b.Label(returnTrueLabel)

@@ -71,6 +71,14 @@ type Options struct {
 	// stage causes the real-loader ERROR_DLL_INIT_FAILED. Production
 	// code MUST leave this false.
 	DiagSkipConvertedPayload bool
+
+	// DiagSkipConvertedResolver and DiagSkipConvertedSpawn are
+	// finer-grained slice-5.5.y bisection gates. The first skips the
+	// kernel32 resolver and (transitively) the CreateThread call; the
+	// second keeps the resolver but skips the CreateThread call frame.
+	// Production code MUST leave both false.
+	DiagSkipConvertedResolver bool
+	DiagSkipConvertedSpawn    bool
 }
 
 // Sentinels surfaced by Generate.
@@ -220,6 +228,8 @@ func Generate(opts Options) ([]byte, []byte, error) {
 	)
 	emitOpts.AntiDebug = opts.AntiDebug
 	emitOpts.DiagSkipConvertedPayload = opts.DiagSkipConvertedPayload
+	emitOpts.DiagSkipConvertedResolver = opts.DiagSkipConvertedResolver
+	emitOpts.DiagSkipConvertedSpawn = opts.DiagSkipConvertedSpawn
 
 	if opts.Compress {
 		dst := make([]byte, lz4.CompressBlockBound(len(originalTextBytes)))

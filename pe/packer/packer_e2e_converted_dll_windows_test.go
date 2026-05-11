@@ -211,3 +211,87 @@ func TestPackBinary_ConvertEXEtoDLL_LoadLibrary_NoPayload_E2E(t *testing.T) {
 	writeDiag("ablation step 5: LoadLibrary OK on minimal stub → bug is downstream of flag latch")
 	_ = h
 }
+
+// TestPackBinary_ConvertEXEtoDLL_LoadLibrary_SGNOnly_E2E packs with
+// DiagSkipConvertedResolver=true: SGN rounds run, but resolver +
+// CreateThread are omitted. Distinguishes "SGN decrypts .text fine"
+// from "resolver or spawn crashes." Pass = SGN OK, bug downstream.
+func TestPackBinary_ConvertEXEtoDLL_LoadLibrary_SGNOnly_E2E(t *testing.T) {
+	_ = os.Remove(diagPath)
+	writeDiag("=== SGNOnly_E2E ===")
+
+	probe, err := os.ReadFile(filepath.Join("testdata", "probe_converted.exe"))
+	if err != nil {
+		t.Skipf("probe fixture missing: %v", err)
+	}
+	packed, _, err := packer.PackBinary(probe, packer.PackBinaryOptions{
+		Format:                    packer.FormatWindowsExe,
+		ConvertEXEtoDLL:           true,
+		DiagSkipConvertedResolver: true,
+		Stage1Rounds:              3,
+		Seed:                      0xC0DECAFE,
+	})
+	if err != nil {
+		t.Fatalf("PackBinary: %v", err)
+	}
+	dllFile, err := os.CreateTemp("", "maldev-packed-sgnonly-*.dll")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	defer os.Remove(dllFile.Name())
+	if _, err := dllFile.Write(packed); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	dllFile.Close()
+
+	writeDiag("sgnonly step a: about to LoadLibrary")
+	h, err := syscall.LoadLibrary(dllFile.Name())
+	writeDiag(fmt.Sprintf("sgnonly step b: LoadLibrary h=%#x err=%v", uintptr(h), err))
+	if err != nil {
+		t.Fatalf("LoadLibrary (SGN only) failed with %v — SGN-decryption is the bug", err)
+	}
+	writeDiag("sgnonly step c: OK → bug is in resolver or CreateThread")
+	_ = h
+}
+
+// TestPackBinary_ConvertEXEtoDLL_LoadLibrary_NoSpawn_E2E packs with
+// DiagSkipConvertedSpawn=true: SGN + resolver run, only the
+// CreateThread call frame is skipped. If this passes and the full
+// path fails, the bug lives in the CreateThread call frame itself.
+func TestPackBinary_ConvertEXEtoDLL_LoadLibrary_NoSpawn_E2E(t *testing.T) {
+	_ = os.Remove(diagPath)
+	writeDiag("=== NoSpawn_E2E ===")
+
+	probe, err := os.ReadFile(filepath.Join("testdata", "probe_converted.exe"))
+	if err != nil {
+		t.Skipf("probe fixture missing: %v", err)
+	}
+	packed, _, err := packer.PackBinary(probe, packer.PackBinaryOptions{
+		Format:                 packer.FormatWindowsExe,
+		ConvertEXEtoDLL:        true,
+		DiagSkipConvertedSpawn: true,
+		Stage1Rounds:           3,
+		Seed:                   0xC0DECAFE,
+	})
+	if err != nil {
+		t.Fatalf("PackBinary: %v", err)
+	}
+	dllFile, err := os.CreateTemp("", "maldev-packed-nospawn-*.dll")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	defer os.Remove(dllFile.Name())
+	if _, err := dllFile.Write(packed); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	dllFile.Close()
+
+	writeDiag("nospawn step a: about to LoadLibrary")
+	h, err := syscall.LoadLibrary(dllFile.Name())
+	writeDiag(fmt.Sprintf("nospawn step b: LoadLibrary h=%#x err=%v", uintptr(h), err))
+	if err != nil {
+		t.Fatalf("LoadLibrary (no spawn) failed with %v — resolver is the bug", err)
+	}
+	writeDiag("nospawn step c: OK → bug is in CreateThread call frame")
+	_ = h
+}
