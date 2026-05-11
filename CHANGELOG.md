@@ -7,6 +7,53 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Packer DLL chantier — v0.110.0 → v0.118.0 (2026-05-11)
+
+#### v0.118.0 — `transform.InjectConvertedDLL` (slice 5.4 of EXE→DLL)
+
+- `pe/packer/transform.InjectConvertedDLL(input, encryptedText,
+  stubBytes, plan)` — converts a packed EXE into a DLL at the byte
+  level. Delegates the full EXE injection pipeline to
+  `InjectStubPE` (write encrypted .text, mark .text RWX, append
+  stub section, rewrite OEP), then ORs the IMAGE_FILE_DLL bit on
+  COFF Characteristics so the Windows loader invokes our stub via
+  DllMain calling convention.
+- `pe/packer/transform.SetIMAGEFILEDLL(buf) error` — shared helper
+  centralising the IMAGE_FILE_DLL flip. Replaces 3 duplicated
+  byte-twiddling sites: `InjectConvertedDLL` (production),
+  `testutil.BuildDLLWithReloc` (fixture builder),
+  `plan_dll_test.setDLLBit` (test helper). Bounds-checked.
+- `pe/packer/transform.ErrPlanNotConverted` — admission sentinel
+  for plan-side admission (`Plan.IsConvertedDLL` must be true).
+  Mirrors `ErrPlanFormatMismatch` shape.
+- `pe/packer/transform.ErrConvertedStubLeak` — admission sentinel
+  catching the slice-2 native-DLL stub being routed through this
+  injector by mistake (the orig_dllmain slot patcher fires only
+  inside `InjectStubDLL`, never reached on this path; without the
+  guard the output would silently jump to an unpatched VA on
+  PROCESS_ATTACH).
+- Defensive `plan.Format == FormatPE` check fires before the
+  delegate, so a hand-crafted Plan with IsConvertedDLL=true +
+  Format=FormatELF fails fast with the right sentinel rather than
+  surfacing as a misleading "delegated EXE inject" error.
+- 6 unit tests: happy path (debug/pe parses, IMAGE_FILE_DLL set,
+  entry at stub RVA), input Characteristics OR-preserved,
+  rejection paths (non-converted plan / native-DLL stub / ELF
+  plan / short buffer for SetIMAGEFILEDLL).
+- **Defer to slice 4.5 / future:** `.reloc` synthesis +
+  DYNAMIC_BASE flip. The slice-5.3 stub has no absolute pointers
+  baked at pack time (R15-relative + PEB-walked), and Go static-PIE
+  inputs typically ship without relocs already → output loads at
+  preferred ImageBase. Operators that need ASLR on the converted
+  DLL must ensure the source EXE was linked with relocs +
+  DYNAMIC_BASE.
+- Slice 5.4 is pack-time + transform-layer only; doesn't touch
+  any EXE-path production call site. No Win VM E2E needed.
+
+Sub-slice 5.5 (`stubgen.Generate` dispatch on `ConvertEXEtoDLL` +
+operator-facing `PackBinary(ConvertEXEtoDLL=true)` end-to-end +
+Win10 VM E2E LoadLibrary roundtrip) is the natural next pickup.
+
 ### Packer DLL chantier — v0.110.0 → v0.117.0 (2026-05-11)
 
 #### v0.117.0 — Tier 🟡 stage1 helper dedup (refactor)
