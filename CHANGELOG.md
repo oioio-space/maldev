@@ -7,6 +7,37 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### Packer DLL chantier — v0.110.0 → v0.115.0 (2026-05-11)
+
+#### v0.115.0 — `EmitResolveKernel32Export` + ROR-13 hashes (slice 5.2 of EXE→DLL)
+
+- `pe/packer/stubgen/stage1.EmitResolveKernel32Export(b, exportName)` —
+  pack-time emitter producing pure-Go x86-64 asm (196 B) that
+  resolves any kernel32 export at runtime via a PEB walk +
+  EAT walk hashed with ROR-13 + XOR (Stephen Fewer canonical
+  shellcode technique). Output VA lands in R13. No IAT entry,
+  no LoadLibraryA call, no import-table IOC.
+- `stage1.Ror13HashASCII(s)` / `stage1.Ror13HashUnicodeUpper(s)` —
+  Go-side hashers byte-identical to the runtime asm. ASCII variant
+  is case-sensitive (Windows export names); Unicode variant folds
+  ASCII [a-z] to uppercase before XOR (matches the asm's wchar
+  walk over LDR_DATA_TABLE_ENTRY.BaseDllName).
+- `stage1.Kernel32DLLHash` — pinned hash of "kernel32.dll" computed
+  at init, spliced into the asm template at emit time. Pairs with
+  the per-call export hash to produce a unique 196 B emission per
+  exportName (only the 4-byte export-hash imm32 differs).
+- `stage1.ErrEmptyExportName` — admission sentinel.
+- 11 unit tests covering hash known-values + case-sensitivity +
+  asm decoder round-trip + sentinel splicing + GS prefix presence
+  + exact byte count.
+- **Simplify pass:** pinned byte budget at exact 196 B (caught any
+  asm drift a loose 100..256 window would have absorbed); renamed
+  the misleading `moduleFoundLbl` variable (held the loop-head
+  anchor, not the found anchor).
+- Slice 5.2 is pack-time + emitter only; the resolver is wired
+  into the converted-DLL stub by slice 5.3. No Win VM E2E needed
+  for this commit (no production call site touched).
+
 ### Packer DLL chantier — v0.110.0 → v0.114.0 (2026-05-11)
 
 #### v0.114.0 — `PackBinaryOptions.ConvertEXEtoDLL` API surface (slice 5.1 of EXE→DLL)
