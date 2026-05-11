@@ -48,6 +48,41 @@ func TestPatchPEImageBase_RejectsTruncated(t *testing.T) {
 	}
 }
 
+// TestPatchPEImageBase_RewritesRelocedDIR64Values guards the
+// v0.106.0 fix: changing the preferred ImageBase without
+// adjusting in-file absolute pointer values would break the
+// loader's rebase math (root cause of the earlier crash).
+// The patch must walk the base-reloc table and add
+// `(newBase - oldBase)` to each DIR64/HIGHLOW patch target.
+func TestPatchPEImageBase_RewritesRelocedDIR64Values(t *testing.T) {
+	pe := peWithRelocsForShift(t) // reused from image_va_shift_test.go
+	const optOff = 0x40 + 4 + transform.PECOFFHdrSize
+	// Set DYNAMIC_BASE bit so PatchPEImageBase doesn't reject.
+	binary.LittleEndian.PutUint16(pe[optOff+transform.OptDllCharacteristicsOffset:],
+		transform.DllCharDynamicBase)
+	const oldBase uint64 = 0x140000000
+	const newBase uint64 = 0x180000000
+	const dir64TargetFile = 0x400 + 0x20
+	originalValue := binary.LittleEndian.Uint64(pe[dir64TargetFile:])
+	if originalValue != oldBase+0x1080 {
+		t.Fatalf("fixture sanity: dir64 target 0x%x, want 0x%x",
+			originalValue, oldBase+0x1080)
+	}
+	if err := transform.PatchPEImageBase(pe, newBase); err != nil {
+		t.Fatalf("PatchPEImageBase: %v", err)
+	}
+	gotValue := binary.LittleEndian.Uint64(pe[dir64TargetFile:])
+	want := newBase + 0x1080 // value should now encode (newBase + RVA)
+	if gotValue != want {
+		t.Errorf("dir64 target after ImageBase patch = 0x%x, want 0x%x (newBase + RVA)",
+			gotValue, want)
+	}
+	gotImageBase := binary.LittleEndian.Uint64(pe[optOff+transform.OptImageBase64Offset:])
+	if gotImageBase != newBase {
+		t.Errorf("ImageBase = 0x%x, want 0x%x", gotImageBase, newBase)
+	}
+}
+
 func TestPatchPEImageBase_RejectsNonASLR(t *testing.T) {
 	pe := minPEWithASLR(t)
 	const optOff = 0x40 + 4 + transform.PECOFFHdrSize
