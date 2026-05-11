@@ -7,7 +7,44 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
-### Packer DLL chantier — v0.110.0 → v0.112.0 (2026-05-11)
+### Packer DLL chantier — v0.110.0 → v0.113.0 (2026-05-11)
+
+#### v0.113.0 — `PackBinary(Format=FormatWindowsDLL)` (slice 4 of `FormatWindowsDLL`)
+
+- `pe/packer/transform.IsDLL(input) bool` — cheap pre-flight that
+  returns true for PE32+ inputs carrying IMAGE_FILE_DLL in COFF
+  Characteristics. Used by the dispatcher to pick between `PlanPE`
+  (EXE path) and `PlanDLL` (DLL path) without paying the full Plan
+  computation.
+- `pe/packer/transform.DirBaseReloc = 5` — promoted from the
+  unexported `dirBaseReloc` so test helpers + sibling packages
+  reference the BASERELOC directory index by name (kills magic-5
+  in 3 sites).
+- `pe/packer/stubgen.Generate` now dispatches on `IsDLL`: PE inputs
+  with the DLL bit route through `PlanDLL` + `EmitDLLStub` +
+  `PatchDLLStubDisplacements` + `InjectStubDLL`; EXE inputs keep
+  the existing `PlanPE` + `EmitStub` + `InjectStubPE` flow.
+- `pe/packer/stubgen.ErrCompressDLLUnsupported` — sentinel for the
+  slice-4 limitation: the DllMain stub layout doesn't yet embed
+  the LZ4 inflate path the EXE stub uses. `errors.Is`-compatible
+  so callers can detect it without parsing error strings.
+- `pe/packer.PackBinary` cross-check: when the operator passes
+  `Format=FormatWindowsExe` with a DLL input (or `FormatWindowsDLL`
+  with an EXE), surface `ErrUnsupportedFormat` before any planning
+  work — the magic-byte cross-check above can't tell EXE and DLL
+  apart since both are FormatPE.
+- `testutil.BuildDLLWithReloc(t, bodySize)` — synthetic DLL fixture
+  for the test suites. Replaces near-duplicate hand-rolled fixtures
+  in `pe/packer/transform/inject_dll_test.go` and `pe/packer/packer_dll_test.go`.
+- 5 new tests: `TestPackBinary_FormatWindowsDLL_HappyPath` /
+  `_RejectsEXEInput` / `_RejectsCompress`,
+  `TestPackBinary_FormatWindowsExe_RejectsDLLInput`,
+  `TestIsDLL_DetectsBitCorrectly`. Win10 VM E2E green.
+- **Slice 4.5 (next):** real-loader `LoadLibrary` round-trip with
+  an MSVC-built `testlib.dll`. The C fixture + Makefile recipe ship
+  in `pe/packer/testdata/`; mingw won't emit `.reloc` (toolchain
+  limitation documented in `testlib.c`), so the round-trip test
+  needs the Win VM's MSVC toolchain.
 
 #### v0.112.0 — `transform.InjectStubDLL` (slice 3 of `FormatWindowsDLL`)
 

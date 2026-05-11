@@ -1,5 +1,5 @@
 ---
-status: in-progress (slice 3 of 4 shipped)
+status: pack-time pipeline complete (4 of 4 byte-pipeline slices shipped; LoadLibrary VM E2E deferred to 4.5)
 created: 2026-05-11
 last_reviewed: 2026-05-11
 reflects_commit: HEAD
@@ -14,7 +14,10 @@ reflects_commit: HEAD
 | 1 | `transform.PlanDLL` + `Plan.IsDLL` + `ErrIsEXE` + `ImageFileDLL` (promoted to `peconst.go`, dedup'd against `pe/packer/runtime`) | ✅ shipped | v0.110.0 (`a8f66b4`) |
 | 2 | `stubgen/stage1/dll_stub.go` — DllMain prologue/epilogue (preserve rcx/edx/r8 + r15, decrypt-once sentinel, tail-call to original DllMain) + `PatchDLLStubDisplacements` + `PatchDllMainSlot`. **Bonus from /simplify:** shared `emitTextBasePrologue` + `patchSentinel` helpers extracted from `EmitStub`/`PatchTextDisplacement` — EXE and DLL paths now share both the CALL+POP+ADD idiom and the sentinel scan-rewrite. | ✅ shipped | v0.111.0 |
 | 3 | `transform.InjectStubDLL` — writes encrypted .text, appends the stub section, appends a `.mldrel` section carrying the merged reloc table (host blocks + a new DIR64 entry covering the DllMain slot), re-points `DataDirectory[BASERELOC]`, pre-fills the slot with `ImageBase + OEPRVA`. **Simplify bonus:** the DllMain sentinel + slot patcher moved to `transform` (`DLLStubSentinel`, `DLLStubSentinelBytes`, `PatchDLLStubSlot`); `stage1.PatchDllMainSlot` now wraps it — single source of truth, no cross-package drift. | ✅ shipped | v0.112.0 |
-| 4 | `packer.go` dispatch `FormatWindowsDLL` → `PlanDLL` / `GenerateDLL` / `InjectStubDLL` + Win10 VM E2E with `testlib.dll` | ⏳ next | — |
+| 4 | `transform.IsDLL` pre-flight + `stubgen.Generate` DLL dispatch + `PackBinary` EXE/DLL cross-check + `stubgen.ErrCompressDLLUnsupported`. Operator-facing API: `PackBinaryOptions.Format = FormatWindowsDLL` now drives the full DLL pipeline end-to-end at the byte level. **Simplify bonus:** the synthetic-DLL test fixture promoted to `testutil.BuildDLLWithReloc` (two consumers); `transform.DirBaseReloc` exported (kills magic-5 in 3 sites). | ✅ shipped | v0.113.0 |
+| 4.5 | `LoadLibrary` round-trip on Win10 VM with an MSVC-built `testlib.dll` (mingw won't emit `.reloc` even with `--enable-reloc-section`; documented in `pe/packer/testdata/testlib.c`). Validates the DllMain stub against the real loader — until then the pack-time tests guarantee byte-level correctness only. | ⏳ next | — |
+| 5 | **EXE → DLL conversion** — separate chantier scoped in [`packer-exe-to-dll-plan.md`](./packer-exe-to-dll-plan.md). Converts an EXE input into a DLL output at pack time (sideloading / injection / LOLBAS). Pure-Go pack pipeline, PEB-walk-resolved `CreateThread` to spawn the original OEP from `DllMain(PROCESS_ATTACH)`. 5 sub-slices, ~970 LOC. | ⏳ follow-up | — |
+| 6 | **Fused EXE→DLL + dllproxy** — `packer.PackProxyDLL` emits a single DLL that is BOTH a `pe/dllproxy` forwarder for a target system DLL AND a packed-EXE-as-DLL payload. One-file drop for search-order hijack with the payload running on `DllMain(PROCESS_ATTACH)`. Scoped at the end of [`packer-exe-to-dll-plan.md`](./packer-exe-to-dll-plan.md). 3 sub-slices, ~650 LOC. Depends on slice 5. | ⏳ follow-up | — |
 
 ## Why this exists
 
