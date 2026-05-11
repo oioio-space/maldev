@@ -62,6 +62,13 @@ func PlanPE(input []byte, stubMaxSize uint32) (Plan, error) {
 	}
 
 	coffOff := peOff + peSigSize
+	// Reject DLLs upfront — the stub design assumes EXE entry-point
+	// semantics (arg-less call from kernel + ExitProcess at end).
+	// IMAGE_FILE_DLL is bit 0x2000 of COFF Characteristics (offset
+	// +0x12 from coffOff).
+	if binary.LittleEndian.Uint16(input[coffOff+0x12:coffOff+0x14])&0x2000 != 0 {
+		return Plan{}, ErrIsDLL
+	}
 	numSections := binary.LittleEndian.Uint16(input[coffOff+coffNumSectionsOffset : coffOff+coffNumSectionsOffset+2])
 	sizeOfOptHdr := binary.LittleEndian.Uint16(input[coffOff+coffSizeOfOptionalHdrOffset : coffOff+coffSizeOfOptionalHdrOffset+2])
 

@@ -1565,6 +1565,7 @@ binaries; rebuild via `make winhello winpanic`).
 | `winhello_w32.exe` | mingw `-nostdlib`, Win32 directly (no CRT, no globals, no constructors) | ✅ runs + prints stdout | ✅ runs + prints stdout | proves the IMPORT walker covers non-Go MSVC-style binaries too — directory inventory IMPORT + EXCEPTION + IAT only |
 | `winver.exe` (Windows 11 stock) | MSVC PE, **CFG-protected** | ❌ crash `0xC0000409` STATUS_STACK_BUFFER_OVERRUN | ❌ load reject "is not a valid Win32 application" | **CFG cookie protection rejects modified .text** — see Known limitations below |
 | **mingw default (with CRT)** | C compiled normally, `puts` etc. | ❌ rejected at `PackBinary` time | ❌ same | mingw CRT injects TLS callbacks → `transform.ErrTLSCallbacks`. Workaround: build with `-nostdlib` like `winhello_w32` |
+| **DLLs** (`testlib.dll` exporting `add()`) | mingw no-CRT shared library | ❌ rejected at `PackBinary` time | ❌ same | DLL contract (DllMain return BOOL, multiple invocations with PROCESS_ATTACH/DETACH reasons) incompatible with PackBinary's EXE stub design → `transform.ErrIsDLL`. Workaround: wrap with `PackBinaryBundle` + a custom loader that LoadLibrary's the unwrapped payload |
 
 **Operational envelope:** `PackBinary` is validated for
 **Go-built static-PIE Windows binaries**. Microsoft CFG-protected

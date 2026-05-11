@@ -111,6 +111,18 @@ var (
 	// encrypted bytes — out of scope v1.
 	ErrTLSCallbacks = errors.New("transform: input has TLS callbacks (out of scope)")
 
+	// ErrIsDLL fires when the input PE carries the
+	// IMAGE_FILE_DLL bit in COFF Characteristics. PackBinary's
+	// stub follows the EXE entry-point contract (single arg-less
+	// call from the loader, then ExitProcess); a DLL's "entry
+	// point" is DllMain(HINSTANCE, DWORD, LPVOID) → BOOL invoked
+	// multiple times with PROCESS_ATTACH / THREAD_ATTACH /
+	// PROCESS_DETACH reasons. The stub would never see PROCESS_DETACH
+	// to clean up, and its ExitProcess would tear down the host
+	// process instead of returning TRUE. Out of scope for v1 —
+	// see HANDOFF-2026-05-11 "DLL packing" open question.
+	ErrIsDLL = errors.New("transform: input is a DLL (PackBinary only supports EXE — use PackBinaryBundle to wrap DLLs)")
+
 	// ErrStubTooLarge fires when emitted stub bytes exceed
 	// Plan.StubMaxSize.
 	ErrStubTooLarge = errors.New("transform: emitted stub exceeds reserved size")
