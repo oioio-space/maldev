@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"time"
 
 	"github.com/oioio-space/maldev/crypto"
 	"github.com/oioio-space/maldev/pe/packer/internal/elfgate"
@@ -148,6 +149,18 @@ type PackBinaryOptions struct {
 	// PE only; ELF section names live in `.shstrtab` and aren't
 	// load-relevant.
 	RandomizeStubSectionName bool
+
+	// RandomizeTimestamp, when true, overwrites the COFF File
+	// Header's TimeDateStamp with a random epoch in the
+	// `[now-5y, now]` window. Defeats temporal clustering by
+	// threat-intel pivots that group samples by linker timestamp.
+	// Per-pack uniqueness comes from a fresh-seeded RNG (seeded
+	// from opts.Seed when non-zero, else crypto-random).
+	//
+	// Phase 2-B of docs/refactor-2026-doc/packer-design.md.
+	// PE only — ELF doesn't carry an analogous build-timestamp
+	// field the loader respects.
+	RandomizeTimestamp bool
 }
 
 // ErrUnsupportedFormat fires when [PackBinary]'s opts.Format does not
@@ -198,7 +211,7 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		stubSectionName = transform.RandomStubSectionName(rand.New(rand.NewSource(seed)))
 	}
 
-	return stubgen.Generate(stubgen.Options{
+	out, key, err := stubgen.Generate(stubgen.Options{
 		Input:           input,
 		Rounds:          rounds,
 		Seed:            opts.Seed,
@@ -209,6 +222,30 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		// StubMaxSize zero: stubgen.Generate picks 8192 (Compress=true) or
 		// 4096 (Compress=false) based on the Compress flag.
 	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Phase 2-B: per-pack random TimeDateStamp on PE outputs only.
+	// Run AFTER stubgen.Generate so we patch the final byte buffer
+	// rather than mutating the input. Reproducible across packs of
+	// the same input + seed (RNG seeded from opts.Seed when non-zero).
+	if opts.RandomizeTimestamp && transform.DetectFormat(out) == transform.FormatPE {
+		seed := opts.Seed
+		if seed == 0 {
+			s, ierr := random.Int64()
+			if ierr != nil {
+				return nil, nil, fmt.Errorf("packer: random timestamp seed: %w", ierr)
+			}
+			seed = s
+		}
+		ts := transform.RandomTimeDateStamp(rand.New(rand.NewSource(seed)), uint32(time.Now().Unix()))
+		if perr := transform.PatchPETimeDateStamp(out, ts); perr != nil {
+			return nil, nil, fmt.Errorf("packer: patch timestamp: %w", perr)
+		}
+	}
+
+	return out, key, nil
 }
 
 // transformFormatFor maps the operator-facing packer.Format to the
