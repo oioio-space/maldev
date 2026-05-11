@@ -1576,6 +1576,16 @@ at a missing walker per the
 
 ## Known limitations
 
+> **Diagnosing failures.** The companion doc
+> [`docs/refactor-2026-doc/packer-debug-toolkit.md`](../../refactor-2026-doc/packer-debug-toolkit.md)
+> covers the empirical-bisection workflow + in-tree CLIs
+> (`packer-vis sections`, `packer-vis directories`,
+> `packer-vis entropy`, `packer-vis compare`) that solve most
+> packer crashes without an external debugger. It includes a
+> recognisable-failure-code table mapping `0xC0000005` /
+> `0xC0000135` / `0xC0000409` / "is not a valid Win32
+> application" to their root causes + first-action remediation.
+
 ### `0xC0000409` (STATUS_STACK_BUFFER_OVERRUN) on Windows execution
 
 **Symptom:** packed binary exits with exit code `3221226505`
