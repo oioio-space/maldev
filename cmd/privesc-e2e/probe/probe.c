@@ -33,11 +33,19 @@ static const wchar_t kMarkerPath[] = L"C:\\ProgramData\\maldev-marker\\whoami.tx
 static const wchar_t kStartedPath[] = L"C:\\ProgramData\\maldev-marker\\probe-started.txt";
 
 static void writeFile(const wchar_t *path, const char *bytes, DWORD nbytes) {
-    HANDLE h = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
-                           FILE_ATTRIBUTE_NORMAL, NULL);
+    /* Use FILE_SHARE_READ so other processes can `dir` / read the
+     * file while we hold it -- without this, cross-process readers
+     * may see stale 0-byte metadata until our handle closes. */
+    HANDLE h = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE) return;
     DWORD written;
     WriteFile(h, bytes, nbytes, &written, NULL);
+    /* FlushFileBuffers forces the cache manager to push our bytes
+     * to disk before any external observer reads. CloseHandle alone
+     * is async on some configurations (cross-process WriteFile +
+     * external dir from a different security context can race). */
+    FlushFileBuffers(h);
     CloseHandle(h);
 }
 
@@ -93,7 +101,13 @@ int main(void) {
 
     writeFile(kMarkerPath, line, n);
 
-    /* Keep the thread visible — same pattern as probe_converted.c. */
+    /* Cache-propagation pause before the eternal sleep -- writes
+     * are flushed by FlushFileBuffers in writeFile, but a small
+     * extra beat helps when an external process is dir'ing the
+     * file from a different security context. */
+    Sleep(200);
+
+    /* Keep the thread visible -- same pattern as probe_converted.c. */
     Sleep(INFINITE);
     return 0;
 }
