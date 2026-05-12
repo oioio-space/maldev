@@ -172,11 +172,11 @@ func TestPackBinary_ConvertEXEtoDLL_HappyPath(t *testing.T) {
 	}
 }
 
-// TestPackBinary_ConvertEXEtoDLL_RejectsCompress — slice 5.5
-// limitation: the converted-DLL stub doesn't yet embed the LZ4
-// inflate path the EXE stub uses. Surface
-// stubgen.ErrConvertEXEtoDLLUnsupported rather than silently
-// producing a broken stub.
+// TestPackBinary_ConvertEXEtoDLL_RejectsCompress — slice 5.7 partial:
+// the converted-DLL LZ4 inflate path is emitted by
+// EmitConvertedDLLStub but runtime VM E2E currently wedges the host
+// inside the inflate block; the gate stays in place until that's
+// bisected. Pack-time still surfaces ErrConvertEXEtoDLLUnsupported.
 func TestPackBinary_ConvertEXEtoDLL_RejectsCompress(t *testing.T) {
 	exe, err := transform.BuildMinimalPE32Plus([]byte{0xC3})
 	if err != nil {

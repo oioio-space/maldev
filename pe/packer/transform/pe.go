@@ -292,9 +292,15 @@ func InjectStubPE(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, er
 	binary.LittleEndian.PutUint16(out[coffOff+coffNumSectionsOffset:coffOff+coffNumSectionsOffset+2], numSections+1)
 
 	// SizeOfImage must cover the new section's virtual span; the loader
-	// rejects the image at load time if this is too small.
+	// rejects the image at load time if this is too small. When
+	// StubScratchSize > 0 the section's VirtualSize was extended by
+	// the scratch region above — SizeOfImage has to include it,
+	// otherwise the loader truncates the mapping (silently for EXEs,
+	// hard-rejects with STATUS_INVALID_IMAGE_FORMAT for DLLs).
+	// Slice 5.7 caught this: converted-DLL + Compress=true produced
+	// `.mldv` ending at VA 0x80c0 while SizeOfImage stayed at 0x8000.
 	sectionAlign := binary.LittleEndian.Uint32(out[optOff+optSectionAlignOffset : optOff+optSectionAlignOffset+4])
-	newSizeOfImage := alignUpU32(plan.StubRVA+plan.StubMaxSize, sectionAlign)
+	newSizeOfImage := alignUpU32(plan.StubRVA+plan.StubMaxSize+plan.StubScratchSize, sectionAlign)
 	binary.LittleEndian.PutUint32(out[optOff+optSizeOfImageOffset:optOff+optSizeOfImageOffset+4], newSizeOfImage)
 
 	binary.LittleEndian.PutUint32(out[optOff+optAddrEntryOffset:optOff+optAddrEntryOffset+4], plan.StubRVA)

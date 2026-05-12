@@ -155,6 +155,69 @@ func TestPackBinary_ConvertEXEtoDLL_LoadLibrary_E2E(t *testing.T) {
 	writeDiag("step 8: test complete")
 }
 
+// TestPackBinary_ConvertEXEtoDLL_LoadLibrary_Compress_E2E validates
+// slice 5.7: PackBinary(ConvertEXEtoDLL=true, Compress=true) ships a
+// DLL whose DllMain SGN-decodes the LZ4 block, inflates into the
+// stub-section scratch buffer, memcpys plaintext back to .text, then
+// spawns the original entry. Same marker assertion as the
+// uncompressed E2E.
+func TestPackBinary_ConvertEXEtoDLL_LoadLibrary_Compress_E2E(t *testing.T) {
+	t.Skip("slice 5.7 partial: pack-time wired (stub + SizeOfImage); runtime " +
+		"VM E2E wedges the host inside the LZ4 inflate block — gated via " +
+		"stubgen.ErrConvertEXEtoDLLUnsupported until bisected. Set env " +
+		"MALDEV_PACKER_COMPRESS_DLL_DEBUG=1 to run anyway when debugging.")
+	if os.Getenv("MALDEV_PACKER_COMPRESS_DLL_DEBUG") != "1" {
+		return
+	}
+	_ = os.Remove(diagPath)
+	writeDiag("=== Compress_E2E ===")
+
+	probe, err := os.ReadFile(filepath.Join("testdata", "probe_converted.exe"))
+	if err != nil {
+		t.Skipf("probe fixture missing: %v", err)
+	}
+	packed, _, err := packer.PackBinary(probe, packer.PackBinaryOptions{
+		Format:          packer.FormatWindowsExe,
+		ConvertEXEtoDLL: true,
+		Compress:        true,
+		Stage1Rounds:    3,
+		Seed:            0xC0DECAFE,
+	})
+	if err != nil {
+		t.Fatalf("PackBinary Compress: %v", err)
+	}
+	writeDiag(fmt.Sprintf("compress step 1: packed (%d B)", len(packed)))
+
+	dllFile, err := os.CreateTemp("", "maldev-packed-compress-*.dll")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	defer os.Remove(dllFile.Name())
+	if _, err := dllFile.Write(packed); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	dllFile.Close()
+
+	_ = os.Remove(markerPath)
+	writeDiag("compress step 2: about to LoadLibrary")
+	h, err := syscall.LoadLibrary(dllFile.Name())
+	writeDiag(fmt.Sprintf("compress step 3: LoadLibrary h=%#x err=%v", uintptr(h), err))
+	if err != nil {
+		t.Fatalf("LoadLibrary Compress: %v", err)
+	}
+	_ = h
+	time.Sleep(2 * time.Second)
+	content, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("marker missing — LZ4 inflate or memcpy broken: %v", err)
+	}
+	defer os.Remove(markerPath)
+	if got, want := string(content), "OK\n"; got != want {
+		t.Errorf("marker = %q, want %q", got, want)
+	}
+	writeDiag("compress step 4: marker OK — LZ4 path validated")
+}
+
 // TestPackBinary_ConvertEXEtoDLL_LoadLibrary_AntiDebug_E2E asserts the
 // silent-exit semantics of the AntiDebug-on-converted-DLL path:
 //

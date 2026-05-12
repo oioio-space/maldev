@@ -7,7 +7,39 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
-### Packer DLL chantier — v0.110.0 → v0.122.0 (2026-05-11 → 2026-05-12)
+### Packer DLL chantier — v0.110.0 → v0.123.0 (2026-05-11 → 2026-05-12)
+
+#### v0.123.0 — Slice 5.7 partial + SizeOfImage scratch fix
+
+**Slice 5.7 (Compress on converted DLL) — pack-time wired, runtime
+deferred:**
+
+- `EmitConvertedDLLStub` now emits the LZ4 register-setup + inline
+  inflate + memcpy block between the SGN rounds and the kernel32
+  resolver, mirroring the EXE-stub path (`EmitStub`). Trio of
+  required `EmitOptions` fields (`CompressedSize`, `OriginalSize`,
+  `ScratchDispFromText`) is validated.
+- The `ErrConvertEXEtoDLLUnsupported` gate at `stubgen.Generate`
+  stays in place: VM E2E with `Compress=true` currently wedges the
+  Win10 host (SSH-unreachable) inside the LZ4 path. Root cause not
+  yet bisected — the gate prevents operators from shipping the broken
+  runtime. Re-enable once
+  `TestPackBinary_ConvertEXEtoDLL_LoadLibrary_Compress_E2E` (currently
+  `t.Skip`-gated; toggle with `MALDEV_PACKER_COMPRESS_DLL_DEBUG=1` to
+  bisect) turns green.
+
+**`InjectStubPE` SizeOfImage fix (applies to ALL Compress packs):**
+
+When `Plan.StubScratchSize > 0` the appended stub section's
+`VirtualSize` extends past `StubMaxSize`. `SizeOfImage` was being
+computed as `alignUp(StubRVA + StubMaxSize)` — the scratch region
+overflowed declared image bounds. Win10's DLL loader hard-rejects
+with `STATUS_INVALID_IMAGE_FORMAT` / `ERROR_BAD_EXE_FORMAT` (193) in
+this case; EXE loader had been silently lenient. Fix: include
+`StubScratchSize` in the `SizeOfImage` computation. Caught while
+running slice-5.7 Compress E2E on the converted-DLL path.
+
+
 
 #### v0.122.0 — Slice 5.6: AntiDebug for converted-DLL stub
 
