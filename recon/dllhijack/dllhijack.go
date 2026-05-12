@@ -2,6 +2,8 @@ package dllhijack
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -9,6 +11,11 @@ import (
 	"github.com/oioio-space/maldev/evasion/stealthopen"
 	"github.com/oioio-space/maldev/pe/imports"
 )
+
+// ErrNoWritableOpportunity fires when [PickBestWritable] scanned the
+// host but every ranked Opportunity is read-only — no payload drop
+// path. Wrap with [errors.Is] to branch.
+var ErrNoWritableOpportunity = errors.New("dllhijack: no writable opportunity")
 
 // ScanOpts bundles optional, composable behaviour for the scanners.
 // Zero value preserves the default path-based file open.
@@ -281,4 +288,45 @@ func ParseBinaryPath(cmdline string) string {
 		return cmdline[:sp]
 	}
 	return cmdline
+}
+
+// PickBestWritable runs [ScanAll] + [Rank] and returns the highest-
+// scoring writable Opportunity. Preference order:
+//
+//  1. Writable AND (IntegrityGain OR AutoElevate) — the elevation
+//     vectors operators want.
+//  2. Any writable — fallback when no elevation path is reachable.
+//
+// Returns [ErrNoWritableOpportunity] (wrappable via [errors.Is]) when
+// every ranked Opportunity is read-only or the scan turned up nothing.
+// Use this when the caller wants one ready-to-drop target picked
+// already; reach for ScanAll + Rank directly when you need to inspect
+// every candidate (e.g. an operator UI).
+func PickBestWritable(opts ...ScanOpts) (*Opportunity, error) {
+	all, err := ScanAll(opts...)
+	if err != nil {
+		return nil, fmt.Errorf("dllhijack: PickBestWritable scan: %w", err)
+	}
+	ranked := Rank(all)
+	if pick := pickBestWritableFrom(ranked); pick != nil {
+		return pick, nil
+	}
+	return nil, fmt.Errorf("%w (scanned %d candidates)", ErrNoWritableOpportunity, len(ranked))
+}
+
+// pickBestWritableFrom is the scan-free selector core, exposed for
+// platform-agnostic unit tests. ranked must already have been passed
+// through [Rank]. Returns nil when no Opportunity is writable.
+func pickBestWritableFrom(ranked []Opportunity) *Opportunity {
+	for i := range ranked {
+		if ranked[i].Writable && (ranked[i].IntegrityGain || ranked[i].AutoElevate) {
+			return &ranked[i]
+		}
+	}
+	for i := range ranked {
+		if ranked[i].Writable {
+			return &ranked[i]
+		}
+	}
+	return nil
 }
