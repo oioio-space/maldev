@@ -554,6 +554,17 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		out = newOut
 	}
 
+	// Always strip DataDirectory[SECURITY] on PE outputs. The
+	// .text mutation invalidates any Authenticode signature
+	// regardless; carrying a stale cert pointer makes the file
+	// look "signed-but-tampered" (loud OPSEC signal). Zeroing
+	// the pointer renders it cleanly "unsigned".
+	if isPE {
+		if perr := transform.StripPESecurityDirectory(out); perr != nil {
+			return nil, nil, fmt.Errorf("packer: strip security directory: %w", perr)
+		}
+	}
+
 	return out, key, nil
 }
 
