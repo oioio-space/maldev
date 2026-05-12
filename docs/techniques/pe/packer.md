@@ -262,16 +262,17 @@ blob standalone.
 ### Mode 2 — `PackPipeline` / `UnpackPipeline` (composed blob)
 
 Stack multiple ciphers / compressors / permutations. Each stage is
-keyed independently; the operator gets back a `[]Step` slice they
-need to replay (in reverse) to unpack.
+keyed independently; the operator gets back a `PipelineKeys` slice
+of per-step key material they need to transport alongside the blob
+to recover the payload.
 
 ```go
-pipeline := []packer.Step{
+pipeline := []packer.PipelineStep{
     {Op: packer.OpCompress, Algo: uint8(packer.CompressorFlate)},
-    {Op: packer.OpEncrypt,  Algo: uint8(packer.CipherAESGCM)},
+    {Op: packer.OpCipher,   Algo: uint8(packer.CipherAESGCM)},
 }
-blob, steps, err := packer.PackPipeline(payload, pipeline)
-recovered, err := packer.UnpackPipeline(blob, steps)
+blob, keys, err := packer.PackPipeline(payload, pipeline)
+recovered, err := packer.UnpackPipeline(blob, keys)
 ```
 
 Same shape as `Pack`; just stronger obfuscation when the operator
@@ -1855,23 +1856,35 @@ blocking; tracked.
 
 ---
 
-## Tested-fixture matrix (2026-05-11)
+## Tested-fixture matrix (2026-05-12)
 
 The empirical results below come from running each fixture
-through `Vanilla` (no opts) and `RandomizeAll` (every Phase 2
-opt) packs, then executing the result on a Win10 VM. All
-fixtures live under `pe/packer/testdata/` (force-tracked
-binaries; rebuild via `make winhello winpanic`).
+through ALL applicable pack modes + Win10 VM E2E. All fixtures
+live under `pe/packer/testdata/` (force-tracked binaries;
+rebuild via the `pe/packer/testdata/Makefile` targets).
+
+### Vanilla / RandomizeAll matrix (Mode 3 EXE pack)
 
 | Fixture | Class | Vanilla pack | `RandomizeAll` pack | Comment |
 |---|---|---|---|---|
 | `winhello.exe` | Go static-PIE, exits cleanly | ✅ runs + prints stdout | ✅ runs + prints stdout | the canonical happy path |
 | `winpanic.exe` | Go static-PIE, nil-deref + `defer/recover` | ✅ recovers + prints stack | ✅ recovers + prints stack | `.pdata` stale doesn't bite Go (Go uses pclntab unwinder, not Win32 SEH) |
 | `winhello_w32.exe` | mingw `-nostdlib`, Win32 directly (no CRT, no globals, no constructors) | ✅ runs + prints stdout | ✅ runs + prints stdout | proves the IMPORT walker covers non-Go MSVC-style binaries too — directory inventory IMPORT + EXCEPTION + IAT only |
-| `winhello_w32_res.exe` | `winhello_w32` + RT_GROUP_ICON + RT_MANIFEST embedded via `tc-hib/winres` (pure Go, no mingw windres) | ✅ resources parseable post-pack | ✅ resources parseable post-pack | proves the **RESOURCE walker** (Phase 2-F-3-c-3) covers `RandomizeImageVAShift` for binaries with embedded icons / manifests / version-info. Without this walker `RandomizeAll` would leave the resource tree's leaf `IMAGE_RESOURCE_DATA_ENTRY.OffsetToData` RVAs stale → `winres.LoadFromEXE` fails with "data entry out of bounds". Regenerate fixture: `scripts/build-fixture-winres.sh`. |
+| `winhello_w32_res.exe` | `winhello_w32` + RT_GROUP_ICON + RT_MANIFEST embedded via `tc-hib/winres` (pure Go, no mingw windres) | ✅ resources parseable post-pack | ✅ resources parseable post-pack | proves the **RESOURCE walker** (Phase 2-F-3-c-3, v0.125.0) preserves icons/manifests under `RandomizeImageVAShift`. Regenerate fixture: `scripts/build-fixture-winres.sh`. |
 | `winver.exe` (Windows 11 stock) | MSVC PE, **CFG-protected** | ❌ crash `0xC0000409` STATUS_STACK_BUFFER_OVERRUN | ❌ load reject "is not a valid Win32 application" | **CFG cookie protection rejects modified .text** — see Known limitations below |
 | **mingw default (with CRT)** | C compiled normally, `puts` etc. | ❌ rejected at `PackBinary` time | ❌ same | mingw CRT injects TLS callbacks → `transform.ErrTLSCallbacks`. Workaround: build with `-nostdlib` like `winhello_w32` |
-| **DLLs** (`testlib.dll` exporting `add()`) | mingw no-CRT shared library | ❌ rejected at `PackBinary` time | ❌ same | DLL contract (DllMain return BOOL, multiple invocations with PROCESS_ATTACH/DETACH reasons) incompatible with PackBinary's EXE stub design → `transform.ErrIsDLL`. **In progress (v0.110.0+):** `transform.PlanDLL` ships the planning layer; the DllMain stub itself lands in slice 2 of the [DLL packer plan](../../refactor-2026-doc/packer-dll-format-plan.md). Until that closes, workaround is `PackBinaryBundle` + a custom loader that LoadLibrary's the unwrapped payload. |
+| **DLLs as EXE input** (`testlib.dll`) | mingw no-CRT shared library passed to `Format=FormatWindowsExe` | ❌ rejected at `PackBinary` time | ❌ same | `transform.ErrIsDLL` — input doesn't match `Format=WindowsExe`. **Workaround:** use `Format=FormatWindowsDLL` (Mode 7, ✅ since v0.128.0) or wrap with `PackBinaryBundle`. |
+
+### DLL-mode validations (Modes 7-10)
+
+| Test | Mode | Win10 VM E2E | Validates |
+|---|---|---|---|
+| `TestPackBinary_FormatWindowsDLL_LoadLibrary_E2E` | 7 (`FormatWindowsDLL`) | ✅ since v0.128.0 | Native DllMain stub LoadLibrary'd cleanly. Uses `testutil.BuildDLLWithReloc` synthetic fixture. |
+| `TestPackBinary_ConvertEXEtoDLL_LoadLibrary_E2E` | 8 (`ConvertEXEtoDLL`) | ✅ | Converted EXE-as-DLL: payload writes marker file from spawned thread. Uses `probe_converted.exe`. |
+| `TestPackBinary_ConvertEXEtoDLL_LoadLibrary_Compress_E2E` | 8 + `Compress` | ✅ since v0.124.0 | Same + LZ4 inflate path. Confirms slice 5.7. |
+| `TestPackBinary_ConvertEXEtoDLL_LoadLibrary_AntiDebug_E2E` | 8 + `AntiDebug` | ✅ since v0.122.0 | Silent-exit when KVM trips RDTSC↔CPUID delta on virtualised host. |
+| `TestPackProxyDLL_LoadLibrary_E2E` | 10 (`PackProxyDLL`) | ✅ since v0.129.0 | Fused proxy loads — basic structural validation. |
+| `TestPackProxyDLL_Strict_E2E` | 10 strict | ✅ since `c9c0635` | Both side effects: (a) `GetProcAddress` resolves forwarder to real `version.dll` at 0x7ff9aff810b0 via GLOBALROOT scheme, (b) packed payload writes marker from thread inside host. Slice 6.3 closure. |
 
 **Operational envelope:** `PackBinary` is validated for
 **Go-built static-PIE Windows binaries**. Microsoft CFG-protected
