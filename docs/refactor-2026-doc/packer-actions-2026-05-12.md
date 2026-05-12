@@ -104,6 +104,22 @@ attacker compiled.
 
 After commit, pickup at next unticked sub-slice.
 
+### Sub-slice 9.6 — close all open gaps from session 2026-05-12
+
+Identified after the dec0466 / 8b1a1ec checkpoints. Each gap gets
+its own commit so cross-machine resume always picks up at the next
+checkbox.
+
+| # | Gap | Approach | Status |
+|---|---|---|---|
+| 9.6.a | Add Defender exclusions for `C:\Vulnerable\` and `C:\ProgramData\maldev-marker\` via direct registry write (HKLM\SOFTWARE\Microsoft\Windows Defender\Exclusions\Paths). Provisioning step. | Go program, run as test admin during provisioning. Falls back to AMSI-bypass PowerShell if registry write blocked by Tamper Protection. | ⏳ next |
+| 9.6.b | AMSI bypass via `evasion/amsi.PatchAll` integrated in orchestrator. Demonstrates eating-our-own-dog-food even though scope (per-process) doesn't help spawned PowerShell. | Wrap orchestrator startup with PatchAll + log success/failure. | ⏳ |
+| 9.6.c | Marker 0-byte mystery: probe `FlushFileBuffers` before CloseHandle + sleep 200 ms before SleepInfinite. Plus orchestrator polls more aggressively (50 ms). | Modify `cmd/privesc-e2e/probe/probe.c`. | ⏳ |
+| 9.6.d | Big binary AS lowuser RC=1: install Defender exclusion FIRST (9.6.a), then re-test. If still bites, sign the orchestrator binary or bisect via stripping symbols/sections. | Validate after 9.6.a. | ⏳ |
+| 9.6.e | Go probe in injected thread: write a tiny Go probe with `runtime.LockOSThread` + minimal init, OR document Go-incompatibility loudly in `pe/packer/packer.md` Mode 8 limitations. | Try Go probe with `os.Exit(0)` as first line — if even that doesn't trigger marker, document hard incompat. | ⏳ |
+| 9.6.f | Final E2E run with all of the above. Both Mode 8 and Mode 10. STRONG verdict (marker shows SYSTEM). Tag v0.132.0. | Run both modes. | ⏳ |
+| 9.6.g | User-facing doc: walkthrough in `docs/techniques/pe/packer-privesc-e2e.md` (or sibling) with screenshots + decision tree. | After 9.6.f green. | ⏳ |
+
 ---
 
 **Slice 1.A FULLY HARDENED.** v0.130.0 shipped the feature;
