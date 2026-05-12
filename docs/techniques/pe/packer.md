@@ -1627,11 +1627,75 @@ Reverse `Pack`. Sentinels: `ErrShortBlob`, `ErrBadMagic`,
 `ErrUnsupportedCompressor`, `ErrPayloadSizeMismatch`. Wrong key surfaces
 as the underlying AEAD authentication error.
 
-#### `func PackPipeline(data []byte, pipeline []Step) ([]byte, []Step, error)`
+#### `func PackPipeline(data []byte, pipeline []PipelineStep) ([]byte, PipelineKeys, error)`
 
 Multi-stage `Pack` — compose ciphers, compressors, permutations.
 Returns the blob plus the per-step keys (caller must store all of
-them to invert via `UnpackPipeline`).
+them to invert via `UnpackPipeline`). Pipeline ops:
+`OpCipher`, `OpPermute`, `OpCompress`, `OpEntropyCover`. Sentinels:
+`ErrEmptyPipeline`, `ErrPipelineTooLong`,
+`ErrUnsupportedPermutation`, `ErrPipelineKeysMismatch`.
+
+### DLL operations (Modes 7-10)
+
+#### `func PackBinary(input []byte, opts PackBinaryOptions) (out, key []byte, err error)` — Mode 7
+
+Same entry point as Mode 3, but with `opts.Format =
+FormatWindowsDLL`. Input MUST be a PE32+ DLL with
+`IMAGE_FILE_DLL` set and a populated `.reloc` table. Returns
+the packed DLL ready for `LoadLibrary`. The original `DllMain`
+is preserved verbatim (stub tail-calls into it). See Mode 7
+above for the toolchain limitation (mingw refuses `.reloc`;
+use MSVC or `transform.BuildMinimalPE32Plus`).
+
+Sentinels (`opts.Format = FormatWindowsDLL`):
+- `transform.ErrIsEXE` — input is an EXE, not a DLL.
+- `transform.ErrNoExistingRelocDir` — input lacks `.reloc`.
+- `stubgen.ErrCompressDLLUnsupported` — `Compress` not yet
+  threaded through the DllMain stub.
+
+#### `func PackBinary(input []byte, opts PackBinaryOptions) (out, key []byte, err error)` — Mode 8
+
+Same entry point with `opts.Format = FormatWindowsExe +
+opts.ConvertEXEtoDLL = true`. Input is an EXE; output is a DLL
+that LoadLibrary'd spawns the original EXE entry point on a
+new thread inside the host process. `Compress + AntiDebug`
+both supported.
+
+#### `func PackChainedProxyDLL(input []byte, opts ChainedProxyDLLOptions) (proxy, payload, key []byte, err error)` — Mode 9
+
+Two-file sideloading bundle. Returns `proxy` (forwarder +
+LoadLibraryA stub mirroring `opts.TargetName`'s exports) and
+`payload` (encrypted EXE-as-DLL, Mode-8 shape). Drop both
+side-by-side under the operator's chosen filenames.
+
+#### `func PackProxyDLL(input []byte, opts ProxyDLLOptions) (proxy, key []byte, err error)` — Mode 10
+
+Single-file fused proxy. Returns one PE32+ DLL that BOTH
+mirrors `opts.TargetName`'s exports AND carries the encrypted
+EXE payload, with NO `LoadLibraryA` IAT entry (`CreateThread`
+resolved via PEB walk).
+
+### Transform building blocks (advanced)
+
+Lower-level primitives the operator-facing entry points
+compose with. Use directly when integrating with other
+maldev packages or building custom emitters.
+
+```
+transform.WalkBaseRelocs(pe, cb) error
+transform.WalkImportDirectoryRVAs(pe, cb) error
+transform.WalkResourceDirectoryRVAs(pe, cb) error
+transform.ShiftImageVA(pe, delta) ([]byte, error)
+transform.AppendExportSection(pe, exportBytes, sectionRVA) ([]byte, error)
+transform.NextAvailableRVA(pe) (uint32, error)
+transform.StripPESecurityDirectory(pe) error
+transform.BuildMinimalPE32Plus(body) ([]byte, error)
+transform.SetIMAGEFILEDLL(buf) error
+transform.PatchPEImageBase(pe, base) error
+transform.RandomImageBase64(rng) uint64
+dllproxy.BuildExportData(targetName, exports, scheme, sectionVA) ([]byte, uint32, error)
+```
 
 ### Multi-target bundle
 
