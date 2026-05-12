@@ -162,13 +162,10 @@ func TestPackBinary_ConvertEXEtoDLL_LoadLibrary_E2E(t *testing.T) {
 // spawns the original entry. Same marker assertion as the
 // uncompressed E2E.
 func TestPackBinary_ConvertEXEtoDLL_LoadLibrary_Compress_E2E(t *testing.T) {
-	t.Skip("slice 5.7 partial: pack-time wired (stub + SizeOfImage); runtime " +
-		"VM E2E wedges the host inside the LZ4 inflate block — gated via " +
-		"stubgen.ErrConvertEXEtoDLLUnsupported until bisected. Set env " +
-		"MALDEV_PACKER_COMPRESS_DLL_DEBUG=1 to run anyway when debugging.")
-	if os.Getenv("MALDEV_PACKER_COMPRESS_DLL_DEBUG") != "1" {
-		return
-	}
+	// Slice 5.7 ✅ shipped: this test runs unconditionally. 3/3 passes
+	// confirmed on Win10 VM (2026-05-12). The earlier wedge was cleared
+	// by the slice 5.5.y callee-save spill fix + the SizeOfImage
+	// scratch-region fix (both in place by v0.123.0).
 	_ = os.Remove(diagPath)
 	writeDiag("=== Compress_E2E ===")
 

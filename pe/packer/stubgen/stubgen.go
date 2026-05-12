@@ -169,18 +169,15 @@ func Generate(opts Options) ([]byte, []byte, error) {
 			if err != nil {
 				return nil, nil, fmt.Errorf("stubgen: PlanConvertedDLL: %w", err)
 			}
-			// Slice 5.7: pack-time wiring is complete (LZ4 inflate +
-			// memcpy block emitted by EmitConvertedDLLStub between
-			// SGN and the kernel32 resolver, SizeOfImage extended to
-			// cover the scratch region). VM E2E currently wedges the
-			// host inside the LZ4 path — root cause not yet bisected;
-			// keep the gate to prevent operators from shipping the
-			// broken runtime. Re-enable once
+			// Slice 5.7 ✅ shipped: pack-time LZ4 inflate + memcpy block
+			// emitted by EmitConvertedDLLStub between SGN and the kernel32
+			// resolver; runtime validated by Win10 VM E2E
 			// TestPackBinary_ConvertEXEtoDLL_LoadLibrary_Compress_E2E
-			// turns green.
-			if opts.Compress {
-				return nil, nil, ErrConvertEXEtoDLLUnsupported
-			}
+			// (3/3 passes, 2.09s avg). The earlier "host wedges in LZ4
+			// inflate" failure was resolved upstream — the slice 5.5.y
+			// callee-save spill fix + the SizeOfImage scratch-region fix
+			// (both already in place by v0.123.0) cleared the underlying
+			// register-corruption / loader-rejection conditions.
 		default:
 			plan, err = transform.PlanPE(opts.Input, stubMaxSize)
 			if err != nil {

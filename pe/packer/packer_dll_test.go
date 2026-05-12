@@ -172,24 +172,34 @@ func TestPackBinary_ConvertEXEtoDLL_HappyPath(t *testing.T) {
 	}
 }
 
-// TestPackBinary_ConvertEXEtoDLL_RejectsCompress — slice 5.7 partial:
-// the converted-DLL LZ4 inflate path is emitted by
-// EmitConvertedDLLStub but runtime VM E2E currently wedges the host
-// inside the inflate block; the gate stays in place until that's
-// bisected. Pack-time still surfaces ErrConvertEXEtoDLLUnsupported.
-func TestPackBinary_ConvertEXEtoDLL_RejectsCompress(t *testing.T) {
+// TestPackBinary_ConvertEXEtoDLL_AcceptsCompress — slice 5.7 ✅:
+// the LZ4 inflate path inside EmitConvertedDLLStub is now
+// validated end-to-end on Win10 VM
+// (TestPackBinary_ConvertEXEtoDLL_LoadLibrary_Compress_E2E,
+// 3/3 passes). Pack-time must succeed when both ConvertEXEtoDLL
+// and Compress are set, producing a parseable PE32+ DLL whose
+// COFF Characteristics carries IMAGE_FILE_DLL.
+func TestPackBinary_ConvertEXEtoDLL_AcceptsCompress(t *testing.T) {
 	exe, err := transform.BuildMinimalPE32Plus([]byte{0xC3})
 	if err != nil {
 		t.Fatalf("BuildMinimalPE32Plus: %v", err)
 	}
-	_, _, err = packerpkg.PackBinary(exe, packerpkg.PackBinaryOptions{
+	out, _, err := packerpkg.PackBinary(exe, packerpkg.PackBinaryOptions{
 		Format:          packerpkg.FormatWindowsExe,
 		ConvertEXEtoDLL: true,
 		Compress:        true,
 		Stage1Rounds:    3,
 	})
-	if !errors.Is(err, stubgen.ErrConvertEXEtoDLLUnsupported) {
-		t.Errorf("got %v, want stubgen.ErrConvertEXEtoDLLUnsupported", err)
+	if err != nil {
+		t.Fatalf("PackBinary(ConvertEXEtoDLL+Compress): %v", err)
+	}
+	pf, err := pe.NewFile(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("debug/pe rejected packed output: %v", err)
+	}
+	defer pf.Close()
+	if pf.Characteristics&transform.ImageFileDLL == 0 {
+		t.Errorf("output Characteristics = 0x%x, missing IMAGE_FILE_DLL", pf.Characteristics)
 	}
 }
 
