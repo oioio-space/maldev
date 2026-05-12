@@ -1,55 +1,43 @@
-/* Privesc-E2E whoami probe.
+/* Privesc-E2E whoami probe (simplified after debug 9.6.d).
  *
  * mingw -nostdlib EXE that:
- *   1. Opens a process token, asks for the username (kernel32+advapi32
- *      via GetUserNameW), writes it to C:\ProgramData\maldev-marker\whoami.txt
- *   2. Sleeps INFINITE so the spawned thread stays visible if the
- *      operator wants to dump it.
+ *   1. Writes a breadcrumb to C:\probe-root-marker.txt (FIRST)
+ *   2. Calls advapi32!GetUserNameA via LoadLibrary + GetProcAddress
+ *      (avoids needing -ladvapi32 import while still working in
+ *      SYSTEM-spawned-thread context)
+ *   3. Writes "<user>|pid=<pid>\n" to
+ *      C:\ProgramData\maldev-marker\whoami.txt
+ *   4. Sleep INFINITE
  *
- * Why C and not Go: when this EXE is packed via PackBinary{ConvertEXEtoDLL:true}
- * and the resulting DLL is LoadLibrary'd inside a non-Go host (here, our
- * SYSTEM-context victim.exe), the spawned thread starts at this binary's
- * OEP. Go's runtime requires being the process entry point — the thread-
- * spawn shape kills it instantly. -nostdlib C with explicit Win32 calls
- * has no such constraint.
+ * Why dynamic resolve of GetUserNameA: linking advapi32 statically
+ * adds an import-table entry that the Mode-8 stub may not resolve
+ * cleanly in the SYSTEM-context thread. LoadLibraryA is in the IAT
+ * via kernel32 already; resolving advapi32 at runtime sidesteps
+ * any IAT-vs-stub-disagreement.
  *
- * Build: x86_64-w64-mingw32-gcc -nostdlib -e mainCRTStartup -o probe.exe \
- *          probe.c -ladvapi32 -lkernel32
+ * Build: x86_64-w64-mingw32-gcc -nostdlib -e main -o probe.exe \
+ *          probe.c -lkernel32
  */
 #include <windows.h>
 
-/* mingw -nostdlib's libgcc still pulls a __main symbol; stub it. */
 void __main(void) {}
 
-/* OpenProcessToken / GetTokenInformation / LookupAccountSidW are in
- * advapi32 too — same risk. Use kernel32 ONLY: read the SID directly
- * from the token via NtQueryInformationToken, format it. Works without
- * advapi32 import at all.
- *
- * Actually simpler: GetEnvironmentVariableW("USERNAME") is kernel32 and
- * SYSTEM has %USERNAME% = SYSTEM. */
+typedef BOOL (WINAPI *GetUserNameA_t)(LPSTR, LPDWORD);
 
-static const wchar_t kMarkerPath[] = L"C:\\ProgramData\\maldev-marker\\whoami.txt";
+static const wchar_t kRootMarker[]  = L"C:\\probe-root-marker.txt";
 static const wchar_t kStartedPath[] = L"C:\\ProgramData\\maldev-marker\\probe-started.txt";
+static const wchar_t kMarkerPath[]  = L"C:\\ProgramData\\maldev-marker\\whoami.txt";
 
 static void writeFile(const wchar_t *path, const char *bytes, DWORD nbytes) {
-    /* Use FILE_SHARE_READ so other processes can `dir` / read the
-     * file while we hold it -- without this, cross-process readers
-     * may see stale 0-byte metadata until our handle closes. */
     HANDLE h = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
                            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE) return;
     DWORD written;
     WriteFile(h, bytes, nbytes, &written, NULL);
-    /* FlushFileBuffers forces the cache manager to push our bytes
-     * to disk before any external observer reads. CloseHandle alone
-     * is async on some configurations (cross-process WriteFile +
-     * external dir from a different security context can race). */
     FlushFileBuffers(h);
     CloseHandle(h);
 }
 
-/* Manual int -> ASCII for PID (no CRT). */
 static int u32ToStr(DWORD v, char *buf) {
     char tmp[12]; int n = 0;
     if (v == 0) { buf[0] = '0'; return 1; }
@@ -58,56 +46,48 @@ static int u32ToStr(DWORD v, char *buf) {
     return n;
 }
 
-/* UTF-16 -> UTF-8 (ASCII subset only — usernames are ASCII in our test). */
-static int wToA(const wchar_t *src, char *dst, int srcLen) {
-    int n = 0;
-    for (int i = 0; i < srcLen && src[i]; i++) {
-        if (src[i] < 0x80) dst[n++] = (char)src[i];
-        else dst[n++] = '?';
-    }
-    return n;
-}
-
 int main(void) {
-    /* Brute-force breadcrumb to C:\ root — same path shape as the
-     * known-working probe_converted.c. If this appears but
-     * kStartedPath doesn't, ProgramData write is the issue. If THIS
-     * doesn't appear, the spawned thread itself never reached main. */
-    HANDLE root = CreateFileW(L"C:\\probe-root-marker.txt", GENERIC_WRITE,
-                              0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (root != INVALID_HANDLE_VALUE) {
-        DWORD w;
-        WriteFile(root, "main reached\n", 13, &w, NULL);
-        CloseHandle(root);
-    }
+    /* Breadcrumb 1: just-reached-main, in C:\ root (writable in
+     * SYSTEM context, visible cross-process via FILE_SHARE_READ). */
+    writeFile(kRootMarker, "main\n", 5);
+
+    /* Breadcrumb 2: in our marker dir. If this exists but
+     * whoami.txt doesn't, the dir was reachable but the actual
+     * marker write later failed. */
     writeFile(kStartedPath, "started\n", 8);
 
-    wchar_t name[256] = {0};
-    DWORD nameLen = GetEnvironmentVariableW(L"USERNAME", name, 256);
-    if (nameLen == 0) {
-        /* fallback hint so we still see SOMETHING in the marker */
-        const wchar_t fallback[] = L"<no-USERNAME-env>";
-        for (int i = 0; fallback[i] && i < 255; i++) name[i] = fallback[i];
-        nameLen = (DWORD)(sizeof(fallback)/sizeof(wchar_t)) - 1;
-    }
-
-    /* Build "<name>|pid=<pid>\n" in a fixed buffer. */
+    /* Resolve GetUserNameA dynamically. advapi32 may not be loaded
+     * yet -- pull it in. */
+    HMODULE adv = LoadLibraryA("advapi32.dll");
     char line[512];
-    int n = wToA(name, line, (int)nameLen);
-    line[n++] = '|';
-    line[n++] = 'p'; line[n++] = 'i'; line[n++] = 'd'; line[n++] = '=';
+    int n = 0;
+    if (adv) {
+        GetUserNameA_t pGetUserNameA = (GetUserNameA_t)GetProcAddress(adv, "GetUserNameA");
+        if (pGetUserNameA) {
+            char name[256] = {0};
+            DWORD nameLen = 256;
+            if (pGetUserNameA(name, &nameLen)) {
+                /* nameLen includes the trailing NUL; strip it. */
+                int copy = (int)nameLen - 1;
+                if (copy < 0) copy = 0;
+                if (copy > 255) copy = 255;
+                for (int i = 0; i < copy; i++) line[n++] = name[i];
+            }
+        }
+    }
+    if (n == 0) {
+        /* Fallback: identify ourselves with at least the PID so
+         * the marker is non-empty and the chain is provable. */
+        const char fb[] = "<no-getusername>";
+        for (int i = 0; fb[i]; i++) line[n++] = fb[i];
+    }
+    line[n++] = '|'; line[n++] = 'p'; line[n++] = 'i'; line[n++] = 'd'; line[n++] = '=';
     n += u32ToStr(GetCurrentProcessId(), line + n);
     line[n++] = '\n';
 
     writeFile(kMarkerPath, line, n);
 
-    /* Cache-propagation pause before the eternal sleep -- writes
-     * are flushed by FlushFileBuffers in writeFile, but a small
-     * extra beat helps when an external process is dir'ing the
-     * file from a different security context. */
     Sleep(200);
-
-    /* Keep the thread visible -- same pattern as probe_converted.c. */
     Sleep(INFINITE);
     return 0;
 }
