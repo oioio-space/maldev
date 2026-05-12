@@ -39,14 +39,47 @@ while getopts "m:p:k" opt; do
 done
 
 VBOX="${MALDEV_VBOX_EXE:-/c/Program Files/Oracle/VirtualBox/VBoxManage.exe}"
-VM_NAME='Windows10'
 SNAPSHOT='INIT'
 SSH_USER='test'
 LOWUSER='lowuser'
-HOST_IP='192.168.56.102'
 SSH_KEY="${MALDEV_VM_WINDOWS_SSH_KEY:-$HOME/.ssh/vm_windows_key}"
 [ -f "$SSH_KEY" ] || { echo "missing SSH key: $SSH_KEY" >&2; exit 1; }
 SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o BatchMode=yes)
+
+# Driver auto-detect — VirtualBox on operator workstation, libvirt on
+# the Fedora dev host. Either driver may be forced via MALDEV_VM_DRIVER.
+DRIVER="${MALDEV_VM_DRIVER:-}"
+if [ -z "$DRIVER" ]; then
+  if command -v VBoxManage >/dev/null 2>&1 || [ -x "$VBOX" ]; then
+    DRIVER='vbox'
+  elif command -v virsh >/dev/null 2>&1; then
+    DRIVER='libvirt'
+  else
+    echo "no VM driver found: install VirtualBox or libvirt" >&2; exit 1
+  fi
+fi
+
+case "$DRIVER" in
+  vbox)
+    VM_NAME="${MALDEV_VM_NAME:-Windows10}"
+    HOST_IP="${MALDEV_VM_HOST_IP:-192.168.56.102}"
+    vm_poweroff() { "$VBOX" controlvm "$VM_NAME" poweroff &>/dev/null; }
+    vm_restore()  { "$VBOX" snapshot "$VM_NAME" restore "$SNAPSHOT" &>/dev/null; }
+    vm_start()    { "$VBOX" startvm "$VM_NAME" --type headless &>/dev/null; }
+    ;;
+  libvirt)
+    VM_NAME="${MALDEV_VM_NAME:-win10}"
+    HOST_IP="${MALDEV_VM_HOST_IP:-192.168.122.122}"
+    # snapshot-revert on a running-snapshot covers poweroff + restore
+    # in one atomic op — no separate poweroff/start.
+    vm_poweroff() { virsh destroy "$VM_NAME" &>/dev/null || true; }
+    vm_restore()  { virsh snapshot-revert "$VM_NAME" --snapshotname "$SNAPSHOT" --running &>/dev/null; }
+    vm_start()    { virsh domstate "$VM_NAME" 2>/dev/null | grep -q "en cours\|running" || virsh start "$VM_NAME" &>/dev/null; }
+    ;;
+  *)
+    echo "unknown MALDEV_VM_DRIVER=$DRIVER (want vbox|libvirt)" >&2; exit 1
+    ;;
+esac
 
 log() { printf '\033[36m[%s] %s\033[0m\n' "$(date +%H:%M:%S)" "$*"; }
 fail() { printf '\033[31m[%s] FAIL: %s\033[0m\n' "$(date +%H:%M:%S)" "$*" >&2; exit 1; }
@@ -57,18 +90,18 @@ teardown() {
     return
   fi
   log "tearing down VM"
-  "$VBOX" controlvm "$VM_NAME" poweroff &>/dev/null
+  vm_poweroff
   sleep 3
-  "$VBOX" snapshot "$VM_NAME" restore "$SNAPSHOT" &>/dev/null
+  vm_restore
 }
 trap teardown EXIT
 
 # 1. Snapshot restore
 log "restoring snapshot $SNAPSHOT"
-"$VBOX" controlvm "$VM_NAME" poweroff &>/dev/null || true
+vm_poweroff || true
 sleep 3
-"$VBOX" snapshot "$VM_NAME" restore "$SNAPSHOT" &>/dev/null || fail "snapshot restore"
-"$VBOX" startvm "$VM_NAME" --type headless &>/dev/null || fail "startvm"
+vm_restore || fail "snapshot restore"
+vm_start   || fail "startvm"
 
 # 2. Wait for SSH — print every 5 attempts so the run never goes
 #    silent for more than ~10s during the boot window.
@@ -89,10 +122,18 @@ done
 
 # 3. Build host-side
 cd "$(dirname "$0")/.."
-log "building probe.exe (mingw -nostdlib) + victim.exe + privesc-e2e.exe (windows/amd64)"
+log "building probe.exe (mingw -nostdlib) + fakelib.dll (cgo c-shared) + victim.exe + privesc-e2e.exe (windows/amd64)"
 x86_64-w64-mingw32-gcc -nostdlib -e main \
     -o cmd/privesc-e2e/probe/probe.exe \
     cmd/privesc-e2e/probe/probe.c -lkernel32 || fail "build probe (mingw)"
+# fakelib must build BEFORE the orchestrator — main.go //go:embed
+# pulls fakelib/fakelib.dll at compile time. GOTMPDIR isolates the
+# cgo tmpfiles so host AV scanning ignore/ doesn't churn.
+mkdir -p ignore/gotmp
+GOTMPDIR="$(pwd)/ignore/gotmp" CGO_ENABLED=1 \
+    GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc \
+    go build -buildmode=c-shared \
+    -o cmd/privesc-e2e/fakelib/fakelib.dll ./cmd/privesc-e2e/fakelib || fail "build fakelib (cgo c-shared)"
 GOOS=windows GOARCH=amd64 go build -o /tmp/victim.exe       ./cmd/privesc-e2e/victim     || fail "build victim"
 GOOS=windows GOARCH=amd64 go build -o /tmp/privesc-e2e.exe  ./cmd/privesc-e2e            || fail "build orchestrator"
 
@@ -109,7 +150,7 @@ scp "${SSH_OPTS[@]}" \
 # 5. Provision lowuser
 log "provisioning lowuser account"
 ssh "${SSH_OPTS[@]}" "${SSH_USER}@${HOST_IP}" \
-  "powershell -ExecutionPolicy Bypass -File C:\\Users\\${SSH_USER}\\provision-lowuser.ps1 -Password '${LOWPASS}'" \
+  "powershell -ExecutionPolicy Bypass -File C:\\Users\\${SSH_USER}\\provision-lowuser.ps1 -Password \"${LOWPASS}\"" \
   || fail "provision-lowuser"
 
 # 6. Provision privesc target (victim + SYSTEM task)
@@ -142,8 +183,20 @@ log "executing privesc-e2e.exe AS ${LOWUSER} (mode=${MODE}) — this can take 60
 # Avoid bash->ssh->cmd->powershell quoting hell: drop a tiny PS
 # wrapper on the VM hardcoding the args, then invoke it via a
 # single-token command line.
+# Pack-time flag plumbing: AntiDebug is OFF by default on libvirt/KVM
+# because the RDTSC ↔ CPUID delta gate baked into the slice-5.6 stub
+# trips on the KVM VMEXIT and causes a silent no-op LoadLibrary
+# (handle returns valid, payload never runs). VirtualBox host CPUs
+# emulate RDTSC tightly enough that the gate stays under threshold.
+# Operator override via MALDEV_PRIVESC_E2E_ARGS for ad-hoc runs.
+ORCH_ARGS="-mode ${MODE}"
+if [ "$DRIVER" = "libvirt" ]; then
+    ORCH_ARGS="$ORCH_ARGS -antidebug=false"
+fi
+ORCH_ARGS="${MALDEV_PRIVESC_E2E_ARGS:-$ORCH_ARGS}"
+log "orchestrator args: $ORCH_ARGS"
 cat > /tmp/run-orchestrator.ps1 <<EOF
-& "C:\\Users\\${SSH_USER}\\run-as-lowuser.ps1" -Binary "C:\\Users\\Public\\maldev\\privesc-e2e.exe" -BinaryArgs "-mode ${MODE}" -UserName ${LOWUSER} -Password "${LOWPASS}" -TimeoutSeconds 180
+& "C:\\Users\\${SSH_USER}\\run-as-lowuser.ps1" -Binary "C:\\Users\\Public\\maldev\\privesc-e2e.exe" -BinaryArgs "${ORCH_ARGS}" -UserName ${LOWUSER} -Password "${LOWPASS}" -TimeoutSeconds 180
 EOF
 scp "${SSH_OPTS[@]}" /tmp/run-orchestrator.ps1 "${SSH_USER}@${HOST_IP}:C:/Users/${SSH_USER}/" &>/dev/null
 OUT=$(ssh "${SSH_OPTS[@]}" "${SSH_USER}@${HOST_IP}" \
@@ -187,7 +240,18 @@ echo "================================================================"
 #             The payload thread reached at least the loader callback.
 strong=0
 adequate=0
-if [ -f ignore/privesc-e2e/whoami.txt ] && grep -qi 'system' ignore/privesc-e2e/whoami.txt; then
+# GetUserNameA returns the localised SYSTEM account name in Windows-1252
+# encoding (NOT UTF-8): "System" (en-US), "Syst\xE8me" (fr-FR), "Sistema"
+# (es/it/pt). grep -qi 'system' alone misses the French byte sequence
+# because the `è` byte (0xE8) breaks the literal-match. Match either
+# the en-US/Iberian word OR the French ASCII skeleton "Syst" followed
+# by a non-printable byte then "me".
+if [ -f ignore/privesc-e2e/whoami.txt ] && \
+   LC_ALL=C grep -qaiE '(system|sistema|Syst.me)' ignore/privesc-e2e/whoami.txt; then
+    # LC_ALL=C forces byte-level grep: in a UTF-8 locale `-E` treats
+    # `.` as a character class, and the lone 0xE8 byte (è in Win-1252)
+    # isn't a valid UTF-8 character → `Syst.me` silently fails to
+    # match the French marker. Byte mode sidesteps it.
     strong=1
 fi
 # Adequate proof: count "LoadLibrary succeeded" lines in victim.log. The
@@ -211,9 +275,9 @@ fi
 if [ "$teardown_ok" = 1 ]; then
     if [ "$KEEP_VM" != 1 ]; then
         trap - EXIT
-        "$VBOX" controlvm "$VM_NAME" poweroff &>/dev/null || true
+        vm_poweroff || true
         sleep 3
-        "$VBOX" snapshot "$VM_NAME" restore "$SNAPSHOT" &>/dev/null
+        vm_restore
     fi
     exit 0
 fi

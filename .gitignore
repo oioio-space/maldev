@@ -11,6 +11,10 @@
 *.dylib
 *.exe
 
+# cgo c-shared header emitted alongside fakelib.dll — regenerated on
+# every build, never hand-edited.
+cmd/privesc-e2e/fakelib/fakelib.h
+
 # Test fixtures that must ship with the repo (force-include overrides above).
 !testutil/clrhost/maldev_clr_test.dll
 !pe/packer/testdata/winhello.exe

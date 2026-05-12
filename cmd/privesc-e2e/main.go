@@ -237,8 +237,38 @@ func main() {
 	// 6. Verify identity is NOT lowuser
 	me := strings.ToLower(currentUser())
 	gotID := strings.ToLower(strings.SplitN(got, "|", 2)[0])
+	// SYSTEM identity is reported localised by GetUserNameA: "System"
+	// (en-US), "Système" (fr-FR), "Sistema" (es/it/pt), … and the
+	// returned bytes are the Windows ANSI code page, NOT UTF-8 — so
+	// a literal Go "système" (UTF-8 bytes \xC3\xA8 for è) won't match
+	// the marker bytes (Win-1252 \xE8 for è). We strip every non-
+	// ASCII byte and look for the common ASCII skeleton "sst" (every
+	// localisation we care about contains s, then s, then t in that
+	// order with no other ASCII letter in between — the diacritics
+	// are gone after stripping). Skeleton avoids false positives on
+	// regular user names (lowuser, test, etc.).
+	var asciiOnly strings.Builder
+	for _, c := range gotID {
+		if c < 0x80 {
+			asciiOnly.WriteRune(c)
+		}
+	}
+	ascii := asciiOnly.String()
+	isSystem := false
+	// Skeletons after ASCII-strip of each localisation:
+	//   en-US "System"  → "system"
+	//   fr-FR "Système" → "systme" (è removed)
+	//   es/it/pt "Sistema" → "sistema"
+	//   Russian/Japanese strip to empty — fall through to PARTIAL,
+	//   acceptable (no test host on those locales right now).
+	for _, skeleton := range []string{"system", "systme", "sistema"} {
+		if strings.Contains(ascii, skeleton) {
+			isSystem = true
+			break
+		}
+	}
 	switch {
-	case strings.Contains(gotID, "system"):
+	case isSystem:
 		logStep("✅ SUCCESS: payload ran as SYSTEM (got %q, we are %q)", gotID, me)
 		os.Exit(0)
 	case gotID != me:
