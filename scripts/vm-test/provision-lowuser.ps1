@@ -35,6 +35,14 @@ if (-not (Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue)) {
 # Windows builds, which blocks scheduled-task / network logons.
 net user $UserName /passwordreq:yes 2>&1 | Out-Null
 
+# Belt-and-suspenders: force-set the password via `net user` too.
+# Empirically Set-LocalUser + SecureString stores the password
+# differently from what schtasks /RP and `runas` expect on some
+# Win10 builds, producing 4625 STATUS_WRONG_PASSWORD at batch-logon
+# time even though both Set-LocalUser and our /RP saw the SAME
+# plain-text string. `net user` matches schtasks' expectation.
+net user $UserName $Password 2>&1 | Out-Null
+
 # Add lowuser to the local Users group (SID S-1-5-32-545) so it gets the
 # default SeNetworkLogonRight — required for OpenSSH network logon. Use
 # the SID rather than the name because Windows localizes "Users" → e.g.
