@@ -361,6 +361,59 @@ for _, o := range ae {
 }
 ```
 
+### PickBestWritable
+
+One-shot variant of `ScanAll + Rank + filter`. Returns the
+highest-scoring writable Opportunity, preferring those that also
+carry `IntegrityGain` or `AutoElevate`; falls back to any
+writable; returns `ErrNoWritableOpportunity` when nothing is
+reachable.
+
+```go
+import (
+    "errors"
+    "github.com/oioio-space/maldev/recon/dllhijack"
+)
+
+best, err := dllhijack.PickBestWritable()
+switch {
+case errors.Is(err, dllhijack.ErrNoWritableOpportunity):
+    log.Fatal("no writable hijack target on this host")
+case err != nil:
+    log.Fatal(err) // scan itself failed (non-Windows, etc.)
+}
+fmt.Printf("%s %s → %s (integrity-gain=%v)\n",
+    best.Kind, best.DisplayName, best.HijackedPath, best.IntegrityGain)
+```
+
+Live end-to-end example: `cmd/privesc-e2e`'s `-discover` path
+runs `PickBestWritable`, plants the packed DLL at `best.HijackedPath`,
+triggers the victim, validates marker — full chain in 40 LOC.
+See [`cmd/privesc-e2e/README.md`](../../../cmd/privesc-e2e/README.md).
+
+### ScanPATHWritable — MareBackup-class precondition
+
+Surfaces every writable directory in the system or user `%PATH%`.
+The classic MareBackup PrivEsc pivot
+([itm4n](https://itm4n.github.io/hijacking-the-windows-marebackup-scheduled-task-for-privilege-escalation/))
+relies on a SYSTEM-context scheduled task whose call chain ends
+in an **unqualified** `CreateProcessW(L"powershell.exe", …)` —
+the EXE search reaches `%PATH%` before `System32`. This scanner
+answers the prerequisite: "can my token write to any
+system-PATH dir?".
+
+```go
+opps, _ := dllhijack.ScanPATHWritable()
+for _, o := range opps {
+    fmt.Printf("%s: %s (integrity-gain=%v)\n",
+        o.Kind, o.SearchDir, o.IntegrityGain)
+}
+```
+
+Unlike the IAT-based scanners this one ignores `ScanOpts.Opener`
+(no PE reads) and reports `BinaryPath == ""` — the victim is
+generic (any higher-integrity unqualified `CreateProcess`).
+
 ### Advanced — validate before deploying
 
 ```go

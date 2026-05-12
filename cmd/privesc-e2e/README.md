@@ -2,6 +2,16 @@
 
 End-to-end proof of the maldev DLL-hijack privesc chain.
 
+**Doubles as the canonical example for these helpers** (all
+shipped as standalone APIs that this command consumes):
+
+| Helper | Doc | Used here for |
+|---|---|---|
+| [`packer.PackProxyDLLFromTarget`](../../docs/techniques/pe/packer.md#packproxydllfromtarget) | `pe/packer/proxy_fused.go` | Mode 10 path — single call replaces a 15-line parse-and-pack chain |
+| [`dllproxy.ExportsFromBytes`](../../docs/techniques/pe/dll-proxy.md) | `pe/dllproxy/dllproxy.go` | (transitively, inside `PackProxyDLLFromTarget`) |
+| [`dllhijack.PickBestWritable`](../../docs/techniques/recon/dll-hijack.md#pickbestwritable) | `recon/dllhijack/dllhijack.go` | `-discover` path — picks the highest-ranked writable opportunity in one call |
+| [`evasion.ApplyAllAggregated`](../../docs/techniques/evasion/preset.md) | `evasion/evasion.go` | `amsi_windows.go::patchAMSI` — one-liner aggregating preset.Aggressive failures |
+
 ## What it does
 
 Runs from a non-admin shell on the Win10 target. Packs an embedded
@@ -52,9 +62,14 @@ source on each run.
 ## Environment setup — full reproducible procedure
 
 Prerequisites:
-- VirtualBox 7.x with a Windows 10 x64 VM named `Windows10` (or
-  override via `MALDEV_VM_WINDOWS_VBOX_NAME` in
-  `scripts/vm-test/config.local.yaml`).
+- A Windows 10 x64 VM under either:
+  - VirtualBox 7.x — domain `Windows10`, IP `192.168.56.102`
+    (overridable via `MALDEV_VM_NAME` + `MALDEV_VM_HOST_IP`).
+  - libvirt/KVM (Fedora dev host) — domain `win10`, IP
+    `192.168.122.122` (overridable via the same env vars).
+  Driver is auto-detected by `scripts/vm-privesc-e2e.sh`:
+  `VBoxManage` in `PATH` → VirtualBox, else `virsh` → libvirt.
+  Force one with `MALDEV_VM_DRIVER={vbox,libvirt}`.
 - An admin SSH account on the VM (default `test` / `test`,
   authenticated via SSH key — see step 2 below).
 - A `INIT` snapshot of the VM with OpenSSH-server already enabled
@@ -111,7 +126,7 @@ invocation:
 
 | Step | What | Where |
 |---|---|---|
-| 1. Snapshot restore | `VBoxManage snapshot Windows10 restore INIT` | host |
+| 1. Snapshot restore | `VBoxManage snapshot $VM restore INIT` (vbox) / `virsh snapshot-revert $VM --snapshotname INIT --running` (libvirt) | host |
 | 2. SSH wait | up to 180 s, polls every 2 s | host |
 | 3. Build artefacts | probe.exe + fakelib.dll + privesc-e2e.exe + victim.exe | host |
 | 4. SCP artefacts | to `C:\Users\test\` on the VM | host -> VM |
@@ -149,7 +164,10 @@ bash scripts/vm-privesc-e2e.sh -m 8 -p 'OtherSafePassword'
 | `Le mappage entre les noms de compte et les ID de s�curit� n'a pas �t� effectu�` (icacls Everyone) | French Windows locale | use SID `*S-1-1-0` not the name `Everyone` |
 | `Le nom d'utilisateur ou le mot de passe est incorrect` (schtasks /RP) | password contains `!` or other cmd-special chars | use only `[A-Za-z0-9]` in `-p` argument |
 | `###RC=1` with empty out.txt AS lowuser | `Set-LocalUser` SAM password representation differs from what schtasks expects | provisioning script now also calls `net user $UserName $Password` — verify `b6d26c8` is in HEAD |
-| GUI VM but `headless` boot loops | INIT snapshot was taken with desktop session active | re-take snapshot with `VBoxManage startvm Windows10 --type headless` and wait for SSH before snapshotting |
+| `###RC=1` <1 s, no orchestrator output, no breadcrumb files | bash single-quotes around `-Password` are NOT stripped by cmd.exe (default Win-OpenSSH shell); PowerShell sees literal `'MaldevLow42x'` (14 chars), schtasks `/RP` sends `MaldevLow42x` (12 chars) → STATUS_WRONG_PASSWORD | driver now uses bash-doublequoted form for the provision call (commit `11d37d8`) |
+| `LoadLibrary succeeded` but no whoami.txt on libvirt/KVM | RDTSC ↔ CPUID delta in the AntiDebug stub trips on KVM VMEXIT — silent no-op LoadLibrary | driver auto-passes `-antidebug=false` when `DRIVER=libvirt`; for ad-hoc runs use `MALDEV_PRIVESC_E2E_ARGS="-mode 8 -antidebug=false"` |
+| Verdict stays ADEQUATE on non-English Windows | French/Spanish SYSTEM name reported in Windows-1252 (`Syst\xE8me`) — both the orchestrator `strings.Contains("system")` and the script `grep -i 'system'` miss the byte | both checks now ASCII-strip + per-locale skeleton match (`system`/`systme`/`sistema`); script uses `LC_ALL=C grep -aE` (commit `11d37d8`) |
+| GUI VM but `headless` boot loops | INIT snapshot was taken with desktop session active | re-take snapshot with `VBoxManage startvm Windows10 --type headless` (vbox) or `virsh start $VM` (libvirt) and wait for SSH before snapshotting |
 
 ### 6. Where everything lives after a successful run
 

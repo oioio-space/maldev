@@ -1718,6 +1718,30 @@ mirrors `opts.TargetName`'s exports AND carries the encrypted
 EXE payload, with NO `LoadLibraryA` IAT entry (`CreateThread`
 resolved via PEB walk).
 
+#### `PackProxyDLLFromTarget`
+
+`func PackProxyDLLFromTarget(payload, targetDLLBytes []byte, opts ProxyDLLOptions) (proxy, key []byte, err error)`
+
+Convenience wrapper around `PackProxyDLL` that parses the
+target DLL's bytes (via [`dllproxy.ExportsFromBytes`](dll-proxy.md))
+and feeds the named-export list into `opts.Exports` — the
+caller no longer reaches into `pe/parse` directly. `opts.TargetName`
+is still required (the on-disk filename the proxy impersonates;
+not inferable from the PE).
+
+```go
+fakelib, _ := os.ReadFile(`C:\Vulnerable\fakelib.dll`)
+fused, key, err := packer.PackProxyDLLFromTarget(probe, fakelib, packer.ProxyDLLOptions{
+    PackOpts:   packer.PackBinaryOptions{Format: packer.FormatWindowsExe, Stage1Rounds: 3},
+    TargetName: "fakelib",
+})
+```
+
+Used as the canonical Mode-10 entry point by
+[`cmd/privesc-e2e`](../../../cmd/privesc-e2e/README.md) (the
+`-mode 10` branch reads `fakelib.dll` from the target and packs
+in one call).
+
 ### Transform building blocks (advanced)
 
 Lower-level primitives the operator-facing entry points

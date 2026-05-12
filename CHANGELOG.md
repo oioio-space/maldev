@@ -7,6 +7,70 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### v0.132.0 — privesc-e2e helpers + STRONG verdict on libvirt (2026-05-12)
+
+**New helpers (slice 9.7):**
+
+- `dllproxy.ExportsFromBytes(peBytes) ([]Export, error)` — parses a
+  target DLL via `parse.FromBytesFast` and returns its named exports
+  in the shape `GenerateExt` / `PackProxyDLL` consume. Ordinal-only
+  entries skipped. Doc + Examples in
+  [`docs/techniques/pe/dll-proxy.md`](docs/techniques/pe/dll-proxy.md).
+- `packer.PackProxyDLLFromTarget(payload, targetDLL, opts)` — fused
+  parse + filter + pack. One call replaces the previous 15-line
+  inline chain. Doc in
+  [`docs/techniques/pe/packer.md`](docs/techniques/pe/packer.md#packproxydllfromtarget).
+- `evasion.ApplyAllAggregated(techs, caller) error` — folds the
+  `map[string]error` from `ApplyAll` into a sorted-by-name single
+  error with an `N/M failed` prefix. Doc in
+  [`docs/techniques/evasion/preset.md`](docs/techniques/evasion/preset.md#applyallaggregated).
+- `dllhijack.PickBestWritable(opts...)` — `ScanAll + Rank` + first
+  writable+integrity-gain pick, fallback any-writable, sentinel
+  `ErrNoWritableOpportunity` otherwise. Doc in
+  [`docs/techniques/recon/dll-hijack.md`](docs/techniques/recon/dll-hijack.md#pickbestwritable).
+
+**dllhijack ranker hardening:**
+
+- `isApiSet` filter — `api-ms-win-*.dll` / `ext-ms-win-*.dll` excluded
+  from `HijackPath` candidates (loader resolves them via in-PEB
+  ApiSet schema, never disk; some Win10/11 builds ship physical
+  stubs in `System32\downlevel\` that would otherwise trip the
+  file-existence heuristic).
+- `ScanPATHWritable` — new scanner emitting `KindPathHijack`
+  opportunities for writable `%PATH%` dirs. Mirrors itm4n's
+  MareBackup PrivEsc pivot pattern: SYSTEM-context tasks doing
+  unqualified `CreateProcess` reach `%PATH%` before `System32`.
+  Rank weight +40 (between Service and ScheduledTask); IntegrityGain
+  flagged on system-hive entries.
+
+**privesc-e2e slice 9.8 gap fixes:**
+
+- `victim.exe` sleeps 5 s after `LoadLibrary` so the Mode-8 spawned
+  thread has time to complete its `WriteFile`s before `ExitProcess`.
+- Orchestrator swaps `preset.Stealth` → `preset.Aggressive` (Stealth
+  + CET opt-out + ACG + BlockDLLs MicrosoftOnly). Order-of-ops audit
+  in `amsi_windows.go::patchAMSI` doc.
+
+**privesc-e2e full chain green on Fedora/libvirt host:**
+
+- `vm-privesc-e2e.sh` driver auto-detect (`vbox` / `libvirt`) +
+  abstracted `vm_poweroff` / `vm_restore` / `vm_start`.
+- Build pipeline gains the missing `fakelib.dll` cgo c-shared step.
+- Password quoting fixed: bash double-quotes through ssh → cmd.exe
+  → PowerShell (single quotes leaked into `$Password`, causing
+  `STATUS_WRONG_PASSWORD` at schtasks /RP).
+- `AntiDebug=true` auto-disabled on libvirt (RDTSC ↔ CPUID delta
+  trips on KVM VMEXIT → silent no-op LoadLibrary). Override via
+  `MALDEV_PRIVESC_E2E_ARGS`.
+- Locale-aware SYSTEM identity matching in both orchestrator
+  (`strings.Contains` → ASCII-strip + per-locale skeleton) and
+  script (`grep -i 'system'` → `LC_ALL=C grep -aE` for byte-level
+  matching against Win-1252 `Syst\xE8me`).
+
+End-to-end run: **STRONG SUCCESS** for both Mode 8
+(`ConvertEXEtoDLL`) and Mode 10 (`PackProxyDLLFromTarget`) on a
+Win10 libvirt/KVM target.
+
 ### Packer DLL chantier — v0.110.0 → v0.123.0 (2026-05-11 → 2026-05-12)
 
 #### v0.123.0 — Slice 5.7 partial + SizeOfImage scratch fix

