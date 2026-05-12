@@ -277,7 +277,13 @@ func InjectStubDLL(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, e
 	if stubName == ([8]byte{}) {
 		stubName = defaultStubSectionName
 	}
-	writeSectionHeader(out[newStubHdr:], stubName, plan.StubMaxSize, plan.StubRVA, stubFileSize, plan.StubFileOff, scnCntCode|scnMemExec|ScnMemRead)
+	// scnMemWrite is REQUIRED — the DllMain stub does a `mov
+	// [r15+flagDisp], al` to latch the decrypted_flag byte. Without
+	// MEM_WRITE the loader maps the page read-only and the latch
+	// crashes with ACCESS_VIOLATION (slice 4.5 root-cause, fixed
+	// 2026-05-12 — same fix slice 5.5.x already applied to
+	// InjectConvertedDLL).
+	writeSectionHeader(out[newStubHdr:], stubName, plan.StubMaxSize, plan.StubRVA, stubFileSize, plan.StubFileOff, scnCntCode|scnMemExec|ScnMemRead|scnMemWrite)
 
 	// === Phase 4: append the reloc section header ===
 	newRelocHdr := newStubHdr + PESectionHdrSize

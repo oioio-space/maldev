@@ -57,14 +57,6 @@ func patchDllMainBody(t *testing.T, pe []byte, body []byte) {
 //   - Function-pointer rebasing through a real reloc'd absolute
 //     pointer — same MSVC dependency.
 func TestPackBinary_FormatWindowsDLL_LoadLibrary_E2E(t *testing.T) {
-	t.Skip("slice 4.5 deferred: real-loader LoadLibrary on the slice-2 DllMain " +
-		"stub crashes 0xC0000005 even with a proper `mov eax,1; ret` body. The " +
-		"synthetic BuildDLLWithReloc fixture exposes a stub bug pack-time tests " +
-		"don't catch (likely .reloc merge layout or stub trailing-data " +
-		"placement). Bisecting requires an MSVC-built testlib.dll the WinVM " +
-		"hasn't been provisioned with; the converted-DLL pipeline (slice 5+) " +
-		"is independent and shipped — use ConvertEXEtoDLL=true for the EXE→DLL " +
-		"path that's E2E validated.")
 	in := testutil.BuildDLLWithReloc(t, 0x100)
 	// Patch the synthetic fixture's DllMain body to a proper BOOL-
 	// returning function: `mov eax, 1; ret` (B8 01 00 00 00 C3 = 6
