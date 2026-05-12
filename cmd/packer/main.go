@@ -138,6 +138,9 @@ func runPack(args []string) int {
 	rounds := fs.Int("rounds", 3, "SGN polymorphism rounds (1-10); windows-exe and linux-elf")
 	seed := fs.Int64("seed", 0, "poly seed (0 = crypto-random); windows-exe and linux-elf")
 	cover := fs.Bool("cover", false, "after PackBinary, chain ApplyDefaultCover (3 junk sections of mixed entropy); windows-exe and linux-elf only")
+	compress := fs.Bool("compress", false, "LZ4-compress .text before SGN encoding (Mode-3 ingredient); windows-exe and linux-elf")
+	antiDebug := fs.Bool("antidebug", false, "emit anti-debug prologue (PEB.BeingDebugged + NtGlobalFlag + RDTSC↔CPUID delta); windows-exe only — set to false on hypervised hosts")
+	randomize := fs.Bool("randomize", false, "Phase-2 polymorphism (timestamps, section names, junk sections); windows-exe and linux-elf")
 	_ = fs.Parse(args)
 
 	if *in == "" || *out == "" {
@@ -159,9 +162,9 @@ func runPack(args []string) int {
 		}
 		return runPackBlob(data, *out, *keyHex, *keyOut)
 	case "windows-exe":
-		return runPackBinary(data, *out, packer.FormatWindowsExe, *rounds, *seed, *cover)
+		return runPackBinary(data, *out, packer.FormatWindowsExe, *rounds, *seed, *cover, *compress, *antiDebug, *randomize)
 	case "linux-elf":
-		return runPackBinary(data, *out, packer.FormatLinuxELF, *rounds, *seed, *cover)
+		return runPackBinary(data, *out, packer.FormatLinuxELF, *rounds, *seed, *cover, *compress, *antiDebug, *randomize)
 	default:
 		fmt.Fprintf(os.Stderr, "pack: unknown format %q (want \"blob\", \"windows-exe\", or \"linux-elf\")\n", *format)
 		return 1
@@ -223,11 +226,14 @@ func runPackBlob(data []byte, out, keyHex, keyOut string) int {
 // ApplyDefaultCover. ELF inputs without PHT slack (Go static-PIE)
 // surface a non-fatal warning and ship the bare PackBinary output;
 // PE always succeeds because section-table slack is plentiful.
-func runPackBinary(data []byte, out string, format packer.Format, rounds int, seed int64, cover bool) int {
+func runPackBinary(data []byte, out string, format packer.Format, rounds int, seed int64, cover, compress, antiDebug, randomize bool) int {
 	hostBytes, key, err := packer.PackBinary(data, packer.PackBinaryOptions{
 		Format:       format,
 		Stage1Rounds: rounds,
 		Seed:         seed,
+		Compress:     compress,
+		AntiDebug:    antiDebug,
+		RandomizeAll: randomize,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "pack: %v\n", err)

