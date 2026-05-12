@@ -103,10 +103,11 @@ flags. On Linux/macOS:
 ```bash
 cd /path/to/maldev   # the repo root — every path below is relative
 
-# probe — C, mingw, no libc (kernel32 only).
-x86_64-w64-mingw32-gcc -nostdlib -e main \
+# probe — full Go (os.WriteFile + exec.Command). The payload that
+# runs as SYSTEM is real Go code, not a C nostdlib stub.
+GOOS=windows GOARCH=amd64 go build -ldflags='-s -w' \
     -o cmd/privesc-e2e/probe/probe.exe \
-    cmd/privesc-e2e/probe/probe.c -lkernel32
+    ./cmd/privesc-e2e/probe
 
 # fakelib — Go cgo c-shared, only needed for Mode-10.
 mkdir -p ignore/gotmp
@@ -116,9 +117,17 @@ GOTMPDIR="$(pwd)/ignore/gotmp" CGO_ENABLED=1 \
         -o cmd/privesc-e2e/fakelib/fakelib.dll \
         ./cmd/privesc-e2e/fakelib
 
-# victim + orchestrator.
-GOOS=windows GOARCH=amd64 go build -o victim.exe       ./cmd/privesc-e2e/victim
-GOOS=windows GOARCH=amd64 go build -o privesc-e2e.exe  ./cmd/privesc-e2e
+# victim — C nostdlib mingw, kernel32-only. Deliberately NOT Go: the
+# Mode-8 stub spawns the Go probe payload as a thread inside this
+# process; if victim were Go, two Go runtimes would fight over TLS
+# slot 0. Keeping victim Go-runtime-free leaves a clean process for
+# the spawned-thread Go probe to initialise into.
+x86_64-w64-mingw32-gcc -nostdlib -e mainCRTStartup \
+    -o victim.exe \
+    cmd/privesc-e2e/victim/victim.c -lkernel32
+
+# orchestrator.
+GOOS=windows GOARCH=amd64 go build -o privesc-e2e.exe ./cmd/privesc-e2e
 ```
 
 Copy `privesc-e2e.exe` + `victim.exe` to the Windows box however
@@ -389,7 +398,7 @@ target itself, if you're sitting at it):
 | Tool | Purpose | Install |
 |---|---|---|
 | Go ≥ 1.22 | builds the orchestrator + victim | <https://go.dev/dl/> |
-| `gcc` (mingw-w64 inside MSYS2) | builds the C probe + the cgo c-shared fakelib (Mode 10 only) | <https://www.msys2.org/> then `pacman -S mingw-w64-x86_64-toolchain` |
+| `gcc` (mingw-w64 inside MSYS2) | builds the C victim + the cgo c-shared fakelib (Mode 10 only) | <https://www.msys2.org/> then `pacman -S mingw-w64-x86_64-toolchain` |
 
 **(b) Cross-compile from Linux/macOS** (handy in CI or if you
 don't want to install dev tools on the target):
@@ -397,10 +406,10 @@ don't want to install dev tools on the target):
 | Tool | Purpose | Install (Fedora example) |
 |---|---|---|
 | `go` ≥ 1.22 | cross-compile via `GOOS=windows GOARCH=amd64` | `dnf install golang` |
-| `x86_64-w64-mingw32-gcc` | builds the `-nostdlib` C probe + the cgo c-shared fakelib | `dnf install mingw64-gcc` |
+| `x86_64-w64-mingw32-gcc` | builds the `-nostdlib` C victim + the cgo c-shared fakelib | `dnf install mingw64-gcc` |
 
 The native and cross builds are byte-equivalent for the Go
-binaries; the C probe is mingw-built either way. See [§2.0](#20-build-the-binaries-operator-host-before-you-arrive)
+binaries; the C victim is mingw-built either way. See [§2.0](#20-build-the-binaries-operator-host-before-you-arrive)
 for the exact commands.
 
 ---
@@ -870,9 +879,8 @@ Get-WinEvent -LogName Security -FilterXPath "*[System[EventID=4624 or EventID=46
 |---|---|
 | `main.go` | Orchestrator (runs as `lowuser`) — the live actor in the demo |
 | `amsi_windows.go` | `patchAMSI()` — runs `evasion.preset.Aggressive` via `ApplyAllAggregated` |
-| `probe/probe.c` | Tiny `-nostdlib` C EXE — kernel32-only, writes `whoami` marker + breadcrumbs. Embedded into orchestrator via `//go:embed probe/probe.exe`. |
-| `probe/main.go` | Original Go probe — **does NOT survive** thread-injection by Mode-8 stub (Go runtime requires being the process entry point). Kept as a reference; revive only if the runtime-init issue is solved. |
-| `victim/main.go` | DELIBERATELY VULNERABLE — `LoadLibrary("hijackme.dll")` then sleeps 5 s. Deployed at `C:\Vulnerable\victim.exe`, run as SYSTEM by the scheduled task. |
+| `probe/main.go` | Full Go probe — the payload that runs as SYSTEM. Uses `os.WriteFile` + `exec.Command("whoami.exe")`, writes the marker file the orchestrator polls. Embedded into orchestrator via `//go:embed probe/probe.exe`. Survives the Mode-8 thread-spawn because `victim.c` keeps the host process Go-runtime-free. |
+| `victim/victim.c` | DELIBERATELY VULNERABLE — `LoadLibrary("hijackme.dll")` then sleeps 5 s. Built in C nostdlib mingw on purpose: a Go victim would collide with the Go probe's runtime init when the spawned thread fires. Deployed at `C:\Vulnerable\victim.exe`, run as SYSTEM by the scheduled task. |
 | `fakelib/fakelib.go` | Real Go-built `c-shared` DLL with three named exports. Embedded via `//go:embed fakelib/fakelib.dll` for the Mode-10 path. |
 | `../../docs/refactor-2026-doc/privesc-e2e-lessons-2026-05-12.md` | session-by-session debugging log if you want the archaeology |
 

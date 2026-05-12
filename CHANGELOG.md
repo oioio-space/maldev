@@ -7,6 +7,49 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### v0.134.0 — privesc-e2e probe shipped in Go (2026-05-13)
+
+**Role swap.** `cmd/privesc-e2e/probe/main.go` (full Go: `os.WriteFile`
++ `exec.Command("whoami.exe")`) is now the active payload, replacing
+the previous mingw `-nostdlib` `probe.c`. Symmetrically,
+`cmd/privesc-e2e/victim/victim.c` (C nostdlib, kernel32-only, 8.5 KB)
+replaces the previous Go `victim/main.go`.
+
+**Why the swap matters.** The original Go probe was kept "for
+reference" because Mode-8 (`ConvertEXEtoDLL`) spawns the payload
+thread from inside `DllMain` of the packed converted DLL — and a Go
+victim already running its own Go runtime in the host process meant
+two Go runtimes fighting over TLS slot 0, the scheduler, and signal
+handlers. Bumping the victim to C nostdlib clears the host process
+of any Go-runtime state, so the spawned-thread Go probe gets a
+clean process to initialise into. End-to-end verified on libvirt
+Win10 with Defender real-time protection ON:
+
+    marker contents: AUTORITE NT\Système|pid=…|t=…
+    ✅ STRONG SUCCESS — marker shows SYSTEM identity (mode 8)
+
+The payload identity comes back as
+`AUTORITE NT\Système|pid=…|t=…` instead of the previous C-format
+fragment, confirming Go's `os/exec` and Win-1252 string handling
+work cleanly under SYSTEM context.
+
+**File deltas:**
+
+- DELETE `cmd/privesc-e2e/probe/probe.c` (mingw nostdlib payload).
+- DELETE `cmd/privesc-e2e/victim/main.go` (Go victim).
+- ADD `cmd/privesc-e2e/victim/victim.c` (mingw nostdlib victim).
+- `probe/main.go` becomes the live build source; `probe/probe.exe`
+  is now `go build`-emitted, 2 MiB stripped (`-ldflags='-s -w'`).
+- `scripts/vm-privesc-e2e.sh` build pipeline reordered + retooled.
+- `cmd/privesc-e2e/README.md` §2.0 and §10 (repository layout)
+  updated to reflect the new file shapes.
+
+**Orchestrator size impact.** The `//go:embed probe/probe.exe` now
+pulls a 2 MiB Go probe in (was ~11 KB C probe), bumping the
+orchestrator from ~12 MiB to ~14 MiB. The packed dropper (with the
+v0.133.0 Compress fix) stays the same on-disk-signature delta,
+because LZ4 doesn't compress Go `.text` either way.
+
 ### v0.133.0 — Compress packs work on large Go binaries (2026-05-13)
 
 **Bug fix — `pe/packer/transform.InjectStubPE` stub-section
