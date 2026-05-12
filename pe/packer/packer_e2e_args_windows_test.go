@@ -163,3 +163,68 @@ func TestPackBinary_ConvertEXEtoDLL_Args_E2E(t *testing.T) {
 	t.Log("FINDING: payload sees rundll32's command-line, NOT operator-controlled args. " +
 		"Mode 8 has no args-injection mechanism — see packer-improvements-2026-05-12.md.")
 }
+
+// TestPackBinary_ConvertEXEtoDLL_DefaultArgs_E2E closes the gap
+// documented by TestPackBinary_ConvertEXEtoDLL_Args_E2E: with
+// ConvertEXEtoDLLDefaultArgs set, the converted-DLL stub patches
+// PEB.ProcessParameters.CommandLine before invoking the OEP, so
+// the spawned payload's GetCommandLineW (and Go's os.Args) returns
+// the operator-controlled string instead of the host process's
+// (rundll32's) cmdline.
+//
+// Asserts the marker file contains the operator's args, NOT
+// rundll32's. Slice 1.A.4 — first E2E proof of slices 1.A.1-1.A.3.
+func TestPackBinary_ConvertEXEtoDLL_DefaultArgs_E2E(t *testing.T) {
+	probe, err := os.ReadFile(filepath.Join("testdata", "probe_args.exe"))
+	if err != nil {
+		t.Skipf("probe_args.exe missing: %v", err)
+	}
+	const operatorArgs = "operator.exe alpha bravo charlie"
+	packed, _, err := packer.PackBinary(probe, packer.PackBinaryOptions{
+		Format:                     packer.FormatWindowsExe,
+		ConvertEXEtoDLL:            true,
+		ConvertEXEtoDLLDefaultArgs: operatorArgs,
+		Stage1Rounds:               3,
+		Seed:                       42,
+	})
+	if err != nil {
+		t.Fatalf("PackBinary: %v", err)
+	}
+	tmpDir := t.TempDir()
+	dllPath := filepath.Join(tmpDir, "packed.dll")
+	if err := os.WriteFile(dllPath, packed, 0o755); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	const markerPath = `C:\maldev-args-marker.txt`
+	_ = os.Remove(markerPath)
+	defer os.Remove(markerPath)
+
+	rundllCmd := exec.Command("rundll32.exe", dllPath+",DllMain")
+	out, _ := rundllCmd.CombinedOutput()
+	t.Logf("rundll32 output: %q", out)
+
+	for i := 0; i < 40; i++ {
+		if _, err := os.Stat(markerPath); err == nil {
+			break
+		}
+	}
+	content, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("marker missing — payload did not spawn or crashed: %v", err)
+	}
+	got := string(content)
+	t.Logf("DefaultArgs payload observed cmdline: %q", got)
+
+	// The PEB-patched cmdline must surface in the payload's os.Args.
+	for _, want := range []string{"alpha", "bravo", "charlie"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("marker missing operator arg %q (got %q)", want, got)
+		}
+	}
+	// Negative: rundll32-specific tokens must NOT appear (rundll32
+	// would put `,DllMain` and the dll path in the cmdline if PEB
+	// patch had no effect).
+	if strings.Contains(got, "rundll32") || strings.Contains(got, "DllMain") {
+		t.Errorf("payload still observes rundll32's cmdline — PEB patch ineffective (got %q)", got)
+	}
+}
