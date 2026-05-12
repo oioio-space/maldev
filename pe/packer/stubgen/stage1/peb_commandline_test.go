@@ -50,11 +50,12 @@ func TestEmitPEBCommandLinePatch_AssemblesCleanly(t *testing.T) {
 		off += inst.Len
 		count++
 	}
-	// Expect 6 instructions: GS-PEB load (1), +0x20 deref (2),
-	// Length store (3), MaximumLength store (4), LEA buffer (5),
-	// MOV buffer ptr (6).
-	if count != 6 {
-		t.Errorf("decoded %d instructions, want 6", count)
+	// Expect 8 instructions: GS-PEB load (1), +0x20 deref (2),
+	// load existing Buffer into RDI (3), LEA src into RSI (4),
+	// MOV ECX count (5), REP MOVSB (6), Length store (7),
+	// MaximumLength store (8).
+	if count != 8 {
+		t.Errorf("decoded %d instructions, want 8", count)
 	}
 }
 

@@ -58,7 +58,7 @@ the payload with their own args mid-attack.
 | 1.A.1 | PEB-patch asm helper (`stage1.EmitPEBCommandLinePatch`) | ~80 | ✅ shipped (2a89369) |
 | 1.A.2 | Wire DefaultArgs into `EmitConvertedDLLStub`: emit PEB patch BEFORE CreateThread, append args buffer to stub section | ~60 | ✅ shipped |
 | 1.A.3 | Plumb `PackBinaryOptions.ConvertEXEtoDLLDefaultArgs` → `stubgen.Options` → `stage1.EmitOptions` | ~20 | ✅ shipped |
-| 1.A.4 | Win10 VM E2E: pack `probe_args.exe` with DefaultArgs="custom one two", LoadLibrary, assert marker contains "custom\|one\|two" | ~50 | 🟡 test written, awaiting VM run |
+| 1.A.4 | Win10 VM E2E: pack `probe_args.exe` with DefaultArgs="custom one two", LoadLibrary, assert marker contains "custom\|one\|two" | ~50 | ✅ PASS on Win10 VM (after asm pivot) |
 | 1.B.1 | `RunWithArgs` export — emitted in the stub section, registered in the DLL's export table via `transform.AppendExportSection` | ~100 | after 1.A complete |
 | 1.B.2 | Win10 VM E2E: pack, LoadLibrary, GetProcAddress("RunWithArgs"), call with custom args, assert marker | ~50 | after 1.B.1 |
 
@@ -67,20 +67,19 @@ end (1.A complete = v0.130.0, 1.B complete = v0.131.0).
 
 ### Cross-machine resume — current state
 
-Slices 1.A.1, 1.A.2, 1.A.3 shipped + slice 1.A.4 test code
-written (`TestPackBinary_ConvertEXEtoDLL_DefaultArgs_E2E` in
-`pe/packer/packer_e2e_args_windows_test.go`). Pickup at **VM run**:
+**Slice 1.A complete.** Tagged v0.130.0. Pickup at **slice 1.B.1**
+(`RunWithArgs` export emitted in stub section + registered in DLL
+export table via `transform.AppendExportSection`).
 
-```pwsh
-./scripts/vm-run-tests.sh windows ./pe/packer/... \
-  "-tags=maldev_packer_run_e2e -run ConvertEXEtoDLL_DefaultArgs -v -count=1"
-```
-
-Pass = slice 1.A complete → tag v0.130.0 → start Part B
-(`RunWithArgs` export, slices 1.B.1 + 1.B.2). Fail =
-diagnose PEB-patch displacement; first suspect is the
-`argsBufferOff = len(stub) - ConvertedDLLStubArgsBufferOffsetFromEnd(...)`
-arithmetic in `pe/packer/stubgen/stubgen.go`.
+Big lesson from 1.A.4 (saved as `feedback_getcommandline_cache.md`):
+the original PEB-patch design (rewrite `CommandLine.Buffer` pointer)
+was a no-op because `kernel32!GetCommandLineW` caches its result on
+first call — every subsequent caller (Go runtime, MSVC CRT, etc.)
+reads the cache, NOT PEB. Pivoted to **in-place memcpy** at the
+existing buffer pointer (43 B asm: PEB → ProcessParameters → load
+existing Buffer into RDI → REP MOVSB from stub-baked args → update
+Length/MaximumLength). Limitation: assumes existing buffer ≥
+argsLenBytes+2; documented on the field.
 
 The Win64 PEB layout used by the asm patch:
 - `gs:[0x60]` → PEB pointer (TEB+0x60)
