@@ -91,6 +91,18 @@ const (
 	// ScnMemRead is IMAGE_SCN_MEM_READ.
 	ScnMemRead uint32 = 0x40000000
 
+	// ScnMemWrite is IMAGE_SCN_MEM_WRITE. Set on the appended stub
+	// section when [Plan.StubScratchSize] > 0 so the C3 compression
+	// path's LZ4 inflate can write into the BSS slack at runtime.
+	ScnMemWrite uint32 = 0x80000000
+
+	// ScnMemExec is IMAGE_SCN_MEM_EXECUTE.
+	ScnMemExec uint32 = 0x20000000
+
+	// ScnCntCode is IMAGE_SCN_CNT_CODE — section contains executable
+	// code. Set on the appended stub section.
+	ScnCntCode uint32 = 0x00000020
+
 	// ScnMemReadInitData is the OR of [ScnCntInitData] and
 	// [ScnMemRead] — the read-only-data Characteristics value
 	// that cover-layer junk sections carry.

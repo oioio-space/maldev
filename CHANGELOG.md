@@ -7,6 +7,60 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
+### v0.133.0 — Compress packs work on large Go binaries (2026-05-13)
+
+**Bug fix — `pe/packer/transform.InjectStubPE` stub-section
+characteristics:**
+
+Before this release the appended stub section carried only
+`IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_EXECUTE`. The C3 compression
+path's LZ4 inflate writes into the section's BSS slack at runtime
+(scratch region for the inflated `.text` plaintext before memcpy
+back to the original section). On small inputs the kernel's
+freshly-mapped BSS pages happened to be implicitly writable; on
+inputs ≥ ~2 MiB `.text` (measured: 12 MiB Go binaries) the
+inflate reliably faulted with `STATUS_ACCESS_VIOLATION`
+(`0xC0000005`) before `main()` — no orchestrator banner, no
+breadcrumb writes, scheduled-task `LastTaskResult = 3221225477`.
+
+Fix: `InjectStubPE` now ORs `IMAGE_SCN_MEM_WRITE` into the stub
+section's characteristics when `Plan.StubScratchSize > 0`.
+Non-Compress packs keep their historical RX-only stub section
+(no behaviour change for the default pipeline). Two regression
+tests pin the contract:
+- `TestInjectStubPE_StubSectionWritableWhenScratch`
+- `TestInjectStubPE_StubSectionReadOnlyWithoutScratch`
+
+**`cmd/packer` CLI surface:**
+
+- New flags on `pack -format windows-exe|linux-elf`:
+  - `-compress` — LZ4-compress `.text` before SGN encoding.
+  - `-antidebug` — emit anti-debug prologue (windows-exe only).
+  - `-randomize` — Phase-2 polymorphism (timestamps, section
+    names, junk sections).
+  All default `false` to preserve prior conservative-pack
+  behaviour.
+
+**End-to-end verification:**
+
+`cmd/privesc-e2e` (12 MiB Go orchestrator) packed with
+`-rounds 5 -compress -randomize`, Defender real-time protection
+ON, no exclusions, run AS `lowuser` via `schtasks` → marker file
+written by SYSTEM-context probe → **STRONG SUCCESS**. The full
+chain documented in
+[`cmd/privesc-e2e/README.md` §8 bis](cmd/privesc-e2e/README.md#8-bis-defender-bypass-via-dropper-packing).
+
+**Compression-savings note:**
+
+LZ4 on a Go `.text` (PIC pointers + dense x86-64 encoding) yields
+~0 % size reduction. Final packed file is `+8 KiB` (stub +
+inflate decoder) larger than unpacked. The win of `-compress` on
+Go binaries is not file shrinkage but **signature-byte scrambling
+on disk**: the `LZ4-compress → SGN-encode` byte sequence differs
+from the `SGN-on-plain` sequence, defeating heuristics that
+baseline raw SGN output patterns. Mingw C binaries still see
+~30-50 % LZ4 savings on `.text`.
+
 ### v0.132.0 — privesc-e2e helpers + STRONG verdict on libvirt (2026-05-12)
 
 **New helpers (slice 9.7):**

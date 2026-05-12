@@ -1557,8 +1557,9 @@ described in this doc as a thing on screen, not just a byte table.
 
 ```
 packer pack    -in <file> -out <file> [-format blob|windows-exe|linux-elf]
-                                      [-rounds 3] [-seed N] [-compress]
-                                      [-antidebug] [-keyout <file>]
+                                      [-rounds 3] [-seed N]
+                                      [-compress] [-antidebug] [-randomize]
+                                      [-cover] [-keyout <file>] [-key <hex64>]
 packer unpack  -in <file> -out <file> -key <hex32>
 packer bundle  -out <file> -pl <spec> [-pl <spec> ...]
                                       [-fallback exit|crash|first]

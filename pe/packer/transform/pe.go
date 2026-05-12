@@ -33,12 +33,17 @@ const (
 	secSizeOfRawDataOffset    = 0x10
 	secPointerToRawDataOffset = 0x14
 	secCharacteristicsOffset  = 0x24
+)
 
-	// Section Characteristics flags (PE/COFF)
-	scnCntCode  = 0x00000020
-	scnMemExec  = 0x20000000
-	scnMemRead  = 0x40000000
-	scnMemWrite = 0x80000000
+// Section Characteristics flag aliases — kept as package-local
+// shorthand for the busiest call sites; the canonical exported
+// names live in peconst.go ([ScnCntCode], [ScnMemExec],
+// [ScnMemRead], [ScnMemWrite]).
+const (
+	scnCntCode  = ScnCntCode
+	scnMemExec  = ScnMemExec
+	scnMemRead  = ScnMemRead
+	scnMemWrite = ScnMemWrite
 )
 
 // planExpect selects which COFF Characteristics admission rule
@@ -286,16 +291,13 @@ func InjectStubPE(input, encryptedText, stubBytes []byte, plan Plan) ([]byte, er
 	binary.LittleEndian.PutUint32(out[newHdrOff+secVirtualAddressOffset:newHdrOff+secVirtualAddressOffset+4], plan.StubRVA)
 	binary.LittleEndian.PutUint32(out[newHdrOff+secSizeOfRawDataOffset:newHdrOff+secSizeOfRawDataOffset+4], stubFileSize)
 	binary.LittleEndian.PutUint32(out[newHdrOff+secPointerToRawDataOffset:newHdrOff+secPointerToRawDataOffset+4], plan.StubFileOff)
-	// MEM_WRITE is required when StubScratchSize > 0 — the C3
-	// compression path's LZ4 inflate writes into the section's BSS
-	// slack (offset StubMaxSize..StubMaxSize+StubScratchSize). On
-	// small binaries the kernel happens to back the BSS pages with
-	// implicitly-RWX page-table entries, but on larger images (e.g.
-	// the 12 MiB privesc-e2e orchestrator) the inflate triggers
-	// STATUS_ACCESS_VIOLATION (0xC0000005) before main() runs. The
-	// explicit MEM_WRITE bit removes the loader's freedom to map
-	// the scratch range read-only.
-	stubChars := uint32(scnCntCode | scnMemExec | scnMemRead)
+	// MEM_WRITE is required when StubScratchSize > 0: the C3 LZ4
+	// inflate path writes into the section's BSS slack
+	// (StubMaxSize..StubMaxSize+StubScratchSize). On small binaries
+	// the kernel happens to back BSS with RWX PTEs and hides the
+	// bug; on larger images (e.g. 12 MiB Go binaries) the inflate
+	// triggers STATUS_ACCESS_VIOLATION before main().
+	stubChars := scnCntCode | scnMemExec | scnMemRead
 	if plan.StubScratchSize > 0 {
 		stubChars |= scnMemWrite
 	}

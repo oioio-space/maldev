@@ -186,66 +186,49 @@ func TestInjectStubPE_DebugPEParses(t *testing.T) {
 	}
 }
 
-// TestInjectStubPE_StubSectionWritableWhenScratch verifies the stub
-// section gets MEM_WRITE when Plan.StubScratchSize > 0 — the C3
-// compression path's LZ4 inflate writes into the section's BSS
-// slack, so the loader must map those pages writable. Without this,
-// large Go binaries (e.g. the 12 MiB privesc-e2e orchestrator)
-// crashed with STATUS_ACCESS_VIOLATION (0xC0000005) before main().
-// Small binaries happened to succeed by chance of how the kernel
-// backed the BSS pages — explicit MEM_WRITE removes the gamble.
-func TestInjectStubPE_StubSectionWritableWhenScratch(t *testing.T) {
-	const textSize = 0x500
-	input := buildMinimalPE(t, minimalPEOpts{TextSize: textSize, OEPRVA: 0x1010})
-	plan, err := transform.PlanPE(input, 4096)
-	if err != nil {
-		t.Fatalf("PlanPE: %v", err)
+// TestInjectStubPE_StubSectionWriteBit pins the contract:
+// MEM_WRITE iff Plan.StubScratchSize > 0. The C3 compression path
+// runs LZ4 inflate into the section's BSS slack, so the loader
+// must map those pages writable; large Go binaries (e.g. the
+// 12 MiB privesc-e2e orchestrator) faulted with
+// STATUS_ACCESS_VIOLATION before main() until the bit was set.
+// Non-Compress packs stay RX-only so default packs don't grow
+// an unnecessary writable region.
+func TestInjectStubPE_StubSectionWriteBit(t *testing.T) {
+	cases := []struct {
+		name      string
+		scratch   uint32
+		wantWrite bool
+	}{
+		{"WithScratch_HasMEM_WRITE", 0x2000, true},
+		{"NoScratch_StaysReadOnly", 0, false},
 	}
-	plan.StubScratchSize = 0x2000 // request 8 KiB of scratch
-	encryptedText := bytes.Repeat([]byte{0xAA}, int(plan.TextSize))
-	stubBytes := []byte{0xC3}
-
-	out, err := transform.InjectStubPE(input, encryptedText, stubBytes, plan)
-	if err != nil {
-		t.Fatalf("InjectStubPE: %v", err)
-	}
-	f, err := pe.NewFile(bytes.NewReader(out))
-	if err != nil {
-		t.Fatalf("debug/pe rejected output: %v", err)
-	}
-	defer f.Close()
-	stubSec := f.Sections[len(f.Sections)-1]
-	if stubSec.Characteristics&0x80000000 == 0 {
-		t.Errorf("stub section Characteristics = %#x missing MEM_WRITE bit when StubScratchSize=%#x",
-			stubSec.Characteristics, plan.StubScratchSize)
-	}
-}
-
-// TestInjectStubPE_StubSectionReadOnlyWithoutScratch keeps the
-// no-compress / no-scratch path RX-only (the historical default)
-// so non-Compress packs don't grow an unnecessary writable region.
-func TestInjectStubPE_StubSectionReadOnlyWithoutScratch(t *testing.T) {
-	input := buildMinimalPE(t, minimalPEOpts{TextSize: 0x500, OEPRVA: 0x1010})
-	plan, err := transform.PlanPE(input, 4096)
-	if err != nil {
-		t.Fatalf("PlanPE: %v", err)
-	}
-	// plan.StubScratchSize stays 0 — no compression.
-	out, err := transform.InjectStubPE(input,
-		bytes.Repeat([]byte{0xAA}, int(plan.TextSize)),
-		[]byte{0xC3}, plan)
-	if err != nil {
-		t.Fatalf("InjectStubPE: %v", err)
-	}
-	f, err := pe.NewFile(bytes.NewReader(out))
-	if err != nil {
-		t.Fatalf("debug/pe rejected output: %v", err)
-	}
-	defer f.Close()
-	stubSec := f.Sections[len(f.Sections)-1]
-	if stubSec.Characteristics&0x80000000 != 0 {
-		t.Errorf("stub section Characteristics = %#x has spurious MEM_WRITE bit when StubScratchSize=0",
-			stubSec.Characteristics)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			input := buildMinimalPE(t, minimalPEOpts{TextSize: 0x500, OEPRVA: 0x1010})
+			plan, err := transform.PlanPE(input, 4096)
+			if err != nil {
+				t.Fatalf("PlanPE: %v", err)
+			}
+			plan.StubScratchSize = c.scratch
+			out, err := transform.InjectStubPE(input,
+				bytes.Repeat([]byte{0xAA}, int(plan.TextSize)),
+				[]byte{0xC3}, plan)
+			if err != nil {
+				t.Fatalf("InjectStubPE: %v", err)
+			}
+			f, err := pe.NewFile(bytes.NewReader(out))
+			if err != nil {
+				t.Fatalf("debug/pe rejected output: %v", err)
+			}
+			defer f.Close()
+			stubSec := f.Sections[len(f.Sections)-1]
+			gotWrite := stubSec.Characteristics&transform.ScnMemWrite != 0
+			if gotWrite != c.wantWrite {
+				t.Errorf("stub section Characteristics = %#x, MEM_WRITE=%v want %v (scratch=%#x)",
+					stubSec.Characteristics, gotWrite, c.wantWrite, c.scratch)
+			}
+		})
 	}
 }
 

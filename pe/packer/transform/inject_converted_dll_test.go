@@ -156,14 +156,12 @@ func TestInjectConvertedDLL_StubSectionIsWritable(t *testing.T) {
 	}
 	defer pf.Close()
 	stubSec := pf.Sections[len(pf.Sections)-1]
-	const scnMemWrite uint32 = 0x80000000
-	if stubSec.Characteristics&scnMemWrite == 0 {
+	if stubSec.Characteristics&transform.ScnMemWrite == 0 {
 		t.Errorf("stub section Characteristics %#x lacks MEM_WRITE — loader would AV on the flag latch",
 			stubSec.Characteristics)
 	}
 	// EXEC must still be set — the stub is asm code, not data.
-	const scnMemExec uint32 = 0x20000000
-	if stubSec.Characteristics&scnMemExec == 0 {
+	if stubSec.Characteristics&transform.ScnMemExec == 0 {
 		t.Errorf("stub section lost MEM_EXECUTE: %#x", stubSec.Characteristics)
 	}
 }

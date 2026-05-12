@@ -138,9 +138,9 @@ func runPack(args []string) int {
 	rounds := fs.Int("rounds", 3, "SGN polymorphism rounds (1-10); windows-exe and linux-elf")
 	seed := fs.Int64("seed", 0, "poly seed (0 = crypto-random); windows-exe and linux-elf")
 	cover := fs.Bool("cover", false, "after PackBinary, chain ApplyDefaultCover (3 junk sections of mixed entropy); windows-exe and linux-elf only")
-	compress := fs.Bool("compress", false, "LZ4-compress .text before SGN encoding (Mode-3 ingredient); windows-exe and linux-elf")
-	antiDebug := fs.Bool("antidebug", false, "emit anti-debug prologue (PEB.BeingDebugged + NtGlobalFlag + RDTSC↔CPUID delta); windows-exe only — set to false on hypervised hosts")
-	randomize := fs.Bool("randomize", false, "Phase-2 polymorphism (timestamps, section names, junk sections); windows-exe and linux-elf")
+	compress := fs.Bool("compress", false, "LZ4-compress .text before SGN encoding (see docs/techniques/pe/packer.md); windows-exe and linux-elf")
+	antiDebug := fs.Bool("antidebug", false, "emit anti-debug prologue (see docs/techniques/pe/packer.md); windows-exe only — leave off on hypervised hosts (RDTSC↔CPUID delta trips on VMEXIT)")
+	randomize := fs.Bool("randomize", false, "Phase-2 polymorphism (timestamps, section names, junk sections; see docs/techniques/pe/packer.md); windows-exe and linux-elf")
 	_ = fs.Parse(args)
 
 	if *in == "" || *out == "" {
