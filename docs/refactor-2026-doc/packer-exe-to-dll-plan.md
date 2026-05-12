@@ -212,7 +212,7 @@ Win VM E2E (slow, real loader):
 DLLs (see `pe/dllproxy/doc.go` + `assembleWithPayload`). The slice-5
 converted-DLL composes with it in two ways:
 
-### Path A — chained (zero new code after slice 5)
+### Path A — chained (✅ shipped v0.127.0 as `packer.PackChainedProxyDLL`)
 
 ```text
 packer.PackBinary(winhello.exe, {ConvertEXEtoDLL: true})
@@ -230,7 +230,11 @@ the Go runtime spins up in the host's address space while the
 proxy forwards every export back to the real `version.dll`.
 
 **Cost:** zero — emerges naturally from slice 5 + the existing
-`dllproxy.Options.PayloadDLL`.
+`dllproxy.Options.PayloadDLL`. **v0.127.0 ships
+`packer.PackChainedProxyDLL`** — a one-call orchestrator that
+returns `(proxyBytes, payloadBytes, key, err)`. 4 unit tests pin
+admission + happy-path. Operators get the two-file drop without
+having to wire the two emitters themselves.
 
 **Drawback:** two-file drop, IAT entry on `kernel32!LoadLibraryA`
 in the proxy is a detectable IOC.
