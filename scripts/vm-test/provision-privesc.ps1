@@ -69,7 +69,12 @@ schtasks /Delete /TN $TaskName /F *> $null
 $schArgs = @(
     '/Create', '/TN', $TaskName,
     '/TR', "`"$victimDest`"",
-    '/SC', 'ONCE', '/ST', '23:59',     # ONCE far in the future -- only run via /Run
+    # Auto-trigger every minute -- lowuser cannot /Run a SYSTEM task
+    # via schtasks (RPC ACL distinct from the file ACL we patch
+    # below), so we sidestep the permission with a self-trigger and
+    # have the orchestrator just wait one cycle after planting the
+    # DLL.
+    '/SC', 'MINUTE', '/MO', '1',
     '/RU', 'SYSTEM',
     '/RL', 'HIGHEST',
     '/F'

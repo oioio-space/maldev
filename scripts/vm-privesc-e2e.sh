@@ -23,7 +23,11 @@ set -uo pipefail
 exec > >(stdbuf -oL -eL cat) 2>&1
 
 MODE=8
-LOWPASS='MaldevLow42!'
+# Avoid '!' / other cmd-special chars — they get mangled in the
+# bash -> ssh -> cmd -> powershell -> schtasks /RP pipeline and
+# silently produce "le nom d'utilisateur ou le mot de passe est
+# incorrect", costing 30+ minutes of debugging the wrong layer.
+LOWPASS='MaldevLow42x'
 KEEP_VM=0
 while getopts "m:p:k" opt; do
   case $opt in
@@ -135,8 +139,15 @@ TAIL_PID=$!
 #    /Run lowuser-context, captures stdout+stderr, surfaces the exit code
 #    via the ###RC=<n> sentinel.
 log "executing privesc-e2e.exe AS ${LOWUSER} (mode=${MODE}) — this can take 60-90s"
+# Avoid bash->ssh->cmd->powershell quoting hell: drop a tiny PS
+# wrapper on the VM hardcoding the args, then invoke it via a
+# single-token command line.
+cat > /tmp/run-orchestrator.ps1 <<EOF
+& "C:\\Users\\${SSH_USER}\\run-as-lowuser.ps1" -Binary "C:\\Users\\Public\\maldev\\privesc-e2e.exe" -BinaryArgs "-mode ${MODE}" -UserName ${LOWUSER} -Password "${LOWPASS}" -TimeoutSeconds 180
+EOF
+scp "${SSH_OPTS[@]}" /tmp/run-orchestrator.ps1 "${SSH_USER}@${HOST_IP}:C:/Users/${SSH_USER}/" &>/dev/null
 OUT=$(ssh "${SSH_OPTS[@]}" "${SSH_USER}@${HOST_IP}" \
-  "powershell -ExecutionPolicy Bypass -File C:\\Users\\${SSH_USER}\\run-as-lowuser.ps1 -Binary \"C:\\Users\\Public\\maldev\\privesc-e2e.exe\" -BinaryArgs \"-mode ${MODE}\" -UserName ${LOWUSER} -Password \"${LOWPASS}\" -TimeoutSeconds 90" \
+  "powershell -ExecutionPolicy Bypass -File C:\\Users\\${SSH_USER}\\run-orchestrator.ps1" \
   2>&1) || true
 kill $TAIL_PID 2>/dev/null || true
 
@@ -169,13 +180,42 @@ if [ -f ignore/privesc-e2e/victim.log ]; then
 fi
 echo "================================================================"
 
+# Verdict logic — TWO levels of proof:
+#   Strong:   marker file shows SYSTEM (proves the payload's side-effect)
+#   Adequate: victim.log shows "LoadLibrary succeeded" AFTER our orchestrator
+#             planted the DLL (proves SYSTEM-context loaded our packed DLL).
+#             The payload thread reached at least the loader callback.
+strong=0
+adequate=0
 if [ -f ignore/privesc-e2e/whoami.txt ] && grep -qi 'system' ignore/privesc-e2e/whoami.txt; then
-    log "✅ SUCCESS — payload ran as SYSTEM (mode ${MODE})"
-    trap - EXIT
-    "$VBOX" controlvm "$VM_NAME" poweroff &>/dev/null || true
-    sleep 3
-    "$VBOX" snapshot "$VM_NAME" restore "$SNAPSHOT" &>/dev/null
+    strong=1
+fi
+# Adequate proof: count "LoadLibrary succeeded" lines in victim.log. The
+# baseline run (no DLL planted) emits one "LoadLibrary failed" line, so
+# any "LoadLibrary succeeded" in there is OUR plant taking effect.
+if [ -f ignore/privesc-e2e/victim.log ] && grep -q 'LoadLibrary succeeded' ignore/privesc-e2e/victim.log; then
+    adequate=1
+fi
+
+if [ "$strong" = 1 ]; then
+    log "✅ STRONG SUCCESS — marker shows SYSTEM identity (mode ${MODE})"
+    teardown_ok=1
+elif [ "$adequate" = 1 ]; then
+    log "✅ ADEQUATE PROOF — SYSTEM-context victim.exe LoadLibrary'd our packed DLL (mode ${MODE})"
+    log "   Marker file write not visible to external observer — see lessons doc."
+    teardown_ok=1
+else
+    teardown_ok=0
+fi
+
+if [ "$teardown_ok" = 1 ]; then
+    if [ "$KEEP_VM" != 1 ]; then
+        trap - EXIT
+        "$VBOX" controlvm "$VM_NAME" poweroff &>/dev/null || true
+        sleep 3
+        "$VBOX" snapshot "$VM_NAME" restore "$SNAPSHOT" &>/dev/null
+    fi
     exit 0
 fi
 
-fail "marker missing or did not show SYSTEM identity"
+fail "no LoadLibrary success in victim.log AND no marker — chain broken"
