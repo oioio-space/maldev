@@ -191,7 +191,7 @@ Win VM E2E (slow, real loader):
 - **Compress=true.** Same reason as slice 4
   (`stubgen.ErrCompressDLLUnsupported`); LZ4 inflate doesn't
   thread through the converted-DLL layout in slice 5 v1.
-- **Anti-debug prologue.** Easy add later — reuse `emitAntiDebug`
+- ~~**Anti-debug prologue.**~~ ✅ Shipped v0.122.0 (slice 5.6) — `PackBinaryOptions.AntiDebug=true` now applies to converted-DLL packs. Reuses `emitAntiDebug` placed BEFORE the prologue: on positive detection the bare RET inside antidebug returns to the loader with RAX non-zero (BeingDebugged byte / NtGlobalFlag mask / RDTSC delta all positive on hit), so LoadLibrary reads BOOL TRUE and the DLL silently no-ops without ever decrypting or spawning. VM E2E `TestPackBinary_ConvertEXEtoDLL_LoadLibrary_AntiDebug_E2E` validates the silent-exit path (KVM VMEXIT trips the CPUID-RDTSC check by design). Bare-metal undebugged hosts fall through to the full pipeline. Easy add via the original plan — reuse `emitAntiDebug`
   before the DllMain prologue, same as the EXE stub does. Defer.
 
 ## What's already shipped that this builds on

@@ -155,6 +155,72 @@ func TestPackBinary_ConvertEXEtoDLL_LoadLibrary_E2E(t *testing.T) {
 	writeDiag("step 8: test complete")
 }
 
+// TestPackBinary_ConvertEXEtoDLL_LoadLibrary_AntiDebug_E2E asserts the
+// silent-exit semantics of the AntiDebug-on-converted-DLL path:
+//
+//  1. LoadLibrary MUST succeed (loader reads RAX from the bare RET
+//     inside the antidebug prologue; RAX always carries a non-zero
+//     check result on positive detection → BOOL TRUE).
+//  2. The probe's main() MUST NOT run (no marker file). The DllMain
+//     never reached the SGN/resolver/spawn path because the RDTSC ↔
+//     CPUID delta tripped on the virtualized host (KVM VMEXIT
+//     inflates the cycle count well past the 1000-cycle threshold
+//     baked into emitAntiDebugWindowsPE).
+//
+// Together these confirm slice 5.6: the converted-DLL AntiDebug
+// prologue exits cleanly under observation and the payload silently
+// no-ops on monitored hosts, matching the EXE-stub behavior
+// documented in pe/packer/stubgen/stage1/antidebug.go. On a bare-
+// metal undebugged Windows machine the same pack would proceed to
+// CreateThread and the marker WOULD be written; this VM-side test
+// validates the detection path explicitly.
+// Slice 5.6 of docs/refactor-2026-doc/packer-exe-to-dll-plan.md.
+func TestPackBinary_ConvertEXEtoDLL_LoadLibrary_AntiDebug_E2E(t *testing.T) {
+	_ = os.Remove(diagPath)
+	writeDiag("=== AntiDebug_E2E ===")
+
+	probe, err := os.ReadFile(filepath.Join("testdata", "probe_converted.exe"))
+	if err != nil {
+		t.Skipf("probe fixture missing: %v", err)
+	}
+	packed, _, err := packer.PackBinary(probe, packer.PackBinaryOptions{
+		Format:          packer.FormatWindowsExe,
+		ConvertEXEtoDLL: true,
+		AntiDebug:       true,
+		Stage1Rounds:    3,
+		Seed:            0xC0DECAFE,
+	})
+	if err != nil {
+		t.Fatalf("PackBinary AntiDebug: %v", err)
+	}
+	dllFile, err := os.CreateTemp("", "maldev-packed-antidebug-*.dll")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	defer os.Remove(dllFile.Name())
+	if _, err := dllFile.Write(packed); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	dllFile.Close()
+
+	_ = os.Remove(markerPath)
+	writeDiag("antidebug step a: about to LoadLibrary")
+	h, err := syscall.LoadLibrary(dllFile.Name())
+	writeDiag(fmt.Sprintf("antidebug step b: LoadLibrary h=%#x err=%v", uintptr(h), err))
+	if err != nil {
+		t.Fatalf("LoadLibrary AntiDebug: %v — antidebug RET should leave RAX non-zero so loader sees TRUE", err)
+	}
+	_ = h
+	time.Sleep(2 * time.Second)
+	if _, err := os.Stat(markerPath); err == nil {
+		_ = os.Remove(markerPath)
+		t.Errorf("marker present — AntiDebug failed to trip on virtualized host (CPUID-RDTSC delta below threshold?)")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("Stat(marker): %v", err)
+	}
+	writeDiag("antidebug step c: silent no-op confirmed (loader OK, payload skipped)")
+}
+
 // TestPackBinary_ConvertEXEtoDLL_LoadLibrary_NoPayload_E2E is the
 // slice-5.5.y ablation: pack the same probe but with
 // DiagSkipConvertedPayload=true → the converted-DLL stub omits

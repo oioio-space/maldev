@@ -7,7 +7,31 @@ introduce breaking API changes.
 
 ## [Unreleased]
 
-### Packer DLL chantier — v0.110.0 → v0.121.0 (2026-05-11 → 2026-05-12)
+### Packer DLL chantier — v0.110.0 → v0.122.0 (2026-05-11 → 2026-05-12)
+
+#### v0.122.0 — Slice 5.6: AntiDebug for converted-DLL stub
+
+`PackBinaryOptions.AntiDebug=true` now applies to converted-DLL packs.
+Reuses `emitAntiDebug` placed BEFORE the converted-DLL prologue. On
+positive detection (BeingDebugged byte / NtGlobalFlag heap-validation
+triad / RDTSC ↔ CPUID delta > 1000 cycles) the bare RET inside the
+antidebug prologue returns to the loader with RAX non-zero — loader
+reads BOOL TRUE → DllMain "succeeded" → DLL loads silently without
+ever decrypting `.text` or spawning the original entry. Bare-metal
+undebugged hosts fall through to the full pipeline (SGN → resolver
+→ CreateThread → original `main()`).
+
+Win10 VM E2E:
+  TestPackBinary_ConvertEXEtoDLL_LoadLibrary_AntiDebug_E2E PASS
+    LoadLibrary OK (h=0x140000000) + marker NOT written — the KVM
+    VMEXIT trips the CPUID-RDTSC check by design, confirming the
+    silent-exit path is wired correctly.
+
+Unit tests pinning the prefix behaviour:
+  TestEmitConvertedDLLStub_AntiDebug_PrependsCheck (GS-prefix at off 0)
+  TestEmitConvertedDLLStub_AntiDebug_DefaultOff    (zero-value clean)
+
+
 
 #### v0.121.0 — Slice 5 EXE→DLL closure: callee-saved spill + 4 ablation gates (slice 5.5.y)
 
