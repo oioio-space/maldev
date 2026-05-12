@@ -115,35 +115,14 @@ if (Test-Path $victimLog) {
 
 Write-Host "[+] privesc target ready: lowuser -> /Run task -> victim.exe (SYSTEM) -> LoadLibrary(hijackme.dll)"
 
-# 7. Defender exclusions for the test paths.
-#    Direct registry write under
-#    HKLM\SOFTWARE\Microsoft\Windows Defender\Exclusions\Paths --
-#    avoids both Add-MpPreference (AMSI signature blocklist) AND
-#    the AmsiUtils reflective bypass (also signature-flagged in
-#    modern Defender). The registry path needs admin + no Tamper
-#    Protection; check TP first, surface diagnostics either way.
-$tpEnabled = $false
-try {
-    $tpEnabled = (Get-MpComputerStatus).IsTamperProtected
-} catch {
-    Write-Host "[!] Get-MpComputerStatus failed: $($_.Exception.Message)"
-}
-Write-Host "[i] TamperProtection enabled: $tpEnabled"
-
-$regBase = 'HKLM:\SOFTWARE\Microsoft\Windows Defender\Exclusions\Paths'
-$paths = @($VulnDir, $MarkerDir, 'C:\Users\Public\maldev')
-$ok = 0
-foreach ($p in $paths) {
-    try {
-        New-ItemProperty -Path $regBase -Name $p -Value 0 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
-        Write-Host "[+] reg exclusion: $p"
-        $ok++
-    } catch {
-        Write-Host "[!] reg exclusion failed for $p : $($_.Exception.Message)"
-    }
-}
-if ($ok -lt $paths.Length -and $tpEnabled) {
-    Write-Host "[!] some exclusions blocked AND Tamper Protection is ON --"
-    Write-Host "    real-world bypass would require disabling TP via Settings UI"
-    Write-Host "    or InTune policy (cannot be done programmatically by design)."
-}
+# 7. Per the user's '/regarde les autres techniques d'evasion avant
+#    de desactiver les defenses' direction, we deliberately do NOT
+#    add Defender exclusions here. The orchestrator applies
+#    evasion/preset.Stealth() at startup (AMSI patch + ETW patch +
+#    selective ntdll unhook) which is meant to suppress the
+#    behavioural-telemetry signal that previously RC=1'd the
+#    binary AS lowuser. If Defender STILL blocks under those
+#    conditions we treat that as a real-world detection signal
+#    worth documenting rather than papering over.
+Write-Host "[i] No Defender exclusions added -- relying on orchestrator's"
+Write-Host "    evasion/preset.Stealth (AMSI + ETW + ntdll unhook)."

