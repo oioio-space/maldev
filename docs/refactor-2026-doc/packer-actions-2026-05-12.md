@@ -120,6 +120,25 @@ checkbox.
 | 9.6.f | Final E2E run with all of the above. Both Mode 8 and Mode 10. STRONG verdict (marker shows SYSTEM). Tag v0.132.0. | Run both modes. | ⏳ |
 | 9.6.g | User-facing doc: walkthrough in `docs/techniques/pe/packer-privesc-e2e.md` (or sibling) with screenshots + decision tree. | After 9.6.f green. | ⏳ |
 
+### Sub-slice 9.7 — extract reusable helpers from privesc-e2e patterns
+
+Audit revealed two patterns in `cmd/privesc-e2e` that should become
+exported helpers in their respective packages so the next operator
+tool doesn't reinvent them.
+
+| # | Helper | Lives in | Replaces |
+|---|---|---|---|
+| 9.7.a | `packer.PackProxyDLLFromTarget(payload, targetDLLBytes, packOpts)` — parses targetDLLBytes for named exports, builds `ProxyDLLOptions{TargetName, Exports}` from the parsed export list, calls `PackProxyDLL`. Returns the same `(proxy, key, err)` triple. | `pe/packer/proxy_fused.go` | The 30-LOC chunk in `cmd/privesc-e2e/main.go` Mode-10 branch (parse.FromBytes -> ExportEntries -> filter -> PackProxyDLL). |
+| 9.7.b | `dllhijack.PickBestWritable(opts ScanOpts) (*Opportunity, error)` — ScanAll + Rank + return first Writable && (IntegrityGain \|\| AutoElevate) opportunity, with fallback to any Writable. | `recon/dllhijack/dllhijack.go` | The discovery loop in `cmd/privesc-e2e/main.go` `-discover` branch. |
+
+### Sub-slice 9.8 — close gaps 2 (probe race) + 3 (Defender) + 4 (verdict)
+
+| # | Gap | Approach | Status |
+|---|---|---|---|
+| 9.8.a | **Probe race**: spawned thread killed mid-flight when victim.exe returns. Solution: victim sleeps 5 s after LoadLibrary so the spawned thread has time to write its marker + flush. Real-world legitimate-victim sideload chains often have similarly long-running hosts (services, scheduled tasks). | Add `time.Sleep(5*time.Second)` to `cmd/privesc-e2e/victim/main.go` after the LoadLibrary log. | ⏳ |
+| 9.8.b | **Defender flagging the orchestrator binary**: signature on the unpacked Go binary. Solution: stronger runtime evasion (preset.Aggressive instead of Stealth) — adds ACG + BlockDLLs on top of AMSI+ETW+unhook. | Replace `preset.Stealth()` with `preset.Aggressive()` in `cmd/privesc-e2e/amsi_windows.go`. | ⏳ |
+| 9.8.c | **Verdict ADEQUATE -> STRONG**: auto-resolves once 9.8.a fixes the probe race. The probe successfully writes whoami.txt, the driver fetches it, the verdict promotes from ADEQUATE to STRONG. | No code change; validate after 9.8.a. | ⏳ |
+
 ---
 
 **Slice 1.A FULLY HARDENED.** v0.130.0 shipped the feature;
