@@ -239,7 +239,7 @@ having to wire the two emitters themselves.
 **Drawback:** two-file drop, IAT entry on `kernel32!LoadLibraryA`
 in the proxy is a detectable IOC.
 
-### Path B — fused emitter (slice 6)
+### Path B — fused emitter (slice 6) ✅ shipped v0.129.0 as `packer.PackProxyDLL`
 
 One file: a single DLL that IS both the proxy AND the packed
 payload.
@@ -266,11 +266,10 @@ The output PE contains:
 
 **Slice 6 sub-slices:**
 
-| Sub-slice | Surface | LOC |
-|---|---|---|
-| 6.1 | `packer.PackProxyDLL(input, targetName, exports, opts)` — top-level entry point. Coordinates `PlanEXEasDLL` + `dllproxy.buildExportData` + slice-5 stub + new combined injector. |  ~150 |
-| 6.2 | `transform.InjectProxyConvertedDLL` — merges what `transform.InjectConvertedDLL` (slice 5.4) does + what `dllproxy.assembleWithPayload` does. Emits one PE with: stub section, .mldrel reloc cover, export-data section (proxy forwarders), and the original .text overwritten with encrypted payload. | ~300 |
-| 6.3 | Win VM E2E: pack `winhello.exe` as a `version.dll` proxy → drop in `C:\sideload\` next to a tiny harness EXE that links against `version.dll`'s `GetFileVersionInfoSizeW` → run the harness → assert (a) the harness still gets the real `GetFileVersionInfoSizeW` result (forwarder works), AND (b) `winhello` wrote "hello" to stdout (payload ran on attach). | ~200 |
+| Sub-slice | Surface | LOC | Status |
+|---|---|---|---|
+| 6.1 + 6.2 | **Composition route** (vs the originally-scoped 450 LOC merge): `dllproxy.BuildExportData` exposed as a public wrapper around the existing internal builder. New `transform.AppendExportSection` + `transform.NextAvailableRVA` (~120 LOC) glue an export table onto a converted-EXE-as-DLL output. New `packer.PackProxyDLL` orchestrator (~80 LOC) chains `PackBinary{ConvertEXEtoDLL: true}` → `NextAvailableRVA` → `BuildExportData` → `AppendExportSection` in 3 calls. **Total ~200 LOC actually shipped vs the ~450 LOC originally estimated** — no need to re-implement `assembleWithPayload`'s tiny LoadLibraryA stub because the converted-DLL stub already self-contains the payload via PEB-walk-resolved CreateThread. | ~200 | ✅ v0.129.0 |
+| 6.3 | Win VM E2E: `TestPackProxyDLL_LoadLibrary_E2E` packs the synthetic minimal-EXE fixture as a `version.dll` proxy, writes it to `%TEMP%\version.dll`, calls `LoadLibrary`. Asserts no error + non-NULL handle. PASS on Win10 VM (h=0x140000000). Doesn't yet cover (a) GetProcAddress on the exported forwarders or (b) payload spawning the original OEP — those need a probe harness with marker-file side effects (deferred). | n/a | ✅ v0.129.0 |
 
 Total slice 6: ~650 LOC.
 

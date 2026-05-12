@@ -391,6 +391,32 @@ type section struct {
 //     "<target>.#<ordinal>" and no slot in AddressOfNames.
 //
 // sectionVA is the RVA at which the bytes will be loaded.
+// BuildExportData is the exported wrapper around buildExportData
+// for callers in other maldev packages (notably packer's slice 6
+// fused emitter `packer.PackProxyDLL`). It runs the same input
+// validation as [GenerateExt] (normaliseExports — sorts by
+// ordinal ascending, rejects duplicates, requires non-empty)
+// then bakes RVAs into an IMAGE_EXPORT_DIRECTORY + name/forwarder
+// tables sized to land at section RVA `sectionVA`.
+//
+// Returns (exportSectionBytes, exportSize). Caller is responsible
+// for appending those bytes as a new PE section at exactly
+// `sectionVA` and pointing DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT]
+// at (sectionVA, exportSize).
+//
+// Used by packer.PackProxyDLL (slice 6 Path B) — that orchestrator
+// can't call dllproxy.Generate because it needs to MERGE the
+// export table into a packer-emitted PE, not produce a standalone
+// proxy DLL.
+func BuildExportData(targetName string, exports []Export, scheme PathScheme, sectionVA uint32) ([]byte, uint32, error) {
+	sorted, err := normaliseExports(exports)
+	if err != nil {
+		return nil, 0, err
+	}
+	bytes, size := buildExportData(targetName, sorted, scheme, sectionVA)
+	return bytes, size, nil
+}
+
 func buildExportData(targetName string, sortedExports []Export, scheme PathScheme, sectionVA uint32) ([]byte, uint32) {
 	const exportDirSz = 40
 
