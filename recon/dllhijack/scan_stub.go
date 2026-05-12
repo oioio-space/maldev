@@ -62,3 +62,8 @@ func Validate(opp Opportunity, canaryDLL []byte, opts ValidateOpts) (*Validation
 func ScanAutoElevate(opts ...ScanOpts) ([]Opportunity, error) {
 	return nil, errors.New("dllhijack: ScanAutoElevate requires Windows")
 }
+
+// ScanPATHWritable stub. Windows-only.
+func ScanPATHWritable(opts ...ScanOpts) ([]Opportunity, error) {
+	return nil, errors.New("dllhijack: ScanPATHWritable requires Windows")
+}

@@ -19,7 +19,12 @@
 //   - [ScanAutoElevate] walks System32 .exes whose manifest
 //     carries `autoElevate=true` (fodhelper, sdclt, …) — UAC
 //     bypass vector.
-//   - [ScanAll] aggregates the four.
+//   - [ScanPATHWritable] enumerates `%PATH%` (system + user
+//     hive) and surfaces every writable entry. SYSTEM-context
+//     unqualified `CreateProcess` (cf. itm4n's MareBackup
+//     chain) reaches these dirs before System32 — pure
+//     precondition scan, no PE imports walked.
+//   - [ScanAll] aggregates the five.
 //
 // Validation + scoring:
 //

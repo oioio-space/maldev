@@ -85,6 +85,16 @@ const (
 	// DLL search order around such a binary yields a UAC bypass
 	// (MITRE T1548.002).
 	KindAutoElevate
+	// KindPathHijack: a directory listed in %PATH% that the current
+	// token can write to. Any unqualified CreateProcess made from a
+	// higher-integrity context (services, scheduled tasks invoking
+	// non-fully-qualified .exe names) walks the EXE search order and
+	// will pick up an attacker-dropped binary from this dir before
+	// reaching System32. Canonical chain: itm4n's MareBackup PrivEsc
+	// (compattelrunner.exe → acmigration.dll!PowerShellMatchingPlugin
+	// → CreateProcessW(L"powershell.exe", …)). The hit is generic —
+	// no single victim binary is tied to the Opportunity.
+	KindPathHijack
 )
 
 func (k Kind) String() string {
@@ -97,6 +107,8 @@ func (k Kind) String() string {
 		return "scheduled-task"
 	case KindAutoElevate:
 		return "auto-elevate"
+	case KindPathHijack:
+		return "path-hijack"
 	default:
 		return "unknown"
 	}
@@ -172,6 +184,12 @@ func Rank(opps []Opportunity) []Opportunity {
 		switch scored[i].Kind {
 		case KindService:
 			s += 50
+		case KindPathHijack:
+			// Below Service (concrete victim known) but above
+			// ScheduledTask (need a runtime unqualified CreateProcess
+			// to actually fire). Combined with IntegrityGain=true on
+			// system-PATH dirs, the total lands close to Service.
+			s += 40
 		case KindScheduledTask:
 			s += 20
 		case KindAutoElevate:

@@ -114,8 +114,9 @@ func ScanScheduledTasks(opts ...ScanOpts) ([]Opportunity, error) {
 }
 
 // ScanAll runs ScanServices + ScanProcesses + ScanScheduledTasks +
-// ScanAutoElevate and concatenates the results. Errors from any
-// individual scanner are wrapped but do not abort the others.
+// ScanAutoElevate + ScanPATHWritable and concatenates the results.
+// Errors from any individual scanner are wrapped but do not abort
+// the others.
 func ScanAll(opts ...ScanOpts) ([]Opportunity, error) {
 	var all []Opportunity
 	var errs []string
@@ -136,6 +137,11 @@ func ScanAll(opts ...ScanOpts) ([]Opportunity, error) {
 	}
 	if opps, err := ScanAutoElevate(opts...); err != nil {
 		errs = append(errs, "autoelevate: "+err.Error())
+	} else {
+		all = append(all, opps...)
+	}
+	if opps, err := ScanPATHWritable(opts...); err != nil {
+		errs = append(errs, "pathwritable: "+err.Error())
 	} else {
 		all = append(all, opps...)
 	}

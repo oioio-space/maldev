@@ -12,7 +12,7 @@ reflects_commit: 7a8c466
 
 You want to find places where you (current user) can drop a
 malicious DLL such that a privileged target picks it up next
-time it loads. Four scanner surfaces, each catching a different
+time it loads. Five scanner surfaces, each catching a different
 victim class:
 
 | Surface | Catches | Reward when hit |
@@ -21,8 +21,9 @@ victim class:
 | [`ScanProcesses`](#func-scanprocessesopts-scanopts-opportunity-error) | Live processes with the same writable-search-path-+-missing-DLL pattern | Code exec at the process's privilege level on next launch |
 | [`ScanScheduledTasks`](#func-scanscheduledtasksopts-scanopts-opportunity-error) | Tasks registered via COM ITaskService | Exec on next task trigger (often runs as SYSTEM or stored creds) |
 | [`ScanAutoElevate`](#func-scanautoelevateopts-scanopts-opportunity-error) | System32 `.exe` with `autoElevate=true` manifest (fodhelper, sdclt, eventvwr, …) | UAC bypass — these silently elevate without prompt |
+| [`ScanPATHWritable`](#func-scanpathwritableopts-scanopts-opportunity-error) | Writable directories in system or user `%PATH%` | SYSTEM exec whenever a higher-integrity process makes an **unqualified** `CreateProcess` call — cf. itm4n's MareBackup chain (`compattelrunner.exe → acmigration.dll → CreateProcessW(L"powershell.exe", …)`) |
 
-Or run all four in one call:
+Or run all five in one call:
 
 | You want… | Use | Notes |
 |---|---|---|
