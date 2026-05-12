@@ -911,6 +911,311 @@ get one mental model regardless of payload shape.
 
 ---
 
+## DLL operations (Modes 7–10)
+
+The four modes below all produce **PE32+ DLLs** instead of EXEs.
+They unlock the operator playbook of running payloads inside a
+host process via the Windows DLL load mechanism — sideloading,
+classic injection, LOLBAS chains (`rundll32`, `regsvr32`),
+search-order hijack, COM hijack. Each picks a different
+trade-off between operator simplicity, OPSEC cleanliness, and
+the input shape required.
+
+**Quick selector:**
+
+| Operator goal | Mode | Output |
+|---|---|---|
+| Pack an existing native DLL — preserve its DllMain | 7 (`FormatWindowsDLL`) | one DLL |
+| Convert an EXE into a runnable DLL — payload spawns on attach | 8 (`ConvertEXEtoDLL`) | one DLL |
+| Sideload an EXE under a fake DLL name — two-file drop, OK if drop policy allows | 9 (`PackChainedProxyDLL`) | two DLLs (proxy + payload) |
+| Sideload an EXE under a fake DLL name — single-file drop, no `LoadLibraryA` IOC in the IAT | 10 (`PackProxyDLL`) | one fused DLL |
+
+Modes 7–10 share the same Phase 2 randomisation surface as
+Mode 3 (`RandomizeAll` etc. — see [Per-pack
+randomisation](#per-pack-randomisation-phase-2-opts) below)
+and the same DLL-input restrictions
+(`transform.ErrTLSCallbacks` rejects mingw default builds,
+`transform.ErrIsDLL` cross-checks input vs Format).
+
+### Mode 7 — `FormatWindowsDLL` (pack a native DLL)
+
+You have a DLL with its own `DllMain`. You want to encrypt
+its `.text` and ship a packed copy that LoadLibrary'd cleanly
+runs the original `DllMain`. The payload semantic — what the
+DLL DOES — is preserved verbatim; only the on-disk bytes of
+the code section are obfuscated.
+
+```go
+out, _, err := packer.PackBinary(input, packer.PackBinaryOptions{
+    Format:       packer.FormatWindowsDLL,  // ← was FormatWindowsExe
+    Stage1Rounds: 3,
+    Seed:         0,
+    AntiDebug:    true,
+    RandomizeAll: true,  // composes — see Phase 2 opts below
+})
+```
+
+| Property | Value |
+|---|---|
+| Input | PE32+ DLL with `IMAGE_FILE_DLL` set + a non-empty `.reloc` table |
+| Output | PE32+ DLL — `LoadLibrary`'s natively |
+| Encryption | SGN polymorphic encoder (per-round register-randomised) |
+| Stub | DllMain prologue → decrypt-once flag check → SGN rounds → tail-jump to original DllMain |
+| Process tree | One DLL hosted by whatever called `LoadLibrary` |
+| Stub size | ~230 bytes (no compression) |
+
+**Avantages:**
+- Drop-in replacement for the original DLL.
+- Original DllMain is preserved — every reason code
+  (`PROCESS_ATTACH`, `THREAD_ATTACH`, …) still gets the right
+  user-defined behaviour.
+- Composes with `RandomizeAll` (8 Phase 2 randomisers).
+
+**Inconvénients:**
+- Requires the input to carry a populated `.reloc` directory.
+  **Mingw `ld` for x64 PE refuses to emit `.reloc` even with
+  `--enable-reloc-section + --dynamicbase`** (toolchain
+  limitation, documented in `pe/packer/testdata/testlib.c`).
+  Build the DLL with MSVC (`cl /LD foo.c /link /DYNAMICBASE`)
+  or use `transform.BuildMinimalPE32Plus` in tests.
+- The packed `.text` is RWX at runtime (loud EDR signal).
+- Compress is unsupported in Mode 7 today
+  (`stubgen.ErrCompressDLLUnsupported`) — the LZ4 inflate
+  block isn't yet threaded through the DllMain stub layout.
+
+**Validated end-to-end on Win10 VM** since v0.128.0
+(`TestPackBinary_FormatWindowsDLL_LoadLibrary_E2E`). The
+1-line MEM_WRITE fix in v0.128.0 closed the slice 4.5 gap
+that had blocked real-loader validation since v0.111.0.
+
+### Mode 8 — `ConvertEXEtoDLL` (convert an EXE into a runnable DLL)
+
+You have a Go EXE (or any `-nostdlib` Win32 EXE). You want
+the SAME PAYLOAD to run when something `LoadLibrary`'s a DLL,
+so you can drop it into a sideload chain, inject it via
+`CreateRemoteThread`-equivalents, or call it via `rundll32`.
+
+The packer takes your EXE, encrypts `.text`, appends a
+DllMain stub, and flips `IMAGE_FILE_DLL`. At runtime the
+DllMain decrypts `.text`, resolves `kernel32!CreateThread`
+via PEB walk (no IAT entry on `CreateThread` — invisible at
+import-table inspection time), and spawns a new thread on
+the original EXE's entry point. The DllMain returns `TRUE`
+immediately; the loader is unblocked while the payload runs
+in the spawned thread.
+
+```go
+out, _, err := packer.PackBinary(exe, packer.PackBinaryOptions{
+    Format:          packer.FormatWindowsExe,  // input is EXE
+    ConvertEXEtoDLL: true,                     // ← convert at pack time
+    Stage1Rounds:    3,
+    Seed:            0,
+    Compress:        true,                     // ✅ supported in Mode 8 (since v0.124.0)
+    AntiDebug:       true,                     // ✅ supported in Mode 8 (since v0.122.0)
+    RandomizeAll:    true,
+})
+```
+
+| Property | Value |
+|---|---|
+| Input | PE32+ EXE (the same shapes Mode 3 accepts: Go static-PIE, mingw `-nostdlib`, …) |
+| Output | PE32+ DLL with `IMAGE_FILE_DLL` set, encrypted `.text`, appended stub |
+| Stub | DllMain prologue → decrypt-once flag check → SGN rounds → optional LZ4 inflate (`Compress: true`) → PEB-walk resolve `CreateThread` → `CreateThread(NULL, 0, OEP, NULL, 0, NULL)` → return TRUE |
+| Process tree | One image hosted by the LoadLibrary'er; payload is a thread inside that process |
+| Stub size | ~509 bytes (3 SGN rounds, no Compress) → ~700 bytes (with Compress) → +50 bytes if AntiDebug |
+
+**Avantages:**
+- The same Go EXE is now usable in BOTH Mode 3 (run as EXE)
+  and Mode 8 (sideload as DLL) without rebuilding.
+- Composes with `Compress` (slice 5.7), `AntiDebug` (slice
+  5.6), and the full Phase 2 randomisation suite.
+- No `LoadLibraryA` IAT entry — the proxy DLL imports nothing
+  it doesn't already need.
+- Validated on Win10 VM with the `probe_converted.exe`
+  fixture (writes `"OK\n"` from the spawned thread inside the
+  host process — see
+  `TestPackBinary_ConvertEXEtoDLL_LoadLibrary_E2E`).
+
+**Inconvénients:**
+- The payload runs in a NEW thread that's still alive when
+  DllMain returns. If the host process tears down quickly
+  the payload may not finish — `Sleep(INFINITE)` or proper
+  thread synchronisation in your payload.
+- The EXE entry point sees `(int argc, char **argv)`
+  semantics from a non-standard launch — argv is whatever
+  the spawned thread's stack happens to hold. Payloads that
+  parse args need to fall back to `GetCommandLineW` or
+  similar.
+- AntiDebug runs BEFORE the SGN/CreateThread path; positive
+  detection (KVM tripping the RDTSC↔CPUID delta on most
+  virtualised hosts) results in a SILENT no-op DLL load —
+  loader sees BOOL TRUE, payload never runs. Bare-metal
+  undebugged hosts fall through to the full pipeline.
+
+### Mode 9 — `PackChainedProxyDLL` (two-file sideloading bundle)
+
+You want to drop a DLL named like a legitimate Windows DLL
+(e.g. `version.dll`) next to a host EXE that imports from it.
+The host loads the proxy, the proxy forwards every export
+back to the real `version.dll`, AND the proxy's DllMain
+LoadLibrary's a separate payload DLL that contains your
+encrypted EXE. **Two files: proxy DLL + payload DLL.**
+
+This is the operator-friendly composition: you call ONE
+function, get TWO byte streams, drop both side-by-side.
+
+```go
+proxy, payload, _, err := packer.PackChainedProxyDLL(exe,
+    packer.ChainedProxyDLLOptions{
+        TargetName:     "version",       // → version.dll mirror
+        Exports:        []dllproxy.Export{
+            {Name: "GetFileVersionInfoSizeW"},
+            {Name: "GetFileVersionInfoW"},
+            {Name: "VerQueryValueW"},
+        },
+        PayloadDLLName: "payload.dll",   // proxy will LoadLibraryA this
+        PackOpts: packer.PackBinaryOptions{
+            Format:       packer.FormatWindowsExe,
+            Stage1Rounds: 3,
+            Seed:         0,
+        },
+    })
+// Write proxy as `version.dll` next to host EXE, payload as
+// `payload.dll` in the same directory.
+os.WriteFile("/dropdir/version.dll", proxy, 0o644)
+os.WriteFile("/dropdir/payload.dll", payload, 0o644)
+```
+
+| Property | Value |
+|---|---|
+| Output | TWO DLLs: `proxy` (forwarder + LoadLibraryA stub) + `payload` (encrypted EXE-as-DLL) |
+| Proxy size | ~3-5 KB (depends on export count + path scheme) |
+| Payload size | Input size + ~600 B SGN stub |
+| Forwarders | Perfect-DLL-proxy GLOBALROOT scheme by default — `\\.\GLOBALROOT\SystemRoot\System32\version.<export>` |
+
+**Avantages:**
+- Operator gets the two-file drop without wiring two
+  emitters by hand.
+- The legit-target's exports are forwarded transparently —
+  the host EXE's calls to `GetFileVersionInfoSizeW` etc. all
+  succeed, returning the real version.dll's results.
+- Payload DLL is independently swappable (re-pack
+  `payload.dll` with new opts, leave `proxy.dll` alone).
+
+**Inconvénients:**
+- **Two-file drop** — needs the operator to place both files
+  successfully. AppLocker / WDAC policies that whitelist a
+  single DLL by hash will catch the second drop.
+- Proxy IAT carries `kernel32!LoadLibraryA` — a detectable
+  IOC for kits that fingerprint proxy DLLs by their import
+  set. Mode 10 (`PackProxyDLL`) ships the single-file fused
+  variant that eliminates this.
+
+### Mode 10 — `PackProxyDLL` (single-file fused proxy, no LoadLibraryA IOC)
+
+The OPSEC-cleaner sibling of Mode 9. ONE PE that:
+- Mirrors the legit target's exports (each forwarded via the
+  perfect-dll-proxy absolute path).
+- Carries the encrypted EXE payload inside the same PE (no
+  separate `payload.dll` to drop).
+- Has NO `LoadLibraryA` IAT entry — `CreateThread` is
+  resolved at runtime via PEB walk, so the proxy doesn't even
+  need `kernel32` import.
+
+```go
+fused, _, err := packer.PackProxyDLL(exe, packer.ProxyDLLOptions{
+    TargetName: "version",
+    Exports: []dllproxy.Export{
+        {Name: "GetFileVersionInfoSizeW"},
+        {Name: "GetFileVersionInfoW"},
+        {Name: "VerQueryValueW"},
+    },
+    PackOpts: packer.PackBinaryOptions{
+        Format:       packer.FormatWindowsExe,
+        Stage1Rounds: 3,
+        Seed:         0,
+    },
+})
+// Single drop. Name it after the legit target.
+os.WriteFile("/dropdir/version.dll", fused, 0o644)
+```
+
+| Property | Value |
+|---|---|
+| Output | ONE PE32+ DLL — IMAGE_FILE_DLL set, EXPORT directory populated, encrypted EXE in `.text` |
+| Imports | None (CreateThread resolved via PEB walk) |
+| Size | Input EXE + ~500 B SGN stub + ~200 B per export forwarder string |
+| Forwarders | Perfect-DLL-proxy GLOBALROOT scheme by default |
+
+**Avantages:**
+- Single-file drop — most restrictive AppLocker policies
+  permit a one-file replacement when the path/name match.
+- **Zero IAT entries** — defeats import-table fingerprinting.
+- Inherits all Mode 8 strengths (Compress, AntiDebug, full
+  Phase 2 randomisation).
+
+**Inconvénients:**
+- The output is bigger than Mode 9's proxy (carries both the
+  forwarders AND the encrypted payload).
+- The export forwarders are visible in the PE on disk —
+  static analysis can see the `version.dll` mirror. Use a
+  different `TargetName` for OPSEC variance, but it must
+  still match a real DLL on the target host or the loader
+  rejects the forwarders.
+- Implementation note: the fused emitter composes
+  `PackBinary{ConvertEXEtoDLL: true}` + `transform.AppendExportSection`
+  + `dllproxy.BuildExportData`. ~200 LOC orchestrator.
+  Original plan (`packer-exe-to-dll-plan.md` slice 6 Path B)
+  estimated ~450 LOC for a hand-rolled merged injector;
+  composition saved ~250 LOC.
+
+**Strict end-to-end validation** (since `c9c0635`,
+2026-05-12): `TestPackProxyDLL_Strict_E2E` packs
+`probe_converted.exe`, drops as `version.dll`, then asserts
+both side effects on Win10 VM:
+1. `GetProcAddress("GetFileVersionInfoSizeW")` resolves to
+   the real `version.dll` (loader follows the GLOBALROOT
+   forwarder string).
+2. The packed EXE's `main()` runs in a spawned thread inside
+   the host process — observable via the marker file
+   `C:\maldev-probe-marker.txt`.
+
+### When to pick which DLL mode — decision tree
+
+```
+Is your input a DLL with its own DllMain you want to keep?
+  YES → Mode 7 (FormatWindowsDLL) — preserve DllMain, encrypt .text
+  NO  → input is an EXE
+        ↓
+        Do you need EXPORTS (sideload as a fake legit DLL)?
+          NO  → Mode 8 (ConvertEXEtoDLL) — minimal DLL output
+          YES → How strict is the drop policy?
+                  Two files OK   → Mode 9 (PackChainedProxyDLL)
+                  Single file    → Mode 10 (PackProxyDLL)  ← OPSEC-cleanest
+```
+
+### Composability with `pe/dllproxy` and `pe/masquerade`
+
+- **`pe/dllproxy`** ships `Export`, `PathScheme`,
+  `BuildExportData` — Mode 10 reuses all three. Operators
+  can also call `dllproxy.GenerateExt` directly when they
+  want a forwarder-only DLL with NO encrypted payload (pure
+  sideloading, no implant).
+- **`pe/masquerade`** ships `Resources` (icon + manifest +
+  version-info + cert) extraction/transplant via
+  `tc-hib/winres`. The natural composition: extract
+  resources from a legit DLL → pack EXE via Mode 10 → use
+  `winres.LoadFromEXE + ResourceSet.WriteToEXE` to
+  transplant the legit resources onto the fused proxy. The
+  Phase 2-F-3-c-3 RESOURCE walker (v0.125.0) ensures these
+  transplanted resources survive `RandomizeAll`.
+- **`pe/parse`** exposes `Exports(path)` — the natural input
+  source for Mode 9 / Mode 10's `Exports` field. Extract
+  from `C:\Windows\System32\version.dll` on a Win10 host →
+  feed the result straight into `PackProxyDLL`.
+
+---
+
 ## Per-pack randomisation (Phase 2 opts)
 
 The `Mode 3 PackBinary` example above shows a long list of
