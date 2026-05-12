@@ -623,10 +623,30 @@ func validatePackBinaryInput(opts PackBinaryOptions, input []byte) error {
 			return fmt.Errorf("%w: ConvertEXEtoDLL requires an EXE input but got a DLL",
 				ErrUnsupportedFormat)
 		}
+		// Bound DefaultArgs at pack time. Stub max is 4 KiB
+		// (Compress=false) or 8 KiB (Compress=true); the stub asm
+		// itself is ~600 B + LZ4-inflated payload tail, so leave
+		// headroom. This catches "obvious" oversizing with a clear
+		// error before stubgen.Generate emits an opaque
+		// transform.ErrStubTooLarge.
+		if n := len(opts.ConvertEXEtoDLLDefaultArgs); n > maxConvertEXEtoDLLDefaultArgsRunes {
+			return fmt.Errorf("%w: ConvertEXEtoDLLDefaultArgs is %d chars; max is %d (would not fit in stub)",
+				ErrUnsupportedFormat, n, maxConvertEXEtoDLLDefaultArgsRunes)
+		}
 	}
 
 	return nil
 }
+
+// maxConvertEXEtoDLLDefaultArgsRunes caps DefaultArgs at pack time
+// so the stub-fitting failure surfaces with a readable error rather
+// than as transform.ErrStubTooLarge from deep inside stubgen. Bound
+// chosen to leave room in both the 4 KiB (no-Compress) and 8 KiB
+// (Compress) stub budgets after subtracting ~600 B of asm, the
+// payload tail, and the trailing data overhead. Operators wanting
+// huge default cmdlines should re-think — most Windows loaders cap
+// CommandLine at hundreds of bytes.
+const maxConvertEXEtoDLLDefaultArgsRunes = 1500
 
 // Per-randomiser seed offsets keep each opt-block's math/rand
 // stream independent when multiple Randomize* flags fire on the

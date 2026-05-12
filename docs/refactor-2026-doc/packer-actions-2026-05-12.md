@@ -2,7 +2,7 @@
 status: in-progress
 created: 2026-05-12
 last_reviewed: 2026-05-12
-reflects_commit: HEAD (slice 1.A.2)
+reflects_commit: d8ed9a3 (v0.130.0 + docs)
 ---
 
 # Packer — action plan tracker (2026-05-12)
@@ -59,17 +59,29 @@ the payload with their own args mid-attack.
 | 1.A.2 | Wire DefaultArgs into `EmitConvertedDLLStub`: emit PEB patch BEFORE CreateThread, append args buffer to stub section | ~60 | ✅ shipped |
 | 1.A.3 | Plumb `PackBinaryOptions.ConvertEXEtoDLLDefaultArgs` → `stubgen.Options` → `stage1.EmitOptions` | ~20 | ✅ shipped |
 | 1.A.4 | Win10 VM E2E: pack `probe_args.exe` with DefaultArgs="custom one two", LoadLibrary, assert marker contains "custom\|one\|two" | ~50 | ✅ PASS on Win10 VM (after asm pivot) |
-| 1.B.1 | `RunWithArgs` export — emitted in the stub section, registered in the DLL's export table via `transform.AppendExportSection` | ~100 | after 1.A complete |
-| 1.B.2 | Win10 VM E2E: pack, LoadLibrary, GetProcAddress("RunWithArgs"), call with custom args, assert marker | ~50 | after 1.B.1 |
+| 1.A.5 | **Harden: runtime overflow guard.** Asm reads existing `MaximumLength` at +0x72 BEFORE memcpy; if `argsLen+2 > existing`, skip patch. Asm 43→48 B (+ MOVZX/CMP/JB; dropped MaxLength write — capacity is OS-allocated, not ours). | ~30 LOC | ✅ shipped |
+| 1.A.6 | **Test-surface gaps.** (a) Tighten 1.A.4 to exact equality. (b) Pack-time bound (`maxConvertEXEtoDLLDefaultArgsRunes = 1500`) with readable error. (c) `LargeButValid` E2E — empirically PROVED guard fires on rundll32 with 1400 chars (loader has only ~135 B cmdline, our patch needs 2800 B → JB taken, payload safely sees rundll32 cmdline). Win11 VM not provisioned on this host — skipped. Custom small-cmdline fixture turned out unnecessary since rundll32 already triggered the path. | ~80 LOC | ✅ shipped (Win11 deferred) |
+| 1.B.1 | `RunWithArgs` export — emitted in the stub section, registered in the DLL's export table via `transform.AppendExportSection` | ~100 | after 1.A.6 |
+| 1.B.2 | Win10 + Win11 VM E2E: pack, LoadLibrary, GetProcAddress("RunWithArgs"), call with custom args, assert marker. Also: regsvr32 sanity (DllRegisterServer alias path). | ~70 | after 1.B.1 |
 
 Each slice ships its own commit. Tags every successful slice
 end (1.A complete = v0.130.0, 1.B complete = v0.131.0).
 
 ### Cross-machine resume — current state
 
-**Slice 1.A complete.** Tagged v0.130.0. Pickup at **slice 1.B.1**
-(`RunWithArgs` export emitted in stub section + registered in DLL
-export table via `transform.AppendExportSection`).
+**Slice 1.A FULLY HARDENED.** v0.130.0 shipped the feature;
+follow-up slices 1.A.5 + 1.A.6 (in response to "il n'y a pas
+de contournement ?") added:
+- runtime asm guard (CMP existing MaxLength vs needed; JB skip)
+- pack-time bound at 1500 chars with readable error
+- exact-equality assertion (was Contains)
+- empirical guard-firing proof (LargeButValid test on Win10 VM)
+
+Win11 VM not provisioned on this host — deferred to whenever
+the user provisions one (see `feedback_vm_testing.md`). Tag
+v0.131.0 follows. Pickup at **slice 1.B.1** (`RunWithArgs`
+export emitted in stub section + registered via
+`transform.AppendExportSection`).
 
 Big lesson from 1.A.4 (saved as `feedback_getcommandline_cache.md`):
 the original PEB-patch design (rewrite `CommandLine.Buffer` pointer)

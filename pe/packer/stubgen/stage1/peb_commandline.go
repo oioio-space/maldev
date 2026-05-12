@@ -48,20 +48,23 @@ const pebCommandLineDispSentinel uint32 = 0xCAFEDADE
 // [PatchPEBCommandLineDisp] once the stub's trailing-data
 // offset is finalised.
 //
-// LIMITATION: assumes the existing buffer at PEB.CommandLine.Buffer
-// has at least argsLenBytes+2 bytes available. Loaders that hand
-// out very short cmdlines (rare) would be overflown — operators
-// should size DefaultArgs to fit a typical loader (rundll32 cmdline
-// is ~hundreds of bytes; SMSS is bounded by RTL_MAX_DRIVE_LETTERS;
-// most >= 64 B is safe).
+// SAFETY GUARD: the asm reads the existing buffer's
+// `MaximumLength` (UNICODE_STRING +0x72) and only commits the
+// memcpy if `MaximumLength >= argsLenBytes + 2`. If the loader
+// handed out a buffer too small, the patch is silently skipped
+// — payload inherits the host's cmdline rather than overflow
+// the heap. Also: `MaximumLength` is NEVER overwritten (it
+// represents the OS-allocated capacity, not our intent); only
+// `Length` changes to reflect our shorter string.
 //
 // Clobbers: RAX (PEB → params), RDI (memcpy dst), RSI (memcpy src),
-// RCX (memcpy count). RDI/RSI are callee-saved by Win64 ABI but
-// the converted-DLL stub prologue spills them at frame entry, so
-// the clobber stays inside the stub frame. R15 (textBase) preserved.
+// RCX (memcpy count + scratch for the size compare). RDI/RSI are
+// callee-saved by Win64 ABI but the converted-DLL stub prologue
+// spills them at frame entry, so the clobber stays inside the
+// stub frame. R15 (textBase) preserved.
 //
-// Emits 43 bytes (9 + 4 + 4 + 7 + 5 + 2 + 6 + 6). Pinned via
-// [EmitPEBCommandLinePatch_ByteBudget].
+// Emits 48 bytes (9 + 4 + 4 + 5 + 2 + 4 + 7 + 5 + 2 + 6). Pinned
+// via [EmitPEBCommandLinePatch_ByteBudget].
 func EmitPEBCommandLinePatch(b *amd64.Builder, argsLenBytes uint16) error {
 	bytes := make([]byte, 0, EmitPEBCommandLinePatch_ByteBudget)
 
@@ -69,25 +72,36 @@ func EmitPEBCommandLinePatch(b *amd64.Builder, argsLenBytes uint16) error {
 	bytes = append(bytes, 0x65, 0x48, 0x8B, 0x04, 0x25, 0x60, 0x00, 0x00, 0x00)
 	// mov rax, qword ptr [rax + 0x20]   ; ProcessParameters
 	bytes = append(bytes, 0x48, 0x8B, 0x40, 0x20)
-	// mov rdi, qword ptr [rax + 0x78]   ; existing CommandLine.Buffer (memcpy dst)
-	// 48 (REX.W) | 8B (MOV r64, r/m64) | 78 (ModR/M: mod=01 disp8, reg=RDI(111), r/m=RAX(000)) | 78 (disp8)
+
+	// --- SIZE GUARD ---
+	// movzx ecx, word ptr [rax + 0x72]  ; ECX = existing MaximumLength
+	// 0F B7 48 72
+	bytes = append(bytes, 0x0F, 0xB7, 0x48, 0x72)
+	// cmp cx, imm16                      ; vs needed bytes
+	// 66 81 F9 LL HH
+	bytes = append(bytes, 0x66, 0x81, 0xF9)
+	bytes = binary.LittleEndian.AppendUint16(bytes, argsLenBytes+2)
+	// jb +24                              ; existing too small → skip patch
+	// 72 18 (signed byte 0x18 = 24 — exactly the byte count of the
+	//        guarded block below; recount if you reorder).
+	bytes = append(bytes, 0x72, 0x18)
+
+	// --- GUARDED BLOCK (24 bytes) ---
+	// mov rdi, qword ptr [rax + 0x78]   ; dst = existing CommandLine.Buffer
+	// 48 8B 78 78
 	bytes = append(bytes, 0x48, 0x8B, 0x78, 0x78)
 	// lea rsi, [r15 + disp32]           ; src = our args in stub
-	// 49 (REX.WB: W=1, B=1) | 8D (LEA) | B7 (ModR/M: mod=10 disp32, reg=RSI(110), r/m=R15(111)) | sentinel
+	// 49 8D B7 + disp32 (sentinel patched later)
 	bytes = append(bytes, 0x49, 0x8D, 0xB7)
 	bytes = binary.LittleEndian.AppendUint32(bytes, pebCommandLineDispSentinel)
-	// mov ecx, imm32                    ; count = argsLenBytes + 2 (incl. NUL)
-	// B9 + imm32 (zero-extends to RCX)
+	// mov ecx, imm32                    ; count = argsLenBytes + 2
 	bytes = append(bytes, 0xB9)
 	bytes = binary.LittleEndian.AppendUint32(bytes, uint32(argsLenBytes)+2)
-	// rep movsb                          ; do the copy
+	// rep movsb
 	bytes = append(bytes, 0xF3, 0xA4)
-	// mov word ptr [rax + 0x70], argsLenBytes        ; Length
+	// mov word ptr [rax + 0x70], argsLenBytes   ; Length only — leave MaxLength alone
 	bytes = append(bytes, 0x66, 0xC7, 0x40, 0x70)
 	bytes = binary.LittleEndian.AppendUint16(bytes, argsLenBytes)
-	// mov word ptr [rax + 0x72], argsLenBytes + 2    ; MaximumLength
-	bytes = append(bytes, 0x66, 0xC7, 0x40, 0x72)
-	bytes = binary.LittleEndian.AppendUint16(bytes, argsLenBytes+2)
 
 	if got := len(bytes); got != EmitPEBCommandLinePatch_ByteBudget {
 		return fmt.Errorf("stage1: EmitPEBCommandLinePatch byte count = %d, want %d (drift)",
@@ -103,7 +117,7 @@ func EmitPEBCommandLinePatch(b *amd64.Builder, argsLenBytes uint16) error {
 // EmitPEBCommandLinePatch emits. Pinned in unit tests so any
 // future drift in the asm encoding is caught at compile time
 // for callers that pre-allocate stub layout space.
-const EmitPEBCommandLinePatch_ByteBudget = 43
+const EmitPEBCommandLinePatch_ByteBudget = 48
 
 // PatchPEBCommandLineDisp rewrites the
 // [pebCommandLineDispSentinel] imm32 with the real R15-relative

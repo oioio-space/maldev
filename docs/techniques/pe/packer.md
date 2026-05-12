@@ -1064,13 +1064,19 @@ How it works: the stub reads the existing `PEB.ProcessParameters.CommandLine.Buf
   `GetCommandLineW` / `os.Args`, not arguments scoped to the
   DLL. Set `ConvertEXEtoDLLDefaultArgs` (v0.130.0+) to bake an
   operator-controlled cmdline into the stub.
-- `ConvertEXEtoDLLDefaultArgs` overflow risk: the in-place
-  rewrite assumes the loader's existing cmdline buffer is at
-  least `len(args_utf16) + 2` bytes. Typical loaders are safe
-  (rundll32 ≈ 200+ B, normal launchers ≥ 512 B), but a tiny
-  custom launcher could be overflown. Sized as wide-chars × 2
-  + 2 — keep DefaultArgs ≲ 256 wide chars for safety. There
-  is no runtime check; the asm trusts the loader's MAX.
+- `ConvertEXEtoDLLDefaultArgs` is hard-capped at **1500 chars**
+  at pack time (`PackBinary` returns a clear error past that —
+  see `packer.maxConvertEXEtoDLLDefaultArgsRunes`). The cap
+  exists to keep the args buffer + stub asm under the 4 KiB
+  (or 8 KiB with `Compress: true`) stub-section budget.
+- The asm-level patch is **guarded at runtime**: the stub reads
+  the existing `CommandLine.MaximumLength` from PEB before the
+  REP MOVSB and SKIPS the patch entirely if the loader's
+  buffer is too small. Payload then safely inherits the host
+  cmdline rather than overflowing the heap. Validated on Win10
+  with rundll32: a 1400-char DefaultArgs trips the guard
+  (rundll32 cmdline buffer is ~hundreds of bytes, not 2.8 KiB)
+  and the payload sees rundll32's cmdline — no crash.
 - The PEB-buffer rewrite is permanent for the host process —
   the host's own subsequent `GetCommandLineW` calls also
   return the new string. OPSEC trade-off when sideloading
