@@ -52,7 +52,6 @@ import (
 
 	"github.com/oioio-space/maldev/pe/dllproxy"
 	"github.com/oioio-space/maldev/pe/packer"
-	"github.com/oioio-space/maldev/pe/parse"
 	"github.com/oioio-space/maldev/recon/dllhijack"
 )
 
@@ -189,20 +188,9 @@ func main() {
 		if err != nil {
 			fatal("re-read fakelib: %v", err)
 		}
-		pf, err := parse.FromBytes(fakelibOnDisk, "fakelib.dll")
+		exports, err := dllproxy.ExportsFromBytes(fakelibOnDisk)
 		if err != nil {
 			fatal("parse fakelib: %v", err)
-		}
-		entries, err := pf.ExportEntries()
-		if err != nil {
-			fatal("parse fakelib exports: %v", err)
-		}
-		var exports []dllproxy.Export
-		for _, e := range entries {
-			if e.Name == "" {
-				continue // skip ordinal-only
-			}
-			exports = append(exports, dllproxy.Export{Name: e.Name, Ordinal: e.Ordinal})
 		}
 		if len(exports) == 0 {
 			fatal("fakelib has no named exports — Mode 10 needs ≥1")

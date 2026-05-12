@@ -1,5 +1,11 @@
 package evasion
 
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
 // Technique is a single evasion action that can be applied.
 // Each evasion sub-package (amsi, etw, unhook, acg, blockdlls)
 // exports constructors that return Technique values.
@@ -54,4 +60,33 @@ func ApplyAll(techniques []Technique, caller Caller) map[string]error {
 		return nil
 	}
 	return errs
+}
+
+// ApplyAllAggregated runs every technique like [ApplyAll] but folds
+// the per-technique failures into a single error whose message lists
+// each failing technique alphabetically. Returns nil if every
+// technique succeeded. Use this when the caller only needs to know
+// "did anything fail" and wants a single value to log or return.
+//
+// Example:
+//
+//	if err := evasion.ApplyAllAggregated(techniques, nil); err != nil {
+//	    log.Printf("evasion: %v", err)
+//	}
+func ApplyAllAggregated(techniques []Technique, caller Caller) error {
+	errs := ApplyAll(techniques, caller)
+	if errs == nil {
+		return nil
+	}
+	names := make([]string, 0, len(errs))
+	for name := range errs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s: %v", name, errs[name]))
+	}
+	return fmt.Errorf("evasion: %d/%d techniques failed: %s",
+		len(errs), len(techniques), strings.Join(parts, "; "))
 }

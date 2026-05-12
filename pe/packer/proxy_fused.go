@@ -96,3 +96,35 @@ func PackProxyDLL(input []byte, opts ProxyDLLOptions) (proxy, key []byte, err er
 
 	return fused, key, nil
 }
+
+// PackProxyDLLFromTarget is a convenience wrapper around
+// [PackProxyDLL] that infers the export list from a real target DLL
+// supplied as bytes. The caller still owns [ProxyDLLOptions.TargetName]
+// (the on-disk filename the proxy will impersonate) because the
+// PE itself does not carry a reliable canonical name string.
+//
+// Named exports are kept verbatim (Name + Ordinal). Ordinal-only
+// entries are skipped — [pe/dllproxy.Generate] would forward them
+// via "#N" strings, but the converted-DLL fused emitter currently
+// constructs forwarder strings only from explicit names, so an
+// ordinal-only loader call into the proxy would miss the table.
+// Operators wanting ordinal coverage should call [PackProxyDLL]
+// directly with a manually-built [dllproxy.Export] slice.
+//
+// Returns the same (proxy, key) pair as [PackProxyDLL]. Errors when
+// the target has no named exports or [ProxyDLLOptions.TargetName] is
+// blank.
+func PackProxyDLLFromTarget(payload, targetDLLBytes []byte, opts ProxyDLLOptions) (proxy, key []byte, err error) {
+	if opts.TargetName == "" {
+		return nil, nil, fmt.Errorf("packer: proxy-from-target: TargetName required (cannot infer from binary)")
+	}
+	exports, err := dllproxy.ExportsFromBytes(targetDLLBytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("packer: proxy-from-target: %w", err)
+	}
+	if len(exports) == 0 {
+		return nil, nil, fmt.Errorf("packer: proxy-from-target: target has no named exports")
+	}
+	opts.Exports = exports
+	return PackProxyDLL(payload, opts)
+}

@@ -10,7 +10,41 @@ import (
 	"strconv"
 
 	"github.com/oioio-space/maldev/pe/cert"
+	"github.com/oioio-space/maldev/pe/parse"
 )
+
+// ExportsFromBytes parses the PE/COFF bytes of a real DLL and returns
+// its named exports in the shape [GenerateExt] and downstream packers
+// (e.g. [github.com/oioio-space/maldev/pe/packer.PackProxyDLLFromTarget])
+// consume. Ordinal-only entries (Name == "") are skipped — the
+// forwarder emitter assembles "<target>.<name>" strings only, so an
+// ordinal-only loader call into a generated proxy would miss the
+// table. Callers needing ordinal coverage must build the [Export]
+// slice manually.
+//
+// Uses [pe/parse.FromBytesFast] — every other PE directory is
+// irrelevant here.
+//
+// Returns an empty slice (no error) when the target carries no named
+// exports; the caller decides whether that is fatal.
+func ExportsFromBytes(peBytes []byte) ([]Export, error) {
+	pf, err := parse.FromBytesFast(peBytes, "<embedded-target>")
+	if err != nil {
+		return nil, fmt.Errorf("dllproxy: ExportsFromBytes parse: %w", err)
+	}
+	entries, err := pf.ExportEntries()
+	if err != nil {
+		return nil, fmt.Errorf("dllproxy: ExportsFromBytes exports: %w", err)
+	}
+	out := make([]Export, 0, len(entries))
+	for _, e := range entries {
+		if e.Name == "" {
+			continue
+		}
+		out = append(out, Export{Name: e.Name, Ordinal: e.Ordinal})
+	}
+	return out, nil
+}
 
 // Machine identifies the COFF machine type baked into the emitted PE.
 type Machine uint16
