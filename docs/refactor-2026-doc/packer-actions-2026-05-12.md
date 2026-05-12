@@ -250,20 +250,45 @@ Recommended: **3A as a quick win** (move patchAMSI() AFTER all our VirtualAlloc-
 
 Recommended: **5A first verify carefully** with `cat > tmp/run.ps1 <<EOF` then `cat /tmp/run.ps1` to inspect, then `scp` then SSH `powershell -File`. If still flaky, **5C is the proper fix**.
 
-### Master execution order (post-resume)
+### Master execution order — status 2026-05-13
 
 ```
-1. 9.7.a + 9.7.c (helpers, no VM needed) -> commit, push
-2. 9.7.b (dllhijack helper) -> commit, push
-3. Refactor cmd/privesc-e2e/main.go to use the 3 helpers -> commit, push
-4. 9.8.a (victim sleep 5 s) -> commit, push
-5. 9.8.b (preset.Aggressive, after audit of order-of-ops) -> commit, push
-6. Re-run vm-privesc-e2e.sh -m 8 -- expect STRONG verdict
-7. Run -m 10 -- validate Mode 10 helper path end-to-end
-8. 9.6.f tag v0.132.0
-9. 9.6.g write the user-facing doc against the working chain
-10. (optional) 9.7.b extension: same scan-and-pick pattern for AutoElevate-only flows
+1. 9.7.a + 9.7.c (packer.PackProxyDLLFromTarget + evasion.ApplyAllAggregated)        ✅ shipped (commit 12cc47c)
+2. 9.7.b (dllhijack.PickBestWritable + sentinel)                                     ✅ shipped (commit bb5549a)
+   bonus: dllhijack ApiSet filter (zerotracelab/itm4n)                               ✅ shipped (commit 41cb0fc)
+   bonus: dllhijack.ScanPATHWritable + KindPathHijack (MareBackup chain)             ✅ shipped (commit e94858b)
+3. Refactor cmd/privesc-e2e/main.go to use the 3 helpers                             ✅ shipped (commit 73146aa)
+4. 9.8.a (victim sleep 5 s after LoadLibrary)                                        ✅ shipped (commit d75e9c4)
+5. 9.8.b (preset.Aggressive, audited order-of-ops)                                   ✅ shipped (commit 1b7da1e)
+6. vm-privesc-e2e.sh on libvirt — STRONG verdict on -m 8                             ✅ shipped (commit 3a67ae9)
+7. Mode-10 STRONG verdict (PackProxyDLLFromTarget end-to-end)                        ✅ verified live
+8. tag v0.132.0                                                                      ✅ shipped (tag 99e7dd7)
+9. user-facing doc — cmd/privesc-e2e/README rewritten thrice                         ✅ shipped (commits 2f9c5da, 2c9579a, 1a4aec2, 9397acc)
+10. (deferred) 9.7.b extension: same scan-and-pick pattern for AutoElevate-only flows ⏳ backlog
 ```
+
+**Bonus completed during this slice (out of original plan):**
+
+- v0.133.0 — `InjectStubPE` MEM_WRITE fix unblocks `Compress` packs on large
+  Go binaries. End-to-end verified: `cmd/privesc-e2e` packed with
+  `-rounds 5 -compress -randomize`, Defender real-time protection ON,
+  no exclusions, AS lowuser → STRONG SUCCESS marker. Two regression
+  tests in `pe/packer/transform/pe_test.go`
+  (`TestInjectStubPE_StubSectionWriteBit`).
+- `cmd/packer` gains `-compress` / `-antidebug` / `-randomize` CLI flags
+  (commit b4aa4b9 + simplify pass 21d3b81).
+- `pe/packer/transform/peconst.go` exports `ScnMemWrite` / `ScnMemExec` /
+  `ScnCntCode` (kills 3 magic-number sites; simplify pass).
+- `cmd/privesc-e2e/README.md` gains §7-bis Detection & Forensics with
+  built-in-Windows-only commands (wevtutil, Get-WinEvent, schtasks,
+  certutil, fsutil USN, auditpol) + §8-bis Defender bypass via dropper
+  packing.
+- DiagHub SYSTEM-DLL loader (Project Zero 2018 primitive B) queued in
+  memory `diaghub_privesc_loader.md` for a future slice.
+
+**Authorship hygiene:** all 15 session commits rewritten as
+`oioio-space <oioio-space@users.noreply.github.com>`, tags v0.132.0 +
+v0.133.0 re-pointed, master force-pushed 2026-05-13.
 
 ### Cross-machine resume — exhaustive context dump
 
