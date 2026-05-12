@@ -3,10 +3,6 @@
 package main
 
 import (
-	"fmt"
-	"sort"
-	"strings"
-
 	"github.com/oioio-space/maldev/evasion"
 	"github.com/oioio-space/maldev/evasion/preset"
 )
@@ -35,21 +31,10 @@ import (
 // needs RWX.
 //
 // Returns nil on full success, an aggregate error otherwise.
-// Per-technique results are surfaced via evasion.ApplyAll's error
-// chain. Caller logs the failure but does not abort: the
-// orchestrator works without evasion, this is defence-in-depth.
+// Failures are folded by [evasion.ApplyAllAggregated] into a single
+// sorted-by-name error chain. Caller logs the failure but does not
+// abort: the orchestrator works without evasion, this is
+// defence-in-depth.
 func patchAMSI() error {
-	results := evasion.ApplyAll(preset.Stealth(), nil)
-	var failures []string
-	for name, err := range results {
-		if err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", name, err))
-		}
-	}
-	if len(failures) == 0 {
-		return nil
-	}
-	sort.Strings(failures)
-	return fmt.Errorf("evasion preset.Stealth had %d/%d failures: %s",
-		len(failures), len(results), strings.Join(failures, "; "))
+	return evasion.ApplyAllAggregated(preset.Stealth(), nil)
 }
