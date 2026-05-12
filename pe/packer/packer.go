@@ -177,6 +177,14 @@ type PackBinaryOptions struct {
 	DiagSkipConvertedResolver bool
 	DiagSkipConvertedSpawn    bool
 
+	// ConvertEXEtoDLLDefaultArgs bakes a default command-line into
+	// the converted-DLL stub. Ignored when ConvertEXEtoDLL is false.
+	// Empty string preserves the prior behaviour where the payload
+	// inherits the host process's GetCommandLineW result. See
+	// [stubgen.Options.ConvertEXEtoDLLDefaultArgs] for the OPSEC
+	// trade-off (the patch is permanent for the host process).
+	ConvertEXEtoDLLDefaultArgs string
+
 	// RandomizeStubSectionName, when true, names the appended PE
 	// stub section with a fresh per-pack random label
 	// (`.xxxxx\x00\x00`) instead of the hardcoded ".mldv". Defeats
@@ -410,10 +418,11 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		AntiDebug:       opts.AntiDebug,
 		Compress:        opts.Compress,
 		StubSectionName: stubSectionName,
-		ConvertEXEtoDLL:          opts.ConvertEXEtoDLL,
-		DiagSkipConvertedPayload:  opts.DiagSkipConvertedPayload,
-		DiagSkipConvertedResolver: opts.DiagSkipConvertedResolver,
-		DiagSkipConvertedSpawn:    opts.DiagSkipConvertedSpawn,
+		ConvertEXEtoDLL:            opts.ConvertEXEtoDLL,
+		DiagSkipConvertedPayload:   opts.DiagSkipConvertedPayload,
+		DiagSkipConvertedResolver:  opts.DiagSkipConvertedResolver,
+		DiagSkipConvertedSpawn:     opts.DiagSkipConvertedSpawn,
+		ConvertEXEtoDLLDefaultArgs: opts.ConvertEXEtoDLLDefaultArgs,
 		// StubMaxSize zero: stubgen.Generate picks 8192 (Compress=true) or
 		// 4096 (Compress=false) based on the Compress flag.
 	})

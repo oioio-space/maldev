@@ -7,6 +7,7 @@ import (
 
 	lz4 "github.com/pierrec/lz4/v4"
 
+	"github.com/oioio-space/maldev/encode"
 	"github.com/oioio-space/maldev/pe/packer/stubgen/amd64"
 	"github.com/oioio-space/maldev/pe/packer/stubgen/poly"
 	"github.com/oioio-space/maldev/pe/packer/stubgen/stage1"
@@ -79,6 +80,14 @@ type Options struct {
 	// Production code MUST leave both false.
 	DiagSkipConvertedResolver bool
 	DiagSkipConvertedSpawn    bool
+
+	// ConvertEXEtoDLLDefaultArgs bakes a default command-line into
+	// the converted-DLL stub. Ignored when ConvertEXEtoDLL is false
+	// (only the converted-DLL stub flavour patches PEB.CommandLine).
+	// Empty string preserves prior behaviour: payload sees the host
+	// process's existing GetCommandLineW result. See
+	// [stage1.EmitOptions.DefaultArgs] for OPSEC trade-offs.
+	ConvertEXEtoDLLDefaultArgs string
 }
 
 // Sentinels surfaced by Generate.
@@ -236,6 +245,7 @@ func Generate(opts Options) ([]byte, []byte, error) {
 	emitOpts.DiagSkipConvertedPayload = opts.DiagSkipConvertedPayload
 	emitOpts.DiagSkipConvertedResolver = opts.DiagSkipConvertedResolver
 	emitOpts.DiagSkipConvertedSpawn = opts.DiagSkipConvertedSpawn
+	emitOpts.DefaultArgs = opts.ConvertEXEtoDLLDefaultArgs
 
 	if opts.Compress {
 		dst := make([]byte, lz4.CompressBlockBound(len(originalTextBytes)))
@@ -360,6 +370,14 @@ func Generate(opts Options) ([]byte, []byte, error) {
 	case plan.IsConvertedDLL:
 		if _, err := stage1.PatchConvertedDLLStubDisplacements(stubBytes, plan); err != nil {
 			return nil, nil, fmt.Errorf("stubgen: PatchConvertedDLLStubDisplacements: %w", err)
+		}
+		if opts.ConvertEXEtoDLLDefaultArgs != "" {
+			argsBytesLen := len(encode.ToUTF16LE(opts.ConvertEXEtoDLLDefaultArgs))
+			offFromEnd := stage1.ConvertedDLLStubArgsBufferOffsetFromEnd(argsBytesLen)
+			argsBufferOff := uint32(len(stubBytes) - offFromEnd)
+			if _, err := stage1.PatchPEBCommandLineDisp(stubBytes, plan.StubRVA, plan.TextRVA, argsBufferOff); err != nil {
+				return nil, nil, fmt.Errorf("stubgen: PatchPEBCommandLineDisp: %w", err)
+			}
 		}
 	}
 
