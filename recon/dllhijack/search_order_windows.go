@@ -39,6 +39,9 @@ func SearchOrder(exeDir string) []string {
 //   - If dllName is a KnownDLL (registry list), the loader goes straight
 //     to System32 regardless of search order — no hijack possible;
 //     returns zero-values.
+//   - If dllName matches an ApiSet contract (api-ms-win-* / ext-ms-win-*),
+//     the loader redirects via the in-PEB ApiSet schema and never reads
+//     from disk — also unhijackable; returns zero-values.
 //   - Otherwise, walk the search order until the DLL is found
 //     (resolved). Report the FIRST dir earlier than resolved that is
 //     user-writable AND does not already contain dllName.
@@ -48,7 +51,7 @@ func SearchOrder(exeDir string) []string {
 //   - resolvedDir: where the DLL currently resolves to, or "" if not
 //     present anywhere on the search order.
 func HijackPath(exeDir, dllName string) (hijackDir, resolvedDir string) {
-	if isKnownDLL(dllName) {
+	if isKnownDLL(dllName) || isApiSet(dllName) {
 		return "", ""
 	}
 	dirs := SearchOrder(exeDir)

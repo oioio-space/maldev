@@ -35,6 +35,14 @@
 // from hijack candidates — those are early-load-mapped from
 // `\KnownDlls\` and bypass the search order entirely.
 //
+// ApiSet contracts (`api-ms-win-*.dll`, `ext-ms-win-*.dll`) are
+// also excluded — the loader resolves them via the in-PEB
+// ApiSet schema and never reads them from disk, so dropping a
+// payload under those names would never be picked up. Some
+// Win10/11 builds ship physical stubs in `System32\downlevel\`
+// for compatibility; the filter prevents the file-existence
+// heuristic from falsely flagging those.
+//
 // # MITRE ATT&CK
 //
 //   - T1574.001 (Hijack Execution Flow: DLL Search Order Hijacking)

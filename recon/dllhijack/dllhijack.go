@@ -17,6 +17,19 @@ import (
 // path. Wrap with [errors.Is] to branch.
 var ErrNoWritableOpportunity = errors.New("dllhijack: no writable opportunity")
 
+// isApiSet returns true when dllName matches an MS ApiSet contract
+// (api-ms-win-*.dll or ext-ms-win-*.dll). The loader resolves these
+// virtual names via the ApiSet schema in the PEB — they never reach
+// disk-based search, so emitting them as hijack candidates is noise.
+// Some Win10/11 builds ship physical stubs in System32\downlevel\
+// which would otherwise trip the fileExists heuristic in HijackPath.
+//
+// Reference: https://learn.microsoft.com/en-us/windows/win32/apiindex/windows-apisets
+func isApiSet(dllName string) bool {
+	n := strings.ToLower(dllName)
+	return strings.HasPrefix(n, "api-ms-win-") || strings.HasPrefix(n, "ext-ms-win-")
+}
+
 // ScanOpts bundles optional, composable behaviour for the scanners.
 // Zero value preserves the default path-based file open.
 //

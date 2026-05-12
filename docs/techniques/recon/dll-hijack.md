@@ -52,6 +52,12 @@ What this does NOT achieve:
   `HKLM\…\Session Manager\KnownDLLs` are early-load-mapped
   from `\KnownDlls\` and bypass search order entirely. Not
   hijackable; this package skips them.
+- **ApiSet contracts are excluded** — names matching
+  `api-ms-win-*.dll` or `ext-ms-win-*.dll` are resolved by the
+  loader via the in-PEB ApiSet schema and never read from disk.
+  Some Win10/11 builds ship physical stubs in
+  `System32\downlevel\` which would otherwise trip the
+  file-existence heuristic; the filter prevents false positives.
 - **Doesn't catch service-trigger-launched binaries** —
   hosted services that load DLLs only when a specific event
   fires. The IAT walk catches static imports; LoadLibrary at
