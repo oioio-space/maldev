@@ -147,7 +147,7 @@ cat > /tmp/run-orchestrator.ps1 <<EOF
 EOF
 scp "${SSH_OPTS[@]}" /tmp/run-orchestrator.ps1 "${SSH_USER}@${HOST_IP}:C:/Users/${SSH_USER}/" &>/dev/null
 OUT=$(ssh "${SSH_OPTS[@]}" "${SSH_USER}@${HOST_IP}" \
-  "powershell -ExecutionPolicy Bypass -File C:\\Users\\${SSH_USER}\\run-orchestrator.ps1" \
+  "powershell -ExecutionPolicy Bypass -File C:\\Users\\${SSH_USER}\\run-orchestrator.ps1 ; powershell -Command \"Start-Sleep -Seconds 70; Write-Host VICTIM-LOG-LATE:; Get-Content C:\\ProgramData\\maldev-marker\\victim.log -Tail 4\"" \
   2>&1) || true
 kill $TAIL_PID 2>/dev/null || true
 
