@@ -79,6 +79,41 @@ type EmitOptions struct {
 	// flag and fails with DiagSkipConvertedSpawn, the bug lives in the
 	// resolver. Slice 5.5.y; production MUST leave false.
 	DiagSkipConvertedResolver bool
+
+	// DefaultArgs is the wide-character command-line baked into the
+	// converted-DLL stub. When non-empty, EmitConvertedDLLStub
+	// patches PEB.ProcessParameters.CommandLine to point at this
+	// string BEFORE invoking CreateThread on the OEP — the spawned
+	// payload's GetCommandLineW (and Go's os.Args / MSVC argv
+	// parser) returns these bytes instead of the host process's
+	// existing cmdline.
+	//
+	// Wire encoding: UTF-16LE, NUL-terminated (terminator emitted
+	// by EmitConvertedDLLStub), embedded as trailing data in the
+	// stub section. The PEB-patch asm references the buffer via an
+	// R15-relative LEA whose imm32 is patched at finalisation time
+	// via PatchPEBCommandLineDisp.
+	//
+	// Empty string disables the PEB-patch path entirely; payload
+	// sees host process cmdline as before. EXE-only path through
+	// EmitConvertedDLLStub; ignored by EmitStub / EmitDLLStub.
+	//
+	// OPSEC trade-off: does NOT save/restore the host's original
+	// CommandLine — the patch is permanent for the duration of the
+	// host process. Operators packing for sideloading should be
+	// aware that the host's GetCommandLineW also returns the new
+	// string after this fires.
+	DefaultArgs string
+}
+
+// convertedSpawnEnabled reports whether the converted-DLL stub
+// should emit code that runs at PROCESS_ATTACH time. The three
+// Diag* flags individually short-circuit the payload-decryption,
+// resolver, and CreateThread frames; any of them being on means
+// downstream emit sites (PEB patch, CreateThread call) must be
+// skipped to keep the stub valid.
+func (o EmitOptions) convertedSpawnEnabled() bool {
+	return !o.DiagSkipConvertedPayload && !o.DiagSkipConvertedResolver && !o.DiagSkipConvertedSpawn
 }
 
 // baseReg is the callee-saved register the prologue loads with the

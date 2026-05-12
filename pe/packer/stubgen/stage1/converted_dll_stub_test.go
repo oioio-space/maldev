@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/oioio-space/maldev/encode"
 	"github.com/oioio-space/maldev/pe/packer/stubgen/amd64"
 	"github.com/oioio-space/maldev/pe/packer/stubgen/stage1"
 	"github.com/oioio-space/maldev/pe/packer/transform"
@@ -190,5 +191,91 @@ func TestPatchConvertedDLLStubDisplacements_RewritesFlagDisp(t *testing.T) {
 	binary.LittleEndian.PutUint32(wantBytes[:], wantDisp)
 	if !bytes.Contains(out, wantBytes[:]) {
 		t.Errorf("post-patch: real disp %#x not found in stub", wantDisp)
+	}
+}
+
+// TestEmitConvertedDLLStub_DefaultArgs_AppendsBuffer — DefaultArgs
+// non-empty must (a) embed the PEB-patch sentinel (0xCAFEDADE) once
+// in the asm, and (b) append the UTF-16LE-encoded args + 2B NUL
+// terminator to the trailing data, BEFORE the 1B decrypted_flag.
+// Layout is asserted because PatchPEBCommandLineDisp consumers rely
+// on it.
+func TestEmitConvertedDLLStub_DefaultArgs_AppendsBuffer(t *testing.T) {
+	const args = "AB" // 2 wchars → 4 bytes UTF-16LE → 2 NUL → +1 flag = 7 trailing
+	b, _ := amd64.New()
+	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(1), stage1.EmitOptions{
+		DefaultArgs: args,
+	}); err != nil {
+		t.Fatalf("EmitConvertedDLLStub: %v", err)
+	}
+	out, _ := b.Encode()
+
+	pebSentinel := []byte{0xDE, 0xDA, 0xFE, 0xCA} // 0xCAFEDADE LE
+	if got := bytes.Count(out, pebSentinel); got != 1 {
+		t.Errorf("PEB-patch sentinel count = %d, want 1", got)
+	}
+
+	// Layout: ...[A 0 B 0 0 0 flag] — 4+2+1 = 7 trailing bytes.
+	wantTrail := []byte{'A', 0x00, 'B', 0x00, 0x00, 0x00, 0x00}
+	if !bytes.HasSuffix(out, wantTrail) {
+		t.Errorf("trailing bytes = % x, want suffix % x", out[len(out)-7:], wantTrail)
+	}
+
+	// Flag byte still at offset stub_size-1 (existing contract preserved).
+	if out[len(out)-1] != 0x00 {
+		t.Errorf("flag byte (offset -1) = %#x, want 0x00", out[len(out)-1])
+	}
+}
+
+// TestEmitConvertedDLLStub_DefaultArgs_DisabledByDefault — empty
+// DefaultArgs must NOT emit the PEB-patch sentinel and trailing
+// data must remain a single flag byte. Regression guard for the
+// gated path.
+func TestEmitConvertedDLLStub_DefaultArgs_DisabledByDefault(t *testing.T) {
+	b, _ := amd64.New()
+	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(1), stage1.EmitOptions{}); err != nil {
+		t.Fatalf("EmitConvertedDLLStub: %v", err)
+	}
+	out, _ := b.Encode()
+
+	pebSentinel := []byte{0xDE, 0xDA, 0xFE, 0xCA}
+	if bytes.Contains(out, pebSentinel) {
+		t.Error("PEB-patch sentinel leaked when DefaultArgs is empty")
+	}
+}
+
+// TestPatchPEBCommandLineDisp_RewritesFromConvertedStub — chains
+// EmitConvertedDLLStub(DefaultArgs=...) with PatchPEBCommandLineDisp
+// using the offset returned by ConvertedDLLStubArgsBufferOffsetFromEnd.
+// Sentinel must be gone and the computed disp must appear in its place.
+func TestPatchPEBCommandLineDisp_RewritesFromConvertedStub(t *testing.T) {
+	const args = "X"
+	b, _ := amd64.New()
+	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(1), stage1.EmitOptions{
+		DefaultArgs: args,
+	}); err != nil {
+		t.Fatalf("EmitConvertedDLLStub: %v", err)
+	}
+	out, _ := b.Encode()
+
+	offFromEnd := stage1.ConvertedDLLStubArgsBufferOffsetFromEnd(len(encode.ToUTF16LE(args)))
+	argsBufferOff := uint32(len(out) - offFromEnd)
+
+	n, err := stage1.PatchPEBCommandLineDisp(out, stdConvertedDLLPlan.StubRVA, stdConvertedDLLPlan.TextRVA, argsBufferOff)
+	if err != nil {
+		t.Fatalf("PatchPEBCommandLineDisp: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("patched %d sentinels, want 1", n)
+	}
+	pebSentinel := []byte{0xDE, 0xDA, 0xFE, 0xCA}
+	if bytes.Contains(out, pebSentinel) {
+		t.Error("PEB-patch sentinel still present after patch")
+	}
+	wantDisp := uint32(int32(stdConvertedDLLPlan.StubRVA+argsBufferOff) - int32(stdConvertedDLLPlan.TextRVA))
+	var wantBytes [4]byte
+	binary.LittleEndian.PutUint32(wantBytes[:], wantDisp)
+	if !bytes.Contains(out, wantBytes[:]) {
+		t.Errorf("computed disp %#x not present in patched stub", wantDisp)
 	}
 }

