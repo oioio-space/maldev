@@ -177,6 +177,30 @@ func ShiftImageVA(pe []byte, delta uint32) ([]byte, error) {
 		return nil, fmt.Errorf("transform: import directory fixup: %w", walkErr)
 	}
 
+	// 5c. Walk the RESOURCE directory tree and bump every leaf
+	//     IMAGE_RESOURCE_DATA_ENTRY.OffsetToData RVA. Without this
+	//     FindResource/FindResourceEx return wrong byte ranges (or
+	//     wander into garbage) because the leaf data pointers in
+	//     the resource tree are static RVAs the linker bakes,
+	//     NOT covered by the .reloc table. Empirically observed:
+	//     packing a binary with embedded icon + manifest under
+	//     RandomizeAll + RandomizeImageVAShift produced a
+	//     "data entry out of bounds" error from winres.LoadFromEXE
+	//     until this walker landed.
+	if walkErr := WalkResourceDirectoryRVAs(pe, func(rvaFileOff uint32) error {
+		if int(rvaFileOff)+4 > len(out) {
+			return fmt.Errorf("resource RVA patch past EOF (file 0x%x)", rvaFileOff)
+		}
+		cur := binary.LittleEndian.Uint32(out[rvaFileOff:])
+		if cur == 0 {
+			return nil
+		}
+		binary.LittleEndian.PutUint32(out[rvaFileOff:], cur+delta)
+		return nil
+	}); walkErr != nil {
+		return nil, fmt.Errorf("transform: resource directory fixup: %w", walkErr)
+	}
+
 	walkErr := WalkBaseRelocs(pe, func(e BaseRelocEntry) error {
 		// (a) Repack the block's PageRVA in `out`. We do this
 		//     once per block; the walker yields entries in

@@ -354,6 +354,14 @@ _Each area is collapsed by default — click to expand. Detection level is the c
 
 </details>
 
+<details><summary><strong>scripts</strong> — 1 package</summary>
+
+| Package | Detection | Summary |
+|---|---|---|
+| [`scripts`](https://pkg.go.dev/github.com/oioio-space/maldev/scripts) | — | build-fixture-winres.go regenerates pe/packer/testdata/winhello_w32_res.exe — winhello_w32.exe with an RT_GROUP_ICON + RT_MANIFEST embedded via tc-hib/winres (pure Go, no mingw windres dependency) |
+
+</details>
+
 <!-- END AUTOGEN: package-index -->
 
 ## Cross-cutting guides
