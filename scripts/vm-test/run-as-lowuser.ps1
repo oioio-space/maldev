@@ -9,6 +9,7 @@ param(
     [Parameter(Mandatory=$true)][string]$Binary,
     [Parameter(Mandatory=$true)][string]$UserName,
     [Parameter(Mandatory=$true)][string]$Password,
+    [string]$BinaryArgs = '',
     [int]$TimeoutSeconds = 120
 )
 
@@ -23,7 +24,9 @@ $outFile  = Join-Path $workDir 'out.txt'
 $shim     = Join-Path $workDir 'run.cmd'
 
 # 1. Write the cmd shim that runs the binary and redirects both streams.
-$shimBody = "@echo off`r`n""$Binary"" > ""$outFile"" 2>&1`r`nexit /b %errorlevel%`r`n"
+#    Append BinaryArgs OUTSIDE the quoted binary path so the shell parses
+#    them as separate argv elements rather than as part of argv[0].
+$shimBody = "@echo off`r`n""$Binary"" $BinaryArgs > ""$outFile"" 2>&1`r`nexit /b %errorlevel%`r`n"
 Set-Content -Path $shim -Value $shimBody -Encoding ASCII -NoNewline
 
 # 2. Tear down any leftover from a previous run.

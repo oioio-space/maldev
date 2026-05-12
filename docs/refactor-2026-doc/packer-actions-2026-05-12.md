@@ -15,8 +15,9 @@ reflects_commit: d8ed9a3 (v0.130.0 + docs)
 
 | # | Item | Effort | Status | Tag |
 |---|---|---|---|---|
-| **1** | **Mode 8 args injection — `DefaultArgs` opt + `RunWithArgs` export** | ~200 LOC | 🟢 in progress | — |
-| 2 | Mode 7 + Compress symmetry with Mode 8 | ~80 LOC | ⏳ next | — |
+| **1** | **Mode 8 args injection — `DefaultArgs` opt + `RunWithArgs` export** | ~200 LOC | 🟢 in progress (1.A done, 1.B scoped) | v0.130/0.131 |
+| **9** | **E2E PrivEsc DLL hijack proof** — VM provisioning + probe + orchestrator + driver + doc, demonstrating full chain from `lowuser` shell to SYSTEM whoami marker | ~600 LOC | 🟢 in progress | — |
+| 2 | Mode 7 + Compress symmetry with Mode 8 | ~80 LOC | ⏳ scoped | — |
 | 3 | `RandomizeStubSectionName` ON by default (OPSEC quick win) | ~5 LOC + tests | ⏳ scoped | — |
 | 4 | PE32+ Machine check explicite (silent breakage guard) | ~10 LOC | ⏳ scoped | — |
 | 5 | Walker interface unifié (R2 in audit) | ~150 LOC | ⏳ scoped | — |
@@ -68,6 +69,42 @@ Each slice ships its own commit. Tags every successful slice
 end (1.A complete = v0.130.0, 1.B complete = v0.131.0).
 
 ### Cross-machine resume — current state
+
+## Item #9 — E2E PrivEsc DLL hijack chain
+
+**Goal.** Validate the entire packer chain (Mode 8 ConvertEXEtoDLL,
+optional Mode 10 PackProxyDLL) end-to-end on a real Win10 VM:
+attacker is a non-admin shell (`lowuser`), defender is a SYSTEM
+scheduled task running a deliberately-vulnerable EXE that
+`LoadLibrary`s a DLL from a user-writable directory. Success =
+the marker file shows `nt authority\system` (or the elevated user)
+written by code that originated as a packed maldev EXE the
+attacker compiled.
+
+### Sub-slices
+
+| # | Scope | LOC | Status |
+|---|---|---|---|
+| 9.1 | **VM provisioning.** Add `lowuser` (non-admin), `C:\Vulnerable\` (lowuser-writable), `victim.exe` (LoadLibrary("hijackme.dll")), scheduled task SYSTEM-context running victim.exe with ACL granting lowuser /Run rights, Defender exclusions for `C:\Vulnerable\` + `C:\ProgramData\maldev-marker\`. Snapshot as `INIT-PRIVESC`. | ~150 (PowerShell) | ⏳ next |
+| 9.2 | **Probe.** Tiny Go EXE `whoami_marker` → execs `whoami`, writes output + timestamp + PID to `C:\ProgramData\maldev-marker\whoami.txt`. | ~30 | ⏳ |
+| 9.3 | **Orchestrator.** Single Go EXE `cmd/privesc-e2e` runnable from lowuser shell — bundles probe bytes (//go:embed), packs to DLL via `packer.PackBinary{ConvertEXEtoDLL:true}`, plants at `C:\Vulnerable\hijackme.dll`, triggers task via `schtasks /Run`, polls marker, prints SUCCESS/FAIL. | ~250 | ⏳ |
+| 9.4 | **Driver.** Bash script `scripts/vm-privesc-e2e.sh` — VBoxManage snapshot restore INIT-PRIVESC, SCP orchestrator as lowuser, SSH lowuser to run, fetch marker, assert SYSTEM. | ~80 | ⏳ |
+| 9.5 | **User doc.** New section in `docs/techniques/pe/packer.md` (or sibling `dll-hijack-e2e.md`) walking the operator chain step by step, citing the orchestrator + screenshots of marker. Only if 9.1-9.4 PASS. | ~150 (md) | ⏳ |
+
+### Open answers (confirmed defaults)
+
+- Hijack vector: DLL search-order (victim's own dir first).
+- Trigger: `schtasks /Run` with lowuser-writable ACL on the task.
+- Snapshot: NEW `INIT-PRIVESC` (do not mutate existing INIT).
+- Pack mode: 8 (ConvertEXEtoDLL) — victim only LoadLibrary's, no exports needed.
+- Bitness: x64 only.
+- Marker dir: `C:\ProgramData\maldev-marker\` (default ACL).
+
+### Cross-machine resume
+
+After commit, pickup at next unticked sub-slice.
+
+---
 
 **Slice 1.A FULLY HARDENED.** v0.130.0 shipped the feature;
 follow-up slices 1.A.5 + 1.A.6 (in response to "il n'y a pas
