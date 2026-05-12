@@ -2036,6 +2036,37 @@ at a missing walker per the
 > `0xC0000135` / `0xC0000409` / "is not a valid Win32
 > application" to their root causes + first-action remediation.
 
+### `0xC0000005` (STATUS_ACCESS_VIOLATION) on large Compress packs
+
+**Symptom:** packed binary exits with `0xC0000005` immediately,
+no stdout, no breadcrumb writes — the orchestrator never reaches
+`main()`. Affected large Go binaries (≥ ~2 MiB `.text`) packed
+with `Compress=true`.
+
+**Cause:** `InjectStubPE` used to mark the appended stub section
+`IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_EXECUTE` only. The C3
+compression path's LZ4 inflate decoder writes into the section's
+BSS slack at runtime (`StubMaxSize..StubMaxSize+StubScratchSize`,
+the kernel-zero-filled scratch region for the inflated plaintext
+before memcpy back to `.text`). Small inputs sometimes succeeded
+because the kernel happened to back the freshly-mapped BSS pages
+with implicitly-writable PTEs; larger inputs reliably faulted.
+
+**Fix (in tree since 2026-05-13):** `InjectStubPE` now adds
+`IMAGE_SCN_MEM_WRITE` to the stub section's characteristics when
+`Plan.StubScratchSize > 0`. The change is gated behind the
+scratch-size predicate so non-Compress packs keep their RX-only
+stub section. Two regression tests pin the contract:
+`TestInjectStubPE_StubSectionWritableWhenScratch` and
+`TestInjectStubPE_StubSectionReadOnlyWithoutScratch`.
+
+End-to-end verification: 12 MiB
+`cmd/privesc-e2e/privesc-e2e.exe` packed with
+`-compress -randomize -rounds 5` reaches STRONG SUCCESS through
+the full DLL-hijack chain (Defender real-time protection ON,
+no exclusions) — see
+[`cmd/privesc-e2e/README.md` §8 bis](../../../cmd/privesc-e2e/README.md#8-bis-defender-bypass-via-dropper-packing).
+
 ### `0xC0000409` (STATUS_STACK_BUFFER_OVERRUN) on Windows execution
 
 **Symptom:** packed binary exits with exit code `3221226505`

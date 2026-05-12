@@ -186,6 +186,69 @@ func TestInjectStubPE_DebugPEParses(t *testing.T) {
 	}
 }
 
+// TestInjectStubPE_StubSectionWritableWhenScratch verifies the stub
+// section gets MEM_WRITE when Plan.StubScratchSize > 0 — the C3
+// compression path's LZ4 inflate writes into the section's BSS
+// slack, so the loader must map those pages writable. Without this,
+// large Go binaries (e.g. the 12 MiB privesc-e2e orchestrator)
+// crashed with STATUS_ACCESS_VIOLATION (0xC0000005) before main().
+// Small binaries happened to succeed by chance of how the kernel
+// backed the BSS pages — explicit MEM_WRITE removes the gamble.
+func TestInjectStubPE_StubSectionWritableWhenScratch(t *testing.T) {
+	const textSize = 0x500
+	input := buildMinimalPE(t, minimalPEOpts{TextSize: textSize, OEPRVA: 0x1010})
+	plan, err := transform.PlanPE(input, 4096)
+	if err != nil {
+		t.Fatalf("PlanPE: %v", err)
+	}
+	plan.StubScratchSize = 0x2000 // request 8 KiB of scratch
+	encryptedText := bytes.Repeat([]byte{0xAA}, int(plan.TextSize))
+	stubBytes := []byte{0xC3}
+
+	out, err := transform.InjectStubPE(input, encryptedText, stubBytes, plan)
+	if err != nil {
+		t.Fatalf("InjectStubPE: %v", err)
+	}
+	f, err := pe.NewFile(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("debug/pe rejected output: %v", err)
+	}
+	defer f.Close()
+	stubSec := f.Sections[len(f.Sections)-1]
+	if stubSec.Characteristics&0x80000000 == 0 {
+		t.Errorf("stub section Characteristics = %#x missing MEM_WRITE bit when StubScratchSize=%#x",
+			stubSec.Characteristics, plan.StubScratchSize)
+	}
+}
+
+// TestInjectStubPE_StubSectionReadOnlyWithoutScratch keeps the
+// no-compress / no-scratch path RX-only (the historical default)
+// so non-Compress packs don't grow an unnecessary writable region.
+func TestInjectStubPE_StubSectionReadOnlyWithoutScratch(t *testing.T) {
+	input := buildMinimalPE(t, minimalPEOpts{TextSize: 0x500, OEPRVA: 0x1010})
+	plan, err := transform.PlanPE(input, 4096)
+	if err != nil {
+		t.Fatalf("PlanPE: %v", err)
+	}
+	// plan.StubScratchSize stays 0 — no compression.
+	out, err := transform.InjectStubPE(input,
+		bytes.Repeat([]byte{0xAA}, int(plan.TextSize)),
+		[]byte{0xC3}, plan)
+	if err != nil {
+		t.Fatalf("InjectStubPE: %v", err)
+	}
+	f, err := pe.NewFile(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("debug/pe rejected output: %v", err)
+	}
+	defer f.Close()
+	stubSec := f.Sections[len(f.Sections)-1]
+	if stubSec.Characteristics&0x80000000 != 0 {
+		t.Errorf("stub section Characteristics = %#x has spurious MEM_WRITE bit when StubScratchSize=0",
+			stubSec.Characteristics)
+	}
+}
+
 // TestInjectStubPE_HonoursTextMemSize verifies that setting Plan.TextMemSize >
 // Plan.TextSize causes InjectStubPE to widen the .text VirtualSize in the output
 // PE section header. The on-disk SizeOfRawData stays at the original TextSize —
