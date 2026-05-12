@@ -41,4 +41,18 @@ func main() {
 		return
 	}
 	logf("LoadLibrary succeeded: handle=%#x — hijack DLL ran in our context", uintptr(h))
+
+	// Race-avoidance window for Mode-8 (ConvertEXEtoDLL) chains.
+	// The packed DllMain returns immediately after spawning the
+	// payload thread; without this sleep, victim.exe falls off the
+	// end of main() and calls ExitProcess before the spawned thread
+	// reaches its final WriteFile(whoami.txt). Real-world legitimate-
+	// victim sideload chains (services, scheduled tasks) have
+	// similarly long-lived hosts, so this is faithful behaviour,
+	// not a test artefact.
+	//
+	// Slice 9.8.a — see docs/refactor-2026-doc/packer-actions-2026-05-12.md.
+	logf("sleeping 5 s before exit to let payload thread complete its writes")
+	time.Sleep(5 * time.Second)
+	logf("victim exit")
 }
