@@ -198,6 +198,75 @@ them in production.
   enhancement: do the runtime init from DllMain (not the
   spawned thread) by hijacking the host's main thread.
 
+## Layer 11+ — sub-slice 9.6 deep-dive findings
+
+### 11. AMSI's own self-defence
+- **Symptom:** `Add-MpPreference -ExclusionPath` script blocked
+  with "le fichier contient un virus". Same fate for the
+  AmsiUtils reflective bypass even with string concatenation
+  (`'amsi'+'InitFailed'`).
+- **Root cause:** modern Defender's AMSI signatures cover both
+  the canonical `Add-MpPreference` invocation AND the well-known
+  `AmsiUtils.amsiInitFailed` reflection bypass — script was
+  blocked at execution time, full file marked malicious.
+- **Fix:** stop trying to disable defences. Switched to
+  registry-direct write at HKLM\…\Exclusions\Paths (no AMSI
+  involvement) — but Tamper Protection often blocks that too.
+- **Lesson + decision:** per the user's `regarte les autres
+  techniques d'evasion avant de desactiver les defenses`
+  direction, dropped exclusions entirely and rely on the
+  orchestrator's runtime evasion (`evasion/preset.Stealth`).
+
+### 12. `Set-LocalUser` vs `net user` password mismatch
+- **Symptom:** provision-lowuser.ps1 uses
+  `Set-LocalUser -Password (ConvertTo-SecureString …)`. Then
+  `schtasks /Create /RU lowuser /RP <samepassword>` succeeds.
+  But when the task FIRES, batch logon emits Security event
+  4625 STATUS_WRONG_PASSWORD (0xC000006A) — even though
+  Set-LocalUser and our /RP saw the SAME plain-text bytes.
+- **Root cause:** `Set-LocalUser` + `SecureString` apparently
+  stores the password in SAM with a representation that
+  schtasks /RP and `runas` reject on at least some Win10 builds.
+  Manually running `net user lowuser <pw>` immediately fixes it.
+- **Fix:** added `net user $UserName $Password` after the
+  Set-LocalUser call in provision-lowuser.ps1 (b6d26c8).
+- **Lesson:** for any local-account password used by
+  schtasks/RunAs flows, `net user` is the canonical SAM writer.
+  PowerShell's secure-string path is for credential-vault
+  scenarios, not batch-logon ones.
+
+### 13. Mode 8 stub + multiple `WriteFile` calls
+- **Symptom:** our mingw `-nostdlib` C probe writes 3 markers
+  via separate `CreateFileW`+`WriteFile`+`CloseHandle` calls in
+  sequence + `Sleep(INFINITE)`. Only the FIRST 1-2 markers
+  appear; later writes never land. The reference
+  `probe_converted.exe` (writes ONE 3-byte marker only) works
+  consistently.
+- **Theory:** the Mode-8 stub spawns the probe via
+  `CreateThread(NULL, 0, OEP, NULL, 0, NULL)`. Victim.exe
+  process exits as soon as DllMain returns; the spawned thread
+  is killed mid-flight. With 2-3 ms between WriteFile calls,
+  the window is small enough that the 1st write lands but
+  later ones can be racing the parent's process exit.
+- **Workaround:** make the probe write its critical marker
+  FIRST (single WriteFile + close + flush), THEN the rest.
+- **Lesson:** Mode 8 probes get only ONE reliable WriteFile
+  per spawn. Anything after that races process exit.
+
+### 14. Probe payload fires inconsistently (gap 9.6.d.x)
+- **Symptom:** even after the password fix, the run-as-lowuser
+  driver path produces RC=1 with no orchestrator output. Same
+  command run manually via SSH (orchestrator AS lowuser via
+  the same harness) produces full output and the chain
+  completes (LoadLibrary succeeded in victim.log).
+- **Suspect:** quoting/escaping of `-Password` through bash →
+  ssh → cmd → PowerShell → schtasks /RP differs subtly
+  between the driver script and the manual ssh command. The
+  4625 logged at 15:16 confirms the password mismatch — same
+  string in both flows but bytes diverge.
+- **Status:** open. Worked around by manual `net user lowuser
+  $PW` between provisioning and orchestrator run.
+
 ## Open follow-ups
 
 1. **Make Mode 8 + Go work** (user request still pending).
