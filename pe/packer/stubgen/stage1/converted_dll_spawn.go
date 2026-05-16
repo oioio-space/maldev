@@ -30,6 +30,15 @@ type convertedSpawnArgsTrailing struct {
 
 func (convertedSpawnArgsTrailing) isConvertedSpawnArgs() {}
 
+// convertedSpawnArgsFromRCX instructs the spawn block to call
+// [EmitPEBCommandLinePatchRCX] — the source pointer is the
+// caller-supplied LPCWSTR in RCX, and the byte length is computed
+// inline via a wcslen scan. Used by the RunWithArgs exported entry,
+// where the caller owns the args buffer.
+type convertedSpawnArgsFromRCX struct{}
+
+func (convertedSpawnArgsFromRCX) isConvertedSpawnArgs() {}
+
 // emitConvertedSpawnBlock emits the post-decrypt sequence of the
 // converted-DLL stub:
 //
@@ -51,9 +60,16 @@ func emitConvertedSpawnBlock(b *amd64.Builder, plan transform.Plan, opts EmitOpt
 	}
 
 	if opts.convertedSpawnEnabled() {
-		if t, ok := args.(convertedSpawnArgsTrailing); ok && t.lenBytes > 0 {
-			if err := EmitPEBCommandLinePatch(b, t.lenBytes); err != nil {
-				return fmt.Errorf("stage1/converted: PEB patch: %w", err)
+		switch a := args.(type) {
+		case convertedSpawnArgsTrailing:
+			if a.lenBytes > 0 {
+				if err := EmitPEBCommandLinePatch(b, a.lenBytes); err != nil {
+					return fmt.Errorf("stage1/converted: PEB patch (trailing): %w", err)
+				}
+			}
+		case convertedSpawnArgsFromRCX:
+			if err := EmitPEBCommandLinePatchRCX(b); err != nil {
+				return fmt.Errorf("stage1/converted: PEB patch (rcx): %w", err)
 			}
 		}
 
