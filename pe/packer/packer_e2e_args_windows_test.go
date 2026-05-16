@@ -7,7 +7,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
+	"unsafe"
 
 	"github.com/oioio-space/maldev/pe/packer"
 )
@@ -305,5 +308,83 @@ func TestPackBinary_ConvertEXEtoDLL_DefaultArgs_LargeButValid(t *testing.T) {
 		t.Log("runtime guard fired — payload safely fell back to host cmdline")
 	default:
 		t.Errorf("marker is neither operator args nor host cmdline — possible partial overwrite: %.200q", got)
+	}
+}
+
+// TestPackBinary_ConvertEXEtoDLL_RunWithArgs_E2E exercises the
+// RunWithArgs DLL export end-to-end: pack probe_args.exe with the
+// export enabled, LoadLibrary, GetProcAddress, invoke with a custom
+// operator-controlled wide string, and assert the payload sees those
+// exact args.
+//
+// Unlike DefaultArgs (which bakes operator args at pack time), this
+// path is fully runtime-controlled: the caller hands the args buffer
+// to the export, the stub copies it into PEB.ProcessParameters.CommandLine,
+// then spawns the OEP via CreateThread. The export blocks via
+// WaitForSingleObject and returns the OEP's exit code as a DWORD —
+// proving the Wait + GetExitCodeThread plumbing on top of the spawn.
+func TestPackBinary_ConvertEXEtoDLL_RunWithArgs_E2E(t *testing.T) {
+	probe, err := os.ReadFile(filepath.Join("testdata", "probe_args.exe"))
+	if err != nil {
+		t.Skipf("probe_args.exe missing: %v", err)
+	}
+	packed, _, err := packer.PackBinary(probe, packer.PackBinaryOptions{
+		Format:                     packer.FormatWindowsExe,
+		ConvertEXEtoDLL:            true,
+		ConvertEXEtoDLLRunWithArgs: true,
+		Stage1Rounds:               3,
+		Seed:                       42,
+	})
+	if err != nil {
+		t.Fatalf("PackBinary: %v", err)
+	}
+	tmpDir := t.TempDir()
+	dllPath := filepath.Join(tmpDir, "packed.dll")
+	if err := os.WriteFile(dllPath, packed, 0o755); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	const markerPath = `C:\maldev-args-marker.txt`
+	_ = os.Remove(markerPath)
+	defer os.Remove(markerPath)
+
+	const operatorArgs = "operator.exe runtime alpha beta"
+
+	h, err := syscall.LoadLibrary(dllPath)
+	if err != nil {
+		t.Fatalf("LoadLibrary %s: %v", dllPath, err)
+	}
+	defer syscall.FreeLibrary(h)
+	proc, err := syscall.GetProcAddress(h, "RunWithArgs")
+	if err != nil {
+		t.Fatalf("GetProcAddress RunWithArgs: %v", err)
+	}
+	wargs, err := syscall.UTF16FromString(operatorArgs)
+	if err != nil {
+		t.Fatalf("UTF16FromString: %v", err)
+	}
+	ret, _, callErr := syscall.SyscallN(proc, uintptr(unsafe.Pointer(&wargs[0])))
+	t.Logf("RunWithArgs returned exit code %d (callErr=%v)", ret, callErr)
+
+	// Wait briefly for the OEP thread to flush its marker. RunWithArgs
+	// blocks until the thread exits, so by the time SyscallN returns the
+	// probe has already written the file — but the FS may need a tick.
+	deadline := time.Now().Add(2 * time.Second)
+	var content []byte
+	for time.Now().Before(deadline) {
+		content, err = os.ReadFile(markerPath)
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("marker missing — payload did not spawn or RunWithArgs failed: %v", err)
+	}
+	got := strings.TrimRight(string(content), "\r\n")
+	t.Logf("RunWithArgs payload observed cmdline: %q", got)
+
+	const want = "operator.exe|runtime|alpha|beta"
+	if got != want {
+		t.Errorf("marker contents mismatch:\n  got:  %q\n  want: %q", got, want)
 	}
 }
