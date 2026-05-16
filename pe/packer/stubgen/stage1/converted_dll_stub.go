@@ -252,6 +252,17 @@ func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.R
 		return fmt.Errorf("stage1/converted: ret: %w", err)
 	}
 
+	// Optional RunWithArgs export body — emitted between the DllMain
+	// epilogue and the trailing data so the wide-args buffer + flag
+	// byte stay at the end (preserves ConvertedDLLStub*OffsetFromEnd
+	// contracts). The entry has its own 8-byte INT3 sentinel that
+	// PatchConvertedDLLRunWithArgsEntry locates after encode.
+	if opts.RunWithArgs {
+		if err := EmitConvertedDLLRunWithArgsEntry(b, plan, opts); err != nil {
+			return fmt.Errorf("stage1/converted: run-with-args entry: %w", err)
+		}
+	}
+
 	// Trailing data layout (from the end of the stub):
 	//   [args (N bytes UTF-16LE)][NUL (2 B)][flag (1 B)]
 	// Args + NUL only emitted when DefaultArgs is set. Flag stays

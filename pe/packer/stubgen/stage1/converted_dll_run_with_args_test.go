@@ -170,6 +170,31 @@ func TestEmitConvertedDLLRunWithArgsEntry_ReturnsExitCode(t *testing.T) {
 	}
 }
 
+// TestPatchConvertedDLLRunWithArgsEntry_LocatesAndNOPs — patcher
+// must find the sentinel, return its offset, and overwrite all 8
+// bytes with 0x90. A second call on the patched buffer must fail
+// (sentinel gone).
+func TestPatchConvertedDLLRunWithArgsEntry_LocatesAndNOPs(t *testing.T) {
+	emitted := emitRunWithArgsEntry(t)
+
+	off, err := stage1.PatchConvertedDLLRunWithArgsEntry(emitted)
+	if err != nil {
+		t.Fatalf("PatchConvertedDLLRunWithArgsEntry: %v", err)
+	}
+	// Sentinel sits at +0 in the entry-only encoding.
+	if off != 0 {
+		t.Errorf("offset = %d, want 0 (sentinel at start of entry-only emit)", off)
+	}
+	for i := 0; i < len(stage1.RunWithArgsEntrySentinel); i++ {
+		if emitted[off+i] != 0x90 {
+			t.Errorf("byte %d not NOPped: %#x", off+i, emitted[off+i])
+		}
+	}
+	if _, err := stage1.PatchConvertedDLLRunWithArgsEntry(emitted); err == nil {
+		t.Error("second patch on already-NOPped buffer should error (sentinel gone)")
+	}
+}
+
 // TestEmitConvertedDLLRunWithArgsEntry_PinnedByteCount — full entry
 // size invariant. Bump deliberately when the asm template changes
 // (anti-debug, additional resolves in slice 1.B.1.c.3, etc).

@@ -131,6 +131,35 @@ func TestEmitConvertedDLLStub_PinnedByteCount(t *testing.T) {
 	}
 }
 
+// TestEmitConvertedDLLStub_RunWithArgs_EmbedsEntry — when
+// EmitOptions.RunWithArgs=true the encoded stub contains the
+// RunWithArgs entry block. PatchConvertedDLLRunWithArgsEntry must
+// locate the sentinel at a non-zero offset (DllMain body precedes
+// it), NOP it, and the entry must end before the trailing flag byte.
+func TestEmitConvertedDLLStub_RunWithArgs_EmbedsEntry(t *testing.T) {
+	b, _ := amd64.New()
+	if err := stage1.EmitConvertedDLLStub(b, stdConvertedDLLPlan, makeRounds(3), stage1.EmitOptions{RunWithArgs: true}); err != nil {
+		t.Fatalf("EmitConvertedDLLStub: %v", err)
+	}
+	out, _ := b.Encode()
+
+	off, err := stage1.PatchConvertedDLLRunWithArgsEntry(out)
+	if err != nil {
+		t.Fatalf("PatchConvertedDLLRunWithArgsEntry: %v", err)
+	}
+	if off == 0 {
+		t.Errorf("entry sentinel at offset 0 — DllMain body should precede it")
+	}
+	if off >= len(out)-stage1.ConvertedDLLStubFlagByteOffsetFromEnd {
+		t.Errorf("entry offset %d overlaps trailing flag byte at %d", off, len(out)-stage1.ConvertedDLLStubFlagByteOffsetFromEnd)
+	}
+	for i := 0; i < 8; i++ {
+		if out[off+i] != 0x90 {
+			t.Errorf("sentinel byte %d not NOPped: %#x", off+i, out[off+i])
+		}
+	}
+}
+
 // TestEmitConvertedDLLStub_AntiDebug_PrependsCheck — when AntiDebug=true
 // the converted-DLL stub must start with the GS-prefixed PEB load
 // (0x65 0x48 0x8B ... 0x60) that opens emitAntiDebugWindowsPE. Slice 5.6.

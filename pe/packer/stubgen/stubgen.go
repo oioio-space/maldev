@@ -387,6 +387,18 @@ func Generate(opts Options) ([]byte, []byte, error) {
 				return nil, nil, fmt.Errorf("stubgen: PatchPEBCommandLineDisp: %w", err)
 			}
 		}
+		if opts.ConvertEXEtoDLLRunWithArgs {
+			if _, err := stage1.PatchRunWithArgsTextDisplacement(stubBytes, plan); err != nil {
+				return nil, nil, fmt.Errorf("stubgen: PatchRunWithArgsTextDisplacement: %w", err)
+			}
+			// Offset becomes the RunWithArgs export RVA in slice 1.B.1.d;
+			// for now we only NOP the sentinel so the entry's first byte
+			// is a safe NOP if a stray GetProcAddress lands here before
+			// the export table is in place.
+			if _, err := stage1.PatchConvertedDLLRunWithArgsEntry(stubBytes); err != nil {
+				return nil, nil, fmt.Errorf("stubgen: PatchConvertedDLLRunWithArgsEntry: %w", err)
+			}
+		}
 	}
 
 	// 7. Inject into input. DLL inputs route through InjectStubDLL;

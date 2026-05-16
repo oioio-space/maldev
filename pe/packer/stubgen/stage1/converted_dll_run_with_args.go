@@ -256,3 +256,25 @@ func PatchRunWithArgsTextDisplacement(stubBytes []byte, plan transform.Plan) (in
 	_, count, err := patchSentinel(stubBytes, rwaTextDispNeedle, value, false, "prologueSentinelRWA 0xCAFEBABF")
 	return count, err
 }
+
+// PatchConvertedDLLRunWithArgsEntry locates the [RunWithArgsEntrySentinel]
+// 8-byte INT3 run inside an encoded converted-DLL stub, returns the
+// byte offset of the sentinel (= offset of the entry code itself,
+// since the sentinel sits at the very start of the entry block —
+// after NOPing it the entry's first executable byte is also at this
+// offset), and overwrites the sentinel with 8× 0x90 NOPs so a misrouted
+// GetProcAddress call doesn't trigger a debug break on the first byte.
+//
+// Used by the export-table builder (slice 1.B.1.d) to compute the
+// RunWithArgs export RVA: `StubRVA + entryOff`. INT3 (0xCC) never
+// appears in our emitted asm so the 8-byte run is a collision-free
+// marker — patchSentinel with allowMulti=false enforces exactly one
+// match.
+func PatchConvertedDLLRunWithArgsEntry(stubBytes []byte) (int, error) {
+	nops := bytes.Repeat([]byte{0x90}, len(RunWithArgsEntrySentinel))
+	idx, _, err := patchSentinel(stubBytes, RunWithArgsEntrySentinel[:], nops, false, "RunWithArgsEntrySentinel (8×0xCC)")
+	if err != nil {
+		return 0, err
+	}
+	return idx, nil
+}
