@@ -216,81 +216,18 @@ func EmitConvertedDLLStub(b *amd64.Builder, plan transform.Plan, rounds []poly.R
 		}
 	}
 
-	// Resolver + spawn live behind two finer ablation gates. The
-	// outer DiagSkipConvertedPayload still wins (it returns early
-	// before SGN); these only skip the downstream pieces.
-	if !opts.DiagSkipConvertedPayload && !opts.DiagSkipConvertedResolver {
-		// --- resolve kernel32!CreateThread → R13 ---
-		// EmitResolveKernel32Export clobbers RAX, RBX, RCX, RDX, R8, R9,
-		// R10, R11, R12 but preserves R13, R14, R15. R15 (our textBase)
-		// stays intact, so the OEP-computation below still works.
-		if err := EmitResolveKernel32Export(b, "CreateThread"); err != nil {
-			return fmt.Errorf("stage1/converted: resolve CreateThread: %w", err)
-		}
-	}
-
-	// DefaultArgs path: rewrite PEB.ProcessParameters.CommandLine
-	// before the OEP runs. RAX + R10 clobber is harmless because
-	// the CreateThread setup below loads RCX/RDX/R8/R9 fresh.
+	// Resolver + PEB patch + CreateThread spawn — emitted via the
+	// shared helper. Trailing-data args descriptor is only set when
+	// DefaultArgs is non-empty; nil means "skip PEB patch".
 	var defaultArgsBytes []byte
+	var spawnArgs convertedSpawnArgs
 	if opts.convertedSpawnEnabled() && opts.DefaultArgs != "" {
 		defaultArgsBytes = encode.ToUTF16LE(opts.DefaultArgs)
-		if err := EmitPEBCommandLinePatch(b, uint16(len(defaultArgsBytes))); err != nil {
-			return fmt.Errorf("stage1/converted: PEB patch: %w", err)
-		}
+		spawnArgs = convertedSpawnArgsTrailing{lenBytes: uint16(len(defaultArgsBytes))}
 	}
-
-	if opts.convertedSpawnEnabled() {
-		// --- CreateThread(NULL, 0, OEP, NULL, 0, NULL) ---
-	// Windows x64 ABI:
-	//   rcx = lpThreadAttributes      (NULL)
-	//   rdx = dwStackSize             (0)
-	//   r8  = lpStartAddress          (OEP absolute VA = R15 + OEPdisp)
-	//   r9  = lpParameter             (NULL)
-	//   [rsp+0x20] = dwCreationFlags  (0)
-	//   [rsp+0x28] = lpThreadId       (NULL)
-	if err := b.SUB(amd64.RSP, amd64.Imm(createThreadCallFrameSize)); err != nil {
-		return fmt.Errorf("stage1/converted: sub rsp,createThreadCallFrameSize: %w", err)
+	if err := emitConvertedSpawnBlock(b, plan, opts, spawnArgs); err != nil {
+		return err
 	}
-	if err := b.XOR(amd64.RCX, amd64.RCX); err != nil {
-		return fmt.Errorf("stage1/converted: xor rcx,rcx: %w", err)
-	}
-	if err := b.XOR(amd64.RDX, amd64.RDX); err != nil {
-		return fmt.Errorf("stage1/converted: xor rdx,rdx: %w", err)
-	}
-	// r8 = OEP absolute VA. OEPdisp = OEPRVA - TextRVA, encoded as
-	// a signed imm32 ADD. The PE32+ image-size invariant caps
-	// SizeOfImage at 2 GiB minus headers, so |OEPdisp| < 2^31 by
-	// construction — int32 cast can't overflow on a well-formed PE.
-	oepDisp := int32(plan.OEPRVA) - int32(plan.TextRVA)
-	if err := b.MOV(amd64.R8, amd64.R15); err != nil {
-		return fmt.Errorf("stage1/converted: mov r8,r15: %w", err)
-	}
-	if oepDisp != 0 {
-		if err := b.ADD(amd64.R8, amd64.Imm(int64(oepDisp))); err != nil {
-			return fmt.Errorf("stage1/converted: add r8,oepDisp: %w", err)
-		}
-	}
-	if err := b.XOR(amd64.R9, amd64.R9); err != nil {
-		return fmt.Errorf("stage1/converted: xor r9,r9: %w", err)
-	}
-	// [rsp+0x20] = 0  (dwCreationFlags)
-	if err := b.MOV(amd64.MemOp{Base: amd64.RSP, Disp: 0x20}, amd64.RCX); err != nil { // RCX==0 already
-		return fmt.Errorf("stage1/converted: zero [rsp+0x20]: %w", err)
-	}
-	// [rsp+0x28] = 0  (lpThreadId)
-	if err := b.MOV(amd64.MemOp{Base: amd64.RSP, Disp: 0x28}, amd64.RCX); err != nil {
-		return fmt.Errorf("stage1/converted: zero [rsp+0x28]: %w", err)
-	}
-	// call r13
-	if err := b.CALL(amd64.R13); err != nil {
-		return fmt.Errorf("stage1/converted: call r13: %w", err)
-	}
-	// restore the CreateThread frame
-	if err := b.ADD(amd64.RSP, amd64.Imm(createThreadCallFrameSize)); err != nil {
-		return fmt.Errorf("stage1/converted: add rsp,createThreadCallFrameSize: %w", err)
-	}
-	} // end of CreateThread-spawn gate
 
 	// --- return TRUE: restore args + r15, leave rax=1 ---
 	_ = b.Label(returnTrueLabel)

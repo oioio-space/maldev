@@ -1,8 +1,8 @@
 ---
 status: in-progress
 created: 2026-05-12
-last_reviewed: 2026-05-12
-reflects_commit: d8ed9a3 (v0.130.0 + docs)
+last_reviewed: 2026-05-16
+reflects_commit: 1.B.1.a refactor
 ---
 
 # Packer — action plan tracker (2026-05-12)
@@ -62,11 +62,19 @@ the payload with their own args mid-attack.
 | 1.A.4 | Win10 VM E2E: pack `probe_args.exe` with DefaultArgs="custom one two", LoadLibrary, assert marker contains "custom\|one\|two" | ~50 | ✅ PASS on Win10 VM (after asm pivot) |
 | 1.A.5 | **Harden: runtime overflow guard.** Asm reads existing `MaximumLength` at +0x72 BEFORE memcpy; if `argsLen+2 > existing`, skip patch. Asm 43→48 B (+ MOVZX/CMP/JB; dropped MaxLength write — capacity is OS-allocated, not ours). | ~30 LOC | ✅ shipped |
 | 1.A.6 | **Test-surface gaps.** (a) Tighten 1.A.4 to exact equality. (b) Pack-time bound (`maxConvertEXEtoDLLDefaultArgsRunes = 1500`) with readable error. (c) `LargeButValid` E2E — empirically PROVED guard fires on rundll32 with 1400 chars (loader has only ~135 B cmdline, our patch needs 2800 B → JB taken, payload safely sees rundll32 cmdline). Win11 VM not provisioned on this host — skipped. Custom small-cmdline fixture turned out unnecessary since rundll32 already triggered the path. | ~80 LOC | ✅ shipped (Win11 deferred) |
-| 1.B.1 | `RunWithArgs` export — emitted in the stub section, registered in the DLL's export table via `transform.AppendExportSection` | ~100 | after 1.A.6 |
-| 1.B.2 | Win10 + Win11 VM E2E: pack, LoadLibrary, GetProcAddress("RunWithArgs"), call with custom args, assert marker. Also: regsvr32 sanity (DllRegisterServer alias path). | ~70 | after 1.B.1 |
+| 1.B.1.a | **Refactor**: extract resolver + PEB-patch + CreateThread block from `EmitConvertedDLLStub` into `emitConvertedSpawnBlock(b, plan, opts, args convertedSpawnArgs)` helper. Sealed-iface `convertedSpawnArgs` with one impl `convertedSpawnArgsTrailing{lenBytes}`. Byte-for-byte identical output — pinned 509-B test still passes. | ~130 | ✅ shipped |
+| 1.B.1.b | Add `EmitPEBCommandLinePatchRCX` (runtime wcslen + src=RCX variant) + plumb the second `convertedSpawnArgs` impl (`convertedSpawnArgsFromRCX`). | ~140 | ⏳ next |
+| 1.B.1.c | Emit `RunWithArgs` entry inside the stub (own prologue + spawn block via helper + WaitForSingleObject). Plumb `Plan.RunWithArgsRVA` + `PackBinaryOptions.ConvertEXEtoDLLRunWithArgs bool` → `stubgen.Options` → `stage1.EmitOptions`. | ~180 | ⏳ |
+| 1.B.1.d | Direct-RVA export table builder in `pe/packer/transform/` (mirrors `dllproxy.BuildExportData` shape but `AddressOfFunctions[i]` points at code RVA, not forwarder string). Wire into `stubgen.go` after `EmitConvertedDLLStub` via `transform.AppendExportSection`. | ~150 | ⏳ |
+| 1.B.2 | Win10 + Win11 VM E2E: pack, LoadLibrary, GetProcAddress("RunWithArgs"), call with custom args, WaitForSingleObject, assert marker. Also: regsvr32 sanity (DllRegisterServer alias path). | ~80 | ⏳ |
 
 Each slice ships its own commit. Tags every successful slice
 end (1.A complete = v0.130.0, 1.B complete = v0.131.0).
+
+**Design decisions (locked 2026-05-16):**
+- `RunWithArgs` calls `CreateThread` then `WaitForSingleObject` and returns the OEP exit code via `GetExitCodeThread`. Synchronous, blocks the caller.
+- Shared inner emitter at the Go level (`emitConvertedSpawnBlock`) — DllMain and RunWithArgs each emit their own asm site, but both go through the same Go function to keep the spawn shape in lockstep.
+- Opt-in via `PackBinaryOptions.ConvertEXEtoDLLRunWithArgs bool`. Off by default — no extra IOC when the operator doesn't need the runtime entry.
 
 ### Cross-machine resume — current state
 
