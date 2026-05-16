@@ -265,11 +265,13 @@ func PatchRunWithArgsTextDisplacement(stubBytes []byte, plan transform.Plan) (in
 // offset), and overwrites the sentinel with 8× 0x90 NOPs so a misrouted
 // GetProcAddress call doesn't trigger a debug break on the first byte.
 //
-// Used by the export-table builder (slice 1.B.1.d) to compute the
-// RunWithArgs export RVA: `StubRVA + entryOff`. INT3 (0xCC) never
+// Caller uses the returned offset to compute the export RVA
+// (`StubRVA + entryOff`). Unlike the other `Patch*` helpers in this
+// package, which return a match count, this one returns the offset
+// because the export-table builder needs it. INT3 (0xCC) never
 // appears in our emitted asm so the 8-byte run is a collision-free
-// marker — patchSentinel with allowMulti=false enforces exactly one
-// match.
+// marker — `patchSentinel` with `allowMulti=false` enforces exactly
+// one match.
 func PatchConvertedDLLRunWithArgsEntry(stubBytes []byte) (int, error) {
 	nops := bytes.Repeat([]byte{0x90}, len(RunWithArgsEntrySentinel))
 	idx, _, err := patchSentinel(stubBytes, RunWithArgsEntrySentinel[:], nops, false, "RunWithArgsEntrySentinel (8×0xCC)")

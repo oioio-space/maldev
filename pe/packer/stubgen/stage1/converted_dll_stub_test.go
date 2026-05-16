@@ -153,7 +153,7 @@ func TestEmitConvertedDLLStub_RunWithArgs_EmbedsEntry(t *testing.T) {
 	if off >= len(out)-stage1.ConvertedDLLStubFlagByteOffsetFromEnd {
 		t.Errorf("entry offset %d overlaps trailing flag byte at %d", off, len(out)-stage1.ConvertedDLLStubFlagByteOffsetFromEnd)
 	}
-	for i := 0; i < 8; i++ {
+	for i := 0; i < len(stage1.RunWithArgsEntrySentinel); i++ {
 		if out[off+i] != 0x90 {
 			t.Errorf("sentinel byte %d not NOPped: %#x", off+i, out[off+i])
 		}

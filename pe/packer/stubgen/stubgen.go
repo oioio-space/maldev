@@ -398,6 +398,8 @@ func Generate(opts Options) ([]byte, []byte, error) {
 			if err != nil {
 				return nil, nil, fmt.Errorf("stubgen: PatchConvertedDLLRunWithArgsEntry: %w", err)
 			}
+			// Consumed below after Inject — becomes AddressOfFunctions[0]
+			// for the appended export section.
 			runWithArgsEntryRVA = plan.StubRVA + uint32(entryOff)
 		}
 	}
