@@ -366,6 +366,9 @@ func Generate(opts Options) ([]byte, []byte, error) {
 	if _, err := stage1.PatchTextDisplacement(stubBytes, plan); err != nil {
 		return nil, nil, fmt.Errorf("stubgen: PatchTextDisplacement: %w", err)
 	}
+	// Populated when ConvertEXEtoDLLRunWithArgs is set; consumed below
+	// after Inject to attach the export section pointing at the entry.
+	var runWithArgsEntryRVA uint32
 	// DLL stubs carry extra R15-relative disp sentinels that the
 	// per-flavour patchers rewrite once the trailing-data offsets
 	// are known. Native DLL: flag + slot. Converted DLL: flag only
@@ -391,13 +394,11 @@ func Generate(opts Options) ([]byte, []byte, error) {
 			if _, err := stage1.PatchRunWithArgsTextDisplacement(stubBytes, plan); err != nil {
 				return nil, nil, fmt.Errorf("stubgen: PatchRunWithArgsTextDisplacement: %w", err)
 			}
-			// Offset becomes the RunWithArgs export RVA in slice 1.B.1.d;
-			// for now we only NOP the sentinel so the entry's first byte
-			// is a safe NOP if a stray GetProcAddress lands here before
-			// the export table is in place.
-			if _, err := stage1.PatchConvertedDLLRunWithArgsEntry(stubBytes); err != nil {
+			entryOff, err := stage1.PatchConvertedDLLRunWithArgsEntry(stubBytes)
+			if err != nil {
 				return nil, nil, fmt.Errorf("stubgen: PatchConvertedDLLRunWithArgsEntry: %w", err)
 			}
+			runWithArgsEntryRVA = plan.StubRVA + uint32(entryOff)
 		}
 	}
 
@@ -419,5 +420,36 @@ func Generate(opts Options) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("stubgen: Inject: %w", err)
 	}
 
+	// Append the RunWithArgs export table now that the output is
+	// fully laid out. The export section lands at the next aligned
+	// RVA after the stub section; AddressOfFunctions[0] points back
+	// at the entry inside the stub section (entryRVA = StubRVA + entryOff).
+	if runWithArgsEntryRVA != 0 {
+		sectionRVA, err := transform.NextAvailableRVA(out)
+		if err != nil {
+			return nil, nil, fmt.Errorf("stubgen: NextAvailableRVA: %w", err)
+		}
+		exportBytes, _, err := transform.BuildDirectRVAExportData(runWithArgsModuleName, runWithArgsExportName, runWithArgsEntryRVA, sectionRVA)
+		if err != nil {
+			return nil, nil, fmt.Errorf("stubgen: BuildDirectRVAExportData: %w", err)
+		}
+		out, err = transform.AppendExportSection(out, exportBytes, sectionRVA)
+		if err != nil {
+			return nil, nil, fmt.Errorf("stubgen: AppendExportSection: %w", err)
+		}
+	}
+
 	return out, key, nil
 }
+
+// runWithArgsModuleName is the placeholder DLL name baked into the
+// IMAGE_EXPORT_DIRECTORY.Name field for converted-DLL outputs that
+// expose RunWithArgs. The loader uses the actual loaded-module name
+// at runtime, so this field is informational — kept generic so the
+// emit is stable across packed inputs.
+const runWithArgsModuleName = "packed.dll"
+
+// runWithArgsExportName is the exported function name. Operators
+// call this via `GetProcAddress(h, "RunWithArgs")` to run the OEP
+// with custom args.
+const runWithArgsExportName = "RunWithArgs"

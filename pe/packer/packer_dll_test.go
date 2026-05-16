@@ -172,6 +172,92 @@ func TestPackBinary_ConvertEXEtoDLL_HappyPath(t *testing.T) {
 	}
 }
 
+// TestPackBinary_ConvertEXEtoDLL_RunWithArgs_EmitsExport — slice
+// 1.B.1.d wires the direct-RVA export table builder into the
+// converted-DLL pipeline. With ConvertEXEtoDLLRunWithArgs=true the
+// output must carry a named `RunWithArgs` export pointing inside
+// the appended stub section.
+func TestPackBinary_ConvertEXEtoDLL_RunWithArgs_EmitsExport(t *testing.T) {
+	exe, err := transform.BuildMinimalPE32Plus(bytes.Repeat([]byte{0xC3}, 0x100))
+	if err != nil {
+		t.Fatalf("BuildMinimalPE32Plus: %v", err)
+	}
+	out, _, err := packerpkg.PackBinary(exe, packerpkg.PackBinaryOptions{
+		Format:                     packerpkg.FormatWindowsExe,
+		ConvertEXEtoDLL:            true,
+		ConvertEXEtoDLLRunWithArgs: true,
+		Stage1Rounds:               3,
+		Seed:                       42,
+	})
+	if err != nil {
+		t.Fatalf("PackBinary(RunWithArgs): %v", err)
+	}
+
+	pf, err := pe.NewFile(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("debug/pe.NewFile: %v", err)
+	}
+	defer pf.Close()
+
+	if pf.FileHeader.Characteristics&transform.ImageFileDLL == 0 {
+		t.Error("output missing IMAGE_FILE_DLL")
+	}
+
+	// debug/pe doesn't auto-parse exports; walk DataDirectory[EXPORT].
+	oh, ok := pf.OptionalHeader.(*pe.OptionalHeader64)
+	if !ok {
+		t.Fatalf("OptionalHeader type %T, want *pe.OptionalHeader64", pf.OptionalHeader)
+	}
+	exportDir := oh.DataDirectory[0]
+	if exportDir.Size == 0 {
+		t.Fatal("DataDirectory[EXPORT] is empty — export section not appended")
+	}
+
+	// Locate the section that owns the export directory.
+	var exportSec *pe.Section
+	for _, s := range pf.Sections {
+		if exportDir.VirtualAddress >= s.VirtualAddress &&
+			exportDir.VirtualAddress < s.VirtualAddress+s.VirtualSize {
+			exportSec = s
+			break
+		}
+	}
+	if exportSec == nil {
+		t.Fatalf("no section covers export RVA %#x", exportDir.VirtualAddress)
+	}
+	secData, err := exportSec.Data()
+	if err != nil {
+		t.Fatalf("export section Data: %v", err)
+	}
+	if !bytes.Contains(secData, []byte("RunWithArgs")) {
+		t.Errorf("export section missing 'RunWithArgs' name string")
+	}
+
+	// AddressOfFunctions[0] should land inside the stub section
+	// (the .mldv stub appended by InjectConvertedDLL, which is the
+	// second-to-last section once .edata is appended after).
+	dirOff := exportDir.VirtualAddress - exportSec.VirtualAddress
+	afRVA := uint32(secData[dirOff+28]) | uint32(secData[dirOff+29])<<8 |
+		uint32(secData[dirOff+30])<<16 | uint32(secData[dirOff+31])<<24
+	slotOff := afRVA - exportSec.VirtualAddress
+	entryRVA := uint32(secData[slotOff]) | uint32(secData[slotOff+1])<<8 |
+		uint32(secData[slotOff+2])<<16 | uint32(secData[slotOff+3])<<24
+
+	var stubSec *pe.Section
+	for _, s := range pf.Sections {
+		if s == exportSec {
+			continue
+		}
+		if entryRVA >= s.VirtualAddress && entryRVA < s.VirtualAddress+s.VirtualSize {
+			stubSec = s
+			break
+		}
+	}
+	if stubSec == nil {
+		t.Errorf("entry RVA %#x outside any non-export section", entryRVA)
+	}
+}
+
 // TestPackBinary_ConvertEXEtoDLL_AcceptsCompress — slice 5.7 ✅:
 // the LZ4 inflate path inside EmitConvertedDLLStub is now
 // validated end-to-end on Win10 VM
