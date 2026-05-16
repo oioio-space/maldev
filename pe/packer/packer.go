@@ -185,6 +185,26 @@ type PackBinaryOptions struct {
 	// trade-off (the patch is permanent for the host process).
 	ConvertEXEtoDLLDefaultArgs string
 
+	// ConvertEXEtoDLLRunWithArgs, when true alongside ConvertEXEtoDLL,
+	// adds a `RunWithArgs(LPCWSTR args)` exported function to the
+	// emitted DLL. The operator invokes it via GetProcAddress +
+	// indirect call to spawn the payload with a fresh command-line
+	// at any time after LoadLibrary, independent of any pack-time
+	// [ConvertEXEtoDLLDefaultArgs] baked into DllMain.
+	//
+	// The export takes one wide-char string parameter (UTF-16LE,
+	// NUL-terminated) and returns a DWORD — the OEP thread's exit
+	// code from GetExitCodeThread after WaitForSingleObject. The
+	// stub rewrites PEB.ProcessParameters.CommandLine in place,
+	// spawns a thread on the OEP, waits for completion, and
+	// returns the exit code.
+	//
+	// Adds a single named export to the DLL (one extra IOC). Off
+	// by default — only enable when the operator needs the runtime
+	// entry. ConvertEXEtoDLLDefaultArgs and ConvertEXEtoDLLRunWithArgs
+	// are independent; both, either, or neither may be set.
+	ConvertEXEtoDLLRunWithArgs bool
+
 	// RandomizeStubSectionName, when true, names the appended PE
 	// stub section with a fresh per-pack random label
 	// (`.xxxxx\x00\x00`) instead of the hardcoded ".mldv". Defeats
@@ -423,6 +443,7 @@ func PackBinary(input []byte, opts PackBinaryOptions) ([]byte, []byte, error) {
 		DiagSkipConvertedResolver:  opts.DiagSkipConvertedResolver,
 		DiagSkipConvertedSpawn:     opts.DiagSkipConvertedSpawn,
 		ConvertEXEtoDLLDefaultArgs: opts.ConvertEXEtoDLLDefaultArgs,
+		ConvertEXEtoDLLRunWithArgs: opts.ConvertEXEtoDLLRunWithArgs,
 		// StubMaxSize zero: stubgen.Generate picks 8192 (Compress=true) or
 		// 4096 (Compress=false) based on the Compress flag.
 	})

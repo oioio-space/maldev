@@ -104,6 +104,20 @@ type EmitOptions struct {
 	// aware that the host's GetCommandLineW also returns the new
 	// string after this fires.
 	DefaultArgs string
+
+	// RunWithArgs requests EmitConvertedDLLStub to append a
+	// `RunWithArgs(LPCWSTR args)` exported entry after the DllMain
+	// block. The entry runs the same spawn sequence as DllMain
+	// (PEB.CommandLine patch + CreateThread on OEP), but reads the
+	// args pointer from RCX (caller-supplied) instead of a stub-
+	// embedded buffer. WaitForSingleObject + GetExitCodeThread make
+	// the export synchronous: it returns the OEP thread's exit code
+	// as a DWORD.
+	//
+	// Independent of DefaultArgs. Both, either, or neither may be
+	// set. EXE-only path through EmitConvertedDLLStub; ignored by
+	// EmitStub / EmitDLLStub.
+	RunWithArgs bool
 }
 
 // convertedSpawnEnabled reports whether the converted-DLL stub

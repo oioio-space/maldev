@@ -88,6 +88,13 @@ type Options struct {
 	// process's existing GetCommandLineW result. See
 	// [stage1.EmitOptions.DefaultArgs] for OPSEC trade-offs.
 	ConvertEXEtoDLLDefaultArgs string
+
+	// ConvertEXEtoDLLRunWithArgs requests the converted-DLL stub
+	// to emit a `RunWithArgs(LPCWSTR args)` exported function and
+	// register it in the DLL's export table. Ignored when
+	// ConvertEXEtoDLL is false. See [stage1.EmitOptions.RunWithArgs]
+	// for the per-call semantics.
+	ConvertEXEtoDLLRunWithArgs bool
 }
 
 // Sentinels surfaced by Generate.
@@ -246,6 +253,7 @@ func Generate(opts Options) ([]byte, []byte, error) {
 	emitOpts.DiagSkipConvertedResolver = opts.DiagSkipConvertedResolver
 	emitOpts.DiagSkipConvertedSpawn = opts.DiagSkipConvertedSpawn
 	emitOpts.DefaultArgs = opts.ConvertEXEtoDLLDefaultArgs
+	emitOpts.RunWithArgs = opts.ConvertEXEtoDLLRunWithArgs
 
 	if opts.Compress {
 		dst := make([]byte, lz4.CompressBlockBound(len(originalTextBytes)))
