@@ -149,12 +149,33 @@ func TestPatchRunWithArgsTextDisplacement_RewritesSentinel(t *testing.T) {
 	}
 }
 
+// TestEmitConvertedDLLRunWithArgsEntry_ReturnsExitCode — the entry
+// resolves WaitForSingleObject + GetExitCodeThread (3 CALL R13 sites
+// total with the spawn block's CreateThread) and loads the DWORD exit
+// code with `mov eax, [rbp-0x10]` (8B 45 F0) just before the restore
+// loop. Catches regressions that strip the Wait/ExitCode promotion
+// and revert the entry to returning a raw HANDLE.
+func TestEmitConvertedDLLRunWithArgsEntry_ReturnsExitCode(t *testing.T) {
+	emitted := emitRunWithArgsEntry(t)
+
+	callR13 := []byte{0x41, 0xFF, 0xD5}
+	calls := bytes.Count(emitted, callR13)
+	if calls != 3 {
+		t.Errorf("expected 3 `call r13` sites (CreateThread+Wait+GetExitCode), got %d", calls)
+	}
+
+	movEaxExitCode := []byte{0x8B, 0x45, 0xF0}
+	if !bytes.Contains(emitted, movEaxExitCode) {
+		t.Errorf("entry missing `mov eax, [rbp-0x10]` — exit-code load not wired")
+	}
+}
+
 // TestEmitConvertedDLLRunWithArgsEntry_PinnedByteCount — full entry
 // size invariant. Bump deliberately when the asm template changes
 // (anti-debug, additional resolves in slice 1.B.1.c.3, etc).
 func TestEmitConvertedDLLRunWithArgsEntry_PinnedByteCount(t *testing.T) {
 	got := emitRunWithArgsEntry(t)
-	const want = 403
+	const want = 912
 	if len(got) != want {
 		t.Errorf("entry %d B, want %d B (asm template drift)", len(got), want)
 	}

@@ -38,9 +38,9 @@ var RunWithArgsEntrySentinel = [8]byte{0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
 // (offsets from RBP, growing downward):
 //
 //	-0x08  caller args ptr (RCX spill)
-//	-0x10  reserved (future: WaitForSingleObject VA in slice 1.B.1.c.3)
-//	-0x18  reserved (future: GetExitCodeThread VA in slice 1.B.1.c.3)
-//	-0x20  reserved (future: hThread spill in slice 1.B.1.c.3)
+//	-0x10  DWORD exit code (out-param for GetExitCodeThread, then returned in EAX)
+//	-0x18  unused
+//	-0x20  hThread spill (CreateThread return, re-passed to Wait + ExitCode)
 //	-0x28  rbx
 //	-0x30  rdi
 //	-0x38  rsi
@@ -157,11 +157,61 @@ func EmitConvertedDLLRunWithArgsEntry(b *amd64.Builder, plan transform.Plan, opt
 	if err := emitConvertedSpawnBlock(b, plan, opts, convertedSpawnArgsFromRCX{}); err != nil {
 		return err
 	}
-	// After the spawn block, RAX holds hThread (return value of
-	// CreateThread). Slice 1.B.1.c.3 will insert WaitForSingleObject
-	// + GetExitCodeThread here to promote the return to a DWORD exit
-	// code. For now we surface the raw HANDLE so the entry is callable
-	// end-to-end via 1.B.1.d's export-table wiring.
+
+	// --- wait on the spawned OEP thread and return its exit code ---
+	// After the spawn block, RAX holds hThread (CreateThread return).
+	// Spill it to [rbp-0x20] so we can re-pass it to WaitForSingleObject
+	// and GetExitCodeThread after each kernel32 resolve clobbers RAX.
+	if err := b.MOV(amd64.MemOp{Base: amd64.RBP, Disp: -0x20}, amd64.RAX); err != nil {
+		return fmt.Errorf("stage1/runwithargs: spill hThread: %w", err)
+	}
+
+	// Allocate one Win64 shadow frame shared by both kernel32 calls
+	// below. Stack stays 16-aligned (frame already 0 mod 16). The
+	// resolver runs between them at the same alignment.
+	if err := b.SUB(amd64.RSP, amd64.Imm(0x20)); err != nil {
+		return fmt.Errorf("stage1/runwithargs: sub rsp (shadow): %w", err)
+	}
+
+	// WaitForSingleObject(hThread, INFINITE)
+	if err := EmitResolveKernel32Export(b, "WaitForSingleObject"); err != nil {
+		return fmt.Errorf("stage1/runwithargs: resolve WaitForSingleObject: %w", err)
+	}
+	if err := b.MOV(amd64.RCX, amd64.MemOp{Base: amd64.RBP, Disp: -0x20}); err != nil {
+		return fmt.Errorf("stage1/runwithargs: load hThread → rcx (Wait): %w", err)
+	}
+	// rdx = INFINITE (0xFFFFFFFF, encoded as sign-extended -1).
+	if err := b.MOV(amd64.RDX, amd64.Imm(-1)); err != nil {
+		return fmt.Errorf("stage1/runwithargs: mov rdx,INFINITE: %w", err)
+	}
+	if err := b.CALL(amd64.R13); err != nil {
+		return fmt.Errorf("stage1/runwithargs: call WaitForSingleObject: %w", err)
+	}
+
+	// GetExitCodeThread(hThread, &exitCode). GetExitCodeThread always
+	// writes the DWORD slot at [rbp-0x10] on success, so no pre-zero.
+	if err := EmitResolveKernel32Export(b, "GetExitCodeThread"); err != nil {
+		return fmt.Errorf("stage1/runwithargs: resolve GetExitCodeThread: %w", err)
+	}
+	if err := b.MOV(amd64.RCX, amd64.MemOp{Base: amd64.RBP, Disp: -0x20}); err != nil {
+		return fmt.Errorf("stage1/runwithargs: load hThread → rcx (ExitCode): %w", err)
+	}
+	if err := b.LEA(amd64.RDX, amd64.MemOp{Base: amd64.RBP, Disp: -0x10}); err != nil {
+		return fmt.Errorf("stage1/runwithargs: lea rdx,&exitCode: %w", err)
+	}
+	if err := b.CALL(amd64.R13); err != nil {
+		return fmt.Errorf("stage1/runwithargs: call GetExitCodeThread: %w", err)
+	}
+	if err := b.ADD(amd64.RSP, amd64.Imm(0x20)); err != nil {
+		return fmt.Errorf("stage1/runwithargs: add rsp (shadow): %w", err)
+	}
+
+	// Return value: mov eax, dword ptr [rbp-0x10]. MOVL forces 32-bit
+	// to match the DWORD slot — the Win64 ABI returns ints in EAX/RAX
+	// with the upper 32 bits implicitly zeroed.
+	if err := b.MOVL(amd64.RAX, amd64.MemOp{Base: amd64.RBP, Disp: -0x10}); err != nil {
+		return fmt.Errorf("stage1/runwithargs: load exit code → eax: %w", err)
+	}
 
 	// --- restore callee-saved regs ---
 	for _, s := range runWithArgsCalleeSaved {
